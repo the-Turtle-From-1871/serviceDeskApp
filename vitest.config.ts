@@ -7,5 +7,6 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.ts", "tests/**/*.test.ts"],
     fileParallelism: false, // integration tests share one test DB
+    setupFiles: ["tests/helpers/setup-env.ts"],
   },
 });
