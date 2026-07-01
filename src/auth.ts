@@ -27,11 +27,21 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   callbacks: {
-    jwt({ token, user }) {
-      if (user) {
-        token.id = user.id;
-        token.role = user.role;
-      }
+    async jwt({ token, user }) {
+      if (user) token.id = user.id;
+      if (!token.id) return token;
+      // Re-read role + isActive from the DB on every request (this callback
+      // runs whenever the session is validated, including in `proxy`, which
+      // Next 16 runs on the Node runtime — so Prisma is available here). This
+      // makes role changes and deactivations take effect immediately instead
+      // of living stale in the JWT until it expires. Returning null clears the
+      // session cookies (Auth.js v5), effectively signing the user out.
+      const dbUser = await prisma.user.findUnique({
+        where: { id: token.id },
+        select: { role: true, isActive: true },
+      });
+      if (!dbUser || !dbUser.isActive) return null;
+      token.role = dbUser.role;
       return token;
     },
     session({ session, token }) {
