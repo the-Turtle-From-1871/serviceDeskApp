@@ -68,29 +68,56 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
   set("ITEM DESCRIPTION cRow1", `${t.item.make} ${t.item.model}\nSER NO: ${t.item.serialNumber}`, { multiline: true, size: 9 });
   set("UI.0", "EA", { size: 9, center: true });
   set("QTY.0", "1", { size: 9, center: true });
-  set("A.0.0.0.0.0.0", "1", { size: 9, center: true });
+  // Column-A quantity, recipient signature, date, and anti-tamper guard bars are
+  // drawn manually after flatten (below) for exact centering/rotation.
 
   form.updateFieldAppearances(helv);
   form.flatten();
 
-  // Recipient signs vertically in the active quantity column (column A) with the
-  // date, per DA 2062 practice. Column A spans x≈620–645; row 1's quantity is at
-  // the top (y≈486), so the signature occupies the rows below it. Drawn on top of
-  // the now-flattened form (reads bottom-to-top, i.e. rotated 90°).
+  // --- Column A: quantity (top), then the recipient's signature and date read
+  // vertically up the column (DA 2062 practice), then black "guard" bars over
+  // the empty cells so no rows can be added before or after the signed marks.
   const page1 = pdf.getPage(0);
+  const black = rgb(0, 0, 0);
+  const colLeft = 621;      // column A inner-left (cell borders at 620/645)
+  const colWidth = 23;
+  const colCenter = 632;    // horizontal centre of column A
+  const rowTopY = 486;      // bottom edge of the row-1 quantity cell
+  const tableBottomY = 58;  // bottom of the 19-row item table
   const dateStr = fmt(t.signedAt);
+
+  // Quantity "1", centered at the top of column A.
+  page1.drawText("1", { x: colCenter - helv.widthOfTextAtSize("1", 9) / 2, y: 492, size: 9, font: helv });
+
+  // Signature (vertical, reads up) with the date after it (further up the column).
+  const sigBottom = 350;
+  let blockTop = sigBottom;
+  let drewImage = false;
   if (t.signatureImage && t.signatureImage.startsWith("data:image/png;base64,")) {
     try {
       const sig = await pdf.embedPng(Buffer.from(t.signatureImage.split(",")[1], "base64"));
       const barH = 22; // horizontal extent inside the ~25px column
-      const barW = Math.min(barH * (sig.width / sig.height), 150); // vertical extent
-      page1.drawImage(sig, { x: 642, y: 345, width: barW, height: barH, rotate: degrees(90) });
-      page1.drawText(dateStr, { x: 635, y: 300, size: 6, font: helv, rotate: degrees(90) });
+      const barW = Math.min(barH * (sig.width / sig.height), 72); // vertical extent
+      page1.drawImage(sig, { x: 642, y: sigBottom, width: barW, height: barH, rotate: degrees(90) });
+      const dateY = sigBottom + barW + 10;
+      page1.drawText(dateStr, { x: colCenter + 4, y: dateY, size: 9, font: helv, rotate: degrees(90) });
+      blockTop = dateY + helv.widthOfTextAtSize(dateStr, 9);
+      drewImage = true;
     } catch {
-      page1.drawText(`${t.toUserName}  ${dateStr}`, { x: 634, y: 330, size: 7, font: helv, rotate: degrees(90) });
+      /* fall through to text fallback below */
     }
-  } else {
-    page1.drawText(`${t.toUserName}  ${dateStr}`, { x: 634, y: 330, size: 7, font: helv, rotate: degrees(90) });
+  }
+  if (!drewImage) {
+    const label = `${t.toUserName}   ${dateStr}`;
+    page1.drawText(label, { x: colCenter + 4, y: sigBottom, size: 9, font: helv, rotate: degrees(90) });
+    blockTop = sigBottom + helv.widthOfTextAtSize(label, 9);
+  }
+
+  // Guard bars: black out the empty column below the signed block and any gap
+  // above it (up to the quantity cell), so entries can't be inserted later.
+  page1.drawRectangle({ x: colLeft, y: tableBottomY, width: colWidth, height: sigBottom - 4 - tableBottomY, color: black });
+  if (rowTopY - (blockTop + 2) > 1) {
+    page1.drawRectangle({ x: colLeft, y: blockTop + 2, width: colWidth, height: rowTopY - (blockTop + 2), color: black });
   }
 
   // Appended custody record page.
