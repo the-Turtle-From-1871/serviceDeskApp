@@ -82,3 +82,8 @@ $env:SEED_ADMIN_EMAIL="admin@yourorg.com"; $env:SEED_ADMIN_PASSWORD="<strong-pas
   up is the most common failure.
 - This is custody data — keep it behind auth, on HTTPS (Vercel provides it), and
   don't commit real `.env` files (`.env*` is git-ignored except `.env.example`).
+- **Commit author email (Vercel Hobby)**: git deployments are blocked unless the
+  commit's author email is linked to a GitHub account on the Vercel team. Use an
+  email on your GitHub account (or its `ID+username@users.noreply.github.com`
+  address) as `git config user.email`, otherwise pushes build-block. Direct
+  `vercel --prod` CLI uploads are attributed to your Vercel user and bypass this.
