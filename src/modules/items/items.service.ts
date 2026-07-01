@@ -1,4 +1,4 @@
-import type { Item } from "@prisma/client";
+import type { Item, ItemStatus } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { newItemSchema, type NewItemInput } from "./items.schema";
 
@@ -39,6 +39,10 @@ export async function updateItem(id: string, input: Partial<NewItemInput>): Prom
   return prisma.item.update({ where: { id }, data });
 }
 
+export function setItemStatus(id: string, status: ItemStatus): Promise<Item> {
+  return prisma.item.update({ where: { id }, data: { status } });
+}
+
 export function retireItem(id: string): Promise<Item> {
-  return prisma.item.update({ where: { id }, data: { status: "RETIRED" } });
+  return setItemStatus(id, "RETIRED");
 }

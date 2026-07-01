@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/authz";
-import { createUser, setUserActive } from "@/modules/users/users.service";
+import { createUser, setUserActive, setUserRole } from "@/modules/users/users.service";
 import { newUserSchema } from "@/modules/users/users.schema";
 
 export async function createUserAction(_prev: unknown, formData: FormData) {
@@ -18,9 +18,23 @@ export async function createUserAction(_prev: unknown, formData: FormData) {
 }
 
 export async function toggleUserActiveAction(formData: FormData) {
-  await requireAdmin();
+  const admin = await requireAdmin();
   const id = String(formData.get("id"));
   const active = formData.get("active") === "true";
+  // Guard against self-lockout: deactivating yourself now takes effect
+  // immediately (JWT re-reads isActive), which would sign you out mid-action.
+  if (id === admin.id && !active) return;
   await setUserActive(id, active);
+  revalidatePath("/admin/users");
+}
+
+export async function setUserRoleAction(formData: FormData) {
+  const admin = await requireAdmin();
+  const id = String(formData.get("id"));
+  const role = formData.get("role") === "ADMIN" ? "ADMIN" : "USER";
+  // Guard against self-demotion: role changes are now live, so demoting
+  // yourself would revoke your own admin access on the next request.
+  if (id === admin.id && role !== "ADMIN") return;
+  await setUserRole(id, role);
   revalidatePath("/admin/users");
 }

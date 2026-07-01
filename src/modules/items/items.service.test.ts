@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, expect, test } from "vitest";
 import prisma from "@/lib/prisma";
 import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
-import { createItem, getItem, listItems, updateItem, retireItem } from "./items.service";
+import { createItem, getItem, listItems, updateItem, retireItem, setItemStatus } from "./items.service";
 
 let adminId: string;
 
@@ -56,4 +56,10 @@ test("updateItem changes editable fields", async () => {
   const item = await createItem({ make: "M", model: "N", serialNumber: "S" }, adminId);
   const updated = await updateItem(item.id, { homeLocation: "Cage 3" });
   expect(updated.homeLocation).toBe("Cage 3");
+});
+
+test("setItemStatus can retire then reactivate", async () => {
+  const item = await createItem({ make: "M", model: "N", serialNumber: "S" }, adminId);
+  expect((await setItemStatus(item.id, "RETIRED")).status).toBe("RETIRED");
+  expect((await setItemStatus(item.id, "ACTIVE")).status).toBe("ACTIVE");
 });
