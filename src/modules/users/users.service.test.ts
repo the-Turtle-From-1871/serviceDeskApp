@@ -1,6 +1,7 @@
 import { beforeAll, beforeEach, expect, test } from "vitest";
 import { migrateTestDb, resetDb } from "../../../tests/helpers/db";
-import { createUser, setUserActive, setUserRole, listUsers } from "./users.service";
+import { createUser, setUserActive, setUserRole, listUsers, changeUserPassword } from "./users.service";
+import { verifyPassword } from "@/lib/password";
 
 beforeAll(() => migrateTestDb());
 beforeEach(() => resetDb());
@@ -30,4 +31,19 @@ test("setUserRole promotes to ADMIN", async () => {
 test("listUsers returns created users", async () => {
   await createUser({ name: "A", email: "a@x.co", password: "password123", role: "USER" });
   expect(await listUsers()).toHaveLength(1);
+});
+
+test("changeUserPassword updates the hash when the current password is correct", async () => {
+  const u = await createUser({ name: "Pat", email: "pat@x.co", password: "password123", role: "USER" });
+  await changeUserPassword(u.id, "password123", "newpassword456");
+  const after = await listUsers();
+  expect(await verifyPassword("newpassword456", after[0].passwordHash)).toBe(true);
+  expect(await verifyPassword("password123", after[0].passwordHash)).toBe(false);
+});
+
+test("changeUserPassword rejects a wrong current password", async () => {
+  const u = await createUser({ name: "Pat", email: "pat@x.co", password: "password123", role: "USER" });
+  await expect(changeUserPassword(u.id, "wrongpassword", "newpassword456")).rejects.toMatchObject({
+    code: "INVALID_CURRENT",
+  });
 });

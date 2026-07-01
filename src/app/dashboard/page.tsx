@@ -21,6 +21,7 @@ export default async function Dashboard() {
           </Link>
           <span className="spacer" />
           <span className="subtle" style={{ marginRight: 4 }}>{user.name}</span>
+          <Link href="/account" className="btn btn-ghost btn-sm">Account</Link>
           <SignOutButton />
         </div>
       </header>

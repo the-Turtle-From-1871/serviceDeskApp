@@ -25,6 +25,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             <Link href="/admin/audit">Audit</Link>
           </nav>
           <span className="spacer" />
+          <Link href="/account" className="btn btn-ghost btn-sm">Account</Link>
           <SignOutButton />
         </div>
       </header>
