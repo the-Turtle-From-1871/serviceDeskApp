@@ -7,6 +7,7 @@ import { getItemHistory } from "@/modules/transfers/transfers.service";
 import { ItemDetails } from "@/components/ItemDetails";
 import { TransferHistory } from "@/components/TransferHistory";
 import { InitiateTransferForm } from "@/components/InitiateTransferForm";
+import { OverrideForm } from "@/components/OverrideForm";
 
 export default async function ItemPage({ params }: { params: Promise<{ itemId: string }> }) {
   const { itemId } = await params;
@@ -14,10 +15,19 @@ export default async function ItemPage({ params }: { params: Promise<{ itemId: s
   if (!item) notFound();
   const [session, history] = await Promise.all([auth(), getItemHistory(itemId)]);
   const viewerIsHolder = !!session?.user && item.currentHolderId === session.user.id;
+  const isAdmin = session?.user.role === "ADMIN";
 
   const recipients = viewerIsHolder
     ? await prisma.user.findMany({
         where: { isActive: true, id: { not: session!.user.id } },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      })
+    : [];
+
+  const allUsers = isAdmin
+    ? await prisma.user.findMany({
+        where: { isActive: true },
         select: { id: true, name: true },
         orderBy: { name: "asc" },
       })
@@ -35,6 +45,12 @@ export default async function ItemPage({ params }: { params: Promise<{ itemId: s
         <section>
           <h2>Transfer this item</h2>
           <InitiateTransferForm itemId={item.id} users={recipients} />
+        </section>
+      )}
+      {isAdmin && (
+        <section>
+          <h2>Admin override — force reassign</h2>
+          <OverrideForm itemId={item.id} users={allUsers} />
         </section>
       )}
       {!session?.user && <p><Link href="/login">Sign in</Link> to transfer or sign for this item.</p>}
