@@ -5,14 +5,35 @@ import { createUserAction } from "@/app/admin/actions/users";
 export function NewUserForm() {
   const [state, action, pending] = useActionState(createUserAction, undefined);
   return (
-    <form action={action} style={{ marginBottom: 24 }}>
-      <input name="name" placeholder="Name" required />
-      <input name="email" type="email" placeholder="Email" required />
-      <input name="password" type="password" placeholder="Temp password (8+)" required />
-      <select name="role"><option value="USER">User</option><option value="ADMIN">Admin</option></select>
-      <button disabled={pending} type="submit">Add user</button>
-      {state?.error && <span role="alert" style={{ color: "crimson" }}> {state.error}</span>}
-      {state && "ok" in state && state.ok && <span> Created.</span>}
+    <form action={action} className="stack-sm">
+      <div className="form-grid">
+        <div className="field">
+          <label className="label" htmlFor="nu-name">Name</label>
+          <input id="nu-name" className="input" name="name" placeholder="Jane Doe" required />
+        </div>
+        <div className="field">
+          <label className="label" htmlFor="nu-email">Email</label>
+          <input id="nu-email" className="input" name="email" type="email" placeholder="jane@unit.mil" required />
+        </div>
+        <div className="field">
+          <label className="label" htmlFor="nu-pw">Temporary password</label>
+          <input id="nu-pw" className="input" name="password" type="password" placeholder="8+ characters" required />
+        </div>
+        <div className="field">
+          <label className="label" htmlFor="nu-role">Role</label>
+          <select id="nu-role" className="select" name="role" defaultValue="USER">
+            <option value="USER">User</option>
+            <option value="ADMIN">Admin</option>
+          </select>
+        </div>
+      </div>
+      <div className="row">
+        <button disabled={pending} type="submit" className="btn btn-primary">
+          {pending ? "Adding…" : "Add user"}
+        </button>
+        {state?.error && <span role="alert" className="alert-error">{state.error}</span>}
+        {state && "ok" in state && state.ok && <span className="alert-success">User created.</span>}
+      </div>
     </form>
   );
 }

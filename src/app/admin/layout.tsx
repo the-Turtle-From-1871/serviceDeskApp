@@ -11,15 +11,24 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     throw e;
   }
   return (
-    <div style={{ fontFamily: "system-ui", maxWidth: 900, margin: "2rem auto" }}>
-      <nav style={{ display: "flex", gap: 16, marginBottom: 24 }}>
-        <Link href="/admin/items">Items</Link>
-        <Link href="/admin/items/new">New item</Link>
-        <Link href="/admin/users">Users</Link>
-        <Link href="/admin/audit">Audit</Link>
-        <span style={{ marginLeft: "auto" }}><SignOutButton /></span>
-      </nav>
-      {children}
-    </div>
+    <>
+      <header className="app-header">
+        <div className="app-header__inner">
+          <Link href="/admin/items" className="brand">
+            <span className="brand__mark">HR</span>
+            Hand Receipt
+          </Link>
+          <nav className="nav">
+            <Link href="/admin/items">Items</Link>
+            <Link href="/admin/items/new">New item</Link>
+            <Link href="/admin/users">Users</Link>
+            <Link href="/admin/audit">Audit</Link>
+          </nav>
+          <span className="spacer" />
+          <SignOutButton />
+        </div>
+      </header>
+      <main className="container">{children}</main>
+    </>
   );
 }

@@ -6,12 +6,16 @@ import { SignaturePad } from "@/components/SignaturePad";
 export function SignForm({ transferId }: { transferId: string }) {
   const [state, action, pending] = useActionState(acceptTransferAction, undefined);
   return (
-    <form action={action}>
+    <form action={action} className="stack-sm">
       <input type="hidden" name="transferId" value={transferId} />
-      <p>Draw your signature to accept custody:</p>
+      <label className="label">Draw your signature to accept custody</label>
       <SignaturePad name="signature" />
-      {state?.error && <p role="alert" style={{ color: "crimson" }}>{state.error}</p>}
-      <button disabled={pending} type="submit">{pending ? "Submitting…" : "Accept custody"}</button>
+      {state?.error && <p role="alert" className="alert-error">{state.error}</p>}
+      <div>
+        <button disabled={pending} type="submit" className="btn btn-primary">
+          {pending ? "Submitting…" : "Accept custody"}
+        </button>
+      </div>
     </form>
   );
 }

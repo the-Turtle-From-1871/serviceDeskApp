@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getItem } from "@/modules/items/items.service";
 import { itemQrDataUrl, itemUrl } from "@/modules/items/qr";
@@ -16,18 +17,20 @@ export default async function QrPage({ params }: { params: Promise<{ itemId: str
   if (!item) notFound();
   const [png, url] = await Promise.all([itemQrDataUrl(item.id), Promise.resolve(itemUrl(item.id))]);
   return (
-    <div style={{ textAlign: "center" }}>
-      <h1>
-        {item.make} {item.model}
-      </h1>
-      <p>
-        Serial: {item.serialNumber}
-        {item.assetTag ? ` · Tag: ${item.assetTag}` : ""}
-      </p>
+    <div className="card qr-card stack">
+      <div>
+        <h1 className="page-title" style={{ fontSize: 22 }}>{item.make} {item.model}</h1>
+        <p className="subtle">
+          Serial {item.serialNumber}{item.assetTag ? ` · Tag ${item.assetTag}` : ""}
+        </p>
+      </div>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={png} alt={`QR code for ${item.make} ${item.model}`} width={320} height={320} />
-      <p style={{ fontSize: 12, wordBreak: "break-all" }}>{url}</p>
-      <PrintButton />
+      <img src={png} alt={`QR code for ${item.make} ${item.model}`} width={320} height={320} style={{ margin: "0 auto" }} />
+      <p className="qr-url">{url}</p>
+      <div className="row no-print" style={{ justifyContent: "center" }}>
+        <PrintButton />
+        <Link href="/admin/items" className="btn btn-ghost">Back to items</Link>
+      </div>
     </div>
   );
 }

@@ -8,6 +8,7 @@ import { ItemDetails } from "@/components/ItemDetails";
 import { TransferHistory } from "@/components/TransferHistory";
 import { InitiateTransferForm } from "@/components/InitiateTransferForm";
 import { OverrideForm } from "@/components/OverrideForm";
+import { StatusBadge } from "@/components/StatusBadge";
 
 export default async function ItemPage({ params }: { params: Promise<{ itemId: string }> }) {
   const { itemId } = await params;
@@ -25,35 +26,75 @@ export default async function ItemPage({ params }: { params: Promise<{ itemId: s
       })
     : [];
 
+  // Exclude the current holder so an admin can't record a no-op A→A override.
   const allUsers = isAdmin
     ? await prisma.user.findMany({
-        where: { isActive: true },
+        where: { isActive: true, id: item.currentHolderId ? { not: item.currentHolderId } : undefined },
         select: { id: true, name: true },
         orderBy: { name: "asc" },
       })
     : [];
 
+  const backHref = !session?.user ? "/login" : isAdmin ? "/admin/items" : "/dashboard";
+  const backLabel = !session?.user ? "Sign in" : isAdmin ? "All items" : "Dashboard";
+
   return (
-    <main style={{ fontFamily: "system-ui", maxWidth: 640, margin: "2rem auto" }}>
-      <h1>{item.make} {item.model}</h1>
-      <ItemDetails item={item} />
-      <section id="history">
-        <h2>Transfer history</h2>
-        <TransferHistory rows={history} />
-      </section>
-      {viewerIsHolder && item.status === "ACTIVE" && (
-        <section>
-          <h2>Transfer this item</h2>
-          <InitiateTransferForm itemId={item.id} users={recipients} />
-        </section>
-      )}
-      {isAdmin && (
-        <section>
-          <h2>Admin override — force reassign</h2>
-          <OverrideForm itemId={item.id} users={allUsers} />
-        </section>
-      )}
-      {!session?.user && <p><Link href="/login">Sign in</Link> to transfer or sign for this item.</p>}
-    </main>
+    <>
+      <header className="app-header">
+        <div className="app-header__inner">
+          <Link href="/" className="brand">
+            <span className="brand__mark">HR</span>
+            Hand Receipt
+          </Link>
+          <span className="spacer" />
+          <Link href={backHref} className="btn btn-ghost btn-sm">{backLabel}</Link>
+        </div>
+      </header>
+
+      <main className="container container-mid stack">
+        <div className="row">
+          <div>
+            <h1 className="page-title">{item.make} {item.model}</h1>
+            <p className="subtle">Serial {item.serialNumber}</p>
+          </div>
+          <span className="spacer" />
+          <StatusBadge status={item.status} />
+          {isAdmin && (
+            <Link href={`/admin/items/${item.id}/edit`} className="btn btn-secondary btn-sm">Edit</Link>
+          )}
+        </div>
+
+        <div className="card">
+          <div className="card__title">Details</div>
+          <ItemDetails item={item} />
+        </div>
+
+        <div className="card">
+          <div className="card__title">Transfer history</div>
+          <TransferHistory rows={history} />
+        </div>
+
+        {viewerIsHolder && item.status === "ACTIVE" && (
+          <div className="card">
+            <div className="card__title">Transfer this item</div>
+            <InitiateTransferForm itemId={item.id} users={recipients} />
+          </div>
+        )}
+
+        {isAdmin && (
+          <div className="card">
+            <div className="card__title">Admin override — force reassign</div>
+            <p className="hint" style={{ marginBottom: 12 }}>
+              Reassigns custody without the recipient signing. Recorded in the audit log as an override.
+            </p>
+            <OverrideForm itemId={item.id} users={allUsers} />
+          </div>
+        )}
+
+        {!session?.user && (
+          <p className="subtle"><Link href="/login">Sign in</Link> to transfer or sign for this item.</p>
+        )}
+      </main>
+    </>
   );
 }

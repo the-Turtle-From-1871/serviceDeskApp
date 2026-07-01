@@ -1,4 +1,4 @@
 "use client";
 export function PrintButton() {
-  return <button onClick={() => window.print()}>Print</button>;
+  return <button className="btn btn-primary" onClick={() => window.print()}>Print</button>;
 }
