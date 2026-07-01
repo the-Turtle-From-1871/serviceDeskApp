@@ -15,9 +15,25 @@ type GetSession = () => Promise<{ user: SessionUser } | null>;
 // tests injecting a fake `getSession` never pull in `@/auth` (and its
 // next-auth -> next/server import chain, which Vitest cannot resolve
 // outside a real Next.js build).
+//
+// This is also where session freshness is enforced: the JWT only carries the
+// role captured at login, so here we re-read role + isActive from the DB. That
+// makes role changes and deactivations take effect on the next request instead
+// of living stale until the token expires. It runs only in Node server
+// functions (Server Components / Actions / Route Handlers) that call
+// requireUser/requireAdmin — never in the edge-deployable proxy — which is the
+// pattern Next recommends: enforce authz in the server function, not the proxy.
 const defaultGetSession: GetSession = async () => {
   const { auth } = await import("@/auth");
-  return auth();
+  const session = await auth();
+  if (!session?.user) return null;
+  const { default: prisma } = await import("@/lib/prisma");
+  const fresh = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { role: true, isActive: true },
+  });
+  if (!fresh || !fresh.isActive) return null;
+  return { user: { ...session.user, role: fresh.role } };
 };
 
 export async function requireUser(
