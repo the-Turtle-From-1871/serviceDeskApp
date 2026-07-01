@@ -1,4 +1,4 @@
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb, degrees, TextAlignment } from "pdf-lib";
 import { DA2062_BASE64 } from "./templates/da2062.base64";
 
 export type ReceiptData = {
@@ -34,10 +34,15 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
 
   const form = pdf.getForm();
-  const set = (name: string, value: string, opts: { multiline?: boolean; size?: number } = {}) => {
+  const set = (
+    name: string,
+    value: string,
+    opts: { multiline?: boolean; size?: number; center?: boolean } = {}
+  ) => {
     try {
       const field = form.getTextField(name);
       if (opts.multiline) field.enableMultiline();
+      if (opts.center) field.setAlignment(TextAlignment.Center);
       field.setFontSize(opts.size ?? 10); // avoid pdf-lib auto-sizing short values huge
       field.setText(value);
     } catch {
@@ -58,15 +63,35 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
   // QTY=Qty Authorized, A.*=Qty on hand. ARC/CIIC are skipped: in this template
   // those fields share one widget across two rows, so filling them would bleed
   // onto the empty row below — the accountability data is on the record page.
-  set("ITEM NO aRow1", "1", { size: 9 });
+  set("ITEM NO aRow1", "1", { size: 9, center: true });
   set("MATERIAL NUMBER bRow1", t.item.assetTag ?? "", { size: 9 });
   set("ITEM DESCRIPTION cRow1", `${t.item.make} ${t.item.model}\nSER NO: ${t.item.serialNumber}`, { multiline: true, size: 9 });
-  set("UI.0", "EA", { size: 9 });
-  set("QTY.0", "1", { size: 9 });
-  set("A.0.0.0.0.0.0", "1", { size: 9 });
+  set("UI.0", "EA", { size: 9, center: true });
+  set("QTY.0", "1", { size: 9, center: true });
+  set("A.0.0.0.0.0.0", "1", { size: 9, center: true });
 
   form.updateFieldAppearances(helv);
   form.flatten();
+
+  // Recipient signs vertically in the active quantity column (column A) with the
+  // date, per DA 2062 practice. Column A spans x≈620–645; row 1's quantity is at
+  // the top (y≈486), so the signature occupies the rows below it. Drawn on top of
+  // the now-flattened form (reads bottom-to-top, i.e. rotated 90°).
+  const page1 = pdf.getPage(0);
+  const dateStr = fmt(t.signedAt);
+  if (t.signatureImage && t.signatureImage.startsWith("data:image/png;base64,")) {
+    try {
+      const sig = await pdf.embedPng(Buffer.from(t.signatureImage.split(",")[1], "base64"));
+      const barH = 22; // horizontal extent inside the ~25px column
+      const barW = Math.min(barH * (sig.width / sig.height), 150); // vertical extent
+      page1.drawImage(sig, { x: 642, y: 345, width: barW, height: barH, rotate: degrees(90) });
+      page1.drawText(dateStr, { x: 635, y: 300, size: 6, font: helv, rotate: degrees(90) });
+    } catch {
+      page1.drawText(`${t.toUserName}  ${dateStr}`, { x: 634, y: 330, size: 7, font: helv, rotate: degrees(90) });
+    }
+  } else {
+    page1.drawText(`${t.toUserName}  ${dateStr}`, { x: 634, y: 330, size: 7, font: helv, rotate: degrees(90) });
+  }
 
   // Appended custody record page.
   const page = pdf.addPage([612, 792]);
