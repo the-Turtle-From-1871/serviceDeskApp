@@ -20,4 +20,58 @@ model User {
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  createdItems  Item[]     @relation("CreatedItems")
+  heldItems     Item[]     @relation("CurrentHolder")
+  transfersFrom Transfer[] @relation("TransferFrom")
+  transfersTo   Transfer[] @relation("TransferTo")
+}
+
+enum ItemStatus {
+  ACTIVE
+  RETIRED
+}
+
+model Item {
+  id              String     @id @default(cuid())
+  make            String
+  model           String
+  serialNumber    String
+  assetTag        String?
+  homeLocation    String?
+  notes           String?
+  status          ItemStatus @default(ACTIVE)
+  currentHolder   User?      @relation("CurrentHolder", fields: [currentHolderId], references: [id])
+  currentHolderId String?
+  createdBy       User       @relation("CreatedItems", fields: [createdById], references: [id])
+  createdById     String
+  transfers       Transfer[]
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+}
+
+enum TransferStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+model Transfer {
+  id             String         @id @default(cuid())
+  item           Item           @relation(fields: [itemId], references: [id])
+  itemId         String
+  fromUser       User?          @relation("TransferFrom", fields: [fromUserId], references: [id])
+  fromUserId     String?
+  toUser         User           @relation("TransferTo", fields: [toUserId], references: [id])
+  toUserId       String
+  status         TransferStatus @default(PENDING)
+  isOverride     Boolean        @default(false)
+  actingAdminId  String?
+  signatureImage String?
+  fromUserName   String?
+  toUserName     String
+  itemSummary    String
+  initiatedAt    DateTime       @default(now())
+  signedAt       DateTime?
+  cancelledAt    DateTime?
 }
