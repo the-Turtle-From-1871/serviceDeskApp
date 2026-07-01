@@ -112,6 +112,7 @@ export async function overrideAssign(args: {
   return prisma.$transaction(async (tx) => {
     const item = await tx.item.findUnique({ where: { id: itemId } });
     if (!item) throw new TransferError("NOT_HOLDER");
+    if (item.currentHolderId === toUserId) throw new TransferError("SAME_USER");
     const recipient = await tx.user.findUnique({ where: { id: toUserId } });
     if (!recipient || !recipient.isActive) throw new TransferError("RECIPIENT_INVALID");
 
@@ -134,6 +135,39 @@ export async function overrideAssign(args: {
         actingAdminId,
         signedAt: new Date(),
         fromUserName: fromUser?.name ?? null,
+        toUserName: recipient.name,
+        itemSummary: `${item.make} ${item.model} (SN ${item.serialNumber})`,
+      },
+    });
+  });
+}
+
+// Records the first holder of a freshly-created item as a completed assignment
+// (design "Key Flow 1"): no `fromUser`, no signature — analogous to an admin
+// override but for an item that has never had a holder. Kept in the transfers
+// module so that every write to `Item.currentHolderId` stays confined here.
+export async function assignInitialHolder(args: {
+  itemId: string;
+  toUserId: string;
+}): Promise<Transfer> {
+  const { itemId, toUserId } = args;
+  return prisma.$transaction(async (tx) => {
+    const item = await tx.item.findUnique({ where: { id: itemId } });
+    if (!item) throw new TransferError("NOT_HOLDER");
+    if (item.currentHolderId) throw new TransferError("ALREADY_HELD");
+
+    const recipient = await tx.user.findUnique({ where: { id: toUserId } });
+    if (!recipient || !recipient.isActive) throw new TransferError("RECIPIENT_INVALID");
+
+    await tx.item.update({ where: { id: itemId }, data: { currentHolderId: toUserId } });
+    return tx.transfer.create({
+      data: {
+        itemId,
+        fromUserId: null,
+        toUserId,
+        status: "COMPLETED",
+        signedAt: new Date(),
+        fromUserName: null,
         toUserName: recipient.name,
         itemSummary: `${item.make} ${item.model} (SN ${item.serialNumber})`,
       },

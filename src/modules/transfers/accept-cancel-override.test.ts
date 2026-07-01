@@ -2,7 +2,7 @@ import { beforeAll, beforeEach, expect, test } from "vitest";
 import prisma from "@/lib/prisma";
 import { migrateTestDb, resetDb } from "../../../tests/helpers/db";
 import { makeItem, makeUser } from "../../../tests/helpers/factories";
-import { initiateTransfer, acceptTransfer, cancelTransfer, overrideAssign } from "./transfers.service";
+import { initiateTransfer, acceptTransfer, cancelTransfer, overrideAssign, assignInitialHolder } from "./transfers.service";
 
 const SIG = "data:image/png;base64,iVBORw0KGgoAAAANS";
 
@@ -85,4 +85,37 @@ test("admin override moves custody without signature and cancels pending", async
   expect(after?.currentHolderId).toBe(target.id);
   const stale = await prisma.transfer.findUnique({ where: { id: pending.id } });
   expect(stale?.status).toBe("CANCELLED");
+});
+
+test("override rejects a no-op reassign to the current holder", async () => {
+  const admin = await makeUser({ role: "ADMIN" });
+  const holder = await makeUser();
+  const item = await makeItem(admin.id, { currentHolderId: holder.id });
+  await expect(
+    overrideAssign({ itemId: item.id, toUserId: holder.id, actingAdminId: admin.id })
+  ).rejects.toMatchObject({ code: "SAME_USER" });
+});
+
+test("assignInitialHolder records a fromUser-null completed assignment and sets holder", async () => {
+  const admin = await makeUser({ role: "ADMIN" });
+  const recipient = await makeUser();
+  const item = await makeItem(admin.id); // unassigned
+
+  const t = await assignInitialHolder({ itemId: item.id, toUserId: recipient.id });
+  expect(t.status).toBe("COMPLETED");
+  expect(t.fromUserId).toBeNull();
+  expect(t.toUserId).toBe(recipient.id);
+  expect(t.signedAt).not.toBeNull();
+  const after = await prisma.item.findUnique({ where: { id: item.id } });
+  expect(after?.currentHolderId).toBe(recipient.id);
+});
+
+test("assignInitialHolder refuses an item that already has a holder", async () => {
+  const admin = await makeUser({ role: "ADMIN" });
+  const holder = await makeUser();
+  const other = await makeUser();
+  const item = await makeItem(admin.id, { currentHolderId: holder.id });
+  await expect(
+    assignInitialHolder({ itemId: item.id, toUserId: other.id })
+  ).rejects.toMatchObject({ code: "ALREADY_HELD" });
 });
