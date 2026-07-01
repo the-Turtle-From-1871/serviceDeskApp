@@ -29,6 +29,7 @@ export default async function QrPage({ params }: { params: Promise<{ itemId: str
       <p className="qr-url">{url}</p>
       <div className="row no-print" style={{ justifyContent: "center" }}>
         <PrintButton />
+        <a href={`/admin/items/${item.id}/qr/pdf`} className="btn btn-secondary">Download PDF</a>
         <Link href="/admin/items" className="btn btn-ghost">Back to items</Link>
       </div>
     </div>

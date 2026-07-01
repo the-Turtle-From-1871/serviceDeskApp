@@ -28,6 +28,7 @@ export default async function AuditPage() {
               <th>Status</th>
               <th>Initiated</th>
               <th>Signed</th>
+              <th>Receipt</th>
             </tr>
           </thead>
           <tbody>
@@ -44,6 +45,11 @@ export default async function AuditPage() {
                 </td>
                 <td className="subtle">{new Date(t.initiatedAt).toLocaleString()}</td>
                 <td className="subtle">{t.signedAt ? new Date(t.signedAt).toLocaleString() : "—"}</td>
+                <td>
+                  {t.status === "COMPLETED" && (
+                    <a href={`/transfers/${t.id}/receipt`} className="btn btn-ghost btn-sm">PDF</a>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

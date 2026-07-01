@@ -71,7 +71,7 @@ export default async function ItemPage({ params }: { params: Promise<{ itemId: s
 
         <div className="card">
           <div className="card__title">Transfer history</div>
-          <TransferHistory rows={history} />
+          <TransferHistory rows={history} viewerId={session?.user?.id} isAdmin={isAdmin} />
         </div>
 
         {viewerIsHolder && item.status === "ACTIVE" && (
