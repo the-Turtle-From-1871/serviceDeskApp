@@ -1,9 +1,16 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getItem } from "@/modules/items/items.service";
 import { itemQrDataUrl, itemUrl } from "@/modules/items/qr";
 import { PrintButton } from "@/components/PrintButton";
+import { requireAdmin, AuthError } from "@/lib/authz";
 
 export default async function QrPage({ params }: { params: Promise<{ itemId: string }> }) {
+  try {
+    await requireAdmin();
+  } catch (e) {
+    if (e instanceof AuthError) redirect(e.code === "FORBIDDEN" ? "/dashboard" : "/login");
+    throw e;
+  }
   const { itemId } = await params;
   const item = await getItem(itemId);
   if (!item) notFound();

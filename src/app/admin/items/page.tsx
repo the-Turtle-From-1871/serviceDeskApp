@@ -1,11 +1,19 @@
+import { redirect } from "next/navigation";
 import Link from "next/link";
 import { listItems } from "@/modules/items/items.service";
+import { requireAdmin, AuthError } from "@/lib/authz";
 
 export default async function ItemsPage({
   searchParams,
 }: {
   searchParams: Promise<{ q?: string }>;
 }) {
+  try {
+    await requireAdmin();
+  } catch (e) {
+    if (e instanceof AuthError) redirect(e.code === "FORBIDDEN" ? "/dashboard" : "/login");
+    throw e;
+  }
   const { q } = await searchParams;
   const items = await listItems({ search: q });
   return (

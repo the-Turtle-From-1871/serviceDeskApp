@@ -48,6 +48,17 @@ export async function acceptTransferAction(_prev: unknown, formData: FormData) {
 export async function cancelTransferAction(formData: FormData) {
   const user = await requireUser();
   const transferId = String(formData.get("transferId"));
-  await cancelTransfer({ transferId, actingUserId: user.id, isAdmin: user.role === "ADMIN" });
+  // This action is invoked from a plain <form action={...}> (see
+  // src/app/transfers/[id]/page.tsx), not useActionState, so there is no
+  // channel to surface a returned error back to the user. On a TransferError
+  // (e.g. NOT_HOLDER/NOT_PENDING — someone else already accepted/cancelled,
+  // or a non-party attempted this), the least-surprising behavior is to
+  // treat the cancel as a no-op and send the user back to the dashboard
+  // rather than a raw 500. Any other error is rethrown.
+  try {
+    await cancelTransfer({ transferId, actingUserId: user.id, isAdmin: user.role === "ADMIN" });
+  } catch (e) {
+    if (!(e instanceof TransferError)) throw e;
+  }
   redirect("/dashboard");
 }

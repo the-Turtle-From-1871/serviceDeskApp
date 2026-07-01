@@ -1,7 +1,15 @@
+import { redirect } from "next/navigation";
 import Link from "next/link";
 import prisma from "@/lib/prisma";
+import { requireAdmin, AuthError } from "@/lib/authz";
 
 export default async function AuditPage() {
+  try {
+    await requireAdmin();
+  } catch (e) {
+    if (e instanceof AuthError) redirect(e.code === "FORBIDDEN" ? "/dashboard" : "/login");
+    throw e;
+  }
   const transfers = await prisma.transfer.findMany({ orderBy: { initiatedAt: "desc" }, take: 200 });
   return (
     <div>

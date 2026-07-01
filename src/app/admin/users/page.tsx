@@ -1,8 +1,16 @@
+import { redirect } from "next/navigation";
 import { listUsers } from "@/modules/users/users.service";
 import { toggleUserActiveAction } from "@/app/admin/actions/users";
+import { requireAdmin, AuthError } from "@/lib/authz";
 import { NewUserForm } from "./NewUserForm";
 
 export default async function UsersPage() {
+  try {
+    await requireAdmin();
+  } catch (e) {
+    if (e instanceof AuthError) redirect(e.code === "FORBIDDEN" ? "/dashboard" : "/login");
+    throw e;
+  }
   const users = await listUsers();
   return (
     <div>

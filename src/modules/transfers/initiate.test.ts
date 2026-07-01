@@ -1,7 +1,9 @@
 import { beforeAll, beforeEach, expect, test } from "vitest";
+import prisma from "@/lib/prisma";
 import { migrateTestDb, resetDb } from "../../../tests/helpers/db";
 import { makeItem, makeUser } from "../../../tests/helpers/factories";
 import { initiateTransfer } from "./transfers.service";
+import { TransferError } from "./transfers.errors";
 
 beforeAll(() => migrateTestDb());
 beforeEach(() => resetDb());
@@ -68,4 +70,38 @@ test("cannot transfer to inactive recipient", async () => {
   await expect(
     initiateTransfer({ itemId: item.id, fromUserId: holder.id, toUserId: recipient.id })
   ).rejects.toMatchObject({ code: "RECIPIENT_INVALID" });
+});
+
+test("concurrent initiates for the same item: exactly one wins, loser gets ALREADY_PENDING (not a raw Prisma error)", async () => {
+  const admin = await makeUser({ role: "ADMIN" });
+  const holder = await makeUser();
+  const r1 = await makeUser();
+  const r2 = await makeUser();
+  const item = await makeItem(admin.id, { currentHolderId: holder.id });
+
+  const results = await Promise.allSettled([
+    initiateTransfer({ itemId: item.id, fromUserId: holder.id, toUserId: r1.id }),
+    initiateTransfer({ itemId: item.id, fromUserId: holder.id, toUserId: r2.id }),
+  ]);
+
+  const fulfilled = results.filter((r) => r.status === "fulfilled");
+  const rejected = results.filter((r) => r.status === "rejected");
+
+  expect(fulfilled).toHaveLength(1);
+  expect(rejected).toHaveLength(1);
+
+  // No raw Prisma error should ever leak out of initiateTransfer — every
+  // rejection must be a friendly TransferError. In practice this race
+  // deterministically resolves to ALREADY_PENDING, but we keep the
+  // "no raw Prisma error" assertion authoritative even if timing varies.
+  for (const r of rejected) {
+    if (r.status !== "rejected") continue;
+    expect(r.reason).toBeInstanceOf(TransferError);
+    expect((r.reason as TransferError).code).toBe("ALREADY_PENDING");
+  }
+
+  const pendingTransfers = await prisma.transfer.findMany({
+    where: { itemId: item.id, status: "PENDING" },
+  });
+  expect(pendingTransfers).toHaveLength(1);
 });

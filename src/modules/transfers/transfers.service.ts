@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import type { Item, Transfer } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { TransferError } from "./transfers.errors";
@@ -10,34 +11,52 @@ export async function initiateTransfer(args: {
   const { itemId, fromUserId, toUserId } = args;
   if (fromUserId === toUserId) throw new TransferError("SAME_USER");
 
-  return prisma.$transaction(async (tx) => {
-    const item = await tx.item.findUnique({ where: { id: itemId } });
-    if (!item) throw new TransferError("NOT_HOLDER");
-    if (item.currentHolderId !== fromUserId) throw new TransferError("NOT_HOLDER");
-    if (item.status === "RETIRED") throw new TransferError("ITEM_RETIRED");
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const item = await tx.item.findUnique({ where: { id: itemId } });
+      if (!item) throw new TransferError("NOT_HOLDER");
+      if (item.currentHolderId !== fromUserId) throw new TransferError("NOT_HOLDER");
+      if (item.status === "RETIRED") throw new TransferError("ITEM_RETIRED");
 
-    const recipient = await tx.user.findUnique({ where: { id: toUserId } });
-    if (!recipient || !recipient.isActive) throw new TransferError("RECIPIENT_INVALID");
+      const recipient = await tx.user.findUnique({ where: { id: toUserId } });
+      if (!recipient || !recipient.isActive) throw new TransferError("RECIPIENT_INVALID");
 
-    const pending = await tx.transfer.findFirst({
-      where: { itemId, status: "PENDING" },
+      // Fast-path check: catches the common case cheaply, but under
+      // concurrent initiates for the same item two callers can both pass
+      // this check before either commits. The DB-level partial unique
+      // index `one_pending_transfer_per_item` is the real guard — its
+      // P2002 violation is translated to ALREADY_PENDING below.
+      const pending = await tx.transfer.findFirst({
+        where: { itemId, status: "PENDING" },
+      });
+      if (pending) throw new TransferError("ALREADY_PENDING");
+
+      const holder = await tx.user.findUnique({ where: { id: fromUserId } });
+      return tx.transfer.create({
+        data: {
+          itemId,
+          fromUserId,
+          toUserId,
+          status: "PENDING",
+          fromUserName: holder?.name ?? null,
+          toUserName: recipient.name,
+          itemSummary: `${item.make} ${item.model} (SN ${item.serialNumber})`,
+        },
+      });
     });
-    if (pending) throw new TransferError("ALREADY_PENDING");
-
-    const holder = await tx.user.findUnique({ where: { id: fromUserId } });
-    return tx.transfer.create({
-      data: {
-        itemId,
-        fromUserId,
-        toUserId,
-        status: "PENDING",
-        fromUserName: holder?.name ?? null,
-        toUserName: recipient.name,
-        itemSummary: `${item.make} ${item.model} (SN ${item.serialNumber})`,
-      },
-    });
-  });
+  } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      throw new TransferError("ALREADY_PENDING");
+    }
+    throw e;
+  }
 }
+
+// SignaturePad exports via `toDataURL("image/png")`, so a valid signature is
+// always a PNG data URL. Cap the length as a sane defense against abuse
+// (5 MB of base64 text is already a very large signature image).
+const SIGNATURE_PREFIX = "data:image/png;base64,";
+const MAX_SIGNATURE_BYTES = 5_000_000;
 
 export async function acceptTransfer(args: {
   transferId: string;
@@ -45,7 +64,11 @@ export async function acceptTransfer(args: {
   signatureImage: string;
 }): Promise<Transfer> {
   const { transferId, toUserId, signatureImage } = args;
-  if (!signatureImage || !signatureImage.startsWith("data:image/")) {
+  if (
+    !signatureImage ||
+    !signatureImage.startsWith(SIGNATURE_PREFIX) ||
+    signatureImage.length > MAX_SIGNATURE_BYTES
+  ) {
     throw new TransferError("SIGNATURE_REQUIRED");
   }
   return prisma.$transaction(async (tx) => {
