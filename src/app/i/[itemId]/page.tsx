@@ -21,7 +21,7 @@ export default async function ItemPage({ params }: { params: Promise<{ itemId: s
   const recipients = viewerIsHolder
     ? await prisma.user.findMany({
         where: { isActive: true, id: { not: session!.user.id } },
-        select: { id: true, name: true },
+        select: { id: true, name: true, rank: true },
         orderBy: { name: "asc" },
       })
     : [];
@@ -30,7 +30,7 @@ export default async function ItemPage({ params }: { params: Promise<{ itemId: s
   const allUsers = isAdmin
     ? await prisma.user.findMany({
         where: { isActive: true, id: item.currentHolderId ? { not: item.currentHolderId } : undefined },
-        select: { id: true, name: true },
+        select: { id: true, name: true, rank: true },
         orderBy: { name: "asc" },
       })
     : [];

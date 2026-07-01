@@ -1,8 +1,14 @@
 "use client";
 import { useActionState } from "react";
 import { initiateTransferAction } from "@/app/actions/transfers";
+import { UserCombobox } from "@/components/UserCombobox";
 
-type UserOption = { id: string; name: string };
+type UserOption = { id: string; name: string; rank?: string | null };
+
+function toOptions(users: UserOption[]) {
+  return users.map((u) => ({ id: u.id, label: u.rank ? `${u.rank} ${u.name}` : u.name }));
+}
+
 export function InitiateTransferForm({ itemId, users }: { itemId: string; users: UserOption[] }) {
   const [state, action, pending] = useActionState(initiateTransferAction, undefined);
   if (state && "ok" in state && state.ok)
@@ -11,11 +17,8 @@ export function InitiateTransferForm({ itemId, users }: { itemId: string; users:
     <form action={action} className="stack-sm">
       <input type="hidden" name="itemId" value={itemId} />
       <div className="field">
-        <label className="label" htmlFor="toUserId">Transfer to</label>
-        <select id="toUserId" className="select" name="toUserId" required>
-          <option value="">Select a person…</option>
-          {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-        </select>
+        <label className="label">Transfer to</label>
+        <UserCombobox name="toUserId" users={toOptions(users)} required />
       </div>
       {state?.error && <p role="alert" className="alert-error">{state.error}</p>}
       <div>

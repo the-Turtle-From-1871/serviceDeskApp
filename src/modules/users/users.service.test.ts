@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, expect, test } from "vitest";
 import { migrateTestDb, resetDb } from "../../../tests/helpers/db";
-import { createUser, setUserActive, setUserRole, listUsers, changeUserPassword } from "./users.service";
+import { createUser, registerUser, setUserActive, setUserRole, listUsers, changeUserPassword } from "./users.service";
 import { verifyPassword } from "@/lib/password";
 
 beforeAll(() => migrateTestDb());
@@ -14,6 +14,20 @@ test("createUser hashes password and defaults role USER", async () => {
 
 test("createUser rejects short passwords", async () => {
   await expect(createUser({ name: "Pat", email: "p@x.co", password: "short", role: "USER" })).rejects.toThrow();
+});
+
+test("createUser stores rank and lowercases the email", async () => {
+  const u = await createUser({ rank: "SGT", name: "Pat", email: "Pat.X@Unit.MIL", password: "password123", role: "USER" });
+  expect(u.rank).toBe("SGT");
+  expect(u.email).toBe("pat.x@unit.mil");
+});
+
+test("registerUser creates an active USER (self-registration)", async () => {
+  const u = await registerUser({ rank: "SPC", name: "Reg", email: "Reg.User@X.co", password: "password123" });
+  expect(u.role).toBe("USER");
+  expect(u.isActive).toBe(true);
+  expect(u.email).toBe("reg.user@x.co");
+  expect(u.rank).toBe("SPC");
 });
 
 test("setUserActive toggles the flag", async () => {

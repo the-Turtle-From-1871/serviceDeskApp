@@ -1,12 +1,20 @@
 "use client";
 import { useActionState } from "react";
 import { createUserAction } from "@/app/admin/actions/users";
+import { RANK_OPTIONS } from "@/lib/ranks";
 
 export function NewUserForm() {
   const [state, action, pending] = useActionState(createUserAction, undefined);
   return (
     <form action={action} className="stack-sm">
       <div className="form-grid">
+        <div className="field">
+          <label className="label" htmlFor="nu-rank">Rank</label>
+          <input id="nu-rank" className="input" name="rank" list="nu-ranks" placeholder="e.g. SGT (optional)" autoComplete="off" />
+          <datalist id="nu-ranks">
+            {RANK_OPTIONS.map((r) => <option key={r} value={r} />)}
+          </datalist>
+        </div>
         <div className="field">
           <label className="label" htmlFor="nu-name">Name</label>
           <input id="nu-name" className="input" name="name" placeholder="Jane Doe" required />

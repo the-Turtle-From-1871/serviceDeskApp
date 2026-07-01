@@ -3,6 +3,12 @@ import type { Item, Transfer } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { TransferError } from "./transfers.errors";
 
+// Snapshot a party as "RANK Name" (or just "Name") so history and the DA 2062
+// FROM/TO reflect the rank held at transfer time.
+function disp(u: { rank: string | null; name: string }): string {
+  return u.rank ? `${u.rank} ${u.name}` : u.name;
+}
+
 export async function initiateTransfer(args: {
   itemId: string;
   fromUserId: string;
@@ -38,8 +44,8 @@ export async function initiateTransfer(args: {
           fromUserId,
           toUserId,
           status: "PENDING",
-          fromUserName: holder?.name ?? null,
-          toUserName: recipient.name,
+          fromUserName: holder ? disp(holder) : null,
+          toUserName: disp(recipient),
           itemSummary: `${item.make} ${item.model} (SN ${item.serialNumber})`,
         },
       });
@@ -134,8 +140,8 @@ export async function overrideAssign(args: {
         isOverride: true,
         actingAdminId,
         signedAt: new Date(),
-        fromUserName: fromUser?.name ?? null,
-        toUserName: recipient.name,
+        fromUserName: fromUser ? disp(fromUser) : null,
+        toUserName: disp(recipient),
         itemSummary: `${item.make} ${item.model} (SN ${item.serialNumber})`,
       },
     });
@@ -168,7 +174,7 @@ export async function assignInitialHolder(args: {
         status: "COMPLETED",
         signedAt: new Date(),
         fromUserName: null,
-        toUserName: recipient.name,
+        toUserName: disp(recipient),
         itemSummary: `${item.make} ${item.model} (SN ${item.serialNumber})`,
       },
     });

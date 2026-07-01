@@ -2,8 +2,9 @@
 import { useActionState } from "react";
 import Link from "next/link";
 import { createItemAction } from "@/app/admin/actions/items";
+import { UserCombobox } from "@/components/UserCombobox";
 
-type UserOption = { id: string; name: string };
+type UserOption = { id: string; name: string; rank?: string | null };
 
 const fields = [
   ["make", "Make", true],
@@ -41,11 +42,12 @@ export function NewItemForm({ users }: { users: UserOption[] }) {
           </div>
         ))}
         <div className="field">
-          <label className="label" htmlFor="initialHolderId">Initial holder</label>
-          <select id="initialHolderId" name="initialHolderId" className="select">
-            <option value="">Unassigned</option>
-            {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
+          <label className="label">Initial holder</label>
+          <UserCombobox
+            name="initialHolderId"
+            placeholder="Search by rank or name… (optional)"
+            users={users.map((u) => ({ id: u.id, label: u.rank ? `${u.rank} ${u.name}` : u.name }))}
+          />
         </div>
         <div className="field col-span-2">
           <label className="label" htmlFor="notes">Notes</label>

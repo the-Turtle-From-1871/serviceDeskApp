@@ -12,7 +12,7 @@ export default async function NewItemPage() {
   }
   const users = await prisma.user.findMany({
     where: { isActive: true },
-    select: { id: true, name: true },
+    select: { id: true, name: true, rank: true },
     orderBy: { name: "asc" },
   });
   return (

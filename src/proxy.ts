@@ -8,6 +8,6 @@
 export { auth as proxy } from "@/auth";
 
 export const config = {
-  // Protect everything except auth API, login, public item pages, static assets.
-  matcher: ["/((?!api/auth|login|i/|_next/static|_next/image|favicon.ico).*)"],
+  // Protect everything except auth API, login, register, public item pages, static assets.
+  matcher: ["/((?!api/auth|login|register|i/|_next/static|_next/image|favicon.ico).*)"],
 };

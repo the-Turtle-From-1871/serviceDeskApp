@@ -17,6 +17,7 @@ receipt PDF.
 - **Signed custody chain** — holder initiates a transfer, recipient draws a signature to accept; custody moves only on signature.
 - **Admin console** — create/edit/retire items, manage users (create, set role, activate/deactivate), force-reassign (override), full audit log.
 - **DA Form 2062 hand receipt** — every completed transfer exports a filled, flattened DA 2062 PDF with a vertical recipient signature + date in the quantity column and a custody-record page.
+- **Accounts** — users self-register (standard `USER`); admins can also provision accounts. Rank is captured separately from name.
 - **Roles** — `ADMIN` and `USER`, enforced server-side; deactivations/role changes take effect on the next request.
 - **HST everywhere** — all timestamps display in Hawaii Standard Time (stored as UTC).
 
@@ -107,7 +108,8 @@ docs/                  # architecture + design notes
 
 ## Auth & roles (summary)
 
-Email + password only, no open signup — admins provision accounts. Sessions are
+Email + password. Users can **self-register** (as standard `USER` via
+`/register`); admins can also provision accounts and assign roles. Sessions are
 JWT (no DB session table). Authorization is enforced in `requireUser` /
 `requireAdmin`, which re-read `role`/`isActive` from the DB each request, so
 deactivations and role changes take effect immediately. See

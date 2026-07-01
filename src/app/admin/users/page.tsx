@@ -41,7 +41,7 @@ export default async function UsersPage() {
               const isSelf = u.id === admin.id;
               return (
                 <tr key={u.id}>
-                  <td>{u.name}{isSelf && <span className="subtle"> (you)</span>}</td>
+                  <td>{u.rank ? `${u.rank} ` : ""}{u.name}{isSelf && <span className="subtle"> (you)</span>}</td>
                   <td className="mono">{u.email}</td>
                   <td>
                     <span className={`badge ${u.role === "ADMIN" ? "badge-admin" : "badge-retired"}`}>

@@ -26,9 +26,10 @@ proxy edge-portable even though our app runs it on Node.
 Three core models (`prisma/schema.prisma`):
 
 ### User
-`id, name, email (unique), passwordHash, role (ADMIN|USER), isActive, timestamps`
-- Passwords stored as bcrypt hashes (cost 12); never plaintext.
-- No open registration — admins create users.
+`id, rank?, name, email (unique), passwordHash, role (ADMIN|USER), isActive, timestamps`
+- Passwords stored as bcrypt hashes (cost 12); never plaintext. Emails are normalized to lowercase.
+- Users can self-register (USER role); admins can also create accounts and set roles.
+- `rank` is captured separately from `name`; the pair is snapshotted as "RANK Name" onto transfers.
 
 ### Item
 `id, make, model, serialNumber, assetTag?, homeLocation?, notes?, status (ACTIVE|RETIRED), currentHolderId?, createdById, timestamps`
@@ -86,9 +87,9 @@ a companion:
 - Supabase Auth owns identities in its own `auth.users` schema, issues its own
   JWTs, expects the Supabase client SDK, and leans on **Row-Level Security** for
   authorization.
-- Our app owns the `User` table (with `role`, `isActive`, `passwordHash`) and
-  enforces a role model in `requireUser`/`requireAdmin`, tightly coupled to the
-  custody domain (admin-provisioned accounts, no self-signup).
+- Our app owns the `User` table (with `rank`, `role`, `isActive`, `passwordHash`)
+  and enforces a role model in `requireUser`/`requireAdmin`, tightly coupled to
+  the custody domain (self-registration + admin provisioning, rank/role fields).
 
 Switching to Supabase Auth would be a **rewrite** — migrate identities into
 `auth.users`, move session handling to the Supabase SDK, and re-express role

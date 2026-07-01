@@ -1,13 +1,33 @@
 import type { Role, User } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { hashPassword, verifyPassword } from "@/lib/password";
-import { newUserSchema, type NewUserInput } from "./users.schema";
+import { newUserSchema, registerSchema, type NewUserInput, type RegisterInput } from "./users.schema";
 import { PasswordChangeError } from "./users.errors";
 
 export async function createUser(input: NewUserInput): Promise<User> {
   const data = newUserSchema.parse(input);
   return prisma.user.create({
-    data: { name: data.name, email: data.email, role: data.role, passwordHash: await hashPassword(data.password) },
+    data: {
+      rank: data.rank,
+      name: data.name,
+      email: data.email,
+      role: data.role,
+      passwordHash: await hashPassword(data.password),
+    },
+  });
+}
+
+// Public self-registration — always creates an active standard (USER) account.
+export async function registerUser(input: RegisterInput): Promise<User> {
+  const data = registerSchema.parse(input);
+  return prisma.user.create({
+    data: {
+      rank: data.rank,
+      name: data.name,
+      email: data.email,
+      role: "USER",
+      passwordHash: await hashPassword(data.password),
+    },
   });
 }
 
