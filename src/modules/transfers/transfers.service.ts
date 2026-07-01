@@ -38,3 +38,82 @@ export async function initiateTransfer(args: {
     });
   });
 }
+
+export async function acceptTransfer(args: {
+  transferId: string;
+  toUserId: string;
+  signatureImage: string;
+}): Promise<Transfer> {
+  const { transferId, toUserId, signatureImage } = args;
+  if (!signatureImage || !signatureImage.startsWith("data:image/")) {
+    throw new TransferError("SIGNATURE_REQUIRED");
+  }
+  return prisma.$transaction(async (tx) => {
+    const t = await tx.transfer.findUnique({ where: { id: transferId } });
+    if (!t) throw new TransferError("NOT_PENDING");
+    if (t.status !== "PENDING") throw new TransferError("NOT_PENDING");
+    if (t.toUserId !== toUserId) throw new TransferError("NOT_RECIPIENT");
+
+    await tx.item.update({ where: { id: t.itemId }, data: { currentHolderId: toUserId } });
+    return tx.transfer.update({
+      where: { id: transferId },
+      data: { status: "COMPLETED", signatureImage, signedAt: new Date() },
+    });
+  });
+}
+
+export async function cancelTransfer(args: {
+  transferId: string;
+  actingUserId: string;
+  isAdmin: boolean;
+}): Promise<Transfer> {
+  const { transferId, actingUserId, isAdmin } = args;
+  return prisma.$transaction(async (tx) => {
+    const t = await tx.transfer.findUnique({ where: { id: transferId } });
+    if (!t) throw new TransferError("NOT_PENDING");
+    if (t.status !== "PENDING") throw new TransferError("NOT_PENDING");
+    if (!isAdmin && t.fromUserId !== actingUserId) throw new TransferError("NOT_HOLDER");
+    return tx.transfer.update({
+      where: { id: transferId },
+      data: { status: "CANCELLED", cancelledAt: new Date() },
+    });
+  });
+}
+
+export async function overrideAssign(args: {
+  itemId: string;
+  toUserId: string;
+  actingAdminId: string;
+}): Promise<Transfer> {
+  const { itemId, toUserId, actingAdminId } = args;
+  return prisma.$transaction(async (tx) => {
+    const item = await tx.item.findUnique({ where: { id: itemId } });
+    if (!item) throw new TransferError("NOT_HOLDER");
+    const recipient = await tx.user.findUnique({ where: { id: toUserId } });
+    if (!recipient || !recipient.isActive) throw new TransferError("RECIPIENT_INVALID");
+
+    await tx.transfer.updateMany({
+      where: { itemId, status: "PENDING" },
+      data: { status: "CANCELLED", cancelledAt: new Date() },
+    });
+    await tx.item.update({ where: { id: itemId }, data: { currentHolderId: toUserId } });
+
+    const fromUser = item.currentHolderId
+      ? await tx.user.findUnique({ where: { id: item.currentHolderId } })
+      : null;
+    return tx.transfer.create({
+      data: {
+        itemId,
+        fromUserId: item.currentHolderId,
+        toUserId,
+        status: "COMPLETED",
+        isOverride: true,
+        actingAdminId,
+        signedAt: new Date(),
+        fromUserName: fromUser?.name ?? null,
+        toUserName: recipient.name,
+        itemSummary: `${item.make} ${item.model} (SN ${item.serialNumber})`,
+      },
+    });
+  });
+}
