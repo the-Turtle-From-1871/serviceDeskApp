@@ -34,23 +34,36 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
 
   const form = pdf.getForm();
-  const set = (name: string, value: string) => {
+  const set = (name: string, value: string, opts: { multiline?: boolean; size?: number } = {}) => {
     try {
-      form.getTextField(name).setText(value);
+      const field = form.getTextField(name);
+      if (opts.multiline) field.enableMultiline();
+      field.setFontSize(opts.size ?? 10); // avoid pdf-lib auto-sizing short values huge
+      field.setText(value);
     } catch {
       /* field not present in this template revision — ignore */
     }
   };
 
-  const desc = `${t.item.make} ${t.item.model}, SN ${t.item.serialNumber}`;
-  set("FROM", t.fromUserName ?? "Initial issue");
-  set("TO", t.toUserName);
-  set("HAND RECEIPT IDENTIFIER", `HR-${t.id.slice(0, 8).toUpperCase()}`);
-  set("END ITEM DESCRIPTION", desc);
-  set("QUANTITY", "1");
-  set("ITEM NO aRow1", "1");
-  set("MATERIAL NUMBER bRow1", t.item.assetTag ?? t.item.serialNumber);
-  set("ITEM DESCRIPTION cRow1", desc);
+  // Header. FROM/TO take name, rank and organization; we only store a name, so
+  // the name is used. END ITEM and PUBLICATION blocks are intentionally left
+  // blank — per DA 2062 guidance those are only for component (sub-)hand
+  // receipts that list parts drawn from a specific end item / TM.
+  set("FROM", t.fromUserName ?? "Initial issue", { size: 11 });
+  set("TO", t.toUserName, { size: 11 });
+  set("HAND RECEIPT IDENTIFIER", `HR-${t.id.slice(0, 8).toUpperCase()}`, { size: 11 });
+
+  // Item line 1. Columns: a=ITEM NO, b=MATERIAL NUMBER (NSN / local material
+  // id), c=ITEM DESCRIPTION (nomenclature + serial), UI=Unit of Issue,
+  // QTY=Qty Authorized, A.*=Qty on hand. ARC/CIIC are skipped: in this template
+  // those fields share one widget across two rows, so filling them would bleed
+  // onto the empty row below — the accountability data is on the record page.
+  set("ITEM NO aRow1", "1", { size: 9 });
+  set("MATERIAL NUMBER bRow1", t.item.assetTag ?? "", { size: 9 });
+  set("ITEM DESCRIPTION cRow1", `${t.item.make} ${t.item.model}\nSER NO: ${t.item.serialNumber}`, { multiline: true, size: 9 });
+  set("UI.0", "EA", { size: 9 });
+  set("QTY.0", "1", { size: 9 });
+  set("A.0.0.0.0.0.0", "1", { size: 9 });
 
   form.updateFieldAppearances(helv);
   form.flatten();
@@ -68,7 +81,9 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
   const rows: [string, string][] = [
     ["Item", `${t.item.make} ${t.item.model}`],
     ["Serial number", t.item.serialNumber],
-    ["Asset tag", t.item.assetTag ?? "—"],
+    ["Material / asset tag", t.item.assetTag ?? "—"],
+    ["Quantity / U/I", "1 EA"],
+    ["ARC", "N (nonexpendable)"],
     ["From", t.fromUserName ?? "Initial issue"],
     ["To", t.toUserName],
     ["Type", transferType(t)],
