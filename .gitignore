@@ -53,3 +53,6 @@ next-env.d.ts
 /playwright-report/
 /blob-report/
 .last-run.json
+
+# Vercel
+.vercel
