@@ -43,3 +43,7 @@ next-env.d.ts
 
 # scratch / planning artifacts (not part of the shipped app)
 /.superpowers/
+
+# local tooling indexes / artifacts
+/.codegraph/
+/.playwright-mcp/
