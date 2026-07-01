@@ -1,4 +1,4 @@
-import type { Transfer } from "@prisma/client";
+import type { Item, Transfer } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { TransferError } from "./transfers.errors";
 
@@ -115,5 +115,30 @@ export async function overrideAssign(args: {
         itemSummary: `${item.make} ${item.model} (SN ${item.serialNumber})`,
       },
     });
+  });
+}
+
+export function getItemHistory(itemId: string): Promise<Transfer[]> {
+  return prisma.transfer.findMany({ where: { itemId }, orderBy: { initiatedAt: "desc" } });
+}
+
+export async function getPendingForUser(userId: string) {
+  const [incoming, outgoing] = await Promise.all([
+    prisma.transfer.findMany({
+      where: { toUserId: userId, status: "PENDING" },
+      orderBy: { initiatedAt: "desc" },
+    }),
+    prisma.transfer.findMany({
+      where: { fromUserId: userId, status: "PENDING" },
+      orderBy: { initiatedAt: "desc" },
+    }),
+  ]);
+  return { incoming, outgoing };
+}
+
+export function getHeldItems(userId: string): Promise<Item[]> {
+  return prisma.item.findMany({
+    where: { currentHolderId: userId },
+    orderBy: { updatedAt: "desc" },
   });
 }
