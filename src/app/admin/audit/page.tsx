@@ -3,6 +3,7 @@ import Link from "next/link";
 import prisma from "@/lib/prisma";
 import { requireAdmin, AuthError } from "@/lib/authz";
 import { StatusBadge } from "@/components/StatusBadge";
+import { formatDateTimeHST } from "@/lib/datetime";
 
 export default async function AuditPage() {
   try {
@@ -43,8 +44,8 @@ export default async function AuditPage() {
                     {t.isOverride && <span className="badge badge-override">Override</span>}
                   </div>
                 </td>
-                <td className="subtle">{new Date(t.initiatedAt).toLocaleString()}</td>
-                <td className="subtle">{t.signedAt ? new Date(t.signedAt).toLocaleString() : "—"}</td>
+                <td className="subtle">{formatDateTimeHST(t.initiatedAt)}</td>
+                <td className="subtle">{t.signedAt ? formatDateTimeHST(t.signedAt) : "—"}</td>
                 <td>
                   {t.status === "COMPLETED" && (
                     <a href={`/transfers/${t.id}/receipt`} className="btn btn-ghost btn-sm">PDF</a>

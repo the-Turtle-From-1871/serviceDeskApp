@@ -1,5 +1,6 @@
 import { PDFDocument, StandardFonts, rgb, degrees, TextAlignment } from "pdf-lib";
 import { DA2062_BASE64 } from "./templates/da2062.base64";
+import { formatDateHST } from "@/lib/datetime";
 
 export type ReceiptData = {
   id: string;
@@ -16,7 +17,7 @@ export type ReceiptData = {
 const templateBytes = () => Buffer.from(DA2062_BASE64, "base64");
 
 function fmt(d: Date | null): string {
-  return d ? new Date(d).toISOString().slice(0, 10) : "—";
+  return formatDateHST(d);
 }
 
 function transferType(t: ReceiptData): string {

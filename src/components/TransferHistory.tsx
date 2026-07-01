@@ -1,4 +1,5 @@
 import { StatusBadge } from "@/components/StatusBadge";
+import { formatDateTimeHST } from "@/lib/datetime";
 
 type Row = {
   id: string; status: string; isOverride: boolean;
@@ -36,8 +37,8 @@ export function TransferHistory({
               )}
             </div>
             <div className="meta">
-              Initiated {new Date(r.initiatedAt).toLocaleString()}
-              {r.signedAt ? ` · signed ${new Date(r.signedAt).toLocaleString()}` : ""}
+              Initiated {formatDateTimeHST(r.initiatedAt)}
+              {r.signedAt ? ` · signed ${formatDateTimeHST(r.signedAt)}` : ""}
             </div>
           </li>
         );
