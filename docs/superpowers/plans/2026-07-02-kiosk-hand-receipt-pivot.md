@@ -1364,7 +1364,7 @@ git commit -m "feat(public): receipt search, public receipt page + PDF download"
 
 **Interfaces:**
 - Consumes: `transferSchema`, `PartyInput` (Task 2); `createTransfer`, `getLastReceiver` (Task 3); `sendReceiptEmails` (Task 4); `receiptUrl` (Task 5); `createItem` (items.service); `requireUser` (authz).
-- Produces: `parseTransferForm(formData): { itemMode: "existing" | "new"; itemId?: string; newItem?: NewItemInput; sender: PartyInput; receiver: PartyInput; receiverSignature: string }`; `createTransferAction(_prev, formData)` returning `{ receiptNumber }` / `{ error }`.
+- Produces: `parseTransferForm(formData): { itemMode: "existing" | "new"; itemId?: string; newItem?: NewItemInput; sender: PartyInput; receiver: PartyInput; receiverSignature: string }`; `createTransferAction(_prev, formData)` returning `{ receiptNumber }` / `{ error }`; `lookupLastHolderAction(itemId): Promise<PartyInput | null>` (auth-gated; imperatively called from the form to pre-fill the sender).
 
 - [ ] **Step 1: Write the failing parser test**
 
@@ -1465,7 +1465,7 @@ Replace `src/app/actions/transfers.ts`:
 import { requireUser } from "@/lib/authz";
 import { createItem } from "@/modules/items/items.service";
 import { newItemSchema } from "@/modules/items/items.schema";
-import { createTransfer } from "@/modules/transfers/transfers.service";
+import { createTransfer, getLastReceiver } from "@/modules/transfers/transfers.service";
 import { transferSchema } from "@/modules/transfers/transfers.schema";
 import { TransferError } from "@/modules/transfers/transfers.errors";
 import { sendReceiptEmails } from "@/modules/receipts/send-receipt-email";
@@ -1517,6 +1517,14 @@ export async function createTransferAction(_prev: unknown, formData: FormData) {
   }
   return { receiptNumber };
 }
+
+// Imperatively invoked by the /new form when an existing item is selected, to
+// pre-fill the sender from the item's last-known holder. Auth-gated.
+export async function lookupLastHolderAction(itemId: string) {
+  await requireUser();
+  if (!itemId) return null;
+  return getLastReceiver(itemId);
+}
 ```
 
 - [ ] **Step 6: Build the `/new` page (server component)**
@@ -1560,14 +1568,15 @@ Create `src/app/new/NewTransferForm.tsx`. It has: item selector with an "existin
 ```tsx
 "use client";
 import { useActionState, useState } from "react";
-import { createTransferAction } from "@/app/actions/transfers";
+import { createTransferAction, lookupLastHolderAction } from "@/app/actions/transfers";
 import { SignaturePad } from "@/components/SignaturePad";
 
 type Operator = { rank: string; name: string; unit: string; contact: string; email: string; isAdmin: boolean };
 type ItemOption = { id: string; label: string };
+type Prefill = Partial<Operator> & { isDcsim?: boolean };
 
-function PartyFields({ role, prefill }: { role: "sender" | "receiver"; prefill?: Partial<Operator> }) {
-  const [isDcsim, setIsDcsim] = useState(false);
+function PartyFields({ role, prefill }: { role: "sender" | "receiver"; prefill?: Prefill }) {
+  const [isDcsim, setIsDcsim] = useState(prefill?.isDcsim ?? false);
   const cap = role === "sender" ? "Sender" : "Recipient";
   return (
     <fieldset className="card stack-sm">
@@ -1597,8 +1606,26 @@ export function NewTransferForm({ items, operator }: { items: ItemOption[]; oper
   const [itemMode, setItemMode] = useState<"existing" | "new">(items.length ? "existing" : "new");
   const receipt = state && "receiptNumber" in state ? state.receiptNumber : undefined;
 
-  // A regular (non-admin) operator is a party — default them to the sender side.
-  const senderPrefill = operator.isAdmin ? undefined : operator;
+  // Sender pre-fill precedence: item's last-known holder (fetched on select) >
+  // the logged-in non-admin operator's own account > empty. The sender fieldset
+  // is remounted via `senderKey` so its uncontrolled inputs re-apply defaults.
+  const [senderPrefill, setSenderPrefill] = useState<Prefill | undefined>(operator.isAdmin ? undefined : operator);
+  const [senderKey, setSenderKey] = useState(0);
+
+  async function onItemSelected(itemId: string) {
+    if (!itemId) return;
+    const last = await lookupLastHolderAction(itemId);
+    if (last) {
+      setSenderPrefill(
+        last.isDcsim
+          ? { isDcsim: true, name: last.name }
+          : { isDcsim: false, name: last.name, rank: last.rank ?? "", unit: last.unit ?? "", contact: last.contact ?? "", email: last.email ?? "" }
+      );
+    } else {
+      setSenderPrefill(operator.isAdmin ? undefined : operator);
+    }
+    setSenderKey((k) => k + 1);
+  }
 
   if (receipt) {
     return (
@@ -1622,7 +1649,7 @@ export function NewTransferForm({ items, operator }: { items: ItemOption[]; oper
           <label className="row"><input type="radio" name="itemMode" value="new" checked={itemMode === "new"} onChange={() => setItemMode("new")} /> Log new item</label>
         </div>
         {itemMode === "existing" ? (
-          <select className="select" name="itemId" defaultValue="" required>
+          <select className="select" name="itemId" defaultValue="" required onChange={(e) => onItemSelected(e.target.value)}>
             <option value="" disabled>Select an item…</option>
             {items.map((i) => <option key={i.id} value={i.id}>{i.label}</option>)}
           </select>
@@ -1637,7 +1664,7 @@ export function NewTransferForm({ items, operator }: { items: ItemOption[]; oper
         )}
       </fieldset>
 
-      <PartyFields role="sender" prefill={senderPrefill} />
+      <PartyFields key={senderKey} role="sender" prefill={senderPrefill} />
       <PartyFields role="receiver" />
 
       <fieldset className="card stack-sm">
@@ -1847,5 +1874,5 @@ git commit -m "docs: env + architecture updates for kiosk hand-receipt model"
 - **Remove account self-creation** → Task 8.
 - **Public search by serial/receipt number + PDF download** → Task 6.
 - **Migration keep-admin-wipe-rest** → Task 1.
-- **Pre-fill sender from last holder** → `getLastReceiver` (Task 3). Note: wired server-side is available; the form currently pre-fills only the logged-in operator's own side. If desired, extend `/new` to fetch `getLastReceiver(itemId)` on item selection (a follow-up enhancement; not required for a working first version).
+- **Pre-fill sender from last holder** → `getLastReceiver` (Task 3) + `lookupLastHolderAction` + dynamic sender pre-fill on item select (Task 7). Precedence: last-known holder > logged-in non-admin operator's account > empty.
 ```
