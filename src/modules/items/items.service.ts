@@ -10,10 +10,7 @@ export async function createItem(input: NewItemInput, createdById: string): Prom
 }
 
 export function getItem(id: string) {
-  return prisma.item.findUnique({
-    where: { id },
-    include: { currentHolder: { select: { id: true, name: true } } },
-  });
+  return prisma.item.findUnique({ where: { id } });
 }
 
 export function listItems(opts: { search?: string } = {}) {
@@ -25,11 +22,9 @@ export function listItems(opts: { search?: string } = {}) {
             { make: { contains: search, mode: "insensitive" } },
             { model: { contains: search, mode: "insensitive" } },
             { serialNumber: { contains: search, mode: "insensitive" } },
-            { assetTag: { contains: search, mode: "insensitive" } },
           ],
         }
       : undefined,
-    include: { currentHolder: { select: { id: true, name: true } } },
     orderBy: { createdAt: "desc" },
   });
 }

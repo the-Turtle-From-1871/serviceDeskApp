@@ -7,7 +7,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   try {
     await requireAdmin();
   } catch (e) {
-    if (e instanceof AuthError) redirect(e.code === "FORBIDDEN" ? "/dashboard" : "/login");
+    if (e instanceof AuthError) redirect(e.code === "FORBIDDEN" ? "/" : "/login");
     throw e;
   }
   return (

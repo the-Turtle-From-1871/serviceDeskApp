@@ -2,19 +2,15 @@
 import { useActionState } from "react";
 import Link from "next/link";
 import { createItemAction } from "@/app/admin/actions/items";
-import { UserCombobox } from "@/components/UserCombobox";
-
-type UserOption = { id: string; name: string; rank?: string | null };
 
 const fields = [
   ["make", "Make", true],
   ["model", "Model", true],
   ["serialNumber", "Serial number", true],
-  ["assetTag", "Asset tag", false],
-  ["homeLocation", "Home location", false],
+  ["homeUnit", "Home unit", false],
 ] as const;
 
-export function NewItemForm({ users }: { users: UserOption[] }) {
+export function NewItemForm() {
   const [state, action, pending] = useActionState(createItemAction, undefined);
 
   if (state && "itemId" in state && state.itemId) {
@@ -22,7 +18,6 @@ export function NewItemForm({ users }: { users: UserOption[] }) {
       <div className="card stack">
         <p className="alert-success">Item created successfully.</p>
         <div className="row">
-          <Link href={`/admin/items/${state.itemId}/qr`} className="btn btn-primary">View / print QR code →</Link>
           <Link href="/admin/items/new" className="btn btn-secondary">Add another</Link>
           <Link href="/admin/items" className="btn btn-ghost">Back to items</Link>
         </div>
@@ -41,14 +36,6 @@ export function NewItemForm({ users }: { users: UserOption[] }) {
             <input id={name} className="input" name={name} required={req} />
           </div>
         ))}
-        <div className="field">
-          <label className="label">Initial holder</label>
-          <UserCombobox
-            name="initialHolderId"
-            placeholder="Search by rank or name… (optional)"
-            users={users.map((u) => ({ id: u.id, label: u.rank ? `${u.rank} ${u.name}` : u.name }))}
-          />
-        </div>
         <div className="field col-span-2">
           <label className="label" htmlFor="notes">Notes</label>
           <textarea id="notes" className="textarea" name="notes" placeholder="Optional details about this item" />

@@ -1,8 +1,8 @@
 type Props = {
   item: {
     make: string; model: string; serialNumber: string;
-    assetTag: string | null; homeLocation: string | null; notes: string | null;
-    status: string; currentHolder: { name: string } | null;
+    homeUnit: string | null; notes: string | null;
+    status: string;
   };
 };
 export function ItemDetails({ item }: Props) {
@@ -10,9 +10,7 @@ export function ItemDetails({ item }: Props) {
     ["Make", item.make],
     ["Model", item.model],
     ["Serial number", item.serialNumber],
-    ["Asset tag", item.assetTag ?? "—"],
-    ["Home location", item.homeLocation ?? "—"],
-    ["Current holder", item.currentHolder?.name ?? "Unassigned"],
+    ["Home unit", item.homeUnit ?? "—"],
   ];
   return (
     <div className="stack-sm">

@@ -24,6 +24,14 @@ export function NewUserForm() {
           <input id="nu-email" className="input" name="email" type="email" placeholder="jane@unit.mil" required />
         </div>
         <div className="field">
+          <label className="label" htmlFor="nu-unit">Unit</label>
+          <input id="nu-unit" className="input" name="unit" placeholder="e.g. A Co, 1-1 IN (optional)" />
+        </div>
+        <div className="field">
+          <label className="label" htmlFor="nu-contact">Contact number</label>
+          <input id="nu-contact" className="input" name="contactNumber" placeholder="(optional)" />
+        </div>
+        <div className="field">
           <label className="label" htmlFor="nu-pw">Temporary password</label>
           <input id="nu-pw" className="input" name="password" type="password" placeholder="8+ characters" required />
         </div>

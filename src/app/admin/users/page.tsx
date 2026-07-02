@@ -9,7 +9,7 @@ export default async function UsersPage() {
   try {
     admin = await requireAdmin();
   } catch (e) {
-    if (e instanceof AuthError) redirect(e.code === "FORBIDDEN" ? "/dashboard" : "/login");
+    if (e instanceof AuthError) redirect(e.code === "FORBIDDEN" ? "/" : "/login");
     throw e;
   }
   const users = await listUsers();

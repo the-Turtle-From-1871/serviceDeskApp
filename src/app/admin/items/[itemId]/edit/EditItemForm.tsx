@@ -8,8 +8,7 @@ type ItemValues = {
   make: string;
   model: string;
   serialNumber: string;
-  assetTag: string | null;
-  homeLocation: string | null;
+  homeUnit: string | null;
   notes: string | null;
 };
 
@@ -17,8 +16,7 @@ const fields = [
   ["make", "Make", true],
   ["model", "Model", true],
   ["serialNumber", "Serial number", true],
-  ["assetTag", "Asset tag", false],
-  ["homeLocation", "Home location", false],
+  ["homeUnit", "Home unit", false],
 ] as const;
 
 export function EditItemForm({ item }: { item: ItemValues }) {
@@ -54,7 +52,6 @@ export function EditItemForm({ item }: { item: ItemValues }) {
         <button disabled={pending} type="submit" className="btn btn-primary">
           {pending ? "Saving…" : "Save changes"}
         </button>
-        <Link href={`/i/${item.id}`} className="btn btn-secondary">View item</Link>
         <Link href="/admin/items" className="btn btn-ghost">Back to items</Link>
       </div>
     </form>

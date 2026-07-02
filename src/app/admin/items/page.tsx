@@ -13,7 +13,7 @@ export default async function ItemsPage({
   try {
     await requireAdmin();
   } catch (e) {
-    if (e instanceof AuthError) redirect(e.code === "FORBIDDEN" ? "/dashboard" : "/login");
+    if (e instanceof AuthError) redirect(e.code === "FORBIDDEN" ? "/" : "/login");
     throw e;
   }
   const { q } = await searchParams;
@@ -33,7 +33,7 @@ export default async function ItemsPage({
           className="input"
           name="q"
           defaultValue={q ?? ""}
-          placeholder="Search make, model, serial, or asset tag"
+          placeholder="Search make, model, or serial number"
           style={{ maxWidth: 360 }}
         />
         <button className="btn btn-secondary">Search</button>
@@ -49,7 +49,6 @@ export default async function ItemsPage({
                 <th>Make</th>
                 <th>Model</th>
                 <th>Serial</th>
-                <th>Holder</th>
                 <th>Status</th>
                 <th style={{ textAlign: "right" }}>Actions</th>
               </tr>
@@ -60,13 +59,10 @@ export default async function ItemsPage({
                   <td>{it.make}</td>
                   <td>{it.model}</td>
                   <td className="mono">{it.serialNumber}</td>
-                  <td>{it.currentHolder?.name ?? <span className="subtle">Unassigned</span>}</td>
                   <td><StatusBadge status={it.status} /></td>
                   <td>
                     <div className="actions" style={{ justifyContent: "flex-end" }}>
-                      <Link href={`/i/${it.id}`} className="btn btn-ghost btn-sm">View</Link>
                       <Link href={`/admin/items/${it.id}/edit`} className="btn btn-ghost btn-sm">Edit</Link>
-                      <Link href={`/admin/items/${it.id}/qr`} className="btn btn-ghost btn-sm">QR</Link>
                       <form action={toggleItemStatusAction}>
                         <input type="hidden" name="id" value={it.id} />
                         <input type="hidden" name="status" value={it.status === "RETIRED" ? "ACTIVE" : "RETIRED"} />
