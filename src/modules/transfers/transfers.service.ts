@@ -46,12 +46,14 @@ export async function createTransfer(
         });
       });
     } catch (e) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002" && attempt < 2) {
-        continue; // duplicate receiptNumber — regenerate
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+        if (attempt < 2) continue; // duplicate receiptNumber — regenerate
+        throw new TransferError("RECEIPT_COLLISION"); // exhausted retries
       }
       throw e;
     }
   }
+  // Unreachable: every loop iteration above either returns or throws.
   throw new TransferError("RECEIPT_COLLISION");
 }
 

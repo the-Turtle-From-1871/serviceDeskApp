@@ -62,4 +62,24 @@ describe("getLastReceiver", () => {
     const p = await getLastReceiver("itm1");
     expect(p).toEqual({ isDcsim: false, name: "Prev", rank: "PVT", unit: "B Co", contact: "x", email: "p@u.mil" });
   });
+
+  it("maps null receiver snapshot fields to undefined for a DCSIM receiver", async () => {
+    vi.mocked(prisma.transfer.findFirst).mockResolvedValueOnce({
+      receiverIsDcsim: true,
+      receiverName: "DCSIM Tech",
+      receiverRank: null,
+      receiverUnit: null,
+      receiverContact: null,
+      receiverEmail: null,
+    } as Awaited<ReturnType<typeof prisma.transfer.findFirst>>);
+    const p = await getLastReceiver("itm1");
+    expect(p).toEqual({
+      isDcsim: true,
+      name: "DCSIM Tech",
+      rank: undefined,
+      unit: undefined,
+      contact: undefined,
+      email: undefined,
+    });
+  });
 });
