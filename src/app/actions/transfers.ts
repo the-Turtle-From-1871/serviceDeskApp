@@ -1,64 +1,64 @@
 "use server";
-import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/authz";
-import { initiateTransfer, acceptTransfer, cancelTransfer } from "@/modules/transfers/transfers.service";
+import { createItem } from "@/modules/items/items.service";
+import { newItemSchema } from "@/modules/items/items.schema";
+import { createTransfer, getLastReceiver } from "@/modules/transfers/transfers.service";
+import { transferSchema } from "@/modules/transfers/transfers.schema";
 import { TransferError } from "@/modules/transfers/transfers.errors";
+import { sendReceiptEmails } from "@/modules/receipts/send-receipt-email";
+import { receiptUrl } from "@/modules/items/qr";
+import { parseTransferForm } from "./transfers.parse";
 
-export async function initiateTransferAction(_prev: unknown, formData: FormData) {
+export async function createTransferAction(_prev: unknown, formData: FormData) {
   const user = await requireUser();
-  const itemId = String(formData.get("itemId"));
-  const toUserId = String(formData.get("toUserId"));
-  try {
-    await initiateTransfer({ itemId, fromUserId: user.id, toUserId });
-    revalidatePath(`/i/${itemId}`);
-    return { ok: true };
-  } catch (e) {
-    if (e instanceof TransferError) return { error: humanize(e.code) };
-    throw e;
+  const raw = parseTransferForm(formData);
+
+  // Resolve the item first (creating it when in "new" mode).
+  let itemId = raw.itemId ?? "";
+  if (raw.itemMode === "new") {
+    const parsedItem = newItemSchema.safeParse(raw.newItem);
+    if (!parsedItem.success) return { error: parsedItem.error.issues[0]?.message ?? "Invalid item" };
+    const item = await createItem(parsedItem.data, user.id);
+    itemId = item.id;
   }
-}
 
-function humanize(code: string): string {
-  const map: Record<string, string> = {
-    NOT_HOLDER: "You are not the current holder of this item.",
-    ALREADY_PENDING: "This item already has a pending transfer.",
-    ITEM_RETIRED: "This item is retired and cannot be transferred.",
-    RECIPIENT_INVALID: "That recipient is not available.",
-    SAME_USER: "You cannot transfer an item to yourself.",
-  };
-  return map[code] ?? "Could not start the transfer.";
-}
+  const parsed = transferSchema.safeParse({
+    itemId,
+    sender: raw.sender,
+    receiver: raw.receiver,
+    receiverSignature: raw.receiverSignature,
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
 
-export async function acceptTransferAction(_prev: unknown, formData: FormData) {
-  const user = await requireUser();
-  const transferId = String(formData.get("transferId"));
-  const signatureImage = String(formData.get("signature"));
+  let receiptNumber: string;
   try {
-    await acceptTransfer({ transferId, toUserId: user.id, signatureImage });
+    const t = await createTransfer({ ...parsed.data, createdByUserId: user.id });
+    receiptNumber = t.receiptNumber;
+    await sendReceiptEmails({
+      sender: parsed.data.sender,
+      receiver: parsed.data.receiver,
+      receiptNumber: t.receiptNumber,
+      receiptUrl: receiptUrl(t.receiptNumber),
+      itemSummary: t.itemSummary,
+    });
   } catch (e) {
     if (e instanceof TransferError) {
-      return { error: e.code === "SIGNATURE_REQUIRED" ? "Please sign before accepting." : "Could not accept this transfer." };
+      const map: Record<string, string> = {
+        ITEM_NOT_FOUND: "That item no longer exists.",
+        ITEM_RETIRED: "That item is retired and cannot be transferred.",
+        RECEIPT_COLLISION: "Could not allocate a receipt number — please retry.",
+      };
+      return { error: map[e.code] ?? "Could not create the receipt." };
     }
     throw e;
   }
-  redirect("/dashboard");
+  return { receiptNumber };
 }
 
-export async function cancelTransferAction(formData: FormData) {
-  const user = await requireUser();
-  const transferId = String(formData.get("transferId"));
-  // This action is invoked from a plain <form action={...}> (see
-  // src/app/transfers/[id]/page.tsx), not useActionState, so there is no
-  // channel to surface a returned error back to the user. On a TransferError
-  // (e.g. NOT_HOLDER/NOT_PENDING — someone else already accepted/cancelled,
-  // or a non-party attempted this), the least-surprising behavior is to
-  // treat the cancel as a no-op and send the user back to the dashboard
-  // rather than a raw 500. Any other error is rethrown.
-  try {
-    await cancelTransfer({ transferId, actingUserId: user.id, isAdmin: user.role === "ADMIN" });
-  } catch (e) {
-    if (!(e instanceof TransferError)) throw e;
-  }
-  redirect("/dashboard");
+// Imperatively invoked by the /new form when an existing item is selected, to
+// pre-fill the sender from the item's last-known holder. Auth-gated.
+export async function lookupLastHolderAction(itemId: string) {
+  await requireUser();
+  if (!itemId) return null;
+  return getLastReceiver(itemId);
 }
