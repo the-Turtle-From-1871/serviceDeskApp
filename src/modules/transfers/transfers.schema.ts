@@ -3,12 +3,17 @@ import { z } from "zod";
 export const SIGNATURE_PREFIX = "data:image/png;base64,";
 export const MAX_SIGNATURE_BYTES = 5_000_000;
 
-const optional = z
-  .string()
-  .trim()
-  .optional()
-  .or(z.literal(""))
-  .transform((v) => v || undefined);
+const trimmedString = z.string().trim();
+
+// NOTE: `.optional()` must be the OUTERMOST wrapper (applied after any
+// `.transform()`), not the innermost. Zod's object-key-optionality check
+// looks for a top-level ZodOptional; a `.transform()`/`.or()` on the outside
+// hides that from the object schema, so the inferred object key becomes
+// REQUIRED (typed `string | undefined`) instead of OPTIONAL (`string?`).
+// See Context7 zod v4 docs (zod.dev/v4): `.transform()` produces a
+// ZodPipe/ZodEffects wrapper, and only a schema whose outermost type is
+// ZodOptional (or ZodDefault) is treated as an optional object key.
+const optional = trimmedString.transform((v) => v || undefined).optional();
 
 const emailRe = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
@@ -19,7 +24,7 @@ export const partySchema = z
     rank: optional,
     unit: optional,
     contact: optional,
-    email: optional.transform((v) => (v ? v.toLowerCase() : undefined)),
+    email: trimmedString.transform((v) => (v ? v.toLowerCase() : undefined)).optional(),
   })
   .superRefine((p, ctx) => {
     if (p.isDcsim) return; // DCSIM side only needs a technician name

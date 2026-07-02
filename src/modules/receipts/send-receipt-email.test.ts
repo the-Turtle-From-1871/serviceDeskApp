@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { sendReceiptEmails } from "./send-receipt-email";
+import type { EmailMessage } from "@/lib/email";
 
 const base = {
   receiptNumber: "HR-AAAA1111",
@@ -9,7 +10,7 @@ const base = {
 
 describe("sendReceiptEmails", () => {
   it("emails only non-DCSIM parties, using their email", async () => {
-    const send = vi.fn(async () => {});
+    const send = vi.fn(async (_msg: EmailMessage) => {});
     await sendReceiptEmails(
       {
         ...base,
@@ -24,7 +25,7 @@ describe("sendReceiptEmails", () => {
   });
 
   it("never throws when the underlying sender fails", async () => {
-    const send = vi.fn(async () => { throw new Error("boom"); });
+    const send = vi.fn(async (_msg: EmailMessage) => { throw new Error("boom"); });
     await expect(
       sendReceiptEmails(
         { ...base, sender: { isDcsim: false, name: "A", email: "a@u.mil" }, receiver: { isDcsim: false, name: "B", email: "b@u.mil" } },
