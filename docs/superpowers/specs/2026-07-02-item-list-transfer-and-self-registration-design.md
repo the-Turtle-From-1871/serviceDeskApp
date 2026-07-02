@@ -30,6 +30,22 @@ Four post-launch changes requested after the kiosk pivot shipped:
 - Self-registration: **self-serve, immediately active** USER accounts.
 - Name-line separator: **commas** (`RANK Name, Unit, Contact`).
 
+### Account model (clarified)
+
+An account is required only to **log in and initiate** a transfer. The
+**counterparty is always typed and never needs an account** — in every transfer.
+
+- **DCSIM-involved transfer** (one party is DCSIM): run from the DCSIM/admin
+  login; the non-admin party is simply typed. That non-admin party does **not**
+  need an account.
+- **Two non-DCSIM parties** (no DCSIM involved): the **initiator** needs a login,
+  which is exactly what **self-registration** provides. The other non-DCSIM party
+  is still just typed.
+
+There is no enforcement of "who must register" — the app only requires *a* login
+to reach the transfer form. Self-registration exists so a non-admin initiator has
+one when DCSIM is not involved.
+
 ## Goals
 
 - A logged-in user reaches an item list, picks an item, and completes a transfer
