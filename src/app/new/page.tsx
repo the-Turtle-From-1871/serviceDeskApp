@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/authz";
 import prisma from "@/lib/prisma";
 import { listItems } from "@/modules/items/items.service";
+import { SignOutButton } from "@/components/SignOutButton";
 import { NewTransferForm } from "./NewTransferForm";
 
 export default async function NewTransferPage() {
@@ -29,6 +30,8 @@ export default async function NewTransferPage() {
           <Link href="/" className="brand"><span className="brand__mark">HR</span>Hand Receipt</Link>
           <span className="spacer" />
           <span className="subtle">{user.name}</span>
+          {operator.isAdmin && <Link href="/admin/items" className="btn btn-ghost btn-sm">Admin</Link>}
+          <SignOutButton />
         </div>
       </header>
       <main className="container container-mid stack">

@@ -13,7 +13,7 @@ export default function LoginPage() {
             Hand Receipt
           </div>
           <h1 className="page-title" style={{ fontSize: 20 }}>Sign in</h1>
-          <p className="subtle">Access your held items and transfers.</p>
+          <p className="subtle">Sign in to log items and create hand receipts.</p>
         </div>
         <form action={action} className="stack">
           <div className="field">
