@@ -46,7 +46,12 @@ export function NewTransferForm({ items, operator }: { items: ItemOption[]; oper
 
   async function onItemSelected(itemId: string) {
     if (!itemId) return;
-    const last = await lookupLastHolderAction(itemId);
+    let last: Awaited<ReturnType<typeof lookupLastHolderAction>> = null;
+    try {
+      last = await lookupLastHolderAction(itemId);
+    } catch (err) {
+      console.error("[NewTransferForm] lookupLastHolderAction failed:", err);
+    }
     if (last) {
       setSenderPrefill(
         last.isDcsim

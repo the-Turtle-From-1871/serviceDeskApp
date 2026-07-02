@@ -31,16 +31,10 @@ export async function createTransferAction(_prev: unknown, formData: FormData) {
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
 
   let receiptNumber: string;
+  let t: Awaited<ReturnType<typeof createTransfer>>;
   try {
-    const t = await createTransfer({ ...parsed.data, createdByUserId: user.id });
+    t = await createTransfer({ ...parsed.data, createdByUserId: user.id });
     receiptNumber = t.receiptNumber;
-    await sendReceiptEmails({
-      sender: parsed.data.sender,
-      receiver: parsed.data.receiver,
-      receiptNumber: t.receiptNumber,
-      receiptUrl: receiptUrl(t.receiptNumber),
-      itemSummary: t.itemSummary,
-    });
   } catch (e) {
     if (e instanceof TransferError) {
       const map: Record<string, string> = {
@@ -52,6 +46,19 @@ export async function createTransferAction(_prev: unknown, formData: FormData) {
     }
     throw e;
   }
+
+  try {
+    await sendReceiptEmails({
+      sender: parsed.data.sender,
+      receiver: parsed.data.receiver,
+      receiptNumber: t.receiptNumber,
+      receiptUrl: receiptUrl(t.receiptNumber),
+      itemSummary: t.itemSummary,
+    });
+  } catch (err) {
+    console.error("[createTransferAction] receipt email failed:", err);
+  }
+
   return { receiptNumber };
 }
 
