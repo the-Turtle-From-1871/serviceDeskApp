@@ -26,49 +26,46 @@ proxy edge-portable even though our app runs it on Node.
 Three core models (`prisma/schema.prisma`):
 
 ### User
-`id, rank?, name, email (unique), passwordHash, role (ADMIN|USER), isActive, timestamps`
+`id, rank?, name, email (unique), unit?, contactNumber?, passwordHash, role (ADMIN|USER), isActive, timestamps`
 - Passwords stored as bcrypt hashes (cost 12); never plaintext. Emails are normalized to lowercase.
-- Users can self-register (USER role); admins can also create accounts and set roles.
-- `rank` is captured separately from `name`; the pair is snapshotted as "RANK Name" onto transfers.
+- Accounts are **admin-provisioned only** — self-registration has been removed. `User` rows are operator/staff logins for the kiosk, not a record of every party who ever appears on a receipt.
 
 ### Item
-`id, make, model, serialNumber, assetTag?, homeLocation?, notes?, status (ACTIVE|RETIRED), currentHolderId?, createdById, timestamps`
-- `currentHolderId` is the single source of truth for who holds an item.
-- **Only the transfers module ever writes `currentHolderId`** — item create/edit cannot move custody.
+`id, make, model, serialNumber, homeUnit?, notes?, status (ACTIVE|RETIRED), createdById, timestamps`
+- No `currentHolderId`: the app is a single-device kiosk, not a custody-tracking system. "Who holds it now" is derived by reading the most recent `Transfer` for the item (`getLastReceiver`), used only to pre-fill the sender on `/new`.
 
-### Transfer (the custody ledger)
-`id, itemId, fromUserId?, toUserId, status (PENDING|COMPLETED|CANCELLED), isOverride, actingAdminId?, signatureImage?, fromUserName?, toUserName, itemSummary, initiatedAt, signedAt?, cancelledAt?`
-- Denormalized `fromUserName` / `toUserName` / `itemSummary` snapshot the parties
-  and item at transfer time, so history stays accurate even if records change.
-- **Partial unique index `one_pending_transfer_per_item`** enforces at most one
-  `PENDING` transfer per item at the database level.
+### Transfer (the hand-receipt record)
+`id, receiptNumber (unique, "HR-…"), itemId, itemSummary, senderIsDcsim, senderName, senderRank?, senderUnit?, senderContact?, senderEmail?, receiverIsDcsim, receiverName, receiverRank?, receiverUnit?, receiverContact?, receiverEmail?, receiverSignature, createdByUserId?, status (COMPLETED|VOID), createdAt`
+- Both parties are **typed snapshots on the row**, not FKs to `User` — a `Transfer` fully describes who gave/received an item even if no account for them ever existed.
+- Either party may be flagged `*IsDcsim`: a DCSIM party only needs a name (no rank/unit/contact/email). A non-DCSIM party must supply rank, name, unit, contact, and email — all of which print on the DA 2062.
+- `receiverSignature` is required on every row; there is no sender signature and no pending/in-flight state — a `Transfer` is created already `COMPLETED` in one kiosk operation.
 
-## Custody lifecycle
+## Kiosk flow (single device, no custody tracking)
 
-```
-                 assignInitialHolder (fromUser = null, COMPLETED, no signature)
-Admin creates item ─────────────────────────────────────────────► item held
-        │
-        ▼
-Holder initiateTransfer ──► PENDING ──► recipient acceptTransfer (draws signature)
-                              │                     │
-                              │                     ▼
-                              │              COMPLETED, currentHolderId := recipient
-                              │
-                              ├─ holder/admin cancelTransfer ──► CANCELLED
-                              │
-                              └─ admin overrideAssign ──► cancels PENDING,
-                                    COMPLETED (isOverride = true, no signature)
+An authenticated operator (the shared DCSIM/admin account, or an admin-created
+regular user) works the flow at `/new` entirely on one device:
 
-Admin can RETIRE / reactivate an item (blocks new transfers while RETIRED).
-```
+1. Pick or create the `Item`, then type in **both** parties' details. The
+   sender is pre-filled from the last-known receiver of that item (falling
+   back to the logged-in non-admin operator, else empty). Either side can be
+   toggled DCSIM, which collapses that party's fields to just a name.
+2. The **recipient** signs on-screen (`SignaturePad`) — there is no sender
+   signature step and nothing is left "pending"; the whole exchange is
+   recorded in one transaction as a `COMPLETED` `Transfer` with a fresh
+   `HR-…` receipt number.
+3. A DA Form 2062 hand receipt is generated immediately
+   (`modules/receipts/hand-receipt.ts`), showing both parties, the recipient's
+   signature, and a QR code pointing at `receiptUrl` = `/receipts/<receiptNumber>`.
+4. `sendReceiptEmails` (`modules/receipts/send-receipt-email.ts`) emails that
+   same `receiptUrl` to any **non-DCSIM** party that has an email address,
+   via a pluggable `EmailSender` (`lib/email`): Resend over `fetch` when
+   `RESEND_API_KEY`/`EMAIL_FROM` are set, otherwise a logging stub
+   (`[email:stub]`) so nothing breaks in dev. Send failures are logged and
+   swallowed — they never roll back the completed transfer.
 
-Invariants (enforced in `modules/transfers/transfers.service.ts` + DB):
-- Custody moves **only** on `acceptTransfer` (with a validated signature) or `overrideAssign`.
-- A signature is required to accept: must be a `data:image/png;base64,` payload under a size cap.
-- Only the **recipient** can accept; only the **holder or an admin** can cancel.
-- RETIRED items and inactive recipients are rejected.
-- Concurrent initiates for the same item resolve to exactly one PENDING (fast-path check + the DB unique index; P2002 → `ALREADY_PENDING`).
+No login is required to **find** a receipt afterward: `/` is a public search
+(by item serial number or receipt number) that links to `/receipts/<rn>`
+(view) and `/receipts/<rn>/pdf` (download), both public routes.
 
 ## Authentication & authorization
 
@@ -89,7 +86,7 @@ a companion:
   authorization.
 - Our app owns the `User` table (with `rank`, `role`, `isActive`, `passwordHash`)
   and enforces a role model in `requireUser`/`requireAdmin`, tightly coupled to
-  the custody domain (self-registration + admin provisioning, rank/role fields).
+  the hand-receipt domain (admin-only provisioning, rank/role fields).
 
 Switching to Supabase Auth would be a **rewrite** — migrate identities into
 `auth.users`, move session handling to the Supabase SDK, and re-express role
@@ -102,8 +99,7 @@ around RLS. This app wants none of those.
 
 ## Documents (pdf-lib)
 
-- **Item QR PDF** (`modules/receipts/qr-pdf.ts`) — a one-page item sheet with details and the QR code. Route: `/admin/items/[itemId]/qr/pdf` (admin only).
-- **DA Form 2062 hand receipt** (`modules/receipts/hand-receipt.ts`) — fills the official form (FROM/TO/identifier, item row with U/I + quantities), draws the recipient's signature **vertically in the quantity column** with the date and black anti-tamper guard bars, then appends a custody-record page. Route: `/transfers/[id]/receipt` (parties or admin). The template is embedded as base64 so it bundles reliably on serverless.
+- **DA Form 2062 hand receipt** (`modules/receipts/hand-receipt.ts`) — fills the official form (FROM/TO/identifier, item row with U/I + quantities), draws the recipient's signature **vertically in the quantity column** with the date and black anti-tamper guard bars, embeds a QR code of `receiptUrl` (`/receipts/<receiptNumber>`, from `modules/items/qr.ts`), then appends a custody-record page. Route: `/receipts/[receiptNumber]/pdf` — **public, no login required**, since anyone with the receipt number or the QR link should be able to pull the PDF. The template is embedded as base64 so it bundles reliably on serverless.
 
 ## Time
 
