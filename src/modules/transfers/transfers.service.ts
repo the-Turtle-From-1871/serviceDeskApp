@@ -1,207 +1,98 @@
 import { Prisma } from "@prisma/client";
 import type { Item, Transfer } from "@prisma/client";
 import prisma from "@/lib/prisma";
+import { generateReceiptNumber } from "./receipt-number";
 import { TransferError } from "./transfers.errors";
+import type { PartyInput, TransferInput } from "./transfers.schema";
 
-// Snapshot a party as "RANK Name" (or just "Name") so history and the DA 2062
-// FROM/TO reflect the rank held at transfer time.
-function disp(u: { rank: string | null; name: string }): string {
-  return u.rank ? `${u.rank} ${u.name}` : u.name;
+type WithItem = Transfer & { item: Item };
+
+function itemSummary(i: { make: string; model: string; serialNumber: string }): string {
+  return `${i.make} ${i.model} (SN ${i.serialNumber})`;
 }
 
-export async function initiateTransfer(args: {
-  itemId: string;
-  fromUserId: string;
-  toUserId: string;
-}): Promise<Transfer> {
-  const { itemId, fromUserId, toUserId } = args;
-  if (fromUserId === toUserId) throw new TransferError("SAME_USER");
-
-  try {
-    return await prisma.$transaction(async (tx) => {
-      const item = await tx.item.findUnique({ where: { id: itemId } });
-      if (!item) throw new TransferError("NOT_HOLDER");
-      if (item.currentHolderId !== fromUserId) throw new TransferError("NOT_HOLDER");
-      if (item.status === "RETIRED") throw new TransferError("ITEM_RETIRED");
-
-      const recipient = await tx.user.findUnique({ where: { id: toUserId } });
-      if (!recipient || !recipient.isActive) throw new TransferError("RECIPIENT_INVALID");
-
-      // Fast-path check: catches the common case cheaply, but under
-      // concurrent initiates for the same item two callers can both pass
-      // this check before either commits. The DB-level partial unique
-      // index `one_pending_transfer_per_item` is the real guard — its
-      // P2002 violation is translated to ALREADY_PENDING below.
-      const pending = await tx.transfer.findFirst({
-        where: { itemId, status: "PENDING" },
+export async function createTransfer(
+  input: TransferInput & { createdByUserId?: string }
+): Promise<Transfer> {
+  const { itemId, sender, receiver, receiverSignature, createdByUserId } = input;
+  // Retry once on the (astronomically unlikely) receipt-number collision.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const item = await tx.item.findUnique({ where: { id: itemId } });
+        if (!item) throw new TransferError("ITEM_NOT_FOUND");
+        if (item.status === "RETIRED") throw new TransferError("ITEM_RETIRED");
+        return tx.transfer.create({
+          data: {
+            receiptNumber: generateReceiptNumber(),
+            itemId,
+            itemSummary: itemSummary(item),
+            senderIsDcsim: sender.isDcsim,
+            senderName: sender.name,
+            senderRank: sender.rank ?? null,
+            senderUnit: sender.unit ?? null,
+            senderContact: sender.contact ?? null,
+            senderEmail: sender.email ?? null,
+            receiverIsDcsim: receiver.isDcsim,
+            receiverName: receiver.name,
+            receiverRank: receiver.rank ?? null,
+            receiverUnit: receiver.unit ?? null,
+            receiverContact: receiver.contact ?? null,
+            receiverEmail: receiver.email ?? null,
+            receiverSignature,
+            createdByUserId: createdByUserId ?? null,
+            status: "COMPLETED",
+          },
+        });
       });
-      if (pending) throw new TransferError("ALREADY_PENDING");
-
-      const holder = await tx.user.findUnique({ where: { id: fromUserId } });
-      return tx.transfer.create({
-        data: {
-          itemId,
-          fromUserId,
-          toUserId,
-          status: "PENDING",
-          fromUserName: holder ? disp(holder) : null,
-          toUserName: disp(recipient),
-          itemSummary: `${item.make} ${item.model} (SN ${item.serialNumber})`,
-        },
-      });
-    });
-  } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-      throw new TransferError("ALREADY_PENDING");
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002" && attempt < 2) {
+        continue; // duplicate receiptNumber — regenerate
+      }
+      throw e;
     }
-    throw e;
   }
+  throw new TransferError("RECEIPT_COLLISION");
 }
 
-// SignaturePad exports via `toDataURL("image/png")`, so a valid signature is
-// always a PNG data URL. Cap the length as a sane defense against abuse
-// (5 MB of base64 text is already a very large signature image).
-const SIGNATURE_PREFIX = "data:image/png;base64,";
-const MAX_SIGNATURE_BYTES = 5_000_000;
-
-export async function acceptTransfer(args: {
-  transferId: string;
-  toUserId: string;
-  signatureImage: string;
-}): Promise<Transfer> {
-  const { transferId, toUserId, signatureImage } = args;
-  if (
-    !signatureImage ||
-    !signatureImage.startsWith(SIGNATURE_PREFIX) ||
-    signatureImage.length > MAX_SIGNATURE_BYTES
-  ) {
-    throw new TransferError("SIGNATURE_REQUIRED");
-  }
-  return prisma.$transaction(async (tx) => {
-    const t = await tx.transfer.findUnique({ where: { id: transferId } });
-    if (!t) throw new TransferError("NOT_PENDING");
-    if (t.status !== "PENDING") throw new TransferError("NOT_PENDING");
-    if (t.toUserId !== toUserId) throw new TransferError("NOT_RECIPIENT");
-
-    await tx.item.update({ where: { id: t.itemId }, data: { currentHolderId: toUserId } });
-    return tx.transfer.update({
-      where: { id: transferId },
-      data: { status: "COMPLETED", signatureImage, signedAt: new Date() },
-    });
-  });
+export function getTransferByReceiptNumber(receiptNumber: string): Promise<WithItem | null> {
+  return prisma.transfer.findUnique({
+    where: { receiptNumber: receiptNumber.toUpperCase() },
+    include: { item: true },
+  }) as Promise<WithItem | null>;
 }
 
-export async function cancelTransfer(args: {
-  transferId: string;
-  actingUserId: string;
-  isAdmin: boolean;
-}): Promise<Transfer> {
-  const { transferId, actingUserId, isAdmin } = args;
-  return prisma.$transaction(async (tx) => {
-    const t = await tx.transfer.findUnique({ where: { id: transferId } });
-    if (!t) throw new TransferError("NOT_PENDING");
-    if (t.status !== "PENDING") throw new TransferError("NOT_PENDING");
-    if (!isAdmin && t.fromUserId !== actingUserId) throw new TransferError("NOT_HOLDER");
-    return tx.transfer.update({
-      where: { id: transferId },
-      data: { status: "CANCELLED", cancelledAt: new Date() },
-    });
-  });
+export function searchReceipts(query: string): Promise<WithItem[]> {
+  const q = query.trim();
+  if (!q) return Promise.resolve([]);
+  return prisma.transfer.findMany({
+    where: {
+      OR: [
+        { receiptNumber: { equals: q.toUpperCase() } },
+        { item: { is: { serialNumber: { equals: q, mode: "insensitive" } } } },
+      ],
+    },
+    include: { item: true },
+    orderBy: { createdAt: "desc" },
+  }) as Promise<WithItem[]>;
 }
 
-export async function overrideAssign(args: {
-  itemId: string;
-  toUserId: string;
-  actingAdminId: string;
-}): Promise<Transfer> {
-  const { itemId, toUserId, actingAdminId } = args;
-  return prisma.$transaction(async (tx) => {
-    const item = await tx.item.findUnique({ where: { id: itemId } });
-    if (!item) throw new TransferError("NOT_HOLDER");
-    if (item.currentHolderId === toUserId) throw new TransferError("SAME_USER");
-    const recipient = await tx.user.findUnique({ where: { id: toUserId } });
-    if (!recipient || !recipient.isActive) throw new TransferError("RECIPIENT_INVALID");
-
-    await tx.transfer.updateMany({
-      where: { itemId, status: "PENDING" },
-      data: { status: "CANCELLED", cancelledAt: new Date() },
-    });
-    await tx.item.update({ where: { id: itemId }, data: { currentHolderId: toUserId } });
-
-    const fromUser = item.currentHolderId
-      ? await tx.user.findUnique({ where: { id: item.currentHolderId } })
-      : null;
-    return tx.transfer.create({
-      data: {
-        itemId,
-        fromUserId: item.currentHolderId,
-        toUserId,
-        status: "COMPLETED",
-        isOverride: true,
-        actingAdminId,
-        signedAt: new Date(),
-        fromUserName: fromUser ? disp(fromUser) : null,
-        toUserName: disp(recipient),
-        itemSummary: `${item.make} ${item.model} (SN ${item.serialNumber})`,
-      },
-    });
+export async function getLastReceiver(itemId: string): Promise<PartyInput | null> {
+  const last = await prisma.transfer.findFirst({
+    where: { itemId, status: "COMPLETED" },
+    orderBy: { createdAt: "desc" },
   });
-}
-
-// Records the first holder of a freshly-created item as a completed assignment
-// (design "Key Flow 1"): no `fromUser`, no signature — analogous to an admin
-// override but for an item that has never had a holder. Kept in the transfers
-// module so that every write to `Item.currentHolderId` stays confined here.
-export async function assignInitialHolder(args: {
-  itemId: string;
-  toUserId: string;
-}): Promise<Transfer> {
-  const { itemId, toUserId } = args;
-  return prisma.$transaction(async (tx) => {
-    const item = await tx.item.findUnique({ where: { id: itemId } });
-    if (!item) throw new TransferError("NOT_HOLDER");
-    if (item.currentHolderId) throw new TransferError("ALREADY_HELD");
-
-    const recipient = await tx.user.findUnique({ where: { id: toUserId } });
-    if (!recipient || !recipient.isActive) throw new TransferError("RECIPIENT_INVALID");
-
-    await tx.item.update({ where: { id: itemId }, data: { currentHolderId: toUserId } });
-    return tx.transfer.create({
-      data: {
-        itemId,
-        fromUserId: null,
-        toUserId,
-        status: "COMPLETED",
-        signedAt: new Date(),
-        fromUserName: null,
-        toUserName: disp(recipient),
-        itemSummary: `${item.make} ${item.model} (SN ${item.serialNumber})`,
-      },
-    });
-  });
+  if (!last) return null;
+  return {
+    isDcsim: last.receiverIsDcsim,
+    name: last.receiverName,
+    rank: last.receiverRank ?? undefined,
+    unit: last.receiverUnit ?? undefined,
+    contact: last.receiverContact ?? undefined,
+    email: last.receiverEmail ?? undefined,
+  };
 }
 
 export function getItemHistory(itemId: string): Promise<Transfer[]> {
-  return prisma.transfer.findMany({ where: { itemId }, orderBy: { initiatedAt: "desc" } });
-}
-
-export async function getPendingForUser(userId: string) {
-  const [incoming, outgoing] = await Promise.all([
-    prisma.transfer.findMany({
-      where: { toUserId: userId, status: "PENDING" },
-      orderBy: { initiatedAt: "desc" },
-    }),
-    prisma.transfer.findMany({
-      where: { fromUserId: userId, status: "PENDING" },
-      orderBy: { initiatedAt: "desc" },
-    }),
-  ]);
-  return { incoming, outgoing };
-}
-
-export function getHeldItems(userId: string): Promise<Item[]> {
-  return prisma.item.findMany({
-    where: { currentHolderId: userId },
-    orderBy: { updatedAt: "desc" },
-  });
+  return prisma.transfer.findMany({ where: { itemId }, orderBy: { createdAt: "desc" } });
 }
