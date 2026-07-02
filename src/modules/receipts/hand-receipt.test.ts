@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildHandReceiptPdf, partyHeader, type ReceiptData } from "./hand-receipt";
+import { buildHandReceiptPdf, partyHeader, partyHeaderShort, type ReceiptData } from "./hand-receipt";
 
 const base: ReceiptData = {
   receiptNumber: "HR-AAAA1111",
@@ -44,6 +44,21 @@ describe("partyHeader", () => {
   });
   it("renders DCSIM parties unchanged", () => {
     expect(partyHeader({ isDcsim: true, name: "SSG Tech", rank: null, unit: null, contact: null, email: null }))
+      .toBe("DCSIM · SSG Tech");
+  });
+});
+
+describe("partyHeaderShort", () => {
+  it("omits unit/contact for a non-DCSIM party even when present", () => {
+    expect(partyHeaderShort({ isDcsim: false, name: "Jane Soldier", rank: "SGT", unit: "A Co 1-1 IN", contact: "808-555-0134", email: "j@u.mil" }))
+      .toBe("SGT Jane Soldier");
+  });
+  it("omits rank when absent", () => {
+    expect(partyHeaderShort({ isDcsim: false, name: "Jane Soldier", rank: null, unit: "A Co", contact: null, email: null }))
+      .toBe("Jane Soldier");
+  });
+  it("renders DCSIM parties unchanged", () => {
+    expect(partyHeaderShort({ isDcsim: true, name: "SSG Tech", rank: null, unit: null, contact: null, email: null }))
       .toBe("DCSIM · SSG Tech");
   });
 });

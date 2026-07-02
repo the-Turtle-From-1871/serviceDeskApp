@@ -33,6 +33,13 @@ export function partyHeader(p: ReceiptParty): string {
   return [nameLine, p.unit ?? undefined, p.contact ?? undefined].filter(Boolean).join(", ");
 }
 
+// Short label for internal, fixed-size renders (guard-column label, custody
+// footer) that have no fit-to-box shrinking. Keeps the pre-change behavior.
+export function partyHeaderShort(p: ReceiptParty): string {
+  if (p.isDcsim) return `DCSIM · ${p.name}`;
+  return p.rank ? `${p.rank} ${p.name}` : p.name;
+}
+
 // Multi-line block for the custody record page.
 function partyBlock(p: ReceiptParty): string[] {
   if (p.isDcsim) return ["DCSIM", `Technician: ${p.name}`];
@@ -112,7 +119,7 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
     }
   }
   if (!drewImage) {
-    const label = `${partyHeader(t.receiver)}   ${dateStr}`;
+    const label = `${partyHeaderShort(t.receiver)}   ${dateStr}`;
     page1.drawText(label, { x: colCenter + 4, y: sigBottom, size: 9, font: helv, rotate: degrees(90) });
     blockTop = sigBottom + helv.widthOfTextAtSize(label, 9);
   }
@@ -181,7 +188,7 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
     y -= 24;
   }
   page.drawLine({ start: { x: 56, y: y - 10 }, end: { x: 320, y: y - 10 }, thickness: 0.5, color: muted });
-  page.drawText(`${partyHeader(t.receiver)} · ${dateStr}`, { x: 56, y: y - 24, size: 10, font: helv, color: muted });
+  page.drawText(`${partyHeaderShort(t.receiver)} · ${dateStr}`, { x: 56, y: y - 24, size: 10, font: helv, color: muted });
 
   return pdf.save();
 }
