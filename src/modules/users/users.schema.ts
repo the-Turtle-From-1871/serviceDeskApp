@@ -30,3 +30,7 @@ export const newUserSchema = z.object({
   contactNumber: optionalText,
 });
 export type NewUserInput = z.infer<typeof newUserSchema>;
+
+// Public self-registration: same fields as admin create, minus role (always USER).
+export const registerSchema = newUserSchema.omit({ role: true });
+export type RegisterInput = z.infer<typeof registerSchema>;

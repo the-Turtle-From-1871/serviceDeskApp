@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useActionState } from "react";
 import { loginAction } from "@/app/actions/auth";
 
@@ -28,6 +29,7 @@ export default function LoginPage() {
           <button disabled={pending} type="submit" className="btn btn-primary btn-block">
             {pending ? "Signing in…" : "Sign in"}
           </button>
+          <p className="subtle">No account? <Link href="/register">Create one</Link></p>
         </form>
       </div>
     </div>
