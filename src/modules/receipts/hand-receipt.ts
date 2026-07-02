@@ -25,10 +25,12 @@ export type ReceiptData = {
 
 const templateBytes = () => Buffer.from(DA2062_BASE64, "base64");
 
-// Header line for FROM/TO: DCSIM shows "DCSIM · <tech name>"; otherwise "<rank> <name>".
-function partyHeader(p: ReceiptParty): string {
+// FROM/TO line: DCSIM shows "DCSIM · <name>"; a non-DCSIM party shows
+// "RANK Name, Unit, Contact" with any missing field omitted.
+export function partyHeader(p: ReceiptParty): string {
   if (p.isDcsim) return `DCSIM · ${p.name}`;
-  return p.rank ? `${p.rank} ${p.name}` : p.name;
+  const nameLine = p.rank ? `${p.rank} ${p.name}` : p.name;
+  return [nameLine, p.unit ?? undefined, p.contact ?? undefined].filter(Boolean).join(", ");
 }
 
 // Multi-line block for the custody record page.
@@ -51,21 +53,29 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
   const set = (
     name: string,
     value: string,
-    opts: { multiline?: boolean; size?: number; center?: boolean } = {}
+    opts: { multiline?: boolean; size?: number; center?: boolean; fitWidth?: boolean } = {}
   ) => {
     try {
       const field = form.getTextField(name);
       if (opts.multiline) field.enableMultiline();
       if (opts.center) field.setAlignment(TextAlignment.Center);
-      field.setFontSize(opts.size ?? 10);
+      let size = opts.size ?? 10;
+      if (opts.fitWidth) {
+        // Shrink the font until the value fits the widget's inner width, so a
+        // long "RANK Name, Unit, Contact" line never overflows the box.
+        const rect = field.acroField.getWidgets()[0].getRectangle();
+        const maxW = rect.width - 6;
+        while (size > 6 && helv.widthOfTextAtSize(value, size) > maxW) size -= 0.5;
+      }
+      field.setFontSize(size);
       field.setText(value);
     } catch {
       /* field not present in this template revision — ignore */
     }
   };
 
-  set("FROM", partyHeader(t.sender), { size: 11 });
-  set("TO", partyHeader(t.receiver), { size: 11 });
+  set("FROM", partyHeader(t.sender), { size: 10, fitWidth: true, multiline: true });
+  set("TO", partyHeader(t.receiver), { size: 10, fitWidth: true, multiline: true });
   set("HAND RECEIPT IDENTIFIER", t.receiptNumber, { size: 11 });
 
   set("ITEM NO aRow1", "1", { size: 9, center: true });
