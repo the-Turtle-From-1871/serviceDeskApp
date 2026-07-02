@@ -2,8 +2,6 @@ import type { Item, ItemStatus } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { newItemSchema, type NewItemInput } from "./items.schema";
 
-export type ItemWithHolder = Awaited<ReturnType<typeof getItem>>;
-
 export async function createItem(input: NewItemInput, createdById: string): Promise<Item> {
   const data = newItemSchema.parse(input);
   return prisma.item.create({ data: { ...data, createdById } });

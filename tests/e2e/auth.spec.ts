@@ -1,7 +1,14 @@
 import { expect, test } from "@playwright/test";
 
-test("unauthenticated user is redirected to login", async ({ page }) => {
+test("unauthenticated visitor can view the public home page", async ({ page }) => {
   await page.goto("/");
+  await expect(page).toHaveURL("/");
+  await expect(page.getByRole("heading", { name: "Find your hand receipt" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Search" })).toBeVisible();
+});
+
+test("unauthenticated user is redirected to login from an authed route", async ({ page }) => {
+  await page.goto("/new");
   await expect(page).toHaveURL(/\/login/);
 });
 

@@ -17,7 +17,7 @@ export default async function AuditPage() {
     if (e instanceof AuthError) redirect(e.code === "FORBIDDEN" ? "/" : "/login");
     throw e;
   }
-  const transfers = await prisma.transfer.findMany({ orderBy: { createdAt: "desc" } });
+  const transfers = await prisma.transfer.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
   return (
     <div className="stack">
       <div>
