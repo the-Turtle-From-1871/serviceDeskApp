@@ -17,9 +17,8 @@ const email = z
 const optionalText = z
   .string()
   .trim()
-  .optional()
-  .or(z.literal(""))
-  .transform((v) => v || undefined);
+  .transform((v) => v || undefined)
+  .optional();
 
 export const newUserSchema = z.object({
   rank,

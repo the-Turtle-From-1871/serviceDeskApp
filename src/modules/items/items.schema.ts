@@ -3,9 +3,8 @@ import { z } from "zod";
 const optional = z
   .string()
   .trim()
-  .optional()
-  .or(z.literal(""))
-  .transform((v) => v || undefined);
+  .transform((v) => v || undefined)
+  .optional();
 
 export const newItemSchema = z.object({
   make: z.string().trim().min(1, "Make is required"),

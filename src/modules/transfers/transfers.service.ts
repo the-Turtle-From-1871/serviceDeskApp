@@ -94,7 +94,3 @@ export async function getLastReceiver(itemId: string): Promise<PartyInput | null
     email: last.receiverEmail ?? undefined,
   };
 }
-
-export function getItemHistory(itemId: string): Promise<Transfer[]> {
-  return prisma.transfer.findMany({ where: { itemId }, orderBy: { createdAt: "desc" } });
-}
