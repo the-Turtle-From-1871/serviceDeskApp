@@ -12,20 +12,20 @@ enum Role {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  rank         String?
-  name         String
-  email        String   @unique
-  passwordHash String
-  role         Role     @default(USER)
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id            String   @id @default(cuid())
+  rank          String?
+  name          String
+  email         String   @unique
+  unit          String?
+  contactNumber String?
+  passwordHash  String
+  role          Role     @default(USER)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  createdItems  Item[]     @relation("CreatedItems")
-  heldItems     Item[]     @relation("CurrentHolder")
-  transfersFrom Transfer[] @relation("TransferFrom")
-  transfersTo   Transfer[] @relation("TransferTo")
+  createdItems     Item[]     @relation("CreatedItems")
+  createdTransfers Transfer[] @relation("CreatedTransfers")
 }
 
 enum ItemStatus {
@@ -34,45 +34,51 @@ enum ItemStatus {
 }
 
 model Item {
-  id              String     @id @default(cuid())
-  make            String
-  model           String
-  serialNumber    String
-  assetTag        String?
-  homeLocation    String?
-  notes           String?
-  status          ItemStatus @default(ACTIVE)
-  currentHolder   User?      @relation("CurrentHolder", fields: [currentHolderId], references: [id])
-  currentHolderId String?
-  createdBy       User       @relation("CreatedItems", fields: [createdById], references: [id])
-  createdById     String
-  transfers       Transfer[]
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  id           String     @id @default(cuid())
+  make         String
+  model        String
+  serialNumber String
+  homeUnit     String?
+  notes        String?
+  status       ItemStatus @default(ACTIVE)
+  createdBy    User       @relation("CreatedItems", fields: [createdById], references: [id])
+  createdById  String
+  transfers    Transfer[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 }
 
 enum TransferStatus {
-  PENDING
   COMPLETED
-  CANCELLED
+  VOID
 }
 
 model Transfer {
-  id             String         @id @default(cuid())
-  item           Item           @relation(fields: [itemId], references: [id])
-  itemId         String
-  fromUser       User?          @relation("TransferFrom", fields: [fromUserId], references: [id])
-  fromUserId     String?
-  toUser         User           @relation("TransferTo", fields: [toUserId], references: [id])
-  toUserId       String
-  status         TransferStatus @default(PENDING)
-  isOverride     Boolean        @default(false)
-  actingAdminId  String?
-  signatureImage String?
-  fromUserName   String?
-  toUserName     String
-  itemSummary    String
-  initiatedAt    DateTime       @default(now())
-  signedAt       DateTime?
-  cancelledAt    DateTime?
+  id            String @id @default(cuid())
+  receiptNumber String @unique
+  item          Item   @relation(fields: [itemId], references: [id])
+  itemId        String
+  itemSummary   String
+
+  senderIsDcsim Boolean @default(false)
+  senderName    String
+  senderRank    String?
+  senderUnit    String?
+  senderContact String?
+  senderEmail   String?
+
+  receiverIsDcsim Boolean @default(false)
+  receiverName    String
+  receiverRank    String?
+  receiverUnit    String?
+  receiverContact String?
+  receiverEmail   String?
+
+  receiverSignature String
+
+  createdByUser   User?   @relation("CreatedTransfers", fields: [createdByUserId], references: [id])
+  createdByUserId String?
+
+  status    TransferStatus @default(COMPLETED)
+  createdAt DateTime       @default(now())
 }
