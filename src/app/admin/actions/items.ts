@@ -22,7 +22,7 @@ export async function updateItemAction(_prev: unknown, formData: FormData) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
   await updateItem(id, parsed.data);
-  revalidatePath("/admin/items");
+  revalidatePath("/items");
   return { ok: true };
 }
 
@@ -31,5 +31,5 @@ export async function toggleItemStatusAction(formData: FormData) {
   const id = String(formData.get("id"));
   const next = formData.get("status") === "RETIRED" ? "RETIRED" : "ACTIVE";
   await setItemStatus(id, next);
-  revalidatePath("/admin/items");
+  revalidatePath("/items");
 }

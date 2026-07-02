@@ -9,7 +9,7 @@ export async function loginAction(_prev: unknown, formData: FormData) {
     await signIn("credentials", {
       email: formData.get("email"),
       password: formData.get("password"),
-      redirectTo: "/new",
+      redirectTo: "/items",
     });
   } catch (error) {
     if (error instanceof AuthError) return { error: "Invalid email or password." };

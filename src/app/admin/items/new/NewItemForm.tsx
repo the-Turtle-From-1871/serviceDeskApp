@@ -19,7 +19,7 @@ export function NewItemForm() {
         <p className="alert-success">Item created successfully.</p>
         <div className="row">
           <Link href="/admin/items/new" className="btn btn-secondary">Add another</Link>
-          <Link href="/admin/items" className="btn btn-ghost">Back to items</Link>
+          <Link href="/items" className="btn btn-ghost">Back to items</Link>
         </div>
       </div>
     );
@@ -46,7 +46,7 @@ export function NewItemForm() {
         <button disabled={pending} type="submit" className="btn btn-primary">
           {pending ? "Saving…" : "Create item"}
         </button>
-        <Link href="/admin/items" className="btn btn-ghost">Cancel</Link>
+        <Link href="/items" className="btn btn-ghost">Cancel</Link>
       </div>
     </form>
   );

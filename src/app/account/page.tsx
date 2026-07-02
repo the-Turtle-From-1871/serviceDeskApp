@@ -12,7 +12,7 @@ export default async function AccountPage() {
     if (e instanceof AuthError) redirect("/login");
     throw e;
   }
-  const home = user.role === "ADMIN" ? "/admin/items" : "/";
+  const home = user.role === "ADMIN" ? "/items" : "/";
 
   return (
     <>

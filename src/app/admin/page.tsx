@@ -8,5 +8,5 @@ export default async function AdminHome() {
     if (e instanceof AuthError) redirect(e.code === "FORBIDDEN" ? "/" : "/login");
     throw e;
   }
-  redirect("/admin/items");
+  redirect("/items");
 }

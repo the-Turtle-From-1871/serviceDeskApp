@@ -52,7 +52,7 @@ export function EditItemForm({ item }: { item: ItemValues }) {
         <button disabled={pending} type="submit" className="btn btn-primary">
           {pending ? "Saving…" : "Save changes"}
         </button>
-        <Link href="/admin/items" className="btn btn-ghost">Back to items</Link>
+        <Link href="/items" className="btn btn-ghost">Back to items</Link>
       </div>
     </form>
   );

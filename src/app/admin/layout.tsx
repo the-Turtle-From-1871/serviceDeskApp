@@ -14,12 +14,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     <>
       <header className="app-header">
         <div className="app-header__inner">
-          <Link href="/admin/items" className="brand">
+          <Link href="/items" className="brand">
             <span className="brand__mark">HR</span>
             Hand Receipt
           </Link>
           <nav className="nav">
-            <Link href="/admin/items">Items</Link>
+            <Link href="/items">Items</Link>
             <Link href="/admin/items/new">New item</Link>
             <Link href="/admin/users">Users</Link>
             <Link href="/admin/audit">Audit</Link>

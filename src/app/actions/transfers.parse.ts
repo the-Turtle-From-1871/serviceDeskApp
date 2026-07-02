@@ -1,5 +1,3 @@
-import type { NewItemInput } from "@/modules/items/items.schema";
-
 const s = (fd: FormData, k: string) => String(fd.get(k) ?? "").trim();
 const bool = (fd: FormData, k: string) => {
   const v = s(fd, k);
@@ -18,15 +16,8 @@ function party(fd: FormData, prefix: "sender" | "receiver") {
 }
 
 export function parseTransferForm(fd: FormData) {
-  const itemMode = s(fd, "itemMode") === "new" ? "new" : "existing";
-  const newItem: NewItemInput | undefined =
-    itemMode === "new"
-      ? { make: s(fd, "make"), model: s(fd, "model"), serialNumber: s(fd, "serialNumber"), homeUnit: s(fd, "homeUnit") || undefined, notes: s(fd, "notes") || undefined }
-      : undefined;
   return {
-    itemMode,
-    itemId: itemMode === "existing" ? s(fd, "itemId") : undefined,
-    newItem,
+    itemId: s(fd, "itemId"),
     sender: party(fd, "sender"),
     receiver: party(fd, "receiver"),
     receiverSignature: String(fd.get("receiverSignature") ?? ""),

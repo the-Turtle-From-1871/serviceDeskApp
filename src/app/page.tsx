@@ -14,8 +14,8 @@ export default async function HomePage() {
           <span className="spacer" />
           {session?.user ? (
             <>
-              <Link href="/new" className="btn btn-ghost btn-sm">New receipt</Link>
-              {isAdmin && <Link href="/admin/items" className="btn btn-ghost btn-sm">Admin</Link>}
+              <Link href="/items" className="btn btn-ghost btn-sm">Items</Link>
+              {isAdmin && <Link href="/admin/users" className="btn btn-ghost btn-sm">Admin</Link>}
               <SignOutButton />
             </>
           ) : (
