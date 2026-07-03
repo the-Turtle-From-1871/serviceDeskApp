@@ -7,6 +7,7 @@ vi.mock("@/lib/prisma", () => {
   const tx = {
     item: { findUnique: vi.fn(async () => item) },
     transfer: { create: vi.fn(async () => created), findFirst: vi.fn(), findMany: vi.fn() },
+    $queryRaw: vi.fn(async () => [{ n: BigInt(42) }]),
   };
   type Tx = typeof tx;
   return {
@@ -43,7 +44,7 @@ describe("createTransfer", () => {
     expect(call.receiverEmail).toBe("j@u.mil");
     expect(call.receiverSignature).toBe(sig);
     expect(call.status).toBe("COMPLETED");
-    expect(call.receiptNumber).toMatch(/^HR-[0-9A-F]{8}$/);
+    expect(call.receiptNumber).toBe("HR-000042");
     expect(call.itemSummary).toContain("SN123");
   });
 });

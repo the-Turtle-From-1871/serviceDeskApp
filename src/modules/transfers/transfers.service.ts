@@ -1,7 +1,5 @@
-import { Prisma } from "@prisma/client";
 import type { Item, Transfer } from "@prisma/client";
 import prisma from "@/lib/prisma";
-import { generateReceiptNumber } from "./receipt-number";
 import { TransferError } from "./transfers.errors";
 import type { PartyInput, TransferInput } from "./transfers.schema";
 
@@ -15,46 +13,38 @@ export async function createTransfer(
   input: TransferInput & { createdByUserId?: string }
 ): Promise<Transfer> {
   const { itemId, sender, receiver, receiverSignature, createdByUserId } = input;
-  // Retry once on the (astronomically unlikely) receipt-number collision.
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      return await prisma.$transaction(async (tx) => {
-        const item = await tx.item.findUnique({ where: { id: itemId } });
-        if (!item) throw new TransferError("ITEM_NOT_FOUND");
-        if (item.status === "RETIRED") throw new TransferError("ITEM_RETIRED");
-        return tx.transfer.create({
-          data: {
-            receiptNumber: generateReceiptNumber(),
-            itemId,
-            itemSummary: itemSummary(item),
-            senderIsDcsim: sender.isDcsim,
-            senderName: sender.name,
-            senderRank: sender.rank ?? null,
-            senderUnit: sender.unit ?? null,
-            senderContact: sender.contact ?? null,
-            senderEmail: sender.email ?? null,
-            receiverIsDcsim: receiver.isDcsim,
-            receiverName: receiver.name,
-            receiverRank: receiver.rank ?? null,
-            receiverUnit: receiver.unit ?? null,
-            receiverContact: receiver.contact ?? null,
-            receiverEmail: receiver.email ?? null,
-            receiverSignature,
-            createdByUserId: createdByUserId ?? null,
-            status: "COMPLETED",
-          },
-        });
-      });
-    } catch (e) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-        if (attempt < 2) continue; // duplicate receiptNumber — regenerate
-        throw new TransferError("RECEIPT_COLLISION"); // exhausted retries
-      }
-      throw e;
-    }
-  }
-  // Unreachable: every loop iteration above either returns or throws.
-  throw new TransferError("RECEIPT_COLLISION");
+  return prisma.$transaction(async (tx) => {
+    const item = await tx.item.findUnique({ where: { id: itemId } });
+    if (!item) throw new TransferError("ITEM_NOT_FOUND");
+    if (item.status === "RETIRED") throw new TransferError("ITEM_RETIRED");
+    // Sequential, gap-tolerant receipt number. nextval is atomic across
+    // concurrent transactions, so no collision handling is needed. pg may
+    // return the value as bigint or string; String() handles both.
+    const rows = await tx.$queryRaw<{ n: bigint }[]>`SELECT nextval('receipt_number_seq') AS n`;
+    const receiptNumber = `HR-${String(rows[0].n).padStart(6, "0")}`;
+    return tx.transfer.create({
+      data: {
+        receiptNumber,
+        itemId,
+        itemSummary: itemSummary(item),
+        senderIsDcsim: sender.isDcsim,
+        senderName: sender.name,
+        senderRank: sender.rank ?? null,
+        senderUnit: sender.unit ?? null,
+        senderContact: sender.contact ?? null,
+        senderEmail: sender.email ?? null,
+        receiverIsDcsim: receiver.isDcsim,
+        receiverName: receiver.name,
+        receiverRank: receiver.rank ?? null,
+        receiverUnit: receiver.unit ?? null,
+        receiverContact: receiver.contact ?? null,
+        receiverEmail: receiver.email ?? null,
+        receiverSignature,
+        createdByUserId: createdByUserId ?? null,
+        status: "COMPLETED",
+      },
+    });
+  });
 }
 
 export function getTransferByReceiptNumber(receiptNumber: string): Promise<WithItem | null> {

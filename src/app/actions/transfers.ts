@@ -29,7 +29,6 @@ export async function createTransferAction(_prev: unknown, formData: FormData) {
       const map: Record<string, string> = {
         ITEM_NOT_FOUND: "That item no longer exists.",
         ITEM_RETIRED: "That item is retired and cannot be transferred.",
-        RECEIPT_COLLISION: "Could not allocate a receipt number — please retry.",
       };
       return { error: map[e.code] ?? "Could not create the receipt." };
     }
