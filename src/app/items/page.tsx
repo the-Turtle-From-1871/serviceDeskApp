@@ -55,6 +55,7 @@ export default async function ItemsListPage({ searchParams }: { searchParams: Pr
                     <td>
                       <div className="actions" style={{ justifyContent: "flex-end" }}>
                         {it.status === "ACTIVE" && <Link href={`/items/${it.id}/transfer`} className="btn btn-primary btn-sm">Transfer</Link>}
+                        {isAdmin && <Link href={`/admin/items/${it.id}/qr`} className="btn btn-ghost btn-sm">QR</Link>}
                         {isAdmin && <Link href={`/admin/items/${it.id}/edit`} className="btn btn-ghost btn-sm">Edit</Link>}
                         {isAdmin && (
                           <form action={toggleItemStatusAction}>

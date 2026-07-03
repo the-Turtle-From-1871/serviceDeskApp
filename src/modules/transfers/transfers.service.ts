@@ -69,6 +69,10 @@ export function searchReceipts(query: string): Promise<WithItem[]> {
   }) as Promise<WithItem[]>;
 }
 
+export function listReceiptsForItem(itemId: string): Promise<Transfer[]> {
+  return prisma.transfer.findMany({ where: { itemId }, orderBy: { createdAt: "desc" } });
+}
+
 export async function getLastReceiver(itemId: string): Promise<PartyInput | null> {
   const last = await prisma.transfer.findFirst({
     where: { itemId, status: "COMPLETED" },
