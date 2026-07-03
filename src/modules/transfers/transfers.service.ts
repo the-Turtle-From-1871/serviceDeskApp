@@ -54,21 +54,6 @@ export function getTransferByReceiptNumber(receiptNumber: string): Promise<WithI
   }) as Promise<WithItem | null>;
 }
 
-export function searchReceipts(query: string): Promise<WithItem[]> {
-  const q = query.trim();
-  if (!q) return Promise.resolve([]);
-  return prisma.transfer.findMany({
-    where: {
-      OR: [
-        { receiptNumber: { equals: q.toUpperCase() } },
-        { item: { is: { serialNumber: { equals: q, mode: "insensitive" } } } },
-      ],
-    },
-    include: { item: true },
-    orderBy: { createdAt: "desc" },
-  }) as Promise<WithItem[]>;
-}
-
 export function listReceiptsForItem(itemId: string): Promise<Transfer[]> {
   return prisma.transfer.findMany({ where: { itemId }, orderBy: { createdAt: "desc" } });
 }

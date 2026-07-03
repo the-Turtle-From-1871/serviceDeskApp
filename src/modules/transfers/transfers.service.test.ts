@@ -26,7 +26,7 @@ vi.mock("@/lib/prisma", () => {
 import prisma from "@/lib/prisma";
 // @ts-expect-error - __tx is a test-only export added by the vi.mock factory above.
 import { __tx } from "@/lib/prisma";
-import { createTransfer, searchReceipts, getLastReceiver } from "./transfers.service";
+import { createTransfer, getLastReceiver } from "./transfers.service";
 import type { PartyInput } from "./transfers.schema";
 
 const sender = { isDcsim: true, name: "Tech" } as PartyInput;
@@ -46,15 +46,6 @@ describe("createTransfer", () => {
     expect(call.status).toBe("COMPLETED");
     expect(call.receiptNumber).toBe("HR-000042");
     expect(call.itemSummary).toContain("SN123");
-  });
-});
-
-describe("searchReceipts", () => {
-  it("queries by receiptNumber OR item serial", async () => {
-    await searchReceipts("SN123");
-    const where = vi.mocked(prisma.transfer.findMany).mock.calls[0][0]?.where;
-    expect(JSON.stringify(where)).toContain("serialNumber");
-    expect(JSON.stringify(where)).toContain("receiptNumber");
   });
 });
 

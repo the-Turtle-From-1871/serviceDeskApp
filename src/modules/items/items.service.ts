@@ -39,3 +39,12 @@ export function setItemStatus(id: string, status: ItemStatus): Promise<Item> {
 export function retireItem(id: string): Promise<Item> {
   return setItemStatus(id, "RETIRED");
 }
+
+export function searchItemsBySerial(q: string): Promise<Item[]> {
+  const s = q.trim();
+  if (!s) return Promise.resolve([]);
+  return prisma.item.findMany({
+    where: { serialNumber: { contains: s, mode: "insensitive" } },
+    orderBy: { createdAt: "desc" },
+  });
+}

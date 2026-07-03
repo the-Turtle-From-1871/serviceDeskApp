@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { auth } from "@/auth";
-import { ReceiptSearch } from "@/components/ReceiptSearch";
+import { HomeSearch } from "@/components/HomeSearch";
 import { SignOutButton } from "@/components/SignOutButton";
 
 export default async function HomePage() {
@@ -25,10 +25,10 @@ export default async function HomePage() {
       </header>
       <main className="container container-mid stack">
         <div>
-          <h1 className="page-title">Find your hand receipt</h1>
-          <p className="subtle">Search by item serial number or receipt number (HR-XXXXXXXX) to view and download your receipt.</p>
+          <h1 className="page-title">Find an item or hand receipt</h1>
+          <p className="subtle">Search by item serial number, or look up a hand receipt by its number (HR-XXXXXX).</p>
         </div>
-        <ReceiptSearch />
+        <HomeSearch />
       </main>
     </>
   );
