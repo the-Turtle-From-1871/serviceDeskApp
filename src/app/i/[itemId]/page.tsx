@@ -18,7 +18,7 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
   if (!item) notFound();
   const [receipts, qr] = await Promise.all([
     listReceiptsForItem(item.id),
-    itemQrDataUrl(item.id).catch(() => ""),
+    itemQrDataUrl(item.id).catch((e) => { console.error("[item-page] QR generation failed:", e); return ""; }),
   ]);
   return (
     <>

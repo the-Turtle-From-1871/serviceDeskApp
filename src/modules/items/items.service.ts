@@ -46,5 +46,6 @@ export function searchItemsBySerial(q: string): Promise<Item[]> {
   return prisma.item.findMany({
     where: { serialNumber: { contains: s, mode: "insensitive" } },
     orderBy: { createdAt: "desc" },
+    take: 50, // bound the public result set (a 1-char query would otherwise scan all items)
   });
 }
