@@ -1,3 +1,5 @@
+import QRCode from "qrcode";
+
 // The QR code encodes an absolute URL so a phone can open it. Prefer the
 // explicitly configured APP_URL; fall back to Vercel's injected domain envs so
 // codes are still scannable before APP_URL is set.
@@ -9,4 +11,12 @@ function defaultBaseUrl(): string {
 
 export function receiptUrl(receiptNumber: string, baseUrl = defaultBaseUrl()): string {
   return `${baseUrl.replace(/\/$/, "")}/receipts/${receiptNumber}`;
+}
+
+export function itemUrl(itemId: string, baseUrl = defaultBaseUrl()): string {
+  return `${baseUrl.replace(/\/$/, "")}/i/${itemId}`;
+}
+
+export function itemQrDataUrl(itemId: string, baseUrl?: string): Promise<string> {
+  return QRCode.toDataURL(itemUrl(itemId, baseUrl), { margin: 1, width: 320 });
 }
