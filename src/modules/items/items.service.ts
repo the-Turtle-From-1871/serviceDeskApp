@@ -11,6 +11,13 @@ export function getItem(id: string) {
   return prisma.item.findUnique({ where: { id } });
 }
 
+export function getItemWithCreator(id: string) {
+  return prisma.item.findUnique({
+    where: { id },
+    include: { createdBy: { select: { rank: true, name: true } } },
+  });
+}
+
 export function listItems(opts: { search?: string } = {}) {
   const search = opts.search?.trim();
   return prisma.item.findMany({
