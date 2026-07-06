@@ -1,3 +1,4 @@
+import "server-only"; // password hashing must never reach the client bundle
 import bcrypt from "bcryptjs";
 
 const COST = 12;

@@ -1,3 +1,4 @@
+import "server-only"; // authorization logic is server-only
 import type { Role } from "@prisma/client";
 
 export type SessionUser = { id: string; role: Role; name: string; email: string };

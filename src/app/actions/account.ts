@@ -25,7 +25,9 @@ export async function changePasswordAction(_prev: unknown, formData: FormData) {
     await changeUserPassword(user.id, currentPassword, newPassword);
   } catch (e) {
     if (e instanceof PasswordChangeError) return { error: "Your current password is incorrect." };
-    throw e;
+    // Unexpected failure: log the detail server-side, return a generic message.
+    console.error("[changePasswordAction] unexpected error:", e);
+    return { error: "Something went wrong. Please try again." };
   }
   return { ok: true };
 }

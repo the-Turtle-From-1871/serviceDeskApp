@@ -1,3 +1,4 @@
+import "server-only"; // never bundle the DB client into a client component
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 

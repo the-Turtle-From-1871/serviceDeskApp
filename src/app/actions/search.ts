@@ -11,11 +11,17 @@ export async function liveSearchAction(mode: string, query: string): Promise<Liv
   const q = query.trim();
   if (!q) return { items: [] };
 
-  if (mode === "receipt") {
-    const t = await getTransferByReceiptNumber(q);
-    return { receipt: t ? { receiptNumber: t.receiptNumber, itemSummary: t.itemSummary } : null };
-  }
+  try {
+    if (mode === "receipt") {
+      const t = await getTransferByReceiptNumber(q);
+      return { receipt: t ? { receiptNumber: t.receiptNumber, itemSummary: t.itemSummary } : null };
+    }
 
-  const items = await searchItemsBySerial(q);
-  return { items: items.map((i) => ({ id: i.id, make: i.make, model: i.model, serialNumber: i.serialNumber, status: i.status })) };
+    const items = await searchItemsBySerial(q);
+    return { items: items.map((i) => ({ id: i.id, make: i.make, model: i.model, serialNumber: i.serialNumber, status: i.status })) };
+  } catch (e) {
+    // Log server-side; return an empty (generic) result rather than a 500.
+    console.error("[liveSearchAction] search failed:", e);
+    return mode === "receipt" ? { receipt: null } : { items: [] };
+  }
 }

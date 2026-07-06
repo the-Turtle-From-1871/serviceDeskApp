@@ -32,7 +32,9 @@ export async function createTransferAction(_prev: unknown, formData: FormData) {
       };
       return { error: map[e.code] ?? "Could not create the receipt." };
     }
-    throw e;
+    // Unexpected failure: log the detail server-side, return a generic message.
+    console.error("[createTransferAction] unexpected error:", e);
+    return { error: "Something went wrong creating the receipt. Please try again." };
   }
 
   try {
