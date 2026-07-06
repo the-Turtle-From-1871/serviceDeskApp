@@ -644,3 +644,37 @@ h3 {
     box-shadow: none;
   }
 }
+
+/* ---------- Mobile: tables restack into cards, tighter spacing ---------- */
+@media (max-width: 640px) {
+  .table thead { display: none; }
+  .table,
+  .table tbody,
+  .table tr,
+  .table td { display: block; width: 100%; }
+  .table tr { border-bottom: 8px solid var(--bg); }
+  .table tbody tr:last-child { border-bottom: none; }
+  .table td {
+    border: none;
+    padding: 8px 14px;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .table td::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+  }
+  .table td[data-label=""]::before { content: none; }
+  .table td[data-label=""] { justify-content: flex-start; }
+  .table .actions { justify-content: flex-start; flex-wrap: wrap; }
+
+  .container { padding: 20px 14px 56px; }
+  .app-header__inner { padding: 12px 14px; }
+}

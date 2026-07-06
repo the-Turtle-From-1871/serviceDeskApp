@@ -41,19 +41,19 @@ export default async function UsersPage() {
               const isSelf = u.id === admin.id;
               return (
                 <tr key={u.id}>
-                  <td>{u.rank ? `${u.rank} ` : ""}{u.name}{isSelf && <span className="subtle"> (you)</span>}</td>
-                  <td className="mono">{u.email}</td>
-                  <td>
+                  <td data-label="Name">{u.rank ? `${u.rank} ` : ""}{u.name}{isSelf && <span className="subtle"> (you)</span>}</td>
+                  <td className="mono" data-label="Email">{u.email}</td>
+                  <td data-label="Role">
                     <span className={`badge ${u.role === "ADMIN" ? "badge-admin" : "badge-retired"}`}>
                       {u.role === "ADMIN" ? "Admin" : "User"}
                     </span>
                   </td>
-                  <td>
+                  <td data-label="Active">
                     <span className={`badge ${u.isActive ? "badge-active" : "badge-cancelled"}`}>
                       {u.isActive ? "Active" : "Inactive"}
                     </span>
                   </td>
-                  <td>
+                  <td data-label="">
                     <div className="actions" style={{ justifyContent: "flex-end" }}>
                       <form action={setUserRoleAction}>
                         <input type="hidden" name="id" value={u.id} />

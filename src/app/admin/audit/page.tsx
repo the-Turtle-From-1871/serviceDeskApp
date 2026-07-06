@@ -39,12 +39,12 @@ export default async function AuditPage() {
           <tbody>
             {transfers.map((t) => (
               <tr key={t.id}>
-                <td><Link href={`/receipts/${t.receiptNumber}`}>{t.receiptNumber}</Link></td>
-                <td>{t.itemSummary}</td>
-                <td>{partyLabel(t.senderIsDcsim, t.senderName, t.senderRank)}</td>
-                <td>{partyLabel(t.receiverIsDcsim, t.receiverName, t.receiverRank)}</td>
-                <td className="subtle">{formatDateTimeHST(t.createdAt)}</td>
-                <td><StatusBadge status={t.status} /></td>
+                <td data-label="Receipt"><Link href={`/receipts/${t.receiptNumber}`}>{t.receiptNumber}</Link></td>
+                <td data-label="Item">{t.itemSummary}</td>
+                <td data-label="From">{partyLabel(t.senderIsDcsim, t.senderName, t.senderRank)}</td>
+                <td data-label="To">{partyLabel(t.receiverIsDcsim, t.receiverName, t.receiverRank)}</td>
+                <td className="subtle" data-label="Date">{formatDateTimeHST(t.createdAt)}</td>
+                <td data-label="Status"><StatusBadge status={t.status} /></td>
               </tr>
             ))}
           </tbody>

@@ -45,11 +45,11 @@ export default async function ItemsListPage({ searchParams }: { searchParams: Pr
               <tbody>
                 {items.map((it) => (
                   <tr key={it.id}>
-                    <td>{it.make}</td>
-                    <td>{it.model}</td>
-                    <td className="mono">{it.serialNumber}</td>
-                    <td><StatusBadge status={it.status} /></td>
-                    <td>
+                    <td data-label="Make">{it.make}</td>
+                    <td data-label="Model">{it.model}</td>
+                    <td className="mono" data-label="Serial">{it.serialNumber}</td>
+                    <td data-label="Status"><StatusBadge status={it.status} /></td>
+                    <td data-label="">
                       <div className="actions" style={{ justifyContent: "flex-end" }}>
                         {it.status === "ACTIVE" && <Link href={`/items/${it.id}/transfer`} className="btn btn-primary btn-sm">Transfer</Link>}
                         {isAdmin && <Link href={`/admin/items/${it.id}/qr`} className="btn btn-ghost btn-sm">QR</Link>}

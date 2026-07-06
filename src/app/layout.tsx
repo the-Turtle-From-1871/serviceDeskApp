@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -16,6 +16,8 @@ export const metadata: Metadata = {
   title: "Hand Receipt",
   description: "Digital hand receipts — track custody of equipment with a signed transfer chain.",
 };
+
+export const viewport: Viewport = { width: "device-width", initialScale: 1 };
 
 export default function RootLayout({
   children,
