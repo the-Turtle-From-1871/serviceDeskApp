@@ -654,8 +654,10 @@ h3 {
   .table td { display: block; width: 100%; }
   .table tr { border-bottom: 8px solid var(--bg); }
   .table tbody tr:last-child { border-bottom: none; }
+  /* `.table tbody td` (specificity 0,1,2) also removes the base cell divider,
+     which a bare `.table td` (0,1,1) can't override — keeps cards clean. */
+  .table tbody td { border: none; }
   .table td {
-    border: none;
     padding: 8px 14px;
     display: flex;
     gap: 12px;
