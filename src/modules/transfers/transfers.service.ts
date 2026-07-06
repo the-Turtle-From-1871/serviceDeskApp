@@ -54,6 +54,18 @@ export function getTransferByReceiptNumber(receiptNumber: string): Promise<WithI
   }) as Promise<WithItem | null>;
 }
 
+// Partial, case-insensitive receipt-number search (for the live type-ahead),
+// so results appear as the user types — mirroring searchItemsBySerial. Capped.
+export function searchReceiptsByNumber(q: string): Promise<Transfer[]> {
+  const s = q.trim();
+  if (!s) return Promise.resolve([]);
+  return prisma.transfer.findMany({
+    where: { receiptNumber: { contains: s, mode: "insensitive" } },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+}
+
 export function listReceiptsForItem(itemId: string): Promise<Transfer[]> {
   return prisma.transfer.findMany({ where: { itemId }, orderBy: { createdAt: "desc" } });
 }

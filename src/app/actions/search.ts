@@ -1,10 +1,10 @@
 "use server";
 import { searchItemsBySerial } from "@/modules/items/items.service";
-import { getTransferByReceiptNumber } from "@/modules/transfers/transfers.service";
+import { searchReceiptsByNumber } from "@/modules/transfers/transfers.service";
 
 export type ItemResult = { id: string; make: string; model: string; serialNumber: string; status: string };
 export type ReceiptHit = { receiptNumber: string; itemSummary: string };
-export type LiveSearchResult = { items?: ItemResult[]; receipt?: ReceiptHit | null };
+export type LiveSearchResult = { items?: ItemResult[]; receipts?: ReceiptHit[] };
 
 // PUBLIC BY DESIGN (reviewed exception to the "auth-first" guardrail): the home
 // receipt/item search is intentionally unauthenticated. Read-only, capped at 50
@@ -16,8 +16,8 @@ export async function liveSearchAction(mode: string, query: string): Promise<Liv
 
   try {
     if (mode === "receipt") {
-      const t = await getTransferByReceiptNumber(q);
-      return { receipt: t ? { receiptNumber: t.receiptNumber, itemSummary: t.itemSummary } : null };
+      const rows = await searchReceiptsByNumber(q);
+      return { receipts: rows.map((r) => ({ receiptNumber: r.receiptNumber, itemSummary: r.itemSummary })) };
     }
 
     const items = await searchItemsBySerial(q);
@@ -25,6 +25,6 @@ export async function liveSearchAction(mode: string, query: string): Promise<Liv
   } catch (e) {
     // Log server-side; return an empty (generic) result rather than a 500.
     console.error("[liveSearchAction] search failed:", e);
-    return mode === "receipt" ? { receipt: null } : { items: [] };
+    return mode === "receipt" ? { receipts: [] } : { items: [] };
   }
 }
