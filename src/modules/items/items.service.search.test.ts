@@ -21,7 +21,7 @@ describe("searchItemsBySerial", () => {
 describe("getItemWithCreator", () => {
   it("looks up by id and includes the creator's rank/name", async () => {
     await getItemWithCreator("itm1");
-    const arg = (prisma.item.findUnique as any).mock.calls[0][0];
+    const arg = vi.mocked(prisma.item.findUnique).mock.calls[0][0];
     expect(arg.where).toEqual({ id: "itm1" });
     expect(arg.include).toEqual({ createdBy: { select: { rank: true, name: true } } });
   });
