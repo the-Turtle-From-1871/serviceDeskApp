@@ -5,6 +5,7 @@ import { listReceiptsForItem } from "@/modules/transfers/transfers.service";
 import { itemQrDataUrl, itemUrl } from "@/modules/items/qr";
 import { StatusBadge } from "@/components/StatusBadge";
 import { formatDateTimeHST } from "@/lib/datetime";
+import { AppHeader } from "@/components/AppHeader";
 
 function partyLabel(p: { isDcsim: boolean; name: string; rank: string | null; unit: string | null }): string {
   if (p.isDcsim) return `DCSIM · ${p.name}`;
@@ -22,13 +23,9 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
   ]);
   return (
     <>
-      <header className="app-header">
-        <div className="app-header__inner">
-          <Link href="/" className="brand"><span className="brand__mark">HR</span>Hand Receipt</Link>
-          <span className="spacer" />
-          <Link href="/" className="btn btn-ghost btn-sm">Search</Link>
-        </div>
-      </header>
+      <AppHeader brandHref="/">
+        <Link href="/" className="btn btn-ghost btn-sm">Search</Link>
+      </AppHeader>
       <main className="container container-mid stack">
         <div className="row">
           <div>

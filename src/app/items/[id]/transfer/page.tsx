@@ -5,6 +5,7 @@ import prisma from "@/lib/prisma";
 import { getItem } from "@/modules/items/items.service";
 import { getLastReceiver } from "@/modules/transfers/transfers.service";
 import { SignOutButton } from "@/components/SignOutButton";
+import { AppHeader } from "@/components/AppHeader";
 import { ItemTransferForm } from "./ItemTransferForm";
 
 export default async function ItemTransferPage({ params }: { params: Promise<{ id: string }> }) {
@@ -29,14 +30,10 @@ export default async function ItemTransferPage({ params }: { params: Promise<{ i
 
   return (
     <>
-      <header className="app-header">
-        <div className="app-header__inner">
-          <Link href="/" className="brand"><span className="brand__mark">HR</span>Hand Receipt</Link>
-          <span className="spacer" />
-          <Link href="/items" className="btn btn-ghost btn-sm">Items</Link>
-          <SignOutButton />
-        </div>
-      </header>
+      <AppHeader brandHref="/">
+        <Link href="/items" className="btn btn-ghost btn-sm">Items</Link>
+        <SignOutButton />
+      </AppHeader>
       <main className="container container-mid stack">
         <div>
           <h1 className="page-title">Transfer: {item.make} {item.model}</h1>

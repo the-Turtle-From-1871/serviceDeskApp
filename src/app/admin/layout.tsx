@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { requireAdmin, AuthError } from "@/lib/authz";
 import { SignOutButton } from "@/components/SignOutButton";
+import { AppHeader } from "@/components/AppHeader";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   try {
@@ -12,23 +13,14 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   }
   return (
     <>
-      <header className="app-header">
-        <div className="app-header__inner">
-          <Link href="/items" className="brand">
-            <span className="brand__mark">HR</span>
-            Hand Receipt
-          </Link>
-          <nav className="nav">
-            <Link href="/items">Items</Link>
-            <Link href="/admin/items/new">New item</Link>
-            <Link href="/admin/users">Users</Link>
-            <Link href="/admin/audit">Audit</Link>
-          </nav>
-          <span className="spacer" />
-          <Link href="/account" className="btn btn-ghost btn-sm">Account</Link>
-          <SignOutButton />
-        </div>
-      </header>
+      <AppHeader brandHref="/items">
+        <Link href="/items" className="btn btn-ghost btn-sm">Items</Link>
+        <Link href="/admin/items/new" className="btn btn-ghost btn-sm">New item</Link>
+        <Link href="/admin/users" className="btn btn-ghost btn-sm">Users</Link>
+        <Link href="/admin/audit" className="btn btn-ghost btn-sm">Audit</Link>
+        <Link href="/account" className="btn btn-ghost btn-sm">Account</Link>
+        <SignOutButton />
+      </AppHeader>
       <main className="container">{children}</main>
     </>
   );
