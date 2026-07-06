@@ -19,7 +19,7 @@ export async function loginAction(_prev: unknown, formData: FormData) {
 }
 
 export async function logoutAction() {
-  await signOut({ redirectTo: "/login" });
+  await signOut({ redirectTo: "/" });
 }
 
 export async function registerAction(_prev: unknown, formData: FormData) {
