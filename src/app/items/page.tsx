@@ -51,6 +51,7 @@ export default async function ItemsListPage({ searchParams }: { searchParams: Pr
                     <td data-label="Status"><StatusBadge status={it.status} /></td>
                     <td data-label="">
                       <div className="actions" style={{ justifyContent: "flex-end" }}>
+                        <Link href={`/i/${it.id}`} className="btn btn-ghost btn-sm">View</Link>
                         {it.status === "ACTIVE" && <Link href={`/items/${it.id}/transfer`} className="btn btn-primary btn-sm">Transfer</Link>}
                         {isAdmin && <Link href={`/admin/items/${it.id}/qr`} className="btn btn-ghost btn-sm">QR</Link>}
                         {isAdmin && <Link href={`/admin/items/${it.id}/edit`} className="btn btn-ghost btn-sm">Edit</Link>}

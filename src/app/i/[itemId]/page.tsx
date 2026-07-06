@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getItem } from "@/modules/items/items.service";
+import { getItemWithCreator } from "@/modules/items/items.service";
 import { listReceiptsForItem } from "@/modules/transfers/transfers.service";
 import { itemQrDataUrl, itemUrl } from "@/modules/items/qr";
 import { StatusBadge } from "@/components/StatusBadge";
 import { formatDateTimeHST } from "@/lib/datetime";
 import { AppHeader } from "@/components/AppHeader";
+import { auth } from "@/auth";
+import { SignOutButton } from "@/components/SignOutButton";
 
 function partyLabel(p: { isDcsim: boolean; name: string; rank: string | null; unit: string | null }): string {
   if (p.isDcsim) return `DCSIM · ${p.name}`;
@@ -15,8 +17,9 @@ function partyLabel(p: { isDcsim: boolean; name: string; rank: string | null; un
 
 export default async function PublicItemPage({ params }: { params: Promise<{ itemId: string }> }) {
   const { itemId } = await params;
-  const item = await getItem(itemId);
+  const [item, session] = await Promise.all([getItemWithCreator(itemId), auth()]);
   if (!item) notFound();
+  const loggedIn = !!session?.user;
   const [receipts, qr] = await Promise.all([
     listReceiptsForItem(item.id),
     itemQrDataUrl(item.id).catch((e) => { console.error("[item-page] QR generation failed:", e); return ""; }),
@@ -24,7 +27,14 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
   return (
     <>
       <AppHeader brandHref="/">
-        <Link href="/" className="btn btn-ghost btn-sm">Search</Link>
+        {loggedIn ? (
+          <>
+            <Link href="/items" className="btn btn-ghost btn-sm">Items</Link>
+            <SignOutButton />
+          </>
+        ) : (
+          <Link href="/" className="btn btn-ghost btn-sm">Search</Link>
+        )}
       </AppHeader>
       <main className="container container-mid stack">
         <div className="row">
@@ -35,6 +45,26 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
           <span className="spacer" />
           <StatusBadge status={item.status} />
         </div>
+
+        {loggedIn && (
+          <div className="card">
+            <div className="card__title">Item details</div>
+            <dl className="dl">
+              <dt>Notes</dt>
+              <dd>{item.notes || "—"}</dd>
+              <dt>Date logged</dt>
+              <dd>{formatDateTimeHST(item.createdAt)}</dd>
+              <dt>Logged by</dt>
+              <dd>{item.createdBy ? (item.createdBy.rank ? `${item.createdBy.rank} ${item.createdBy.name}` : item.createdBy.name) : "—"}</dd>
+              <dt>Current holder</dt>
+              <dd>
+                {receipts.length > 0
+                  ? partyLabel({ isDcsim: receipts[0].receiverIsDcsim, name: receipts[0].receiverName, rank: receipts[0].receiverRank, unit: receipts[0].receiverUnit })
+                  : "Not yet transferred"}
+              </dd>
+            </dl>
+          </div>
+        )}
 
         {qr && (
           <div className="card stack-sm" style={{ textAlign: "center" }}>
