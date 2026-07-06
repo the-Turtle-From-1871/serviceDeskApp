@@ -1,7 +1,6 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireUser, AuthError } from "@/lib/authz";
-import { SignOutButton } from "@/components/SignOutButton";
+import { SiteHeader } from "@/components/SiteHeader";
 import { ChangePasswordForm } from "./ChangePasswordForm";
 
 export default async function AccountPage() {
@@ -12,21 +11,10 @@ export default async function AccountPage() {
     if (e instanceof AuthError) redirect("/login");
     throw e;
   }
-  const home = user.role === "ADMIN" ? "/items" : "/";
 
   return (
     <>
-      <header className="app-header">
-        <div className="app-header__inner">
-          <Link href={home} className="brand">
-            <span className="brand__mark">HR</span>
-            Hand Receipt
-          </Link>
-          <span className="spacer" />
-          <Link href={home} className="btn btn-ghost btn-sm">Back</Link>
-          <SignOutButton />
-        </div>
-      </header>
+      <SiteHeader />
 
       <main className="container container-narrow stack">
         <div>

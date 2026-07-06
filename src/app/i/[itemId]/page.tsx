@@ -5,9 +5,8 @@ import { listReceiptsForItem } from "@/modules/transfers/transfers.service";
 import { itemQrDataUrl, itemUrl } from "@/modules/items/qr";
 import { StatusBadge } from "@/components/StatusBadge";
 import { formatDateTimeHST } from "@/lib/datetime";
-import { AppHeader } from "@/components/AppHeader";
+import { SiteHeader } from "@/components/SiteHeader";
 import { auth } from "@/auth";
-import { SignOutButton } from "@/components/SignOutButton";
 
 function partyLabel(p: { isDcsim: boolean; name: string; rank: string | null; unit: string | null }): string {
   if (p.isDcsim) return `DCSIM · ${p.name}`;
@@ -26,16 +25,7 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
   ]);
   return (
     <>
-      <AppHeader brandHref="/">
-        {loggedIn ? (
-          <>
-            <Link href="/items" className="btn btn-ghost btn-sm">Items</Link>
-            <SignOutButton />
-          </>
-        ) : (
-          <Link href="/" className="btn btn-ghost btn-sm">Search</Link>
-        )}
-      </AppHeader>
+      <SiteHeader />
       <main className="container container-mid stack">
         <div className="row">
           <div>

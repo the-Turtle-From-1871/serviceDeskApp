@@ -1,25 +1,10 @@
-import Link from "next/link";
-import { auth } from "@/auth";
 import { HomeSearch } from "@/components/HomeSearch";
-import { SignOutButton } from "@/components/SignOutButton";
-import { AppHeader } from "@/components/AppHeader";
+import { SiteHeader } from "@/components/SiteHeader";
 
 export default async function HomePage() {
-  const session = await auth();
-  const isAdmin = session?.user?.role === "ADMIN";
   return (
     <>
-      <AppHeader brandHref="/">
-        {session?.user ? (
-          <>
-            <Link href="/items" className="btn btn-ghost btn-sm">Items</Link>
-            {isAdmin && <Link href="/admin/users" className="btn btn-ghost btn-sm">Admin</Link>}
-            <SignOutButton />
-          </>
-        ) : (
-          <Link href="/login" className="btn btn-ghost btn-sm">Staff sign in</Link>
-        )}
-      </AppHeader>
+      <SiteHeader />
       <main className="container container-mid stack">
         <div>
           <h1 className="page-title">Find an item or hand receipt</h1>

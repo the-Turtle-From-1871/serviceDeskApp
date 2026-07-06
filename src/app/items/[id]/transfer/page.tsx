@@ -1,11 +1,9 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/authz";
 import prisma from "@/lib/prisma";
 import { getItem } from "@/modules/items/items.service";
 import { getLastReceiver } from "@/modules/transfers/transfers.service";
-import { SignOutButton } from "@/components/SignOutButton";
-import { AppHeader } from "@/components/AppHeader";
+import { SiteHeader } from "@/components/SiteHeader";
 import { ItemTransferForm } from "./ItemTransferForm";
 
 export default async function ItemTransferPage({ params }: { params: Promise<{ id: string }> }) {
@@ -30,10 +28,7 @@ export default async function ItemTransferPage({ params }: { params: Promise<{ i
 
   return (
     <>
-      <AppHeader brandHref="/">
-        <Link href="/items" className="btn btn-ghost btn-sm">Items</Link>
-        <SignOutButton />
-      </AppHeader>
+      <SiteHeader />
       <main className="container container-mid stack">
         <div>
           <h1 className="page-title">Transfer: {item.make} {item.model}</h1>

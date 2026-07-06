@@ -2,9 +2,8 @@ import Link from "next/link";
 import { requireUser } from "@/lib/authz";
 import { listItems } from "@/modules/items/items.service";
 import { StatusBadge } from "@/components/StatusBadge";
-import { SignOutButton } from "@/components/SignOutButton";
 import { toggleItemStatusAction } from "@/app/admin/actions/items";
-import { AppHeader } from "@/components/AppHeader";
+import { SiteHeader } from "@/components/SiteHeader";
 
 export default async function ItemsListPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   const user = await requireUser();
@@ -14,12 +13,7 @@ export default async function ItemsListPage({ searchParams }: { searchParams: Pr
 
   return (
     <>
-      <AppHeader brandHref="/">
-        {isAdmin && <Link href="/admin/items/new" className="btn btn-ghost btn-sm">Log new item</Link>}
-        {isAdmin && <Link href="/admin/users" className="btn btn-ghost btn-sm">Users</Link>}
-        {isAdmin && <Link href="/admin/audit" className="btn btn-ghost btn-sm">Audit</Link>}
-        <SignOutButton />
-      </AppHeader>
+      <SiteHeader />
       <main className="container stack">
         <div className="row">
           <div>
