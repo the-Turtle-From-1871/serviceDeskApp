@@ -6,7 +6,11 @@ export function HomeSearch() {
   const [mode, setMode] = useState<"serial" | "receipt">("serial");
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<ItemResult[]>([]);
+  // receipt: undefined = not searched yet, null = searched with no hit, object = hit.
   const [receipt, setReceipt] = useState<ReceiptHit | null | undefined>(undefined);
+  // The query the currently-held results correspond to. Used so "No matches"
+  // only shows once the *current* query has resolved (avoids a debounce flash).
+  const [resolvedQuery, setResolvedQuery] = useState("");
   const reqId = useRef(0);
 
   useEffect(() => {
@@ -19,15 +23,20 @@ export function HomeSearch() {
         if (id !== reqId.current) return; // ignore out-of-order responses
         setItems(res.items ?? []);
         setReceipt(res.receipt);
+        setResolvedQuery(q);
       } catch {
-        if (id === reqId.current) { setItems([]); setReceipt(undefined); }
+        if (id === reqId.current) { setItems([]); setReceipt(undefined); setResolvedQuery(q); }
       }
     }, 250);
     return () => clearTimeout(timer);
   }, [mode, query]);
 
-  const hasQuery = query.trim().length > 0;
-  const noMatches = hasQuery && (mode === "serial" ? items.length === 0 : receipt === null);
+  const trimmed = query.trim();
+  const hasQuery = trimmed.length > 0;
+  // Only render "No matches" once the current query has actually resolved, so it
+  // doesn't flash (or get announced) during the debounce before results land.
+  const settled = resolvedQuery === trimmed;
+  const noMatches = hasQuery && settled && (mode === "serial" ? items.length === 0 : receipt === null);
 
   return (
     <div className="stack">
@@ -39,35 +48,38 @@ export function HomeSearch() {
         <input className="input" aria-label="Search" placeholder="Start typing…" value={query} onChange={(e) => setQuery(e.target.value)} />
       </div>
 
-      {noMatches && <p className="subtle">No matches.</p>}
+      {/* Type-ahead has no submit, so announce result changes to assistive tech. */}
+      <div aria-live="polite" role="status">
+        {noMatches && <p className="subtle">No matches.</p>}
 
-      {hasQuery && mode === "serial" && items.length > 0 && (
-        <ul className="stack-sm">
-          {items.map((r) => (
-            <li key={r.id} className="card row">
+        {hasQuery && mode === "serial" && items.length > 0 && (
+          <ul className="stack-sm">
+            {items.map((r) => (
+              <li key={r.id} className="card row">
+                <div>
+                  <div><strong>{r.make} {r.model}</strong></div>
+                  <div className="subtle">SN {r.serialNumber} · {r.status}</div>
+                </div>
+                <span className="spacer" />
+                <a className="btn btn-secondary btn-sm" href={`/i/${r.id}`}>View item</a>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {hasQuery && mode === "receipt" && receipt && (
+          <ul className="stack-sm">
+            <li className="card row">
               <div>
-                <div><strong>{r.make} {r.model}</strong></div>
-                <div className="subtle">SN {r.serialNumber} · {r.status}</div>
+                <div><strong>{receipt.receiptNumber}</strong></div>
+                <div className="subtle">{receipt.itemSummary}</div>
               </div>
               <span className="spacer" />
-              <a className="btn btn-secondary btn-sm" href={`/i/${r.id}`}>View item</a>
+              <a className="btn btn-secondary btn-sm" href={`/receipts/${receipt.receiptNumber}`}>View receipt</a>
             </li>
-          ))}
-        </ul>
-      )}
-
-      {hasQuery && mode === "receipt" && receipt && (
-        <ul className="stack-sm">
-          <li className="card row">
-            <div>
-              <div><strong>{receipt.receiptNumber}</strong></div>
-              <div className="subtle">{receipt.itemSummary}</div>
-            </div>
-            <span className="spacer" />
-            <a className="btn btn-secondary btn-sm" href={`/receipts/${receipt.receiptNumber}`}>View receipt</a>
-          </li>
-        </ul>
-      )}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
