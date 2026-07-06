@@ -5,6 +5,8 @@ import { signIn, signOut } from "@/auth";
 import { registerUser } from "@/modules/users/users.service";
 import { registerSchema } from "@/modules/users/users.schema";
 
+// PUBLIC BY DESIGN: login/register are the unauthenticated entry to the auth
+// flow — they cannot require a session (reviewed exception to "auth-first").
 export async function loginAction(_prev: unknown, formData: FormData) {
   try {
     await signIn("credentials", {

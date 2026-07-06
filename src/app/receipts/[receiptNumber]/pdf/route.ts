@@ -2,6 +2,9 @@ import { getTransferByReceiptNumber } from "@/modules/transfers/transfers.servic
 import { buildHandReceiptPdf, type ReceiptParty } from "@/modules/receipts/hand-receipt";
 import { receiptUrl } from "@/modules/items/qr";
 
+// PUBLIC BY DESIGN (reviewed exception to the "auth-first" guardrail): hand
+// receipts are intentionally public so recipients without accounts can look up
+// and download their own receipt by number/serial. No per-user ownership model.
 export async function GET(_req: Request, { params }: { params: Promise<{ receiptNumber: string }> }) {
   const { receiptNumber } = await params;
   const t = await getTransferByReceiptNumber(receiptNumber);

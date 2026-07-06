@@ -6,6 +6,9 @@ export type ItemResult = { id: string; make: string; model: string; serialNumber
 export type ReceiptHit = { receiptNumber: string; itemSummary: string };
 export type LiveSearchResult = { items?: ItemResult[]; receipt?: ReceiptHit | null };
 
+// PUBLIC BY DESIGN (reviewed exception to the "auth-first" guardrail): the home
+// receipt/item search is intentionally unauthenticated. Read-only, capped at 50
+// rows, and returns only the same non-signature summary the public pages show.
 // Live type-ahead: returns results only (never redirects). Blank query → empty.
 export async function liveSearchAction(mode: string, query: string): Promise<LiveSearchResult> {
   const q = query.trim();
