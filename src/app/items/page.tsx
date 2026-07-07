@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/authz";
 import { listItems } from "@/modules/items/items.service";
-import { StatusBadge } from "@/components/StatusBadge";
-import { toggleItemStatusAction } from "@/app/admin/actions/items";
 import { SiteHeader } from "@/components/SiteHeader";
+import { ItemSelectTable } from "@/components/ItemSelectTable";
 
 export default async function ItemsListPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   const user = await requireUser();
@@ -31,40 +30,10 @@ export default async function ItemsListPage({ searchParams }: { searchParams: Pr
         {items.length === 0 ? (
           <div className="card empty">No items match your search.</div>
         ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr><th>Make</th><th>Model</th><th>Serial</th><th>Status</th><th style={{ textAlign: "right" }}>Actions</th></tr>
-              </thead>
-              <tbody>
-                {items.map((it) => (
-                  <tr key={it.id}>
-                    <td data-label="Make">{it.make}</td>
-                    <td data-label="Model">{it.model}</td>
-                    <td className="mono" data-label="Serial">{it.serialNumber}</td>
-                    <td data-label="Status"><StatusBadge status={it.status} /></td>
-                    <td data-label="">
-                      <div className="actions" style={{ justifyContent: "flex-end" }}>
-                        <Link href={`/i/${it.id}`} className="btn btn-ghost btn-sm">View</Link>
-                        {it.status === "ACTIVE" && <Link href={`/items/${it.id}/transfer`} className="btn btn-primary btn-sm">Transfer</Link>}
-                        {isAdmin && <Link href={`/admin/items/${it.id}/qr`} className="btn btn-ghost btn-sm">QR</Link>}
-                        {isAdmin && <Link href={`/admin/items/${it.id}/edit`} className="btn btn-ghost btn-sm">Edit</Link>}
-                        {isAdmin && (
-                          <form action={toggleItemStatusAction}>
-                            <input type="hidden" name="id" value={it.id} />
-                            <input type="hidden" name="status" value={it.status === "RETIRED" ? "ACTIVE" : "RETIRED"} />
-                            <button type="submit" className={`btn btn-sm ${it.status === "RETIRED" ? "btn-secondary" : "btn-danger"}`}>
-                              {it.status === "RETIRED" ? "Reactivate" : "Retire"}
-                            </button>
-                          </form>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ItemSelectTable
+            items={items.map((it) => ({ id: it.id, make: it.make, model: it.model, serialNumber: it.serialNumber, status: it.status }))}
+            isAdmin={isAdmin}
+          />
         )}
       </main>
     </>
