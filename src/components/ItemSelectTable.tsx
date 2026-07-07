@@ -11,7 +11,7 @@ export type ItemRow = { id: string; make: string; model: string; serialNumber: s
 export function ItemSelectTable({ items, isAdmin }: { items: ItemRow[]; isAdmin: boolean }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const toggle = (id: string) => setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggle = (id: string) => setSelected((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   const groupCount = useMemo(() => {
     const keys = new Set<string>();
