@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_RECEIPT_ROWS } from "./receipt-lines";
 
 export const SIGNATURE_PREFIX = "data:image/png;base64,";
 export const MAX_SIGNATURE_BYTES = 5_000_000;
@@ -39,9 +40,20 @@ export const partySchema = z
 
 export type PartyInput = z.infer<typeof partySchema>;
 
-export const transferSchema = z
+const positiveInt = z.coerce.number().int().positive();
+
+export const lineQtySchema = z.object({
+  make: z.string().trim().min(1),
+  model: z.string().trim().min(1),
+  qtyAuth: positiveInt,
+  qtyIssued: positiveInt,
+});
+export type LineQtyInput = z.infer<typeof lineQtySchema>;
+
+export const receiptSchema = z
   .object({
-    itemId: z.string().min(1, "An item is required"),
+    itemIds: z.array(z.string().min(1)).min(1, "Select at least one item"),
+    lines: z.array(lineQtySchema).min(1).max(MAX_RECEIPT_ROWS, "Too many item types for one receipt"),
     sender: partySchema,
     receiver: partySchema,
     receiverSignature: z
@@ -54,5 +66,4 @@ export const transferSchema = z
       ctx.addIssue({ code: "custom", path: ["receiver", "isDcsim"], message: "Both parties cannot be DCSIM" });
     }
   });
-
-export type TransferInput = z.infer<typeof transferSchema>;
+export type ReceiptInput = z.infer<typeof receiptSchema>;
