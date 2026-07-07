@@ -1,18 +1,35 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { SignOutButton } from "@/components/SignOutButton";
 import { isActive, type NavItem } from "@/components/nav";
 
-export function AppHeader({ items, loggedIn, brandHref = "/" }: { items: NavItem[]; loggedIn: boolean; brandHref?: string }) {
+export function AppHeader({ items, loggedIn }: { items: NavItem[]; loggedIn: boolean }) {
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
   const pathname = usePathname();
+  const headerRef = useRef<HTMLElement>(null);
+
+  // Close the open mobile menu on Escape or a tap/click outside the header.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    const onDown = (e: PointerEvent) => {
+      if (headerRef.current && !headerRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onDown);
+    };
+  }, [open]);
+
   return (
-    <header className="app-header">
+    <header className="app-header" ref={headerRef}>
       <div className="app-header__inner">
-        <Link href={brandHref} className="brand" onClick={close}>
+        <Link href="/" className="brand" onClick={close}>
           <span className="brand__mark">HR</span>
           Hand Receipt
         </Link>

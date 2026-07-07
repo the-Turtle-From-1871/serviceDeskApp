@@ -660,8 +660,10 @@ h3 {
   }
 }
 
-/* ---------- Mobile: tables restack into cards, tighter spacing ---------- */
-@media (max-width: 640px) {
+/* ---------- Mobile: tables restack into cards, tighter spacing ----------
+   Matches the 720px header/nav breakpoint so tables restack exactly when the
+   nav collapses to the hamburger (no in-between band with a wide table). */
+@media (max-width: 720px) {
   .table thead { display: none; }
   .table,
   .table tbody,

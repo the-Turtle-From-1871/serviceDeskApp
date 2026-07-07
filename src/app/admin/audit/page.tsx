@@ -4,11 +4,7 @@ import prisma from "@/lib/prisma";
 import { requireAdmin, AuthError } from "@/lib/authz";
 import { StatusBadge } from "@/components/StatusBadge";
 import { formatDateTimeHST } from "@/lib/datetime";
-
-function partyLabel(isDcsim: boolean, name: string, rank: string | null): string {
-  if (isDcsim) return `DCSIM · ${name}`;
-  return rank ? `${rank} ${name}` : name;
-}
+import { formatParty } from "@/modules/transfers/party";
 
 export default async function AuditPage() {
   try {
@@ -41,8 +37,8 @@ export default async function AuditPage() {
               <tr key={t.id}>
                 <td data-label="Receipt"><Link href={`/receipts/${t.receiptNumber}`}>{t.receiptNumber}</Link></td>
                 <td data-label="Item">{t.itemSummary}</td>
-                <td data-label="From">{partyLabel(t.senderIsDcsim, t.senderName, t.senderRank)}</td>
-                <td data-label="To">{partyLabel(t.receiverIsDcsim, t.receiverName, t.receiverRank)}</td>
+                <td data-label="From">{formatParty({ isDcsim: t.senderIsDcsim, name: t.senderName, rank: t.senderRank, unit: t.senderUnit })}</td>
+                <td data-label="To">{formatParty({ isDcsim: t.receiverIsDcsim, name: t.receiverName, rank: t.receiverRank, unit: t.receiverUnit })}</td>
                 <td className="subtle" data-label="Date">{formatDateTimeHST(t.createdAt)}</td>
                 <td data-label="Status"><StatusBadge status={t.status} /></td>
               </tr>

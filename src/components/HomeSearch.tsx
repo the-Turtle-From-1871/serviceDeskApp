@@ -1,30 +1,30 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { liveSearchAction, type ItemResult, type ReceiptHit } from "@/app/actions/search";
+import { liveSearchAction, type LiveSearchResult } from "@/app/actions/search";
 
 export function HomeSearch() {
   const [mode, setMode] = useState<"serial" | "receipt">("serial");
   const [query, setQuery] = useState("");
-  const [items, setItems] = useState<ItemResult[]>([]);
-  const [receipts, setReceipts] = useState<ReceiptHit[]>([]);
-  // The query the currently-held results correspond to. Used so "No matches"
-  // only shows once the *current* query has resolved (avoids a debounce flash).
-  const [resolvedQuery, setResolvedQuery] = useState("");
+  const [result, setResult] = useState<LiveSearchResult>({});
+  // The (mode, query) the held result corresponds to. Keying on BOTH means a
+  // mode switch invalidates `settled` until the new search resolves, so
+  // "No matches" never flashes for a mode/query that hasn't been fetched yet.
+  const [resolvedKey, setResolvedKey] = useState("");
   const reqId = useRef(0);
 
   useEffect(() => {
     const q = query.trim();
     if (!q) return; // blank query: nothing to fetch; render hides stale results via hasQuery
     const id = ++reqId.current;
+    const key = `${mode}\n${q}`;
     const timer = setTimeout(async () => {
       try {
         const res = await liveSearchAction(mode, q);
         if (id !== reqId.current) return; // ignore out-of-order responses
-        setItems(res.items ?? []);
-        setReceipts(res.receipts ?? []);
-        setResolvedQuery(q);
+        setResult(res);
+        setResolvedKey(key);
       } catch {
-        if (id === reqId.current) { setItems([]); setReceipts([]); setResolvedQuery(q); }
+        if (id === reqId.current) { setResult({}); setResolvedKey(key); }
       }
     }, 250);
     return () => clearTimeout(timer);
@@ -32,9 +32,11 @@ export function HomeSearch() {
 
   const trimmed = query.trim();
   const hasQuery = trimmed.length > 0;
-  // Only render "No matches" once the current query has actually resolved, so it
-  // doesn't flash (or get announced) during the debounce before results land.
-  const settled = resolvedQuery === trimmed;
+  const items = result.items ?? [];
+  const receipts = result.receipts ?? [];
+  // Only render "No matches" once the current (mode, query) has resolved, so it
+  // doesn't flash (or get announced) during the debounce or right after a mode switch.
+  const settled = resolvedKey === `${mode}\n${trimmed}`;
   const noMatches = hasQuery && settled && (mode === "serial" ? items.length === 0 : receipts.length === 0);
 
   return (

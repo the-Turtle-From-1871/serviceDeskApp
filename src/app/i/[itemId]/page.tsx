@@ -2,27 +2,27 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getItemWithCreator } from "@/modules/items/items.service";
 import { listReceiptsForItem } from "@/modules/transfers/transfers.service";
+import { formatParty } from "@/modules/transfers/party";
 import { itemQrDataUrl, itemUrl } from "@/modules/items/qr";
 import { StatusBadge } from "@/components/StatusBadge";
 import { formatDateTimeHST } from "@/lib/datetime";
 import { SiteHeader } from "@/components/SiteHeader";
-import { auth } from "@/auth";
-
-function partyLabel(p: { isDcsim: boolean; name: string; rank: string | null; unit: string | null }): string {
-  if (p.isDcsim) return `DCSIM · ${p.name}`;
-  const head = p.rank ? `${p.rank} ${p.name}` : p.name;
-  return p.unit ? `${head} (${p.unit})` : head;
-}
+import { getCurrentUser } from "@/lib/session";
 
 export default async function PublicItemPage({ params }: { params: Promise<{ itemId: string }> }) {
   const { itemId } = await params;
-  const [item, session] = await Promise.all([getItemWithCreator(itemId), auth()]);
-  if (!item) notFound();
-  const loggedIn = !!session?.user;
-  const [receipts, qr] = await Promise.all([
-    listReceiptsForItem(item.id),
-    itemQrDataUrl(item.id).catch((e) => { console.error("[item-page] QR generation failed:", e); return ""; }),
+  // All four fetches depend only on itemId (known up front), so run them together.
+  const [item, user, receipts, qr] = await Promise.all([
+    getItemWithCreator(itemId),
+    getCurrentUser(),
+    listReceiptsForItem(itemId),
+    itemQrDataUrl(itemId).catch((e) => { console.error("[item-page] QR generation failed:", e); return ""; }),
   ]);
+  if (!item) notFound();
+  const loggedIn = !!user && user.isActive;
+  // Current custodian = most recent COMPLETED transfer's receiver (mirrors
+  // getLastReceiver; a VOID transfer must never read as the holder).
+  const currentHolder = receipts.find((t) => t.status === "COMPLETED");
   return (
     <>
       <SiteHeader />
@@ -45,11 +45,11 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
               <dt>Date logged</dt>
               <dd>{formatDateTimeHST(item.createdAt)}</dd>
               <dt>Logged by</dt>
-              <dd>{item.createdBy ? (item.createdBy.rank ? `${item.createdBy.rank} ${item.createdBy.name}` : item.createdBy.name) : "—"}</dd>
+              <dd>{item.createdBy ? formatParty({ isDcsim: false, name: item.createdBy.name, rank: item.createdBy.rank, unit: null }) : "—"}</dd>
               <dt>Current holder</dt>
               <dd>
-                {receipts.length > 0
-                  ? partyLabel({ isDcsim: receipts[0].receiverIsDcsim, name: receipts[0].receiverName, rank: receipts[0].receiverRank, unit: receipts[0].receiverUnit })
+                {currentHolder
+                  ? formatParty({ isDcsim: currentHolder.receiverIsDcsim, name: currentHolder.receiverName, rank: currentHolder.receiverRank, unit: currentHolder.receiverUnit })
                   : "Not yet transferred"}
               </dd>
             </dl>
@@ -75,9 +75,9 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
                   <div>
                     <div><Link href={`/receipts/${t.receiptNumber}`}><strong>{t.receiptNumber}</strong></Link></div>
                     <div className="subtle">
-                      {partyLabel({ isDcsim: t.senderIsDcsim, name: t.senderName, rank: t.senderRank, unit: t.senderUnit })}
+                      {formatParty({ isDcsim: t.senderIsDcsim, name: t.senderName, rank: t.senderRank, unit: t.senderUnit })}
                       {" → "}
-                      {partyLabel({ isDcsim: t.receiverIsDcsim, name: t.receiverName, rank: t.receiverRank, unit: t.receiverUnit })}
+                      {formatParty({ isDcsim: t.receiverIsDcsim, name: t.receiverName, rank: t.receiverRank, unit: t.receiverUnit })}
                       {" · "}{formatDateTimeHST(t.createdAt)}
                     </div>
                   </div>
