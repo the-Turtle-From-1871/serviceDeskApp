@@ -23,7 +23,15 @@ export async function GET(_req: Request, { params }: { params: Promise<{ receipt
     createdAt: t.createdAt,
     receiptUrl: receiptUrl(t.receiptNumber),
     receiverSignature: t.receiverSignature,
-    item: { make: t.item.make, model: t.item.model, serialNumber: t.item.serialNumber, homeUnit: t.item.homeUnit },
+    lines: t.lines.map((ln) => ({
+      lineNo: ln.lineNo,
+      make: ln.make,
+      model: ln.model,
+      unitOfIssue: ln.unitOfIssue,
+      serials: ln.items.map((it) => it.serialNumber),
+      qtyAuth: ln.qtyAuth,
+      qtyIssued: ln.qtyIssued,
+    })),
     sender,
     receiver,
   });

@@ -16,7 +16,17 @@ export default async function ReceiptPage({ params }: { params: Promise<{ receip
       <main className="container container-mid stack">
         <h1 className="page-title">Hand receipt {t.receiptNumber}</h1>
         <div className="card stack-sm">
-          <div><strong>Item:</strong> {t.item.make} {t.item.model} (SN {t.item.serialNumber})</div>
+          <div>
+            <strong>Items:</strong>
+            <ul>
+              {t.lines.map((ln) => (
+                <li key={ln.id}>
+                  {ln.make} {ln.model} — auth {ln.qtyAuth} / issued {ln.qtyIssued} {ln.unitOfIssue}
+                  {" "}(SN {ln.items.map((it) => it.serialNumber).join(", ")})
+                </li>
+              ))}
+            </ul>
+          </div>
           <div><strong>From:</strong> {formatParty({ isDcsim: t.senderIsDcsim, name: t.senderName, rank: t.senderRank, unit: t.senderUnit })}</div>
           <div><strong>To:</strong> {formatParty({ isDcsim: t.receiverIsDcsim, name: t.receiverName, rank: t.receiverRank, unit: t.receiverUnit })}</div>
           <div><strong>Date:</strong> {formatDateTimeHST(t.createdAt)}</div>
