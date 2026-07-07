@@ -20,6 +20,7 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
   ]);
   if (!item) notFound();
   const loggedIn = !!user && user.isActive;
+  const isAdmin = user?.role === "ADMIN";
   // Current custodian = most recent COMPLETED transfer's receiver (mirrors
   // getLastReceiver; a VOID transfer must never read as the holder).
   const currentHolder = receipts.find((t) => t.status === "COMPLETED");
@@ -40,8 +41,12 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
           <div className="card">
             <div className="card__title">Item details</div>
             <dl className="dl">
-              <dt>Notes</dt>
-              <dd>{item.notes || "—"}</dd>
+              {isAdmin && (
+                <>
+                  <dt>Notes</dt>
+                  <dd>{item.notes || "—"}</dd>
+                </>
+              )}
               <dt>Date logged</dt>
               <dd>{formatDateTimeHST(item.createdAt)}</dd>
               <dt>Logged by</dt>
