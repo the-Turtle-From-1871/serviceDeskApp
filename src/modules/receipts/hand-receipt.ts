@@ -1,4 +1,4 @@
-import { PDFDocument, StandardFonts, rgb, degrees, TextAlignment } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb, TextAlignment } from "pdf-lib";
 import QRCode from "qrcode";
 import { DA2062_BASE64 } from "./templates/da2062.base64";
 import { formatDateHST } from "@/lib/datetime";
@@ -102,7 +102,7 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
   const colLeft = 621, colWidth = 23, colCenter = 632, rowTopY = 486, tableBottomY = 58;
   const dateStr = formatDateHST(t.createdAt);
 
-  const rowH = 24; // template row pitch; calibrate against the rendered grid in Step 5
+  const rowH = 24; // template row pitch
   // Issued numbers were landing one row below their item row; anchor their
   // loop one row height above the shared rowTopY (used by the guard-bar
   // blackout rectangle below, which must NOT shift).
