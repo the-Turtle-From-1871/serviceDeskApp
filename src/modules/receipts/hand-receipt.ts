@@ -103,8 +103,12 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
   const dateStr = formatDateHST(t.createdAt);
 
   const rowH = 24; // template row pitch; calibrate against the rendered grid in Step 5
+  // Issued numbers were landing one row below their item row; anchor their
+  // loop one row height above the shared rowTopY (used by the guard-bar
+  // blackout rectangle below, which must NOT shift).
+  const issuedTopY = rowTopY + rowH;
   t.lines.forEach((ln) => {
-    const rowCenterY = rowTopY - (ln.lineNo - 0.5) * rowH;
+    const rowCenterY = issuedTopY - (ln.lineNo - 0.5) * rowH;
     const label = String(ln.qtyIssued);
     page1.drawText(label, { x: colCenter - helv.widthOfTextAtSize(label, 9) / 2, y: rowCenterY, size: 9, font: helv });
   });
