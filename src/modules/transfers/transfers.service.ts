@@ -1,32 +1,47 @@
-import type { Item, Transfer } from "@prisma/client";
+import type { Transfer, TransferLine, TransferItem } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { TransferError } from "./transfers.errors";
-import type { PartyInput, TransferInput } from "./transfers.schema";
+import type { PartyInput, LineQtyInput } from "./transfers.schema";
+import { groupItemsIntoLines, buildItemSummary, MAX_RECEIPT_ROWS } from "./receipt-lines";
 
-type WithItem = Transfer & { item: Item };
+export type ReceiptWithLines = Transfer & { lines: (TransferLine & { items: TransferItem[] })[] };
 
-function itemSummary(i: { make: string; model: string; serialNumber: string }): string {
-  return `${i.make} ${i.model} (SN ${i.serialNumber})`;
-}
+type CreateInput = {
+  itemIds: string[];
+  lines: LineQtyInput[];
+  sender: PartyInput;
+  receiver: PartyInput;
+  receiverSignature: string;
+  createdByUserId?: string;
+};
 
-export async function createTransfer(
-  input: TransferInput & { createdByUserId?: string }
-): Promise<Transfer> {
-  const { itemId, sender, receiver, receiverSignature, createdByUserId } = input;
+const qtyKey = (l: { make: string; model: string }) => `${l.make} ${l.model}`;
+
+export async function createTransfer(input: CreateInput): Promise<Transfer> {
+  const { itemIds, lines: lineQtys, sender, receiver, receiverSignature, createdByUserId } = input;
   return prisma.$transaction(async (tx) => {
-    const item = await tx.item.findUnique({ where: { id: itemId } });
-    if (!item) throw new TransferError("ITEM_NOT_FOUND");
-    if (item.status === "RETIRED") throw new TransferError("ITEM_RETIRED");
-    // Sequential, gap-tolerant receipt number. nextval is atomic across
-    // concurrent transactions, so no collision handling is needed. pg may
-    // return the value as bigint or string; String() handles both.
+    const items = await tx.item.findMany({ where: { id: { in: itemIds } } });
+    if (items.length !== new Set(itemIds).size) throw new TransferError("ITEM_NOT_FOUND");
+    if (items.some((i) => i.status === "RETIRED")) throw new TransferError("ITEM_RETIRED");
+
+    // Authoritative server-side grouping — never trust client line composition.
+    const byId = new Map(items.map((i) => [i.id, i]));
+    const grouped = groupItemsIntoLines(itemIds.map((id) => {
+      const i = byId.get(id)!;
+      return { itemId: i.id, make: i.make, model: i.model, serialNumber: i.serialNumber };
+    }));
+    if (grouped.length > MAX_RECEIPT_ROWS) throw new TransferError("TOO_MANY_LINES");
+
+    // Match submitted qtyAuth/qtyIssued to each server group by make+model.
+    const qtyByKey = new Map(lineQtys.map((l) => [qtyKey(l), l]));
+
     const rows = await tx.$queryRaw<{ n: bigint }[]>`SELECT nextval('receipt_number_seq') AS n`;
     const receiptNumber = `HR-${String(rows[0].n).padStart(6, "0")}`;
+
     return tx.transfer.create({
       data: {
         receiptNumber,
-        itemId,
-        itemSummary: itemSummary(item),
+        itemSummary: buildItemSummary(grouped),
         senderIsDcsim: sender.isDcsim,
         senderName: sender.name,
         senderRank: sender.rank ?? null,
@@ -42,16 +57,30 @@ export async function createTransfer(
         receiverSignature,
         createdByUserId: createdByUserId ?? null,
         status: "COMPLETED",
+        lines: {
+          create: grouped.map((g) => {
+            const q = qtyByKey.get(qtyKey(g));
+            return {
+              lineNo: g.lineNo,
+              make: g.make,
+              model: g.model,
+              unitOfIssue: g.unitOfIssue,
+              qtyAuth: q?.qtyAuth ?? g.defaultQty,
+              qtyIssued: q?.qtyIssued ?? g.defaultQty,
+              items: { create: g.itemIds.map((itemId, idx) => ({ itemId, serialNumber: g.serials[idx] })) },
+            };
+          }),
+        },
       },
     });
   });
 }
 
-export function getTransferByReceiptNumber(receiptNumber: string): Promise<WithItem | null> {
+export function getTransferByReceiptNumber(receiptNumber: string): Promise<ReceiptWithLines | null> {
   return prisma.transfer.findUnique({
     where: { receiptNumber: receiptNumber.toUpperCase() },
-    include: { item: true },
-  }) as Promise<WithItem | null>;
+    include: { lines: { orderBy: { lineNo: "asc" }, include: { items: true } } },
+  }) as Promise<ReceiptWithLines | null>;
 }
 
 // Partial, case-insensitive receipt-number search (for the live type-ahead),
@@ -70,12 +99,15 @@ export function searchReceiptsByNumber(q: string): Promise<{ receiptNumber: stri
 }
 
 export function listReceiptsForItem(itemId: string): Promise<Transfer[]> {
-  return prisma.transfer.findMany({ where: { itemId }, orderBy: { createdAt: "desc" } });
+  return prisma.transfer.findMany({
+    where: { lines: { some: { items: { some: { itemId } } } } },
+    orderBy: { createdAt: "desc" },
+  });
 }
 
 export async function getLastReceiver(itemId: string): Promise<PartyInput | null> {
   const last = await prisma.transfer.findFirst({
-    where: { itemId, status: "COMPLETED" },
+    where: { status: "COMPLETED", lines: { some: { items: { some: { itemId } } } } },
     orderBy: { createdAt: "desc" },
   });
   if (!last) return null;

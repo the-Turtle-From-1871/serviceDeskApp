@@ -1,12 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const item = { id: "itm1", make: "Dell", model: "Latitude", serialNumber: "SN123", status: "ACTIVE" };
-const created = { id: "t1", receiptNumber: "HR-AAAA1111" };
+const items = [
+  { id: "i1", make: "M4", model: "Carbine", serialNumber: "A1", status: "ACTIVE" },
+  { id: "i2", make: "M4", model: "Carbine", serialNumber: "A2", status: "ACTIVE" },
+  { id: "i3", make: "AN/PVS", model: "14", serialNumber: "B7", status: "ACTIVE" },
+];
+const created = { id: "t1", receiptNumber: "HR-000042" };
 
 vi.mock("@/lib/prisma", () => {
   const tx = {
-    item: { findUnique: vi.fn(async () => item) },
-    transfer: { create: vi.fn(async () => created), findFirst: vi.fn(), findMany: vi.fn() },
+    item: { findMany: vi.fn(async () => items) },
+    transfer: { create: vi.fn(async () => created) },
     $queryRaw: vi.fn(async () => [{ n: BigInt(42) }]),
   };
   type Tx = typeof tx;
@@ -16,36 +20,55 @@ vi.mock("@/lib/prisma", () => {
       transfer: {
         findUnique: vi.fn(),
         findFirst: vi.fn(async () => ({ receiverIsDcsim: false, receiverName: "Prev", receiverRank: "PVT", receiverUnit: "B Co", receiverContact: "x", receiverEmail: "p@u.mil" })),
-        findMany: vi.fn(async () => [{ id: "t1", item }]),
+        findMany: vi.fn(async () => []),
       },
     },
     __tx: tx,
   };
 });
 
-import prisma from "@/lib/prisma";
-// @ts-expect-error - __tx is a test-only export added by the vi.mock factory above.
+// @ts-expect-error test-only export
 import { __tx } from "@/lib/prisma";
+import prisma from "@/lib/prisma";
 import { createTransfer, getLastReceiver } from "./transfers.service";
-import type { PartyInput } from "./transfers.schema";
+import type { PartyInput, LineQtyInput } from "./transfers.schema";
 
 const sender = { isDcsim: true, name: "Tech" } as PartyInput;
 const receiver = { isDcsim: false, name: "Jane", rank: "SGT", unit: "A Co", contact: "808", email: "j@u.mil" } as PartyInput;
 const sig = "data:image/png;base64,AAAA";
+const lines: LineQtyInput[] = [
+  { make: "M4", model: "Carbine", qtyAuth: 2, qtyIssued: 2 },
+  { make: "AN/PVS", model: "14", qtyAuth: 1, qtyIssued: 1 },
+];
 
 beforeEach(() => vi.clearAllMocks());
 
-describe("createTransfer", () => {
-  it("writes snapshot columns and a receipt number, status COMPLETED", async () => {
-    await createTransfer({ itemId: "itm1", sender, receiver, receiverSignature: sig });
-    const call = vi.mocked(__tx.transfer.create).mock.calls[0][0].data;
-    expect(call.senderIsDcsim).toBe(true);
-    expect(call.senderName).toBe("Tech");
-    expect(call.receiverEmail).toBe("j@u.mil");
-    expect(call.receiverSignature).toBe(sig);
-    expect(call.status).toBe("COMPLETED");
-    expect(call.receiptNumber).toBe("HR-000042");
-    expect(call.itemSummary).toContain("SN123");
+describe("createTransfer (multi-item)", () => {
+  it("creates nested lines + items with matched quantities and a receipt number", async () => {
+    await createTransfer({ itemIds: ["i1", "i2", "i3"], lines, sender, receiver, receiverSignature: sig });
+    const data = vi.mocked(__tx.transfer.create).mock.calls[0][0].data;
+    expect(data.receiptNumber).toBe("HR-000042");
+    expect(data.itemSummary).toContain("A1");
+    const created = data.lines.create;
+    expect(created).toHaveLength(2);
+    expect(created[0]).toMatchObject({ lineNo: 1, make: "M4", model: "Carbine", qtyAuth: 2, qtyIssued: 2 });
+    expect(created[0].items.create).toEqual([
+      { itemId: "i1", serialNumber: "A1" },
+      { itemId: "i2", serialNumber: "A2" },
+    ]);
+    expect(created[1]).toMatchObject({ lineNo: 2, make: "AN/PVS", model: "14", qtyAuth: 1, qtyIssued: 1 });
+  });
+
+  it("rejects when an item is retired", async () => {
+    vi.mocked(__tx.item.findMany).mockResolvedValueOnce([{ ...items[0], status: "RETIRED" }, items[1], items[2]]);
+    await expect(createTransfer({ itemIds: ["i1", "i2", "i3"], lines, sender, receiver, receiverSignature: sig }))
+      .rejects.toThrow("ITEM_RETIRED");
+  });
+
+  it("rejects when an item id is missing", async () => {
+    vi.mocked(__tx.item.findMany).mockResolvedValueOnce([items[0]]);
+    await expect(createTransfer({ itemIds: ["i1", "i2", "i3"], lines, sender, receiver, receiverSignature: sig }))
+      .rejects.toThrow("ITEM_NOT_FOUND");
   });
 });
 
