@@ -1,4 +1,5 @@
 export const MAX_RECEIPT_ROWS = 18;
+export const MAX_ITEMS_PER_ROW = 10;
 
 export type LineItem = { itemId: string; make: string; model: string; serialNumber: string };
 

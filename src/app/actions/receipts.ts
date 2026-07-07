@@ -29,6 +29,7 @@ export async function createReceiptAction(_prev: unknown, formData: FormData) {
         ITEM_NOT_FOUND: "One of the selected items no longer exists.",
         ITEM_RETIRED: "One of the selected items is retired and cannot be transferred.",
         TOO_MANY_LINES: "Too many item types for one receipt — split into two receipts.",
+        TOO_MANY_PER_ROW: "Too many of one item on a single row — max 10 per make+model. Split into two receipts.",
       };
       return { error: map[e.code] ?? "Could not create the receipt." };
     }

@@ -35,6 +35,13 @@ describe("buildHandReceiptPdf", () => {
     expect(Buffer.from(bytes.slice(0, 5)).toString()).toBe("%PDF-");
     expect(bytes.length).toBeGreaterThan(1000);
   });
+  it("renders a 10-serial row without error", async () => {
+    const bytes = await buildHandReceiptPdf({
+      ...base,
+      lines: [{ lineNo: 1, make: "M4", model: "Carbine", unitOfIssue: "EA", serials: Array.from({ length: 10 }, (_, n) => `SN${n}`), qtyAuth: 10, qtyIssued: 10 }],
+    });
+    expect(Buffer.from(bytes.slice(0, 5)).toString()).toBe("%PDF-");
+  });
 });
 
 describe("partyHeader", () => {

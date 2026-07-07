@@ -60,7 +60,7 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
   const set = (
     name: string,
     value: string,
-    opts: { multiline?: boolean; size?: number; center?: boolean; fitWidth?: boolean } = {}
+    opts: { multiline?: boolean; size?: number; center?: boolean; fitWidth?: boolean; fitBox?: boolean } = {}
   ) => {
     try {
       const field = form.getTextField(name);
@@ -73,6 +73,17 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
         const rect = field.acroField.getWidgets()[0].getRectangle();
         const maxW = rect.width - 6;
         while (size > 6 && helv.widthOfTextAtSize(value, size) > maxW) size -= 0.5;
+      }
+      if (opts.fitBox) {
+        const rect = field.acroField.getWidgets()[0].getRectangle();
+        const maxW = rect.width - 6, maxH = rect.height - 4;
+        const paras = value.split("\n");
+        const fits = (s: number) => {
+          let lines = 0;
+          for (const p of paras) lines += Math.max(1, Math.ceil(helv.widthOfTextAtSize(p, s) / maxW));
+          return lines * s * 1.15 <= maxH;
+        };
+        while (size > 5 && !fits(size)) size -= 0.5;
       }
       field.setFontSize(size);
       field.setText(value);
@@ -87,7 +98,7 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
 
   t.lines.forEach((ln, i) => {
     set(`ITEM NO aRow${ln.lineNo}`, String(ln.lineNo), { size: 9, center: true });
-    set(`ITEM DESCRIPTION cRow${ln.lineNo}`, `${ln.make} ${ln.model}\nSER NO: ${ln.serials.join(", ")}`, { multiline: true, size: 9 });
+    set(`ITEM DESCRIPTION cRow${ln.lineNo}`, `${ln.make} ${ln.model}\nSER NO: ${ln.serials.join(", ")}`, { multiline: true, size: 9, fitBox: true });
     set(`UI.${i}`, ln.unitOfIssue, { size: 9, center: true });
     set(`QTY.${i}`, String(ln.qtyAuth), { size: 9, center: true }); // QTY AUTH column
   });

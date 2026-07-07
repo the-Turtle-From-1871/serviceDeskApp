@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupItemsIntoLines, buildItemSummary, MAX_RECEIPT_ROWS } from "./receipt-lines";
+import { groupItemsIntoLines, buildItemSummary, MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW } from "./receipt-lines";
 
 const item = (itemId: string, make: string, model: string, serialNumber: string) =>
   ({ itemId, make, model, serialNumber });
@@ -40,4 +40,8 @@ describe("buildItemSummary", () => {
 
 describe("MAX_RECEIPT_ROWS", () => {
   it("is 18", () => expect(MAX_RECEIPT_ROWS).toBe(18));
+});
+
+describe("MAX_ITEMS_PER_ROW", () => {
+  it("is 10", () => expect(MAX_ITEMS_PER_ROW).toBe(10));
 });

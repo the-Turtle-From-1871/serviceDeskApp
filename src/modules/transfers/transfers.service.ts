@@ -2,7 +2,7 @@ import type { Transfer, TransferLine, TransferItem } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { TransferError } from "./transfers.errors";
 import type { PartyInput, LineQtyInput } from "./transfers.schema";
-import { groupItemsIntoLines, buildItemSummary, MAX_RECEIPT_ROWS } from "./receipt-lines";
+import { groupItemsIntoLines, buildItemSummary, MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW } from "./receipt-lines";
 
 export type ReceiptWithLines = Transfer & { lines: (TransferLine & { items: TransferItem[] })[] };
 
@@ -34,6 +34,7 @@ export async function createTransfer(input: CreateInput): Promise<Transfer> {
       return { itemId: i.id, make: i.make, model: i.model, serialNumber: i.serialNumber };
     }));
     if (grouped.length > MAX_RECEIPT_ROWS) throw new TransferError("TOO_MANY_LINES");
+    if (grouped.some((g) => g.serials.length > MAX_ITEMS_PER_ROW)) throw new TransferError("TOO_MANY_PER_ROW");
 
     // Match submitted qtyAuth/qtyIssued to each server group by make+model.
     const qtyByKey = new Map(lineQtys.map((l) => [qtyKey(l), l]));

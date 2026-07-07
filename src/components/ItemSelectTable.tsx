@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/StatusBadge";
 import { toggleItemStatusAction } from "@/app/admin/actions/items";
-import { MAX_RECEIPT_ROWS } from "@/modules/transfers/receipt-lines";
+import { MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW } from "@/modules/transfers/receipt-lines";
 
 export type ItemRow = { id: string; make: string; model: string; serialNumber: string; status: "ACTIVE" | "RETIRED" };
 
@@ -20,7 +20,16 @@ export function ItemSelectTable({ items, isAdmin }: { items: ItemRow[]; isAdmin:
   }, [selected, items]);
   const tooMany = groupCount > MAX_RECEIPT_ROWS;
 
-  const create = () => { if (selected.size && !tooMany) router.push(`/receipts/new?items=${[...selected].join(",")}`); };
+  const maxGroupSize = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const it of items) if (selected.has(it.id)) counts.set(`${it.make} ${it.model}`, (counts.get(`${it.make} ${it.model}`) ?? 0) + 1);
+    let max = 0;
+    for (const n of counts.values()) if (n > max) max = n;
+    return max;
+  }, [selected, items]);
+  const tooManyPerRow = maxGroupSize > MAX_ITEMS_PER_ROW;
+
+  const create = () => { if (selected.size && !tooMany && !tooManyPerRow) router.push(`/receipts/new?items=${[...selected].join(",")}`); };
 
   return (
     <>
@@ -59,6 +68,8 @@ export function ItemSelectTable({ items, isAdmin }: { items: ItemRow[]; isAdmin:
           <span>{selected.size} selected · {groupCount} row{groupCount === 1 ? "" : "s"}</span>
           {tooMany
             ? <span role="alert" className="alert-error">Too many item types ({groupCount}). Max {MAX_RECEIPT_ROWS} per receipt — split into two.</span>
+            : tooManyPerRow
+            ? <span role="alert" className="alert-error">Too many of one item ({maxGroupSize}). Max {MAX_ITEMS_PER_ROW} per row — split into two.</span>
             : <button className="btn btn-primary" onClick={create}>Create receipt from {selected.size} selected</button>}
         </div>
       )}

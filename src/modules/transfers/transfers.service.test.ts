@@ -59,6 +59,16 @@ describe("createTransfer (multi-item)", () => {
     expect(created[1]).toMatchObject({ lineNo: 2, make: "AN/PVS", model: "14", qtyAuth: 1, qtyIssued: 1 });
   });
 
+  it("rejects more than 10 items in one make+model row", async () => {
+    const many = Array.from({ length: 11 }, (_, n) => ({ id: `x${n}`, make: "M4", model: "Carbine", serialNumber: `S${n}`, status: "ACTIVE" }));
+    vi.mocked(__tx.item.findMany).mockResolvedValueOnce(many);
+    await expect(createTransfer({
+      itemIds: many.map((m) => m.id),
+      lines: [{ make: "M4", model: "Carbine", qtyAuth: 11, qtyIssued: 11 }],
+      sender, receiver, receiverSignature: sig,
+    })).rejects.toThrow("TOO_MANY_PER_ROW");
+  });
+
   it("rejects when an item is retired", async () => {
     vi.mocked(__tx.item.findMany).mockResolvedValueOnce([{ ...items[0], status: "RETIRED" }, items[1], items[2]]);
     await expect(createTransfer({ itemIds: ["i1", "i2", "i3"], lines, sender, receiver, receiverSignature: sig }))
