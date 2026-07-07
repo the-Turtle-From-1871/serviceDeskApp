@@ -1,4 +1,4 @@
-import { PDFDocument, StandardFonts, rgb, TextAlignment } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb, degrees, TextAlignment } from "pdf-lib";
 import QRCode from "qrcode";
 import { DA2062_BASE64 } from "./templates/da2062.base64";
 import { formatDateHST } from "@/lib/datetime";
@@ -106,8 +106,9 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
   form.updateFieldAppearances(helv);
   form.flatten();
 
-  // --- Column A: per-row issued quantity + guard bar (no signature here —
-  // the recipient signature now lives in its own block below the table).
+  // --- Column A: per-row issued quantity at the top, then the recipient
+  // signature + date drawn VERTICALLY in the empty column below the last item
+  // row, with guard bars blacking out the remaining empty space (DA 2062 layout).
   const page1 = pdf.getPage(0);
   const black = rgb(0, 0, 0);
   const colLeft = 621, colWidth = 23, colCenter = 632, rowTopY = 486, tableBottomY = 58;
@@ -115,8 +116,7 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
 
   const rowH = 24; // template row pitch
   // Issued numbers were landing one row below their item row; anchor their
-  // loop one row height above the shared rowTopY (used by the guard-bar
-  // blackout rectangle below, which must NOT shift).
+  // loop one row height above rowTopY so each lands on its own item row.
   const issuedTopY = rowTopY + rowH;
   t.lines.forEach((ln) => {
     const rowCenterY = issuedTopY - (ln.lineNo - 0.5) * rowH;
@@ -124,22 +124,38 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
     page1.drawText(label, { x: colCenter - helv.widthOfTextAtSize(label, 9) / 2, y: rowCenterY, size: 9, font: helv });
   });
 
-  // Black out the unused lower portion of Column A below the last populated row.
-  const lastRowBottom = rowTopY - t.lines.length * rowH;
-  if (lastRowBottom - tableBottomY > 1) {
-    page1.drawRectangle({ x: colLeft, y: tableBottomY, width: colWidth, height: lastRowBottom - tableBottomY, color: black });
-  }
-
-  // Recipient signature block, below the item table (not in Column A).
-  const sigY = 40;
-  if (t.receiverSignature.startsWith("data:image/png;base64,")) {
+  // Recipient signature + date sit vertically in the column below the last row.
+  const lastRowBottom = issuedTopY - t.lines.length * rowH;
+  const sigBottom = Math.max(tableBottomY + 130, lastRowBottom - 150);
+  let blockTop = sigBottom;
+  let drewImage = false;
+  if (t.receiverSignature && t.receiverSignature.startsWith("data:image/png;base64,")) {
     try {
       const sig = await pdf.embedPng(Buffer.from(t.receiverSignature.split(",")[1], "base64"));
-      const w = 120, h = Math.min((sig.height / sig.width) * w, 28);
-      page1.drawImage(sig, { x: 250, y: sigY, width: w, height: h });
-    } catch { /* fall through to text */ }
+      const barH = 22;
+      const barW = Math.min(barH * (sig.width / sig.height), 72);
+      page1.drawImage(sig, { x: 642, y: sigBottom, width: barW, height: barH, rotate: degrees(90) });
+      const dateY = sigBottom + barW + 10;
+      page1.drawText(dateStr, { x: colCenter + 4, y: dateY, size: 9, font: helv, rotate: degrees(90) });
+      blockTop = dateY + helv.widthOfTextAtSize(dateStr, 9);
+      drewImage = true;
+    } catch {
+      /* fall through to the text label below */
+    }
   }
-  page1.drawText(`${partyHeaderShort(t.receiver)}  ${dateStr}`, { x: 250, y: sigY - 10, size: 8, font: helv });
+  if (!drewImage) {
+    const label = `${partyHeaderShort(t.receiver)}   ${dateStr}`;
+    page1.drawText(label, { x: colCenter + 4, y: sigBottom, size: 9, font: helv, rotate: degrees(90) });
+    blockTop = sigBottom + helv.widthOfTextAtSize(label, 9);
+  }
+  // Guard bar below the signature block, down to the table bottom.
+  if (sigBottom - 4 - tableBottomY > 1) {
+    page1.drawRectangle({ x: colLeft, y: tableBottomY, width: colWidth, height: sigBottom - 4 - tableBottomY, color: black });
+  }
+  // Guard bar above the signature block, up to the bottom of the last item row.
+  if (lastRowBottom - (blockTop + 2) > 1) {
+    page1.drawRectangle({ x: colLeft, y: blockTop + 2, width: colWidth, height: lastRowBottom - (blockTop + 2), color: black });
+  }
 
   // --- Custody record page: both parties in full, QR, signature.
   const page = pdf.addPage([612, 792]);
