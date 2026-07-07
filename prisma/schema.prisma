@@ -43,7 +43,7 @@ model Item {
   status       ItemStatus @default(ACTIVE)
   createdBy    User       @relation("CreatedItems", fields: [createdById], references: [id])
   createdById  String
-  transfers    Transfer[]
+  transferItems TransferItem[]
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 }
@@ -56,9 +56,8 @@ enum TransferStatus {
 model Transfer {
   id            String @id @default(cuid())
   receiptNumber String @unique
-  item          Item   @relation(fields: [itemId], references: [id])
-  itemId        String
   itemSummary   String
+  lines         TransferLine[]
 
   senderIsDcsim Boolean @default(false)
   senderName    String
@@ -81,4 +80,31 @@ model Transfer {
 
   status    TransferStatus @default(COMPLETED)
   createdAt DateTime       @default(now())
+}
+
+model TransferLine {
+  id          String   @id @default(cuid())
+  transfer    Transfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  transferId  String
+  lineNo      Int
+  make        String
+  model       String
+  unitOfIssue String   @default("EA")
+  qtyAuth     Int
+  qtyIssued   Int
+  items       TransferItem[]
+
+  @@index([transferId])
+}
+
+model TransferItem {
+  id             String       @id @default(cuid())
+  line           TransferLine @relation(fields: [transferLineId], references: [id], onDelete: Cascade)
+  transferLineId String
+  item           Item         @relation(fields: [itemId], references: [id])
+  itemId         String
+  serialNumber   String
+
+  @@index([itemId])
+  @@index([transferLineId])
 }
