@@ -7,7 +7,10 @@ const base: ReceiptData = {
   createdAt: new Date("2026-07-02T00:00:00Z"),
   receiptUrl: "https://app.example/receipts/HR-AAAA1111",
   receiverSignature: "",
-  item: { make: "Dell", model: "Latitude", serialNumber: "SN123", homeUnit: "A Co" },
+  lines: [
+    { lineNo: 1, make: "M4", model: "Carbine", unitOfIssue: "EA", serials: ["A1", "A2", "A3"], qtyAuth: 3, qtyIssued: 3 },
+    { lineNo: 2, make: "AN/PVS", model: "14", unitOfIssue: "EA", serials: ["B7"], qtyAuth: 1, qtyIssued: 1 },
+  ],
   sender: { isDcsim: true, name: "SPC Tech", rank: null, unit: null, contact: null, email: null },
   receiver: { isDcsim: false, name: "Jane Doe", rank: "SGT", unit: "A Co", contact: "808-555", email: "j@u.mil" },
 };
@@ -26,6 +29,11 @@ describe("buildHandReceiptPdf", () => {
       receiverSignature: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
     });
     expect(Buffer.from(bytes.slice(0, 5)).toString()).toBe("%PDF-");
+  });
+  it("renders a multi-line receipt into a valid PDF", async () => {
+    const bytes = await buildHandReceiptPdf(base);
+    expect(Buffer.from(bytes.slice(0, 5)).toString()).toBe("%PDF-");
+    expect(bytes.length).toBeGreaterThan(1000);
   });
 });
 
