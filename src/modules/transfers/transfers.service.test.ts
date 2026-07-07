@@ -70,6 +70,24 @@ describe("createTransfer (multi-item)", () => {
     await expect(createTransfer({ itemIds: ["i1", "i2", "i3"], lines, sender, receiver, receiverSignature: sig }))
       .rejects.toThrow("ITEM_NOT_FOUND");
   });
+
+  it("dedupes a repeated itemId so one physical item appears once", async () => {
+    // Real Prisma `findMany({ where: { id: { in: itemIds } } })` collapses duplicate
+    // ids to distinct rows, so mock it that way here (unlike the default mock, which
+    // ignores its input and always returns all three fixture items).
+    vi.mocked(__tx.item.findMany).mockResolvedValueOnce([items[0], items[2]]);
+    const dedupeLines: LineQtyInput[] = [
+      { make: "M4", model: "Carbine", qtyAuth: 1, qtyIssued: 1 },
+      { make: "AN/PVS", model: "14", qtyAuth: 1, qtyIssued: 1 },
+    ];
+    await createTransfer({ itemIds: ["i1", "i1", "i3"], lines: dedupeLines, sender, receiver, receiverSignature: sig });
+    const data = vi.mocked(__tx.transfer.create).mock.calls[0][0].data;
+    const created = data.lines.create;
+    const m4Line = created.find((l) => l.make === "M4")!;
+    expect(m4Line.items.create).toEqual([{ itemId: "i1", serialNumber: "A1" }]);
+    expect(m4Line.qtyAuth).toBe(1);
+    expect(m4Line.qtyIssued).toBe(1);
+  });
 });
 
 describe("getLastReceiver", () => {

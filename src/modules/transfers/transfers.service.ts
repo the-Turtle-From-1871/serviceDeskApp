@@ -25,8 +25,11 @@ export async function createTransfer(input: CreateInput): Promise<Transfer> {
     if (items.some((i) => i.status === "RETIRED")) throw new TransferError("ITEM_RETIRED");
 
     // Authoritative server-side grouping — never trust client line composition.
+    // Dedupe first so a repeated itemId can't produce two TransferItem rows for
+    // one physical item (nothing in the schema blocks that at the DB level).
     const byId = new Map(items.map((i) => [i.id, i]));
-    const grouped = groupItemsIntoLines(itemIds.map((id) => {
+    const uniqueIds = [...new Set(itemIds)];
+    const grouped = groupItemsIntoLines(uniqueIds.map((id) => {
       const i = byId.get(id)!;
       return { itemId: i.id, make: i.make, model: i.model, serialNumber: i.serialNumber };
     }));
