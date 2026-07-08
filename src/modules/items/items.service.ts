@@ -1,6 +1,8 @@
-import type { Item, ItemStatus } from "@prisma/client";
+import type { Item, ItemStatus, Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { newItemSchema, type NewItemInput } from "./items.schema";
+import { parseItemsCsv } from "./csv";
+import { planImport, type SkippedRow } from "./import";
 
 export async function createItem(input: NewItemInput, createdById: string): Promise<Item> {
   const data = newItemSchema.parse(input);
@@ -55,4 +57,33 @@ export function searchItemsBySerial(q: string): Promise<Item[]> {
     orderBy: { createdAt: "desc" },
     take: 50, // bound the public result set (a 1-char query would otherwise scan all items)
   });
+}
+
+export async function importItems(
+  text: string,
+  filename: string,
+  createdById: string
+): Promise<{ added: number; skipped: SkippedRow[]; error?: string }> {
+  const { rows, error } = parseItemsCsv(text);
+  if (error) return { added: 0, skipped: [], error };
+
+  const existing = new Set(
+    (await prisma.item.findMany({ select: { serialNumber: true } })).map((i) => i.serialNumber)
+  );
+  const { toCreate, skipped } = planImport(rows, existing);
+
+  await prisma.$transaction([
+    prisma.item.createMany({ data: toCreate.map((d) => ({ ...d, createdById })) }),
+    prisma.importBatch.create({
+      data: {
+        createdById,
+        filename,
+        addedCount: toCreate.length,
+        skippedCount: skipped.length,
+        skipped: skipped as unknown as Prisma.InputJsonValue,
+      },
+    }),
+  ]);
+
+  return { added: toCreate.length, skipped };
 }
