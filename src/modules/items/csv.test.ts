@@ -37,4 +37,18 @@ describe("parseItemsCsv", () => {
     const { error } = parseItemsCsv(`make,model,serialNumber\n${body}\n`);
     expect(error).toMatch(/limit/i);
   });
+
+  it("errors (does not throw) on unparseable CSV", () => {
+    const { rows, error } = parseItemsCsv('make,model,serialNumber\n"A,B,C\n');
+    expect(rows).toHaveLength(0);
+    expect(error).toMatch(/could not parse|format/i);
+  });
+
+  it("does not falsely reject when the first data row is ragged", () => {
+    // Header has all 3 required columns; first data row is short (missing serialNumber cell).
+    const { rows, error } = parseItemsCsv("make,model,serialNumber\nA,B\nC,D,E\n");
+    expect(error).toBeUndefined();
+    expect(rows).toHaveLength(2);
+    expect(rows[0].serialNumber).toBe(""); // ragged cell becomes empty, later skipped by validation downstream
+  });
 });

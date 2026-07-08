@@ -27,13 +27,15 @@ export function parseItemsCsv(text: string): { rows: RawRow[]; error?: string } 
   if (!text.trim()) return { rows: [], error: "The CSV file is empty." };
 
   let records: Record<string, string>[];
+  let headers: string[] = [];
   try {
     records = parse(text, {
       bom: true,
       trim: true,
       skip_empty_lines: true,
       relax_column_count: true,
-      columns: (header: string[]) => header.map((h) => HEADER_MAP[normalizeHeader(h)] ?? normalizeHeader(h)),
+      columns: (header: string[]) =>
+        (headers = header.map((h) => HEADER_MAP[normalizeHeader(h)] ?? normalizeHeader(h))),
     });
   } catch {
     return { rows: [], error: "Could not parse the CSV file. Check the format and try again." };
@@ -41,7 +43,7 @@ export function parseItemsCsv(text: string): { rows: RawRow[]; error?: string } 
 
   if (records.length === 0) return { rows: [], error: "The CSV has no data rows." };
 
-  const present = new Set(Object.keys(records[0]));
+  const present = new Set(headers);
   const missing = (["make", "model", "serialNumber"] as const).filter((k) => !present.has(k));
   if (missing.length) return { rows: [], error: `Missing required column(s): ${missing.join(", ")}.` };
 
