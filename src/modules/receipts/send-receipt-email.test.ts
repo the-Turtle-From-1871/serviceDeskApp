@@ -21,7 +21,11 @@ describe("sendReceiptEmails", () => {
     );
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0][0].to).toBe("j@u.mil");
+    // Subject is just the hand receipt number.
+    expect(send.mock.calls[0][0].subject).toBe(base.receiptNumber);
+    // Body carries a short message plus the receipt link.
     expect(send.mock.calls[0][0].text).toContain(base.receiptUrl);
+    expect(send.mock.calls[0][0].text).toContain(base.receiptNumber);
   });
 
   it("never throws when the underlying sender fails", async () => {

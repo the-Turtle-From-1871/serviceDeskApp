@@ -12,10 +12,10 @@ type Args = {
 function body(a: Args, party: "sender" | "receiver"): string {
   const role = party === "sender" ? "released" : "received";
   return [
-    `A hand receipt (${a.receiptNumber}) recording that you ${role} custody of`,
-    `${a.itemSummary} has been generated.`,
+    `Hand receipt ${a.receiptNumber} has been generated for ${a.itemSummary}, recording that you ${role} custody of this equipment.`,
     ``,
-    `View or download it here: ${a.receiptUrl}`,
+    `View or download the signed hand receipt here:`,
+    a.receiptUrl,
   ].join("\n");
 }
 
@@ -32,7 +32,7 @@ export async function sendReceiptEmails(args: Args, deps: { sender?: EmailSender
       try {
         await sender.send({
           to: t.email,
-          subject: `Hand receipt ${args.receiptNumber}`,
+          subject: args.receiptNumber,
           text: body(args, t.party),
         });
       } catch (e) {
