@@ -32,6 +32,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ receip
           <div><strong>Date:</strong> {formatDateTimeHST(t.createdAt)}</div>
         </div>
         <div className="row">
+          <a className="btn btn-secondary" href={`/receipts/${t.receiptNumber}/pdf?preview=1`} target="_blank" rel="noopener noreferrer">Preview PDF</a>
           <a className="btn btn-primary" href={`/receipts/${t.receiptNumber}/pdf`}>Download PDF</a>
           <Link className="btn btn-ghost" href="/">Search another</Link>
         </div>

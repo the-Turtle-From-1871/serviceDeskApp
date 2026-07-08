@@ -41,6 +41,7 @@ export function ReceiptBuilderForm({ itemIds, lines, senderPrefill }: { itemIds:
       <div className="card stack-sm">
         <h2 className="page-title">Receipt {receipt} created</h2>
         <div className="row">
+          <a className="btn btn-secondary" href={`/receipts/${receipt}/pdf?preview=1`} target="_blank" rel="noopener noreferrer">Preview PDF</a>
           <a className="btn btn-primary" href={`/receipts/${receipt}/pdf`}>Download PDF</a>
           <a className="btn btn-secondary" href={`/receipts/${receipt}`}>View receipt</a>
           <a className="btn btn-ghost" href="/items">Back to items</a>

@@ -5,10 +5,13 @@ import { receiptUrl } from "@/modules/items/qr";
 // PUBLIC BY DESIGN (reviewed exception to the "auth-first" guardrail): hand
 // receipts are intentionally public so recipients without accounts can look up
 // and download their own receipt by number/serial. No per-user ownership model.
-export async function GET(_req: Request, { params }: { params: Promise<{ receiptNumber: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ receiptNumber: string }> }) {
   const { receiptNumber } = await params;
   const t = await getTransferByReceiptNumber(receiptNumber);
   if (!t) return new Response("Not found", { status: 404 });
+
+  // `?preview` renders the PDF inline in the browser; otherwise force a download.
+  const inline = new URL(req.url).searchParams.has("preview");
 
   const sender: ReceiptParty = {
     isDcsim: t.senderIsDcsim, name: t.senderName, rank: t.senderRank, unit: t.senderUnit, contact: t.senderContact, email: t.senderEmail,
@@ -39,7 +42,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ receipt
   return new Response(Buffer.from(bytes), {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="hand-receipt-${t.receiptNumber}.pdf"`,
+      "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="hand-receipt-${t.receiptNumber}.pdf"`,
     },
   });
 }
