@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState } from "react";
 
 // `name` (optional) renders a hidden input carrying the PNG data URL (existing
 // usage). `onChange` (optional) reports the data URL to a parent on each
@@ -8,12 +8,17 @@ export function SignaturePad({ name, onChange }: { name?: string; onChange?: (da
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [dataUrl, setDataUrl] = useState("");
   const drawing = useRef(false);
-  const emit = useCallback((u: string) => { setDataUrl(u); onChange?.(u); }, [onChange]);
+  // Keep the latest onChange in a ref (updated in an effect, not during render)
+  // so the pointer-event listeners below subscribe ONCE and never re-bind — the
+  // component stays correct even if a caller passes an unstable onChange.
+  const onChangeRef = useRef(onChange);
+  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
 
   useEffect(() => {
     const c = canvasRef.current!;
     const ctx = c.getContext("2d")!;
     ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.strokeStyle = "#111";
+    const emit = (u: string) => { setDataUrl(u); onChangeRef.current?.(u); };
     const pos = (e: PointerEvent) => {
       const r = c.getBoundingClientRect();
       return { x: (e.clientX - r.left) * (c.width / r.width), y: (e.clientY - r.top) * (c.height / r.height) };
@@ -25,12 +30,13 @@ export function SignaturePad({ name, onChange }: { name?: string; onChange?: (da
     c.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
     return () => { c.removeEventListener("pointerdown", down); c.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
-  }, [emit]);
+  }, []);
 
   const clear = () => {
     const c = canvasRef.current!;
     c.getContext("2d")!.clearRect(0, 0, c.width, c.height);
-    emit("");
+    setDataUrl("");
+    onChangeRef.current?.("");
   };
 
   return (
