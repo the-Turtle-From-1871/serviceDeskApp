@@ -1,8 +1,9 @@
 "use server";
 import { z } from "zod";
 import { requireUser } from "@/lib/authz";
-import { changeUserPassword } from "@/modules/users/users.service";
+import { changeUserPassword, updateUserSignature } from "@/modules/users/users.service";
 import { PasswordChangeError } from "@/modules/users/users.errors";
+import { signatureError } from "@/lib/signature";
 
 const schema = z.object({
   currentPassword: z.string().min(1, "Enter your current password"),
@@ -30,4 +31,30 @@ export async function changePasswordAction(_prev: unknown, formData: FormData) {
     return { error: "Something went wrong. Please try again." };
   }
   return { ok: true };
+}
+
+export async function saveSignatureAction(_prev: unknown, formData: FormData) {
+  const user = await requireUser();
+  const raw = String(formData.get("signature") ?? "");
+  const clear = formData.get("clear") === "1";
+
+  if (clear) {
+    try {
+      await updateUserSignature(user.id, null);
+    } catch (e) {
+      console.error("[saveSignatureAction] clear failed:", e);
+      return { error: "Something went wrong. Please try again." };
+    }
+    return { ok: true as const };
+  }
+
+  const err = signatureError(raw);
+  if (err) return { error: err };
+  try {
+    await updateUserSignature(user.id, raw);
+  } catch (e) {
+    console.error("[saveSignatureAction] save failed:", e);
+    return { error: "Something went wrong. Please try again." };
+  }
+  return { ok: true as const };
 }
