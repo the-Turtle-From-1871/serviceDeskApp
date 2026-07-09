@@ -42,6 +42,11 @@ describe("buildHandReceiptPdf", () => {
     });
     expect(Buffer.from(bytes.slice(0, 5)).toString()).toBe("%PDF-");
   });
+  it("renders a CLOSED receipt with the VOID/CLEARED overlay without throwing", async () => {
+    const bytes = await buildHandReceiptPdf({ ...base, status: "CLOSED" });
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(bytes.length).toBeGreaterThan(1000);
+  });
 });
 
 describe("partyHeader", () => {

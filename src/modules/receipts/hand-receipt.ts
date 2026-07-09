@@ -157,6 +157,30 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
     page1.drawRectangle({ x: colLeft, y: blockTop + 2, width: colWidth, height: lastRowBottom - (blockTop + 2), color: black });
   }
 
+  // When the receipt is closed (all property returned), stamp the form page with
+  // a diagonal VOID/CLEARED watermark and strike the recipient signature block,
+  // per the DA 2062 "redline" clear-out treatment.
+  if (t.status === "CLOSED") {
+    const red = rgb(0.78, 0.12, 0.12);
+    const { width, height } = page1.getSize();
+    page1.drawText("VOID / CLEARED", {
+      x: width * 0.12,
+      y: height * 0.42,
+      size: 54,
+      font: bold,
+      color: red,
+      rotate: degrees(35),
+      opacity: 0.28,
+    });
+    // Strike through the vertical signature block in muted red.
+    page1.drawLine({
+      start: { x: colLeft - 2, y: sigBottom },
+      end: { x: colLeft + colWidth + 2, y: blockTop + 2 },
+      thickness: 2,
+      color: red,
+    });
+  }
+
   // --- Custody record page: both parties in full, QR, signature.
   const page = pdf.addPage([612, 792]);
   const ink = rgb(0.06, 0.09, 0.16), muted = rgb(0.4, 0.45, 0.5);
