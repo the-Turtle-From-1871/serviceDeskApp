@@ -42,8 +42,17 @@ describe("buildHandReceiptPdf", () => {
     });
     expect(Buffer.from(bytes.slice(0, 5)).toString()).toBe("%PDF-");
   });
-  it("renders a CLOSED receipt with the VOID/CLEARED overlay without throwing", async () => {
+  it("renders a CLOSED receipt with the CLOSED overlay without throwing", async () => {
     const bytes = await buildHandReceiptPdf({ ...base, status: "CLOSED" });
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(bytes.length).toBeGreaterThan(1000);
+  });
+  it("renders a CLOSED receipt with a closedBy attestation without throwing", async () => {
+    const bytes = await buildHandReceiptPdf({
+      ...base,
+      status: "CLOSED",
+      closedBy: { name: "SPC Tech", signature: "data:image/png;base64,iVBORw0KGgo=", date: base.createdAt },
+    });
     expect(bytes).toBeInstanceOf(Uint8Array);
     expect(bytes.length).toBeGreaterThan(1000);
   });

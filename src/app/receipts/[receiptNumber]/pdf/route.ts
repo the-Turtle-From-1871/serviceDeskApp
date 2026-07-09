@@ -1,4 +1,5 @@
 import { getTransferByReceiptNumber } from "@/modules/transfers/transfers.service";
+import { getClosingReturn } from "@/modules/returns/returns.service";
 import { buildHandReceiptPdf, type ReceiptParty } from "@/modules/receipts/hand-receipt";
 import { receiptUrl } from "@/modules/items/qr";
 
@@ -20,6 +21,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ receiptN
     isDcsim: t.receiverIsDcsim, name: t.receiverName, rank: t.receiverRank, unit: t.receiverUnit, contact: t.receiverContact, email: t.receiverEmail,
   };
 
+  let closedBy: { name: string; signature: string; date: Date } | undefined;
+  if (t.status === "CLOSED") {
+    const cr = await getClosingReturn(t.id);
+    if (cr) closedBy = { name: cr.processedByName, signature: cr.processedBySignature ?? "", date: cr.createdAt };
+  }
+
   const bytes = await buildHandReceiptPdf({
     receiptNumber: t.receiptNumber,
     status: t.status,
@@ -37,6 +44,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ receiptN
     })),
     sender,
     receiver,
+    closedBy,
   });
 
   return new Response(Buffer.from(bytes), {

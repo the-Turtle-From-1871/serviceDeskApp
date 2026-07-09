@@ -21,6 +21,7 @@ export type ReceiptData = {
   lines: { lineNo: number; make: string; model: string; unitOfIssue: string; serials: string[]; qtyAuth: number; qtyIssued: number }[];
   sender: ReceiptParty;
   receiver: ReceiptParty;
+  closedBy?: { name: string; signature: string; date: Date };
 };
 
 const templateBytes = () => Buffer.from(DA2062_BASE64, "base64");
@@ -163,10 +164,10 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
   if (t.status === "CLOSED") {
     const red = rgb(0.78, 0.12, 0.12);
     const { width, height } = page1.getSize();
-    page1.drawText("VOID / CLEARED", {
-      x: width * 0.12,
+    page1.drawText("CLOSED", {
+      x: width * 0.24,
       y: height * 0.42,
-      size: 54,
+      size: 72,
       font: bold,
       color: red,
       rotate: degrees(35),
@@ -211,6 +212,23 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
     page.drawText(k, { x: 56, y, size: 11, font: bold, color: muted });
     page.drawText(v, { x: 200, y, size: 12, font: helv, color: ink });
     y -= 22;
+  }
+
+  if (t.closedBy) {
+    y -= 6;
+    page.drawText("Accepted / closed by", { x: 56, y, size: 11, font: bold, color: muted });
+    y -= 16;
+    page.drawText(`${t.closedBy.name} · ${formatDateHST(t.closedBy.date)}`, { x: 66, y, size: 11, font: helv, color: ink });
+    y -= 6;
+    if (t.closedBy.signature && t.closedBy.signature.startsWith("data:image/png;base64,")) {
+      try {
+        const csig = await pdf.embedPng(Buffer.from(t.closedBy.signature.split(",")[1], "base64"));
+        const w = 180, h = Math.min((csig.height / csig.width) * w, 70);
+        page.drawImage(csig, { x: 66, y: y - h, width: w, height: h });
+        y -= h + 6;
+      } catch { y -= 6; }
+    }
+    y -= 10;
   }
 
   y -= 16;
