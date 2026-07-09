@@ -2,13 +2,15 @@
 import { useActionState, useMemo, useState } from "react";
 import { processReturnAction } from "@/app/actions/returns";
 import type { HeldItem } from "@/modules/returns/plan";
+import { TechnicianSignatureField } from "@/components/TechnicianSignatureField";
 
 const VERIFY_LABEL = "I have physically verified that the serial number on the device matches the screen";
 
-export function ReturnForm({ receiptNumber, held }: { receiptNumber: string; held: HeldItem[] }) {
+export function ReturnForm({ receiptNumber, held, savedSignature }: { receiptNumber: string; held: HeldItem[]; savedSignature?: string | null }) {
   const [state, action, pending] = useActionState(processReturnAction, undefined);
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [verified, setVerified] = useState(false);
+  const [signature, setSignature] = useState(savedSignature ?? "");
 
   const lines = useMemo(() => {
     const by = new Map<number, { lineNo: number; make: string; model: string; items: HeldItem[] }>();
@@ -50,7 +52,7 @@ export function ReturnForm({ receiptNumber, held }: { receiptNumber: string; hel
     );
   }
 
-  const canSubmit = checked.size > 0 && verified && !pending;
+  const canSubmit = checked.size > 0 && verified && signature.length > 0 && !pending;
 
   return (
     <form action={action} className="stack">
@@ -73,6 +75,11 @@ export function ReturnForm({ receiptNumber, held }: { receiptNumber: string; hel
         <input type="checkbox" name="verified" checked={verified} onChange={(e) => setVerified(e.target.checked)} />
         {VERIFY_LABEL}
       </label>
+      <fieldset className="card stack-sm">
+        <legend className="card__title">Technician signature</legend>
+        <p className="subtle">Sign to confirm you accepted these items.</p>
+        <TechnicianSignatureField name="signature" saveOptName="saveSignature" savedSignature={savedSignature} onChange={setSignature} />
+      </fieldset>
       <div className="row">
         <button className="btn btn-primary" disabled={!canSubmit} type="submit">
           {pending ? "Processing…" : "Process return"}
