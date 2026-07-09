@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getTransferByReceiptNumber } from "@/modules/transfers/transfers.service";
+import { getClosingReturn } from "@/modules/returns/returns.service";
 import { formatParty } from "@/modules/transfers/party";
 import { formatDateTimeHST } from "@/lib/datetime";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -14,6 +15,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ receip
   const me = await getCurrentUser();
   const isAdmin = me?.role === "ADMIN";
   const closed = t.status === "CLOSED";
+  const closing = closed ? await getClosingReturn(t.id) : null;
 
   return (
     <>
@@ -22,8 +24,17 @@ export default async function ReceiptPage({ params }: { params: Promise<{ receip
         <h1 className="page-title">Hand receipt {t.receiptNumber}</h1>
 
         {closed && (
-          <div className="card alert-error" role="status">
-            <strong>VOID / CLEARED</strong> — all equipment returned. This receipt is closed and read-only.
+          <div className="card alert-error stack-sm" role="status">
+            <div><strong>CLOSED</strong> — all equipment returned. This receipt is closed and read-only.</div>
+            {closing && (
+              <div className="stack-sm">
+                <div className="subtle">Accepted by {closing.processedByName} · {formatDateTimeHST(closing.createdAt)}</div>
+                {closing.processedBySignature && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={closing.processedBySignature} alt={`Signature of ${closing.processedByName}`} className="sig-preview" />
+                )}
+              </div>
+            )}
           </div>
         )}
 
