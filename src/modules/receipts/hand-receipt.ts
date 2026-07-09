@@ -159,7 +159,7 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
   }
 
   // When the receipt is closed (all property returned), stamp the form page with
-  // a diagonal VOID/CLEARED watermark and strike the recipient signature block,
+  // a diagonal CLOSED watermark and strike the recipient signature block,
   // per the DA 2062 "redline" clear-out treatment.
   if (t.status === "CLOSED") {
     const red = rgb(0.78, 0.12, 0.12);

@@ -50,7 +50,7 @@ function fullBody(a: ReturnEmailArgs): string {
     ``,
     `Your active balance for this hand receipt is now zero. Your accountability is officially closed and you are no longer financially liable for tracking ID ${a.receiptNumber}.`,
     ``,
-    `A closed-out copy of the form (marked VOID / CLEARED) is available here:`,
+    `A closed-out copy of the form (marked CLOSED) is available here:`,
     a.receiptUrl,
     ``,
     `Save this email as your digital clearance record for out-processing, PCS, or ETS.`,
