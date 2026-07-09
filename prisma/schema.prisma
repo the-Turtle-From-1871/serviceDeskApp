@@ -12,21 +12,22 @@ enum Role {
 }
 
 model User {
-  id            String   @id @default(cuid())
-  rank          String?
-  name          String
-  email         String   @unique
-  unit          String?
-  contactNumber String?
-  passwordHash  String
-  role          Role     @default(USER)
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id             String   @id @default(cuid())
+  rank           String?
+  name           String
+  email          String   @unique
+  unit           String?
+  contactNumber  String?
+  passwordHash   String
+  signatureImage String?
+  role           Role     @default(USER)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  createdItems     Item[]        @relation("CreatedItems")
-  createdTransfers Transfer[]    @relation("CreatedTransfers")
-  importBatches    ImportBatch[] @relation("ImportBatches")
+  createdItems     Item[]              @relation("CreatedItems")
+  createdTransfers Transfer[]          @relation("CreatedTransfers")
+  importBatches    ImportBatch[]       @relation("ImportBatches")
   returnsProcessed ReturnTransaction[] @relation("ReturnsProcessed")
 }
 
@@ -36,18 +37,18 @@ enum ItemStatus {
 }
 
 model Item {
-  id           String     @id @default(cuid())
-  make         String
-  model        String
-  serialNumber String
-  homeUnit     String?
-  notes        String?
-  status       ItemStatus @default(ACTIVE)
-  createdBy    User       @relation("CreatedItems", fields: [createdById], references: [id])
-  createdById  String
+  id            String         @id @default(cuid())
+  make          String
+  model         String
+  serialNumber  String
+  homeUnit      String?
+  notes         String?
+  status        ItemStatus     @default(ACTIVE)
+  createdBy     User           @relation("CreatedItems", fields: [createdById], references: [id])
+  createdById   String
   transferItems TransferItem[]
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 }
 
 enum TransferStatus {
@@ -61,8 +62,8 @@ enum ReturnKind {
 }
 
 model Transfer {
-  id            String @id @default(cuid())
-  receiptNumber String @unique
+  id            String         @id @default(cuid())
+  receiptNumber String         @unique
   itemSummary   String
   lines         TransferLine[]
 
@@ -88,17 +89,17 @@ model Transfer {
   status    TransferStatus @default(OPEN)
   createdAt DateTime       @default(now())
 
-  returns   ReturnTransaction[] @relation("TransferReturns")
+  returns ReturnTransaction[] @relation("TransferReturns")
 }
 
 model TransferLine {
-  id          String   @id @default(cuid())
-  transfer    Transfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  id          String         @id @default(cuid())
+  transfer    Transfer       @relation(fields: [transferId], references: [id], onDelete: Cascade)
   transferId  String
   lineNo      Int
   make        String
   model       String
-  unitOfIssue String   @default("EA")
+  unitOfIssue String         @default("EA")
   qtyAuth     Int
   qtyIssued   Int
   items       TransferItem[]
@@ -133,19 +134,20 @@ model ImportBatch {
 }
 
 model ReturnTransaction {
-  id                String   @id @default(cuid())
-  transfer          Transfer @relation("TransferReturns", fields: [transferId], references: [id], onDelete: Cascade)
-  transferId        String
-  receiptNumber     String
-  kind              ReturnKind
-  processedByUser   User?    @relation("ReturnsProcessed", fields: [processedByUserId], references: [id])
-  processedByUserId String?
-  processedByName   String
-  processedByEmail  String
-  returned          Json
-  returnedCount     Int
-  remainingCount    Int
-  createdAt         DateTime @default(now())
+  id                   String     @id @default(cuid())
+  transfer             Transfer   @relation("TransferReturns", fields: [transferId], references: [id], onDelete: Cascade)
+  transferId           String
+  receiptNumber        String
+  kind                 ReturnKind
+  processedByUser      User?      @relation("ReturnsProcessed", fields: [processedByUserId], references: [id])
+  processedByUserId    String?
+  processedByName      String
+  processedByEmail     String
+  processedBySignature String?
+  returned             Json
+  returnedCount        Int
+  remainingCount       Int
+  createdAt            DateTime   @default(now())
 
   @@index([transferId])
 }

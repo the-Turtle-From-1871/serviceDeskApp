@@ -64,3 +64,9 @@ export async function changeUserPassword(
     data: { passwordHash: await hashPassword(newPassword) },
   });
 }
+
+// Sets or clears the caller's reusable saved signature (a PNG data URL, or null
+// to remove it). Validation of the data URL happens at the action layer.
+export function updateUserSignature(id: string, signature: string | null): Promise<void> {
+  return prisma.user.update({ where: { id }, data: { signatureImage: signature } }).then(() => undefined);
+}
