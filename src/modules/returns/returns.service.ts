@@ -13,8 +13,11 @@ export type ProcessReturnResult =
   | { error: string };
 
 // Everything runs inside one transaction so the receipt is read, validated, and
-// mutated atomically — no window for a concurrent return to double-return an
-// item or race the OPEN->CLOSED transition.
+// mutated atomically, avoiding a race on the OPEN->CLOSED transition. Postgres/
+// Prisma default to READ COMMITTED, so the transaction alone does not stop two
+// concurrent calls from reading the same "held" snapshot — the compare-and-swap
+// below (updateMany scoped to returnedAt: null, then asserting the affected
+// count) is what actually prevents a double-return of the same item.
 export async function processReturn(input: ProcessReturnInput): Promise<ProcessReturnResult> {
   const { receiptNumber, selectedItemIds, processedBy } = input;
   try {
@@ -36,7 +39,13 @@ export async function processReturn(input: ProcessReturnInput): Promise<ProcessR
       if (error || !plan) throw new ReturnError("INVALID", error ?? "Invalid return.");
 
       const returnedIds = plan.returned.map((r) => r.transferItemId);
-      await tx.transferItem.updateMany({ where: { id: { in: returnedIds } }, data: { returnedAt: new Date() } });
+      const result = await tx.transferItem.updateMany({
+        where: { id: { in: returnedIds }, returnedAt: null },
+        data: { returnedAt: new Date() },
+      });
+      if (result.count !== returnedIds.length) {
+        throw new ReturnError("INVALID", "One or more items were already returned by a concurrent transaction. Please retry.");
+      }
 
       if (plan.kind === "FULL") {
         await tx.transfer.update({ where: { id: receipt.id }, data: { status: "CLOSED" } });
