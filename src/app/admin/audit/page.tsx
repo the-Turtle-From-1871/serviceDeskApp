@@ -19,6 +19,10 @@ export default async function AuditPage() {
     take: 50,
     include: { createdBy: { select: { name: true } } },
   });
+  const returns = await prisma.returnTransaction.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
   return (
     <div className="stack">
       <div>
@@ -46,6 +50,36 @@ export default async function AuditPage() {
                         {b.skippedCount}
                         {skipped.length > 0 && <span className="subtle"> ({skipped.map((s) => s.serialNumber || "?").join(", ")})</span>}
                       </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {returns.length > 0 && (
+        <div className="stack-sm">
+          <h2 className="card__title">Property returns</h2>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr><th>Date</th><th>By</th><th>Receipt</th><th>Kind</th><th>Returned</th><th>Remaining</th></tr>
+              </thead>
+              <tbody>
+                {returns.map((r) => {
+                  const items = Array.isArray(r.returned) ? (r.returned as { serialNumber: string }[]) : [];
+                  return (
+                    <tr key={r.id}>
+                      <td className="subtle" data-label="Date">{formatDateTimeHST(r.createdAt)}</td>
+                      <td data-label="By">{r.processedByName}</td>
+                      <td data-label="Receipt"><Link href={`/receipts/${r.receiptNumber}`}>{r.receiptNumber}</Link></td>
+                      <td data-label="Kind">{r.kind}</td>
+                      <td data-label="Returned">
+                        {r.returnedCount}
+                        {items.length > 0 && <span className="subtle"> ({items.map((i) => i.serialNumber || "?").join(", ")})</span>}
+                      </td>
+                      <td data-label="Remaining">{r.remainingCount}</td>
                     </tr>
                   );
                 })}
