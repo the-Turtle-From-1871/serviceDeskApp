@@ -20,6 +20,7 @@ export default async function ItemsListPage({ searchParams }: { searchParams: Pr
             <p className="subtle">{items.length} item{items.length === 1 ? "" : "s"}</p>
           </div>
           {isAdmin && <Link href="/admin/items/new" className="btn btn-primary spacer">+ Log new item</Link>}
+          {isAdmin && <Link href="/admin/items/import" className="btn btn-secondary spacer">Import CSV</Link>}
         </div>
 
         <form className="row" style={{ gap: 8 }}>
