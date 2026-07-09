@@ -14,12 +14,46 @@ export default async function AuditPage() {
     throw e;
   }
   const transfers = await prisma.transfer.findMany({ orderBy: { createdAt: "desc" }, take: 200 });
+  const imports = await prisma.importBatch.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 50,
+    include: { createdBy: { select: { name: true } } },
+  });
   return (
     <div className="stack">
       <div>
         <h1 className="page-title">Audit log</h1>
         <p className="subtle">Every hand receipt across all items — {transfers.length} shown.</p>
       </div>
+      {imports.length > 0 && (
+        <div className="stack-sm">
+          <h2 className="card__title">CSV imports</h2>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr><th>Date</th><th>By</th><th>File</th><th>Added</th><th>Skipped</th></tr>
+              </thead>
+              <tbody>
+                {imports.map((b) => {
+                  const skipped = (b.skipped as { serialNumber: string; reason: string }[]) ?? [];
+                  return (
+                    <tr key={b.id}>
+                      <td className="subtle" data-label="Date">{formatDateTimeHST(b.createdAt)}</td>
+                      <td data-label="By">{b.createdBy.name}</td>
+                      <td data-label="File">{b.filename}</td>
+                      <td data-label="Added">{b.addedCount}</td>
+                      <td data-label="Skipped">
+                        {b.skippedCount}
+                        {skipped.length > 0 && <span className="subtle"> ({skipped.map((s) => s.serialNumber || "?").join(", ")})</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
       <div className="table-wrap">
         <table className="table">
           <thead>
