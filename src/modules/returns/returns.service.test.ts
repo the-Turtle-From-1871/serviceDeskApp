@@ -5,6 +5,8 @@ import { createTransfer, getTransferByReceiptNumber } from "@/modules/transfers/
 import { createItem } from "@/modules/items/items.service";
 import { processReturn } from "./returns.service";
 
+const SIG = "data:image/png;base64,iVBORw0KGgo=";
+
 let adminId: string;
 beforeAll(() => migrateTestDb());
 beforeEach(async () => {
@@ -33,7 +35,7 @@ const processedBy = () => ({ id: adminId, name: "Tech", email: "t@x.co" });
 
 test("partial return stamps returnedAt, writes a PARTIAL ledger row, keeps the receipt OPEN", async () => {
   const { receiptNumber, items } = await seedReceipt();
-  const res = await processReturn({ receiptNumber, selectedItemIds: [items[0].id], processedBy: processedBy() });
+  const res = await processReturn({ receiptNumber, selectedItemIds: [items[0].id], signature: SIG, processedBy: processedBy() });
   if ("error" in res) throw new Error(res.error);
   expect(res.plan.kind).toBe("PARTIAL");
 
@@ -46,12 +48,13 @@ test("partial return stamps returnedAt, writes a PARTIAL ledger row, keeps the r
   const ledger = await prisma.returnTransaction.findMany();
   expect(ledger).toHaveLength(1);
   expect(ledger[0]).toMatchObject({ kind: "PARTIAL", returnedCount: 1, remainingCount: 1, receiptNumber });
+  expect(ledger[0].processedBySignature).toBe(SIG);
 });
 
 test("returning the last held item closes the receipt as FULL", async () => {
   const { receiptNumber, items } = await seedReceipt();
-  await processReturn({ receiptNumber, selectedItemIds: [items[0].id], processedBy: processedBy() });
-  const res = await processReturn({ receiptNumber, selectedItemIds: [items[1].id], processedBy: processedBy() });
+  await processReturn({ receiptNumber, selectedItemIds: [items[0].id], signature: SIG, processedBy: processedBy() });
+  const res = await processReturn({ receiptNumber, selectedItemIds: [items[1].id], signature: SIG, processedBy: processedBy() });
   if ("error" in res) throw new Error(res.error);
   expect(res.plan.kind).toBe("FULL");
 
@@ -63,16 +66,16 @@ test("returning the last held item closes the receipt as FULL", async () => {
 
 test("a return against a CLOSED receipt errors and writes nothing", async () => {
   const { receiptNumber, items } = await seedReceipt();
-  await processReturn({ receiptNumber, selectedItemIds: [items[0].id, items[1].id], processedBy: processedBy() });
+  await processReturn({ receiptNumber, selectedItemIds: [items[0].id, items[1].id], signature: SIG, processedBy: processedBy() });
   const before = await prisma.returnTransaction.count();
-  const res = await processReturn({ receiptNumber, selectedItemIds: [items[0].id], processedBy: processedBy() });
+  const res = await processReturn({ receiptNumber, selectedItemIds: [items[0].id], signature: SIG, processedBy: processedBy() });
   expect("error" in res && res.error).toMatch(/closed/i);
   expect(await prisma.returnTransaction.count()).toBe(before);
 });
 
 test("selecting an already-returned item errors", async () => {
   const { receiptNumber, items } = await seedReceipt();
-  await processReturn({ receiptNumber, selectedItemIds: [items[0].id], processedBy: processedBy() });
-  const res = await processReturn({ receiptNumber, selectedItemIds: [items[0].id], processedBy: processedBy() });
+  await processReturn({ receiptNumber, selectedItemIds: [items[0].id], signature: SIG, processedBy: processedBy() });
+  const res = await processReturn({ receiptNumber, selectedItemIds: [items[0].id], signature: SIG, processedBy: processedBy() });
   expect("error" in res && res.error).toMatch(/not currently held/i);
 });

@@ -5,6 +5,8 @@ import { processReturn } from "@/modules/returns/returns.service";
 import { sendReturnEmail } from "@/modules/returns/send-return-email";
 import { receiptUrl } from "@/modules/items/qr";
 import type { ReturnPlan } from "@/modules/returns/plan";
+import { updateUserSignature } from "@/modules/users/users.service";
+import { signatureError } from "@/lib/signature";
 
 type Result = { ok: true; plan: ReturnPlan; receiptNumber: string; closed: boolean } | { error: string };
 
@@ -24,13 +26,24 @@ export async function processReturnAction(_prev: unknown, formData: FormData): P
   const selectedItemIds = formData.getAll("itemId").map(String).filter(Boolean);
   if (selectedItemIds.length === 0) return { error: "Select at least one serial number to return." };
 
+  const signature = String(formData.get("signature") ?? "");
+  const sigErr = signatureError(signature);
+  if (sigErr) return { error: sigErr };
+  const saveSignature = formData.get("saveSignature") === "on";
+
   try {
     const res = await processReturn({
       receiptNumber,
       selectedItemIds,
+      signature,
       processedBy: { id: admin.id, name: admin.name, email: admin.email },
     });
     if ("error" in res) return { error: res.error };
+
+    if (saveSignature) {
+      try { await updateUserSignature(admin.id, signature); }
+      catch (err) { console.error("[processReturnAction] save signature failed:", err); }
+    }
 
     revalidatePath(`/receipts/${res.receiptNumber}`);
     revalidatePath("/admin/audit");

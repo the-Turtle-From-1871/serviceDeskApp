@@ -5,6 +5,7 @@ import { ReturnError } from "./returns.errors";
 export type ProcessReturnInput = {
   receiptNumber: string;
   selectedItemIds: string[];
+  signature: string;
   processedBy: { id: string; name: string; email: string };
 };
 
@@ -19,7 +20,7 @@ export type ProcessReturnResult =
 // below (updateMany scoped to returnedAt: null, then asserting the affected
 // count) is what actually prevents a double-return of the same item.
 export async function processReturn(input: ProcessReturnInput): Promise<ProcessReturnResult> {
-  const { receiptNumber, selectedItemIds, processedBy } = input;
+  const { receiptNumber, selectedItemIds, signature, processedBy } = input;
   try {
     return await prisma.$transaction(async (tx) => {
       // Serialize concurrent returns on the SAME receipt: lock the Transfer row
@@ -68,6 +69,7 @@ export async function processReturn(input: ProcessReturnInput): Promise<ProcessR
           processedByUserId: processedBy.id,
           processedByName: processedBy.name,
           processedByEmail: processedBy.email,
+          processedBySignature: signature,
           returned: plan.returned.map((r) => ({ serialNumber: r.serialNumber, make: r.make, model: r.model })),
           returnedCount: plan.returned.length,
           remainingCount: plan.remaining.length,
@@ -84,4 +86,13 @@ export async function processReturn(input: ProcessReturnInput): Promise<ProcessR
     if (e instanceof ReturnError) return { error: e.message };
     throw e;
   }
+}
+
+// The single FULL return that closed a receipt (its technician's name/signature/
+// date is the closed-out attestation shown on the receipt page and PDF).
+export function getClosingReturn(transferId: string) {
+  return prisma.returnTransaction.findFirst({
+    where: { transferId, kind: "FULL" },
+    orderBy: { createdAt: "desc" },
+  });
 }
