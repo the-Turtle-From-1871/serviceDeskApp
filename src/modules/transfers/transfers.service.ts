@@ -114,7 +114,9 @@ export async function getLastReceiver(itemId: string): Promise<PartyInput | null
     where: { lines: { some: { items: { some: { itemId } } } } },
     orderBy: { createdAt: "desc" },
   });
-  if (!last) return null;
+  // Only the most-recent transfer reflects current custody; a CLOSED receipt
+  // means the item was returned, so there is no current holder to prefill.
+  if (!last || last.status !== "OPEN") return null;
   return {
     isDcsim: last.receiverIsDcsim,
     name: last.receiverName,

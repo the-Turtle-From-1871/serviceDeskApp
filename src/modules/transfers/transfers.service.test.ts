@@ -19,7 +19,7 @@ vi.mock("@/lib/prisma", () => {
       $transaction: vi.fn(async (fn: (tx: Tx) => unknown) => fn(tx)),
       transfer: {
         findUnique: vi.fn(),
-        findFirst: vi.fn(async () => ({ receiverIsDcsim: false, receiverName: "Prev", receiverRank: "PVT", receiverUnit: "B Co", receiverContact: "x", receiverEmail: "p@u.mil" })),
+        findFirst: vi.fn(async () => ({ status: "OPEN", receiverIsDcsim: false, receiverName: "Prev", receiverRank: "PVT", receiverUnit: "B Co", receiverContact: "x", receiverEmail: "p@u.mil" })),
         findMany: vi.fn(async () => []),
       },
     },
@@ -108,6 +108,7 @@ describe("getLastReceiver", () => {
 
   it("maps null receiver snapshot fields to undefined for a DCSIM receiver", async () => {
     vi.mocked(prisma.transfer.findFirst).mockResolvedValueOnce({
+      status: "OPEN",
       receiverIsDcsim: true,
       receiverName: "DCSIM Tech",
       receiverRank: null,
@@ -124,5 +125,25 @@ describe("getLastReceiver", () => {
       contact: undefined,
       email: undefined,
     });
+  });
+
+  it("returns null when the most-recent transfer is CLOSED (item already returned, no current holder)", async () => {
+    vi.mocked(prisma.transfer.findFirst).mockResolvedValueOnce({
+      status: "CLOSED",
+      receiverIsDcsim: false,
+      receiverName: "Prev",
+      receiverRank: "PVT",
+      receiverUnit: "B Co",
+      receiverContact: "x",
+      receiverEmail: "p@u.mil",
+    } as Awaited<ReturnType<typeof prisma.transfer.findFirst>>);
+    const p = await getLastReceiver("itm1");
+    expect(p).toBeNull();
+  });
+
+  it("returns null when there is no prior transfer at all", async () => {
+    vi.mocked(prisma.transfer.findFirst).mockResolvedValueOnce(null);
+    const p = await getLastReceiver("itm1");
+    expect(p).toBeNull();
   });
 });

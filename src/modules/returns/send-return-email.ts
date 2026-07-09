@@ -67,7 +67,10 @@ export async function sendReturnEmail(args: ReturnEmailArgs, deps: { sender?: Em
   const customer = !args.receiver.isDcsim && args.receiver.email ? args.receiver.email : undefined;
 
   const to = customer ?? desk;
-  if (!to) return; // nobody to notify
+  if (!to) {
+    console.info("[return-email] no recipient (customer email + G6_SERVICE_DESK_EMAIL both unset); skipping notification");
+    return; // nobody to notify
+  }
   const cc = to !== desk ? desk : undefined; // don't CC the same address we're sending to
 
   const subject =

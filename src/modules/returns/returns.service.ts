@@ -22,6 +22,15 @@ export async function processReturn(input: ProcessReturnInput): Promise<ProcessR
   const { receiptNumber, selectedItemIds, processedBy } = input;
   try {
     return await prisma.$transaction(async (tx) => {
+      // Serialize concurrent returns on the SAME receipt: lock the Transfer row
+      // before reading held items, so two partial returns can't each read a stale
+      // snapshot and both decline to close — which would strand the receipt OPEN
+      // with nothing held. Under READ COMMITTED the second txn blocks here until the
+      // first commits, then reads fresh state.
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM "Transfer" WHERE "receiptNumber" = ${receiptNumber.toUpperCase()} FOR UPDATE`;
+      if (locked.length === 0) throw new ReturnError("NOT_FOUND", "Receipt not found.");
+
       const receipt = await tx.transfer.findUnique({
         where: { receiptNumber: receiptNumber.toUpperCase() },
         include: { lines: { orderBy: { lineNo: "asc" }, include: { items: true } } },
@@ -75,8 +84,4 @@ export async function processReturn(input: ProcessReturnInput): Promise<ProcessR
     if (e instanceof ReturnError) return { error: e.message };
     throw e;
   }
-}
-
-export function listReturnsForReceipt(transferId: string) {
-  return prisma.returnTransaction.findMany({ where: { transferId }, orderBy: { createdAt: "asc" } });
 }
