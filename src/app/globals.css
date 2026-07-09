@@ -508,7 +508,8 @@ h3 {
   background: currentColor;
 }
 .badge-active,
-.badge-completed {
+.badge-completed,
+.badge-open {
   color: var(--green);
   background: var(--green-soft);
   border-color: var(--green-border);
@@ -519,7 +520,8 @@ h3 {
   border-color: var(--amber-border);
 }
 .badge-retired,
-.badge-cancelled {
+.badge-cancelled,
+.badge-closed {
   color: var(--slate);
   background: var(--slate-soft);
   border-color: var(--slate-border);

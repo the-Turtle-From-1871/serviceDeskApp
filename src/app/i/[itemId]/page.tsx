@@ -21,9 +21,9 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
   if (!item) notFound();
   const loggedIn = !!user && user.isActive;
   const isAdmin = user?.role === "ADMIN";
-  // Current custodian = most recent COMPLETED transfer's receiver (mirrors
-  // getLastReceiver; a VOID transfer must never read as the holder).
-  const currentHolder = receipts.find((t) => t.status === "COMPLETED");
+  // Current custodian = most recent OPEN transfer's receiver; a CLOSED
+  // transfer must never read as the holder.
+  const currentHolder = receipts.find((t) => t.status === "OPEN");
   return (
     <>
       <SiteHeader />

@@ -27,6 +27,7 @@ model User {
   createdItems     Item[]        @relation("CreatedItems")
   createdTransfers Transfer[]    @relation("CreatedTransfers")
   importBatches    ImportBatch[] @relation("ImportBatches")
+  returnsProcessed ReturnTransaction[] @relation("ReturnsProcessed")
 }
 
 enum ItemStatus {
@@ -50,8 +51,13 @@ model Item {
 }
 
 enum TransferStatus {
-  COMPLETED
-  VOID
+  OPEN
+  CLOSED
+}
+
+enum ReturnKind {
+  PARTIAL
+  FULL
 }
 
 model Transfer {
@@ -79,8 +85,10 @@ model Transfer {
   createdByUser   User?   @relation("CreatedTransfers", fields: [createdByUserId], references: [id])
   createdByUserId String?
 
-  status    TransferStatus @default(COMPLETED)
+  status    TransferStatus @default(OPEN)
   createdAt DateTime       @default(now())
+
+  returns   ReturnTransaction[] @relation("TransferReturns")
 }
 
 model TransferLine {
@@ -105,6 +113,7 @@ model TransferItem {
   item           Item         @relation(fields: [itemId], references: [id])
   itemId         String
   serialNumber   String
+  returnedAt     DateTime?
 
   @@index([itemId])
   @@index([transferLineId])
@@ -121,4 +130,22 @@ model ImportBatch {
   createdAt    DateTime @default(now())
 
   @@index([createdById])
+}
+
+model ReturnTransaction {
+  id                String   @id @default(cuid())
+  transfer          Transfer @relation("TransferReturns", fields: [transferId], references: [id], onDelete: Cascade)
+  transferId        String
+  receiptNumber     String
+  kind              ReturnKind
+  processedByUser   User?    @relation("ReturnsProcessed", fields: [processedByUserId], references: [id])
+  processedByUserId String?
+  processedByName   String
+  processedByEmail  String
+  returned          Json
+  returnedCount     Int
+  remainingCount    Int
+  createdAt         DateTime @default(now())
+
+  @@index([transferId])
 }

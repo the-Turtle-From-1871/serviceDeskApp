@@ -3,7 +3,7 @@ import { buildHandReceiptPdf, partyHeader, partyHeaderShort, type ReceiptData } 
 
 const base: ReceiptData = {
   receiptNumber: "HR-AAAA1111",
-  status: "COMPLETED",
+  status: "OPEN",
   createdAt: new Date("2026-07-02T00:00:00Z"),
   receiptUrl: "https://app.example/receipts/HR-AAAA1111",
   receiverSignature: "",

@@ -60,7 +60,7 @@ export async function createTransfer(input: CreateInput): Promise<Transfer> {
         receiverEmail: receiver.email ?? null,
         receiverSignature,
         createdByUserId: createdByUserId ?? null,
-        status: "COMPLETED",
+        status: "OPEN",
         lines: {
           create: grouped.map((g) => {
             const q = qtyByKey.get(qtyKey(g));
@@ -111,7 +111,7 @@ export function listReceiptsForItem(itemId: string): Promise<Transfer[]> {
 
 export async function getLastReceiver(itemId: string): Promise<PartyInput | null> {
   const last = await prisma.transfer.findFirst({
-    where: { status: "COMPLETED", lines: { some: { items: { some: { itemId } } } } },
+    where: { lines: { some: { items: { some: { itemId } } } } },
     orderBy: { createdAt: "desc" },
   });
   if (!last) return null;
