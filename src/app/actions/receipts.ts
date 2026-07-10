@@ -1,9 +1,10 @@
 "use server";
-import { requireUser } from "@/lib/authz";
-import { createTransfer } from "@/modules/transfers/transfers.service";
+import { requireUser, AuthError } from "@/lib/authz";
+import { createTransfer, getTransferByReceiptNumber } from "@/modules/transfers/transfers.service";
 import { receiptSchema } from "@/modules/transfers/transfers.schema";
 import { TransferError } from "@/modules/transfers/transfers.errors";
 import { sendReceiptEmails } from "@/modules/receipts/send-receipt-email";
+import { sendPickupEmail, customerParty, pickupItems } from "@/modules/receipts/send-pickup-email";
 import { renderReceiptPdf } from "@/modules/receipts/render";
 import { receiptUrl } from "@/modules/items/qr";
 import { parseReceiptForm } from "./receipts.parse";
@@ -42,4 +43,42 @@ export async function createReceiptAction(_prev: unknown, formData: FormData) {
     return { error: "Something went wrong creating the receipt. Please try again." };
   }
   return { receiptNumber };
+}
+
+// Staff-initiated: email the customer (non-DCSIM party) that the items on this
+// hand receipt are ready for pickup. Returns { ok } or { error } for the UI.
+export async function notifyPickupAction(_prev: unknown, formData: FormData) {
+  try {
+    await requireUser();
+  } catch (e) {
+    if (e instanceof AuthError) return { error: "You are not authorized to send notifications." };
+    throw e;
+  }
+
+  const receiptNumber = String(formData.get("receiptNumber") ?? "").trim();
+  if (!receiptNumber) return { error: "Missing receipt." };
+
+  const t = await getTransferByReceiptNumber(receiptNumber);
+  if (!t) return { error: "Receipt not found." };
+  if (t.status === "CLOSED") return { error: "This receipt is closed — nothing to pick up." };
+
+  const customer = customerParty(t);
+  if (!customer?.email) return { error: "No email on file for the customer." };
+
+  const items = pickupItems(t);
+  if (items.length === 0) return { error: "No items are awaiting pickup on this receipt." };
+
+  try {
+    await sendPickupEmail({
+      customerName: customer.name,
+      customerEmail: customer.email,
+      receiptNumber: t.receiptNumber,
+      receiptUrl: receiptUrl(t.receiptNumber),
+      items,
+    });
+  } catch (e) {
+    console.error("[notifyPickupAction] pickup email failed:", e);
+    return { error: "Could not send the notification. Please try again." };
+  }
+  return { ok: true as const };
 }

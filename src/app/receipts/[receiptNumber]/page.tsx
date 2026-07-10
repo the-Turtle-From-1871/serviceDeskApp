@@ -6,6 +6,7 @@ import { formatParty } from "@/modules/transfers/party";
 import { formatDateTimeHST } from "@/lib/datetime";
 import { SiteHeader } from "@/components/SiteHeader";
 import { getCurrentUser } from "@/lib/session";
+import { NotifyPickupButton } from "./NotifyPickupButton";
 
 export default async function ReceiptPage({ params }: { params: Promise<{ receiptNumber: string }> }) {
   const { receiptNumber } = await params;
@@ -14,7 +15,12 @@ export default async function ReceiptPage({ params }: { params: Promise<{ receip
 
   const me = await getCurrentUser();
   const isAdmin = me?.role === "ADMIN";
+  const isStaff = !!me && me.isActive;
   const closed = t.status === "CLOSED";
+  // The customer is the non-DCSIM party (receiver first). Only staff can notify,
+  // and only when the receipt is open and the customer has an email on file.
+  const customerEmail = !t.receiverIsDcsim ? t.receiverEmail : !t.senderIsDcsim ? t.senderEmail : null;
+  const canNotify = isStaff && !closed && !!customerEmail;
   const closing = closed ? await getClosingReturn(t.id) : null;
 
   return (
@@ -74,6 +80,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ receip
           {isAdmin && !closed && (
             <a className="btn btn-primary" href={`/receipts/${t.receiptNumber}/return`}>Process return</a>
           )}
+          {canNotify && <NotifyPickupButton receiptNumber={t.receiptNumber} />}
           <a className="btn btn-secondary" href={`/receipts/${t.receiptNumber}/pdf?preview=1`} target="_blank" rel="noopener noreferrer">Preview PDF</a>
           <a className="btn btn-secondary" href={`/receipts/${t.receiptNumber}/pdf`}>Download PDF</a>
           <Link className="btn btn-ghost" href="/">Search another</Link>
