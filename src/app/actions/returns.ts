@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin, AuthError } from "@/lib/authz";
 import { processReturn } from "@/modules/returns/returns.service";
 import { sendReturnEmail } from "@/modules/returns/send-return-email";
+import { renderReceiptPdf } from "@/modules/receipts/render";
 import { receiptUrl } from "@/modules/items/qr";
 import type { ReturnPlan } from "@/modules/returns/plan";
 import { updateUserSignature } from "@/modules/users/users.service";
@@ -49,6 +50,9 @@ export async function processReturnAction(_prev: unknown, formData: FormData): P
     revalidatePath("/admin/audit");
 
     try {
+      let pdf: Uint8Array | undefined;
+      try { pdf = (await renderReceiptPdf(res.receiptNumber)) ?? undefined; }
+      catch (err) { console.error("[processReturnAction] pdf render for email failed:", err); }
       await sendReturnEmail({
         receiver: res.receiver,
         receiptNumber: res.receiptNumber,
@@ -59,6 +63,7 @@ export async function processReturnAction(_prev: unknown, formData: FormData): P
         processedByName: admin.name,
         processedByEmail: admin.email,
         processedAt: new Date(),
+        pdf,
       });
     } catch (err) {
       console.error("[processReturnAction] return email failed:", err);

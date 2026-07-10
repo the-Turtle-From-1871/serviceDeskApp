@@ -7,6 +7,7 @@ type Args = {
   receiptNumber: string;
   receiptUrl: string;
   itemSummary: string;
+  pdf?: Uint8Array;
 };
 
 function body(a: Args, party: "sender" | "receiver"): string {
@@ -34,6 +35,7 @@ export async function sendReceiptEmails(args: Args, deps: { sender?: EmailSender
           to: t.email,
           subject: args.receiptNumber,
           text: body(args, t.party),
+          attachments: args.pdf ? [{ filename: `hand-receipt-${args.receiptNumber}.pdf`, content: args.pdf }] : undefined,
         });
       } catch (e) {
         console.error(`[receipt-email] failed to email ${t.email}:`, e);

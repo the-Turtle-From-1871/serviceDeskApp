@@ -12,6 +12,7 @@ export type ReturnEmailArgs = {
   processedByName: string;
   processedByEmail: string;
   processedAt: Date;
+  pdf?: Uint8Array;
 };
 
 function partialBody(a: ReturnEmailArgs): string {
@@ -81,7 +82,13 @@ export async function sendReturnEmail(args: ReturnEmailArgs, deps: { sender?: Em
   const text = args.kind === "FULL" ? fullBody(args) : partialBody(args);
 
   try {
-    await sender.send({ to, cc, subject, text });
+    await sender.send({
+      to,
+      cc,
+      subject,
+      text,
+      attachments: args.pdf ? [{ filename: `hand-receipt-${args.receiptNumber}.pdf`, content: args.pdf }] : undefined,
+    });
   } catch (e) {
     console.error(`[return-email] failed to email ${to}:`, e);
   }

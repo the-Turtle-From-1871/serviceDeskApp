@@ -58,4 +58,18 @@ describe("sendReturnEmail", () => {
     const send = vi.fn(async () => { throw new Error("boom"); });
     await expect(sendReturnEmail(base, { sender: { send } })).resolves.toBeUndefined();
   });
+
+  it("attaches the PDF when supplied", async () => {
+    const send = vi.fn(async (_m: EmailMessage) => {});
+    const pdf = new Uint8Array([1, 2, 3]);
+    await sendReturnEmail({ ...base, pdf }, { sender: { send } });
+    const msg = send.mock.calls[0][0];
+    expect(msg.attachments).toEqual([{ filename: `hand-receipt-${base.receiptNumber}.pdf`, content: pdf }]);
+  });
+
+  it("omits attachments when no PDF is supplied", async () => {
+    const send = vi.fn(async (_m: EmailMessage) => {});
+    await sendReturnEmail(base, { sender: { send } });
+    expect(send.mock.calls[0][0].attachments).toBeUndefined();
+  });
 });

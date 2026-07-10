@@ -1,4 +1,11 @@
-export type EmailMessage = { to: string; subject: string; text: string; html?: string; cc?: string | string[] };
+export type EmailMessage = {
+  to: string;
+  subject: string;
+  text: string;
+  html?: string;
+  cc?: string | string[];
+  attachments?: { filename: string; content: Uint8Array }[];
+};
 
 export interface EmailSender {
   send(msg: EmailMessage): Promise<void>;
@@ -6,17 +13,23 @@ export interface EmailSender {
 
 class LogEmailSender implements EmailSender {
   async send(msg: EmailMessage): Promise<void> {
-    console.info(`[email:stub] to=${msg.to}${msg.cc ? ` cc=${msg.cc}` : ""} subject=${JSON.stringify(msg.subject)}\n${msg.text}`);
+    const attachmentsSuffix = msg.attachments?.length
+      ? ` [attachments: ${msg.attachments.map((a) => a.filename).join(", ")}]`
+      : "";
+    console.info(`[email:stub] to=${msg.to}${msg.cc ? ` cc=${msg.cc}` : ""} subject=${JSON.stringify(msg.subject)}\n${msg.text}${attachmentsSuffix}`);
   }
 }
 
 class ResendEmailSender implements EmailSender {
   constructor(private apiKey: string, private from: string) {}
   async send(msg: EmailMessage): Promise<void> {
+    const attachments = msg.attachments?.length
+      ? msg.attachments.map((a) => ({ filename: a.filename, content: Buffer.from(a.content).toString("base64") }))
+      : undefined;
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: this.from, to: msg.to, cc: msg.cc, subject: msg.subject, text: msg.text, html: msg.html }),
+      body: JSON.stringify({ from: this.from, to: msg.to, cc: msg.cc, subject: msg.subject, text: msg.text, html: msg.html, attachments }),
     });
     if (!res.ok) throw new Error(`Resend send failed: ${res.status} ${await res.text()}`);
   }

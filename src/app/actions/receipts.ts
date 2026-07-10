@@ -4,6 +4,7 @@ import { createTransfer } from "@/modules/transfers/transfers.service";
 import { receiptSchema } from "@/modules/transfers/transfers.schema";
 import { TransferError } from "@/modules/transfers/transfers.errors";
 import { sendReceiptEmails } from "@/modules/receipts/send-receipt-email";
+import { renderReceiptPdf } from "@/modules/receipts/render";
 import { receiptUrl } from "@/modules/items/qr";
 import { parseReceiptForm } from "./receipts.parse";
 
@@ -18,9 +19,13 @@ export async function createReceiptAction(_prev: unknown, formData: FormData) {
     const t = await createTransfer({ ...parsed.data, createdByUserId: user.id });
     receiptNumber = t.receiptNumber;
     try {
+      let pdf: Uint8Array | undefined;
+      try { pdf = (await renderReceiptPdf(t.receiptNumber)) ?? undefined; }
+      catch (err) { console.error("[createReceiptAction] pdf render for email failed:", err); }
       await sendReceiptEmails({
         sender: parsed.data.sender, receiver: parsed.data.receiver,
         receiptNumber: t.receiptNumber, receiptUrl: receiptUrl(t.receiptNumber), itemSummary: t.itemSummary,
+        pdf,
       });
     } catch (err) { console.error("[createReceiptAction] receipt email failed:", err); }
   } catch (e) {
