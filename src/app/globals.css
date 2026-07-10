@@ -359,6 +359,12 @@ h3 {
   padding: 10px 12px;
   resize: vertical;
 }
+/* The native file-picker button sits at the top of the fixed-height input box;
+   flex-center it vertically. */
+input[type="file"].input {
+  display: flex;
+  align-items: center;
+}
 .input:focus,
 .select:focus,
 .textarea:focus {
