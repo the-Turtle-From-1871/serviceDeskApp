@@ -1,8 +1,26 @@
 import "server-only";
 import { getTransferByReceiptNumber } from "@/modules/transfers/transfers.service";
-import { getClosingReturn } from "@/modules/returns/returns.service";
+import { getClosingReturn, listReturnsForReceipt } from "@/modules/returns/returns.service";
 import { buildHandReceiptPdf, type ReceiptParty } from "@/modules/receipts/hand-receipt";
 import { receiptUrl } from "@/modules/items/qr";
+
+// Build a line's successive quantity-column values (DA 2062 columns A–F): column
+// A is the issued qty, and each return that took items from THIS line advances to
+// the next column with the new balance — preserving history instead of
+// overwriting. Capped at 6 columns.
+function quantityColumns(qtyIssued: number, serials: string[], returns: { returned: unknown }[]): number[] {
+  const serialSet = new Set(serials);
+  const columns = [qtyIssued];
+  for (const rt of returns) {
+    const items = Array.isArray(rt.returned) ? (rt.returned as { serialNumber?: string }[]) : [];
+    const n = items.filter((r) => r.serialNumber && serialSet.has(r.serialNumber)).length;
+    if (n > 0) {
+      columns.push(Math.max(0, columns[columns.length - 1] - n));
+      if (columns.length >= 6) break;
+    }
+  }
+  return columns;
+}
 
 // Fetch a receipt by number and render its DA-2062 PDF (partial returns redline
 // Column A; a closed receipt gets the CLOSED watermark + closing-tech attestation).
@@ -24,18 +42,22 @@ export async function renderReceiptPdf(receiptNumber: string): Promise<Uint8Arra
     if (cr) closedBy = { name: cr.processedByName, signature: cr.processedBySignature ?? "", date: cr.createdAt };
   }
 
+  const returns = await listReturnsForReceipt(t.id);
+
   return buildHandReceiptPdf({
     receiptNumber: t.receiptNumber,
     status: t.status,
     createdAt: t.createdAt,
     receiptUrl: receiptUrl(t.receiptNumber),
     receiverSignature: t.receiverSignature,
-    lines: t.lines.map((ln) => ({
-      lineNo: ln.lineNo, make: ln.make, model: ln.model, unitOfIssue: ln.unitOfIssue,
-      serials: ln.items.map((it) => it.serialNumber),
-      qtyAuth: ln.qtyAuth, qtyIssued: ln.qtyIssued,
-      heldQty: ln.items.filter((it) => it.returnedAt === null).length,
-    })),
+    lines: t.lines.map((ln) => {
+      const serials = ln.items.map((it) => it.serialNumber);
+      return {
+        lineNo: ln.lineNo, make: ln.make, model: ln.model, unitOfIssue: ln.unitOfIssue,
+        serials, qtyAuth: ln.qtyAuth, qtyIssued: ln.qtyIssued,
+        qtyColumns: quantityColumns(ln.qtyIssued, serials, returns),
+      };
+    }),
     sender, receiver, closedBy,
   });
 }

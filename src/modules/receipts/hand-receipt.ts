@@ -18,7 +18,7 @@ export type ReceiptData = {
   createdAt: Date;
   receiptUrl: string;
   receiverSignature: string; // "" or data:image/png;base64,…
-  lines: { lineNo: number; make: string; model: string; unitOfIssue: string; serials: string[]; qtyAuth: number; qtyIssued: number; heldQty?: number }[];
+  lines: { lineNo: number; make: string; model: string; unitOfIssue: string; serials: string[]; qtyAuth: number; qtyIssued: number; qtyColumns?: number[] }[];
   sender: ReceiptParty;
   receiver: ReceiptParty;
   closedBy?: { name: string; signature: string; date: Date };
@@ -124,17 +124,20 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
 
   const rowH = 24; // template row pitch
   const issuedTopY = rowTopY + rowH; // fallback anchor if a QTY widget is missing
+  const colCenters = [632, 657, 682, 707, 731, 756]; // "h. QUANTITY" columns A–F
   t.lines.forEach((ln, i) => {
-    // Align the Column A number vertically with the QTY AUTH number on the same
-    // row (centered on that widget); fall back to the computed row center.
+    // Align the numbers vertically with the QTY AUTH number on the same row
+    // (centered on that widget); fall back to the computed row center.
     const cy = qtyCenters[i];
     const baselineY = cy !== undefined ? cy - 3.2 : issuedTopY - (ln.lineNo - 0.5) * rowH;
-    // Show the still-held balance when items were returned (gate on serial count,
-    // not the typed issued qty, so a no-return receipt never adjusts), else the
-    // issued qty. All numbers are black.
-    const held = ln.heldQty ?? ln.serials.length;
-    const label = String(held < ln.serials.length ? held : ln.qtyIssued);
-    page1.drawText(label, { x: colCenter - helv.widthOfTextAtSize(label, 9) / 2, y: baselineY, size: 9, font: helv, color: black });
+    // Column A = issued qty; each later column is the balance after a return that
+    // took items from this line — history is preserved across columns, not
+    // overwritten. All numbers are black.
+    const cols = ln.qtyColumns && ln.qtyColumns.length ? ln.qtyColumns : [ln.qtyIssued];
+    cols.slice(0, colCenters.length).forEach((val, j) => {
+      const label = String(val);
+      page1.drawText(label, { x: colCenters[j] - helv.widthOfTextAtSize(label, 9) / 2, y: baselineY, size: 9, font: helv, color: black });
+    });
   });
 
   // Recipient signature + date sit vertically in the column below the last row.
@@ -244,7 +247,9 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
   page.drawText("Items", { x: 56, y, size: 11, font: bold, color: muted });
   y -= 18;
   for (const ln of t.lines) {
-    const heldStr = ln.heldQty !== undefined && ln.heldQty < ln.serials.length ? ` · ${ln.heldQty} still held` : "";
+    const cols = ln.qtyColumns && ln.qtyColumns.length ? ln.qtyColumns : [ln.qtyIssued];
+    const currentHeld = cols[cols.length - 1];
+    const heldStr = currentHeld < ln.qtyIssued ? ` · ${currentHeld} still held` : "";
     page.drawText(`${ln.lineNo}. ${ln.make} ${ln.model} — auth ${ln.qtyAuth} / issued ${ln.qtyIssued} ${ln.unitOfIssue}${heldStr}`, { x: 66, y, size: 11, font: helv, color: ink });
     y -= 15;
     page.drawText(`SER: ${ln.serials.join(", ")}`, { x: 76, y, size: 9, font: helv, color: muted });

@@ -96,3 +96,12 @@ export function getClosingReturn(transferId: string) {
     orderBy: { createdAt: "desc" },
   });
 }
+
+// All return transactions for a receipt, oldest first — used to reconstruct the
+// per-line quantity history across the DA 2062 A–F columns.
+export function listReturnsForReceipt(transferId: string) {
+  return prisma.returnTransaction.findMany({
+    where: { transferId },
+    orderBy: { createdAt: "asc" },
+  });
+}
