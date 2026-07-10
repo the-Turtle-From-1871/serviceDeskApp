@@ -8,10 +8,10 @@
 export { auth as proxy } from "@/auth";
 
 export const config = {
-  // Public: home (receipt search), login, register, receipt pages, item pages, auth API, static assets.
-  // Everything else (incl. /items and /admin/*) requires auth. The `|$` branch in
-  // the negative lookahead excludes the bare `/` root path (matched only when
-  // nothing remains after the leading slash) -- verified against a standalone
-  // regex test, since the matcher supports full regex per the Next.js docs.
-  matcher: ["/((?!api/auth|login|register|receipts/|i/|_next/static|_next/image|favicon.ico|$).*)"],
+  // Public: home (receipt search), login, register, privacy, terms, receipt pages,
+  // item pages, auth API, static assets. Everything else (incl. /items and /admin/*)
+  // requires auth. The `|$` branch in the negative lookahead excludes the bare `/`
+  // root path (matched only when nothing remains after the leading slash) -- verified
+  // against a standalone regex test, since the matcher supports full regex per the Next.js docs.
+  matcher: ["/((?!api/auth|login|register|privacy|terms|receipts/|i/|_next/static|_next/image|favicon.ico|$).*)"],
 };
