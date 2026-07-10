@@ -45,9 +45,15 @@ export async function renderReceiptPdf(receiptNumber: string): Promise<Uint8Arra
 
   const returns = await listReturnsForReceipt(t.id);
 
-  // One signature block per return transaction, mapped to columns B, C, … (column
-  // A carries the recipient/issuance signature already on ReceiptData).
-  const columnSignatures = returns.slice(0, 5).map((rt) => ({
+  // Only returns that leave a remaining balance (PARTIAL) get their own DA-2062
+  // quantity/signature column. The FULL return that closes the receipt is shown
+  // as the CLOSED watermark + "Accepted by" attestation instead, so it gets no
+  // column.
+  const columnReturns = returns.filter((rt) => rt.kind !== "FULL");
+
+  // One signature block per partial-return transaction, mapped to columns B, C, …
+  // (column A carries the recipient/issuance signature already on ReceiptData).
+  const columnSignatures = columnReturns.slice(0, 5).map((rt) => ({
     signature: rt.processedBySignature ?? "",
     date: rt.createdAt,
     name: rt.processedByName,
@@ -64,7 +70,7 @@ export async function renderReceiptPdf(receiptNumber: string): Promise<Uint8Arra
       return {
         lineNo: ln.lineNo, make: ln.make, model: ln.model, unitOfIssue: ln.unitOfIssue,
         serials, qtyAuth: ln.qtyAuth, qtyIssued: ln.qtyIssued,
-        qtyColumns: quantityColumns(ln.qtyIssued, serials, returns),
+        qtyColumns: quantityColumns(ln.qtyIssued, serials, columnReturns),
       };
     }),
     sender, receiver, closedBy, columnSignatures,
