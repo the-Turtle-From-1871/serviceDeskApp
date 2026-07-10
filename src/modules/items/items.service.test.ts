@@ -31,6 +31,12 @@ test("createItem rejects blank serial number", async () => {
   ).rejects.toThrow();
 });
 
+test("createItem rejects a blank device name", async () => {
+  await expect(
+    createItem({ make: "Dell", model: "5540", serialNumber: "SN1", ...base, deviceName: "" }, adminId)
+  ).rejects.toThrow();
+});
+
 test("getItem returns the item by id", async () => {
   const created = await createItem({ make: "M", model: "N", serialNumber: "S", ...base }, adminId);
   const found = await getItem(created.id);

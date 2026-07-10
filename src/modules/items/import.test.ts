@@ -33,4 +33,10 @@ describe("planImport", () => {
     expect(toCreate).toHaveLength(0);
     expect(skipped[0]).toMatchObject({ row: 1, reason: "Model is required" });
   });
+
+  it("skips a row with a blank device name", () => {
+    const { toCreate, skipped } = planImport([mk(1, { deviceName: "" })], new Set());
+    expect(toCreate).toHaveLength(0);
+    expect(skipped[0].reason).toMatch(/device name/i);
+  });
 });

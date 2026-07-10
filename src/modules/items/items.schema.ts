@@ -10,8 +10,8 @@ export const newItemSchema = z.object({
   make: z.string().trim().min(1, "Make is required"),
   model: z.string().trim().min(1, "Model is required"),
   serialNumber: z.string().trim().min(1, "Serial number is required"),
+  deviceName: z.string().trim().min(1, "Device name is required"),
   homeUnit: optional,
-  deviceName: z.string().trim().min(1, "Device name is required."),
   notes: optional,
 });
 
