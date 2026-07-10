@@ -22,6 +22,9 @@ export type ReceiptData = {
   sender: ReceiptParty;
   receiver: ReceiptParty;
   closedBy?: { name: string; signature: string; date: Date };
+  // Per-return technician signatures for the DA 2062 columns B, C, … (column A
+  // carries the recipient/issuance signature via receiverSignature).
+  columnSignatures?: { signature: string; date: Date; name: string }[];
 };
 
 const templateBytes = () => Buffer.from(DA2062_BASE64, "base64");
@@ -164,13 +167,30 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
     page1.drawText(label, { x: colCenter + 4, y: sigBottom, size: 9, font: helv, rotate: degrees(90) });
     blockTop = sigBottom + helv.widthOfTextAtSize(label, 9);
   }
-  // Guard bar below the signature block, down to the table bottom.
-  if (sigBottom - 4 - tableBottomY > 1) {
-    page1.drawRectangle({ x: colLeft, y: tableBottomY, width: colWidth, height: sigBottom - 4 - tableBottomY, color: black });
-  }
-  // Guard bar above the signature block, up to the bottom of the last item row.
-  if (lastRowBottom - (blockTop + 2) > 1) {
-    page1.drawRectangle({ x: colLeft, y: blockTop + 2, width: colWidth, height: lastRowBottom - (blockTop + 2), color: black });
+  // Each return transaction's technician signature + date, drawn vertically in
+  // the next column (B, C, …) at the same band as Column A's recipient signature,
+  // so every transaction column carries who accepted it.
+  const retSigs = t.columnSignatures ?? [];
+  for (let k = 0; k < retSigs.length && k + 1 < colCenters.length; k++) {
+    const cs = retSigs[k];
+    const cxJ = colCenters[k + 1]; // column B is index 1
+    const dStr = formatDateHST(cs.date);
+    let drew = false;
+    if (cs.signature && cs.signature.startsWith("data:image/png;base64,")) {
+      try {
+        const sig = await pdf.embedPng(Buffer.from(cs.signature.split(",")[1], "base64"));
+        const barH = 22;
+        const barW = Math.min(barH * (sig.width / sig.height), 72);
+        page1.drawImage(sig, { x: cxJ + 10, y: sigBottom, width: barW, height: barH, rotate: degrees(90) });
+        page1.drawText(dStr, { x: cxJ + 4, y: sigBottom + barW + 10, size: 9, font: helv, rotate: degrees(90) });
+        drew = true;
+      } catch {
+        /* fall through to the text label below */
+      }
+    }
+    if (!drew) {
+      page1.drawText(`${cs.name}   ${dStr}`, { x: cxJ + 4, y: sigBottom, size: 9, font: helv, rotate: degrees(90) });
+    }
   }
 
   // When the receipt is closed (all property returned), stamp the form page with

@@ -5,19 +5,20 @@ import { buildHandReceiptPdf, type ReceiptParty } from "@/modules/receipts/hand-
 import { receiptUrl } from "@/modules/items/qr";
 
 // Build a line's successive quantity-column values (DA 2062 columns A–F): column
-// A is the issued qty, and each return that took items from THIS line advances to
-// the next column with the new balance — preserving history instead of
-// overwriting. Capped at 6 columns.
+// A is the issued qty, and each return TRANSACTION is the next column with the
+// line's balance after it (unchanged if that return took none of this line's
+// items) — one column per transaction so the columns line up with the
+// per-transaction signatures. Capped at 6 columns.
 function quantityColumns(qtyIssued: number, serials: string[], returns: { returned: unknown }[]): number[] {
   const serialSet = new Set(serials);
   const columns = [qtyIssued];
+  let bal = qtyIssued;
   for (const rt of returns) {
+    if (columns.length >= 6) break;
     const items = Array.isArray(rt.returned) ? (rt.returned as { serialNumber?: string }[]) : [];
     const n = items.filter((r) => r.serialNumber && serialSet.has(r.serialNumber)).length;
-    if (n > 0) {
-      columns.push(Math.max(0, columns[columns.length - 1] - n));
-      if (columns.length >= 6) break;
-    }
+    bal = Math.max(0, bal - n);
+    columns.push(bal);
   }
   return columns;
 }
@@ -44,6 +45,14 @@ export async function renderReceiptPdf(receiptNumber: string): Promise<Uint8Arra
 
   const returns = await listReturnsForReceipt(t.id);
 
+  // One signature block per return transaction, mapped to columns B, C, … (column
+  // A carries the recipient/issuance signature already on ReceiptData).
+  const columnSignatures = returns.slice(0, 5).map((rt) => ({
+    signature: rt.processedBySignature ?? "",
+    date: rt.createdAt,
+    name: rt.processedByName,
+  }));
+
   return buildHandReceiptPdf({
     receiptNumber: t.receiptNumber,
     status: t.status,
@@ -58,6 +67,6 @@ export async function renderReceiptPdf(receiptNumber: string): Promise<Uint8Arra
         qtyColumns: quantityColumns(ln.qtyIssued, serials, returns),
       };
     }),
-    sender, receiver, closedBy,
+    sender, receiver, closedBy, columnSignatures,
   });
 }
