@@ -1,3 +1,5 @@
+import { GmailEmailSender, gmailConfigFromEnv } from "./gmail-email";
+
 export type EmailMessage = {
   to: string;
   subject: string;
@@ -36,6 +38,9 @@ class ResendEmailSender implements EmailSender {
 }
 
 export function getEmailSender(): EmailSender {
+  // Prefer Gmail (Google API) when configured; else Resend; else the log stub.
+  const gmail = gmailConfigFromEnv();
+  if (gmail) return new GmailEmailSender(gmail);
   const key = process.env.RESEND_API_KEY;
   const from = process.env.EMAIL_FROM;
   if (key && from) return new ResendEmailSender(key, from);
