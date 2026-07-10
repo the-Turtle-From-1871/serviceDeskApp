@@ -7,6 +7,7 @@ export type RawRow = {
   make: string;
   model: string;
   serialNumber: string;
+  deviceName: string;
   homeUnit: string;
   notes: string;
 };
@@ -17,6 +18,7 @@ const HEADER_MAP: Record<string, keyof Omit<RawRow, "row">> = {
   model: "model",
   serialnumber: "serialNumber",
   serial: "serialNumber",
+  devicename: "deviceName",
   homeunit: "homeUnit",
   notes: "notes",
 };
@@ -44,7 +46,7 @@ export function parseItemsCsv(text: string): { rows: RawRow[]; error?: string } 
   if (records.length === 0) return { rows: [], error: "The CSV has no data rows." };
 
   const present = new Set(headers);
-  const missing = (["make", "model", "serialNumber"] as const).filter((k) => !present.has(k));
+  const missing = (["make", "model", "serialNumber", "deviceName"] as const).filter((k) => !present.has(k));
   if (missing.length) return { rows: [], error: `Missing required column(s): ${missing.join(", ")}.` };
 
   if (records.length > MAX_IMPORT_ROWS) {
@@ -56,6 +58,7 @@ export function parseItemsCsv(text: string): { rows: RawRow[]; error?: string } 
     make: r.make ?? "",
     model: r.model ?? "",
     serialNumber: r.serialNumber ?? "",
+    deviceName: r.deviceName ?? "",
     homeUnit: r.homeUnit ?? "",
     notes: r.notes ?? "",
   }));

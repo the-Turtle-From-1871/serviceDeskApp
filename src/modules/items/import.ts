@@ -19,6 +19,7 @@ export function planImport(
       make: r.make,
       model: r.model,
       serialNumber: r.serialNumber,
+      deviceName: r.deviceName,
       homeUnit: r.homeUnit,
       notes: r.notes,
     });

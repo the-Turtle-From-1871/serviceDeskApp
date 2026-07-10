@@ -3,16 +3,16 @@ import { parseItemsCsv, MAX_IMPORT_ROWS } from "./csv";
 
 describe("parseItemsCsv", () => {
   it("parses rows and maps case-insensitive, aliased headers", () => {
-    const csv = "Make,Model,Serial Number,Home Unit,Notes\nM4,Carbine,A1,A Co,tan\n";
+    const csv = "Make,Model,Serial Number,Device Name,Home Unit,Notes\nM4,Carbine,A1,Radio,A Co,tan\n";
     const { rows, error } = parseItemsCsv(csv);
     expect(error).toBeUndefined();
     expect(rows).toEqual([
-      { row: 1, make: "M4", model: "Carbine", serialNumber: "A1", homeUnit: "A Co", notes: "tan" },
+      { row: 1, make: "M4", model: "Carbine", serialNumber: "A1", deviceName: "Radio", homeUnit: "A Co", notes: "tan" },
     ]);
   });
 
   it("handles quoted fields with embedded commas and skips blank lines", () => {
-    const csv = 'make,model,serialNumber,notes\nM4,Carbine,A1,"tan, worn"\n\nPVS,14,B7,\n';
+    const csv = 'make,model,serialNumber,deviceName,notes\nM4,Carbine,A1,Radio,"tan, worn"\n\nPVS,14,B7,Radio,\n';
     const { rows } = parseItemsCsv(csv);
     expect(rows).toHaveLength(2);
     expect(rows[0].notes).toBe("tan, worn");
@@ -33,8 +33,8 @@ describe("parseItemsCsv", () => {
   });
 
   it("errors when over the row cap", () => {
-    const body = Array.from({ length: MAX_IMPORT_ROWS + 1 }, (_, i) => `M,N,S${i}`).join("\n");
-    const { error } = parseItemsCsv(`make,model,serialNumber\n${body}\n`);
+    const body = Array.from({ length: MAX_IMPORT_ROWS + 1 }, (_, i) => `M,N,S${i},Radio`).join("\n");
+    const { error } = parseItemsCsv(`make,model,serialNumber,deviceName\n${body}\n`);
     expect(error).toMatch(/limit/i);
   });
 
@@ -45,10 +45,10 @@ describe("parseItemsCsv", () => {
   });
 
   it("does not falsely reject when the first data row is ragged", () => {
-    // Header has all 3 required columns; first data row is short (missing serialNumber cell).
-    const { rows, error } = parseItemsCsv("make,model,serialNumber\nA,B\nC,D,E\n");
+    // Header has all 4 required columns; first data row is short (missing deviceName cell).
+    const { rows, error } = parseItemsCsv("make,model,serialNumber,deviceName\nA,B,C\nC,D,E,Radio\n");
     expect(error).toBeUndefined();
     expect(rows).toHaveLength(2);
-    expect(rows[0].serialNumber).toBe(""); // ragged cell becomes empty, later skipped by validation downstream
+    expect(rows[0].deviceName).toBe(""); // ragged cell becomes empty, later skipped by validation downstream
   });
 });

@@ -17,8 +17,8 @@ beforeEach(async () => {
 
 // Build a receipt holding two Dell 5540 (one line, two serials).
 async function seedReceipt() {
-  const a = await createItem({ make: "Dell", model: "5540", serialNumber: "SN-A", homeUnit: undefined, notes: undefined }, adminId);
-  const b = await createItem({ make: "Dell", model: "5540", serialNumber: "SN-B", homeUnit: undefined, notes: undefined }, adminId);
+  const a = await createItem({ make: "Dell", model: "5540", serialNumber: "SN-A", deviceName: "Radio", homeUnit: undefined, notes: undefined }, adminId);
+  const b = await createItem({ make: "Dell", model: "5540", serialNumber: "SN-B", deviceName: "Radio", homeUnit: undefined, notes: undefined }, adminId);
   const t = await createTransfer({
     itemIds: [a.id, b.id],
     lines: [{ make: "Dell", model: "5540", qtyAuth: 2, qtyIssued: 2 }],

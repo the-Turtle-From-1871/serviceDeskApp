@@ -12,15 +12,15 @@ beforeEach(async () => {
 });
 
 test("imports valid rows, skips DB duplicates, in-file duplicates, and invalid rows", async () => {
-  await createItem({ make: "Dell", model: "5540", serialNumber: "EXIST1", homeUnit: undefined, notes: undefined }, adminId);
+  await createItem({ make: "Dell", model: "5540", serialNumber: "EXIST1", deviceName: "Radio", homeUnit: undefined, notes: undefined }, adminId);
 
   const csv = [
-    "make,model,serialNumber,homeUnit,notes",
-    "M4,Carbine,NEW1,A Co,tan",   // ok
-    "M4,Carbine,EXIST1,,",         // already exists
-    "PVS,14,DUP1,,",               // ok (first)
-    "PVS,14,DUP1,,",               // duplicate in file
-    ",Carbine,BAD1,,",             // invalid (missing make)
+    "make,model,serialNumber,deviceName,homeUnit,notes",
+    "M4,Carbine,NEW1,Radio,A Co,tan",   // ok
+    "M4,Carbine,EXIST1,Radio,,",         // already exists
+    "PVS,14,DUP1,Radio,,",               // ok (first)
+    "PVS,14,DUP1,Radio,,",               // duplicate in file
+    ",Carbine,BAD1,Radio,,",             // invalid (missing make)
   ].join("\n");
 
   const res = await importItems(csv, "items.csv", adminId);

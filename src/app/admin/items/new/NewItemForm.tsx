@@ -7,6 +7,7 @@ const fields = [
   ["make", "Make", true],
   ["model", "Model", true],
   ["serialNumber", "Serial number", true],
+  ["deviceName", "Device Name", true],
   ["homeUnit", "Home unit", false],
 ] as const;
 

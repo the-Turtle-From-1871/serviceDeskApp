@@ -42,6 +42,7 @@ model Item {
   model         String
   serialNumber  String
   homeUnit      String?
+  deviceName    String?
   notes         String?
   status        ItemStatus     @default(ACTIVE)
   createdBy     User           @relation("CreatedItems", fields: [createdById], references: [id])

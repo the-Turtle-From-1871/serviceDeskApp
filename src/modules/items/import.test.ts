@@ -3,7 +3,7 @@ import { planImport } from "./import";
 import type { RawRow } from "./csv";
 
 const mk = (row: number, over: Partial<RawRow> = {}): RawRow =>
-  ({ row, make: "M4", model: "Carbine", serialNumber: `S${row}`, homeUnit: "", notes: "", ...over });
+  ({ row, make: "M4", model: "Carbine", serialNumber: `S${row}`, deviceName: "Radio", homeUnit: "", notes: "", ...over });
 
 describe("planImport", () => {
   it("keeps valid, non-duplicate rows", () => {

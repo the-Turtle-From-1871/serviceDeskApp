@@ -41,6 +41,8 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
           <div className="card">
             <div className="card__title">Item details</div>
             <dl className="dl">
+              <dt>Device Name</dt>
+              <dd>{item.deviceName || "—"}</dd>
               {isAdmin && (
                 <>
                   <dt>Notes</dt>

@@ -1,7 +1,7 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { itemQrDataUrl, itemUrl } from "@/modules/items/qr";
 
-type QrItem = { id: string; make: string; model: string; serialNumber: string; homeUnit: string | null };
+type QrItem = { id: string; make: string; model: string; serialNumber: string; homeUnit: string | null; deviceName?: string | null };
 
 // Single-page, print-friendly label: item identity, a large QR code, and its URL.
 export async function buildItemQrPdf(item: QrItem): Promise<Uint8Array> {
@@ -22,6 +22,7 @@ export async function buildItemQrPdf(item: QrItem): Promise<Uint8Array> {
   y -= 40;
   const rows: [string, string][] = [
     ["Serial number", item.serialNumber],
+    ["Device Name", item.deviceName ?? "—"],
     ["Home unit", item.homeUnit ?? "—"],
   ];
   for (const [k, v] of rows) {

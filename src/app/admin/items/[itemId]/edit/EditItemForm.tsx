@@ -9,6 +9,7 @@ type ItemValues = {
   model: string;
   serialNumber: string;
   homeUnit: string | null;
+  deviceName: string | null;
   notes: string | null;
 };
 
@@ -16,6 +17,7 @@ const fields = [
   ["make", "Make", true],
   ["model", "Model", true],
   ["serialNumber", "Serial number", true],
+  ["deviceName", "Device Name", true],
   ["homeUnit", "Home unit", false],
 ] as const;
 

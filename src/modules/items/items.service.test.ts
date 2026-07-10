@@ -4,7 +4,7 @@ import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
 import { createItem, getItem, listItems, updateItem, retireItem, setItemStatus } from "./items.service";
 
 let adminId: string;
-const base = { homeUnit: undefined, notes: undefined } as const;
+const base = { deviceName: "Radio", homeUnit: undefined, notes: undefined } as const;
 
 beforeAll(() => migrateTestDb());
 beforeEach(async () => {

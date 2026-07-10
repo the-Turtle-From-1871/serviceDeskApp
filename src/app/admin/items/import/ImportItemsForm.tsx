@@ -3,7 +3,7 @@ import { useActionState } from "react";
 import Link from "next/link";
 import { importItemsAction } from "@/app/admin/actions/items";
 
-const TEMPLATE = "make,model,serialNumber,homeUnit,notes\n";
+const TEMPLATE = "make,model,serialNumber,deviceName,homeUnit,notes\n";
 
 function groupSkipped(skipped: { row: number; serialNumber: string; reason: string }[]) {
   const by = new Map<string, string[]>();
@@ -24,7 +24,7 @@ export function ImportItemsForm() {
         <div className="field">
           <label className="label" htmlFor="file">CSV file</label>
           <input id="file" className="input" type="file" name="file" accept=".csv" required />
-          <p className="subtle">Columns: make, model, serialNumber, homeUnit, notes. First row must be the header.</p>
+          <p className="subtle">Columns: make, model, serialNumber, deviceName, homeUnit, notes. First row must be the header.</p>
         </div>
         {state && "error" in state && state.error && <p role="alert" className="alert-error">{state.error}</p>}
         <div className="row">
