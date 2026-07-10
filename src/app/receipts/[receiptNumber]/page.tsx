@@ -77,11 +77,15 @@ export default async function ReceiptPage({ params }: { params: Promise<{ receip
           <div><strong>Status:</strong> {t.status}</div>
         </div>
 
+        {((isAdmin && !closed) || showNotify) && (
+          <div className="row">
+            {isAdmin && !closed && (
+              <a className="btn btn-primary" href={`/receipts/${t.receiptNumber}/return`}>Process return</a>
+            )}
+            {showNotify && <NotifyPickupButton receiptNumber={t.receiptNumber} hasCustomerEmail={!!customerEmail} />}
+          </div>
+        )}
         <div className="row">
-          {isAdmin && !closed && (
-            <a className="btn btn-primary" href={`/receipts/${t.receiptNumber}/return`}>Process return</a>
-          )}
-          {showNotify && <NotifyPickupButton receiptNumber={t.receiptNumber} hasCustomerEmail={!!customerEmail} />}
           <a className="btn btn-secondary" href={`/receipts/${t.receiptNumber}/pdf?preview=1`} target="_blank" rel="noopener noreferrer">Preview PDF</a>
           <a className="btn btn-secondary" href={`/receipts/${t.receiptNumber}/pdf`}>Download PDF</a>
           <Link className="btn btn-ghost" href="/">Search another</Link>
