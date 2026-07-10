@@ -122,19 +122,13 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
   t.lines.forEach((ln) => {
     const rowCenterY = issuedTopY - (ln.lineNo - 0.5) * rowH;
     const held = ln.heldQty ?? ln.serials.length;
-    // Redline only when items were actually returned (held below the line's
-    // serial count) — never merely because a typed issued qty differs from the
-    // serial count, which would spuriously redline a receipt with no returns.
+    // When items were actually returned (held below the line's serial count),
+    // show only the current still-held balance (red) — not the old issued qty.
+    // Gate on serial count, not the typed issued qty, so a receipt with no
+    // returns never adjusts even if a typed issued qty differs from the count.
     if (held < ln.serials.length) {
-      // Strike the issued qty and write the still-held balance beneath it
-      // (DA 2062 redline convention).
-      const orig = String(ln.qtyIssued), now = String(held);
-      const ow = helv.widthOfTextAtSize(orig, 8);
-      const oy = rowCenterY + 5;
-      page1.drawText(orig, { x: colCenter - ow / 2, y: oy, size: 8, font: helv, color: red });
-      page1.drawLine({ start: { x: colCenter - ow / 2 - 1, y: oy + 3 }, end: { x: colCenter + ow / 2 + 1, y: oy + 3 }, thickness: 0.8, color: red });
-      const nw = bold.widthOfTextAtSize(now, 9);
-      page1.drawText(now, { x: colCenter - nw / 2, y: rowCenterY - 7, size: 9, font: bold, color: red });
+      const label = String(held);
+      page1.drawText(label, { x: colCenter - bold.widthOfTextAtSize(label, 9) / 2, y: rowCenterY, size: 9, font: bold, color: red });
     } else {
       const label = String(ln.qtyIssued);
       page1.drawText(label, { x: colCenter - helv.widthOfTextAtSize(label, 9) / 2, y: rowCenterY, size: 9, font: helv });
@@ -197,6 +191,26 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
     });
   }
 
+  // Closing-technician attestation drawn in the open body of the FORM page,
+  // alongside the CLOSED marking: printed name, date, and signature (bold).
+  if (t.closedBy) {
+    const ax = 232;
+    let ay = 368;
+    page1.drawText(`Accepted by: ${t.closedBy.name}`, { x: ax, y: ay, size: 12, font: bold, color: black });
+    ay -= 18;
+    page1.drawText(`Date: ${formatDateHST(t.closedBy.date)}`, { x: ax, y: ay, size: 12, font: bold, color: black });
+    ay -= 10;
+    if (t.closedBy.signature && t.closedBy.signature.startsWith("data:image/png;base64,")) {
+      try {
+        const csig = await pdf.embedPng(Buffer.from(t.closedBy.signature.split(",")[1], "base64"));
+        const w = 200, h = Math.min((csig.height / csig.width) * w, 66);
+        page1.drawImage(csig, { x: ax, y: ay - h, width: w, height: h });
+      } catch {
+        /* signature optional — skip on failure */
+      }
+    }
+  }
+
   // --- Custody record page: both parties in full, QR, signature.
   const page = pdf.addPage([612, 792]);
   const ink = rgb(0.06, 0.09, 0.16), muted = rgb(0.4, 0.45, 0.5);
@@ -228,23 +242,6 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
     page.drawText(k, { x: 56, y, size: 11, font: bold, color: muted });
     page.drawText(v, { x: 200, y, size: 12, font: helv, color: ink });
     y -= 22;
-  }
-
-  if (t.closedBy) {
-    y -= 6;
-    page.drawText("Accepted / closed by", { x: 56, y, size: 11, font: bold, color: muted });
-    y -= 16;
-    page.drawText(`${t.closedBy.name} · ${formatDateHST(t.closedBy.date)}`, { x: 66, y, size: 11, font: helv, color: ink });
-    y -= 6;
-    if (t.closedBy.signature && t.closedBy.signature.startsWith("data:image/png;base64,")) {
-      try {
-        const csig = await pdf.embedPng(Buffer.from(t.closedBy.signature.split(",")[1], "base64"));
-        const w = 180, h = Math.min((csig.height / csig.width) * w, 70);
-        page.drawImage(csig, { x: 66, y: y - h, width: w, height: h });
-        y -= h + 6;
-      } catch { y -= 6; }
-    }
-    y -= 10;
   }
 
   y -= 16;
