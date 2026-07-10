@@ -18,7 +18,7 @@ export type ReceiptData = {
   createdAt: Date;
   receiptUrl: string;
   receiverSignature: string; // "" or data:image/png;base64,…
-  lines: { lineNo: number; make: string; model: string; unitOfIssue: string; serials: string[]; qtyAuth: number; qtyIssued: number }[];
+  lines: { lineNo: number; make: string; model: string; unitOfIssue: string; serials: string[]; qtyAuth: number; qtyIssued: number; heldQty?: number }[];
   sender: ReceiptParty;
   receiver: ReceiptParty;
   closedBy?: { name: string; signature: string; date: Date };
@@ -111,7 +111,7 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
   // signature + date drawn VERTICALLY in the empty column below the last item
   // row, with guard bars blacking out the remaining empty space (DA 2062 layout).
   const page1 = pdf.getPage(0);
-  const black = rgb(0, 0, 0);
+  const black = rgb(0, 0, 0), red = rgb(0.78, 0.12, 0.12);
   const colLeft = 621, colWidth = 23, colCenter = 632, rowTopY = 486, tableBottomY = 58;
   const dateStr = formatDateHST(t.createdAt);
 
@@ -121,8 +121,24 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
   const issuedTopY = rowTopY + rowH;
   t.lines.forEach((ln) => {
     const rowCenterY = issuedTopY - (ln.lineNo - 0.5) * rowH;
-    const label = String(ln.qtyIssued);
-    page1.drawText(label, { x: colCenter - helv.widthOfTextAtSize(label, 9) / 2, y: rowCenterY, size: 9, font: helv });
+    const held = ln.heldQty ?? ln.serials.length;
+    // Redline only when items were actually returned (held below the line's
+    // serial count) — never merely because a typed issued qty differs from the
+    // serial count, which would spuriously redline a receipt with no returns.
+    if (held < ln.serials.length) {
+      // Strike the issued qty and write the still-held balance beneath it
+      // (DA 2062 redline convention).
+      const orig = String(ln.qtyIssued), now = String(held);
+      const ow = helv.widthOfTextAtSize(orig, 8);
+      const oy = rowCenterY + 5;
+      page1.drawText(orig, { x: colCenter - ow / 2, y: oy, size: 8, font: helv, color: red });
+      page1.drawLine({ start: { x: colCenter - ow / 2 - 1, y: oy + 3 }, end: { x: colCenter + ow / 2 + 1, y: oy + 3 }, thickness: 0.8, color: red });
+      const nw = bold.widthOfTextAtSize(now, 9);
+      page1.drawText(now, { x: colCenter - nw / 2, y: rowCenterY - 7, size: 9, font: bold, color: red });
+    } else {
+      const label = String(ln.qtyIssued);
+      page1.drawText(label, { x: colCenter - helv.widthOfTextAtSize(label, 9) / 2, y: rowCenterY, size: 9, font: helv });
+    }
   });
 
   // Recipient signature + date sit vertically in the column below the last row.
@@ -162,7 +178,6 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
   // a diagonal CLOSED watermark and strike the recipient signature block,
   // per the DA 2062 "redline" clear-out treatment.
   if (t.status === "CLOSED") {
-    const red = rgb(0.78, 0.12, 0.12);
     const { width, height } = page1.getSize();
     page1.drawText("CLOSED", {
       x: width * 0.24,
@@ -202,7 +217,8 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
   page.drawText("Items", { x: 56, y, size: 11, font: bold, color: muted });
   y -= 18;
   for (const ln of t.lines) {
-    page.drawText(`${ln.lineNo}. ${ln.make} ${ln.model} — auth ${ln.qtyAuth} / issued ${ln.qtyIssued} ${ln.unitOfIssue}`, { x: 66, y, size: 11, font: helv, color: ink });
+    const heldStr = ln.heldQty !== undefined && ln.heldQty < ln.serials.length ? ` · ${ln.heldQty} still held` : "";
+    page.drawText(`${ln.lineNo}. ${ln.make} ${ln.model} — auth ${ln.qtyAuth} / issued ${ln.qtyIssued} ${ln.unitOfIssue}${heldStr}`, { x: 66, y, size: 11, font: helv, color: ink });
     y -= 15;
     page.drawText(`SER: ${ln.serials.join(", ")}`, { x: 76, y, size: 9, font: helv, color: muted });
     y -= 18;

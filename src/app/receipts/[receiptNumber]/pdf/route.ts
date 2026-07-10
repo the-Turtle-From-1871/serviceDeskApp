@@ -41,6 +41,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ receiptN
       serials: ln.items.map((it) => it.serialNumber),
       qtyAuth: ln.qtyAuth,
       qtyIssued: ln.qtyIssued,
+      heldQty: ln.items.filter((it) => it.returnedAt === null).length,
     })),
     sender,
     receiver,

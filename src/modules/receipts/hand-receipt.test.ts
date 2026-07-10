@@ -42,6 +42,14 @@ describe("buildHandReceiptPdf", () => {
     });
     expect(Buffer.from(bytes.slice(0, 5)).toString()).toBe("%PDF-");
   });
+  it("renders a partially-returned line with a redline balance without throwing", async () => {
+    const bytes = await buildHandReceiptPdf({
+      ...base,
+      lines: [{ lineNo: 1, make: "M4", model: "Carbine", unitOfIssue: "EA", serials: ["A1", "A2", "A3"], qtyAuth: 3, qtyIssued: 3, heldQty: 1 }],
+    });
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(bytes.length).toBeGreaterThan(1000);
+  });
   it("renders a CLOSED receipt with the CLOSED overlay without throwing", async () => {
     const bytes = await buildHandReceiptPdf({ ...base, status: "CLOSED" });
     expect(bytes).toBeInstanceOf(Uint8Array);

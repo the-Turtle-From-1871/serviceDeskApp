@@ -24,17 +24,20 @@ export default async function ReceiptPage({ params }: { params: Promise<{ receip
         <h1 className="page-title">Hand receipt {t.receiptNumber}</h1>
 
         {closed && (
-          <div className="card alert-error stack-sm" role="status">
-            <div><strong>CLOSED</strong> — all equipment returned. This receipt is closed and read-only.</div>
-            {closing && (
-              <div className="stack-sm">
-                <div className="subtle">Accepted by {closing.processedByName} · {formatDateTimeHST(closing.createdAt)}</div>
-                {closing.processedBySignature && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={closing.processedBySignature} alt={`Signature of ${closing.processedByName}`} className="sig-preview" />
-                )}
-              </div>
-            )}
+          <div className="card alert-error" role="status">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+              <div style={{ flex: "1 1 240px", minWidth: 0 }}><strong>CLOSED</strong> — all equipment returned. This receipt is closed and read-only.</div>
+              {closing && (
+                <div style={{ flex: "0 0 auto", textAlign: "right" }}>
+                  <div><strong>{closing.processedByName}</strong></div>
+                  {closing.processedBySignature && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={closing.processedBySignature} alt={`Signature of ${closing.processedByName}`} className="sig-preview" style={{ maxWidth: 150, maxHeight: 56 }} />
+                  )}
+                  <div><strong>{formatDateTimeHST(closing.createdAt)}</strong></div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
