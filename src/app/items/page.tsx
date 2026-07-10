@@ -13,7 +13,7 @@ export default async function ItemsListPage({ searchParams }: { searchParams: Pr
   return (
     <>
       <SiteHeader />
-      <main className="container stack">
+      <main className="container container-wide stack">
         <div className="row">
           <div>
             <h1 className="page-title">Items</h1>

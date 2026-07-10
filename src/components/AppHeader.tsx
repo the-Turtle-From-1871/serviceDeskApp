@@ -10,6 +10,10 @@ export function AppHeader({ items, loggedIn }: { items: NavItem[]; loggedIn: boo
   const close = () => setOpen(false);
   const pathname = usePathname();
   const headerRef = useRef<HTMLElement>(null);
+  // Match the header width to the page's content width. The Items list uses the
+  // wide container (.container-wide), so widen the header there too, keeping the
+  // brand/nav aligned with the table edges instead of a narrower centered band.
+  const wide = pathname === "/items";
 
   // Close the open mobile menu on Escape or a tap/click outside the header.
   useEffect(() => {
@@ -28,7 +32,7 @@ export function AppHeader({ items, loggedIn }: { items: NavItem[]; loggedIn: boo
 
   return (
     <header className="app-header" ref={headerRef}>
-      <div className="app-header__inner">
+      <div className={`app-header__inner${wide ? " app-header__inner--wide" : ""}`}>
         <Link href="/" className="brand" onClick={close}>
           <span className="brand__mark">HR</span>
           Hand Receipt

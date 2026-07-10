@@ -105,6 +105,12 @@ h3 {
 .container-mid {
   max-width: 720px;
 }
+/* Wider variant for data-dense list pages (e.g. Items) so table columns and
+   the right-hand action buttons have room on large screens instead of wrapping.
+   Still width:100% below this cap, so it stays responsive on smaller screens. */
+.container-wide {
+  max-width: 1280px;
+}
 
 .stack {
   display: flex;
@@ -139,6 +145,10 @@ h3 {
   display: flex;
   align-items: center;
   gap: 20px;
+}
+/* Matches .container-wide so the header aligns with wide list pages (Items). */
+.app-header__inner--wide {
+  max-width: 1280px;
 }
 .brand {
   display: flex;
@@ -528,7 +538,9 @@ input[type="file"].input {
   display: flex;
   gap: 6px;
   align-items: center;
-  flex-wrap: wrap;
+  /* Keep the row of actions on one line on desktop; the mobile card layout
+     (@media max-width:720px, below) re-enables wrapping. */
+  flex-wrap: nowrap;
 }
 .mono {
   font-family: var(--font-mono);
