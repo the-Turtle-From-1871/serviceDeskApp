@@ -97,11 +97,18 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
   set("TO", partyHeader(t.receiver), { size: 10, fitWidth: true, multiline: true });
   set("HAND RECEIPT IDENTIFIER", t.receiptNumber, { size: 11 });
 
+  const qtyCenters: number[] = [];
   t.lines.forEach((ln, i) => {
     set(`ITEM NO aRow${ln.lineNo}`, String(ln.lineNo), { size: 9, center: true });
     set(`ITEM DESCRIPTION cRow${ln.lineNo}`, `${ln.make} ${ln.model}\nSER NO: ${ln.serials.join(", ")}`, { multiline: true, size: 9, fitBox: true });
     set(`UI.${i}`, ln.unitOfIssue, { size: 9, center: true });
     set(`QTY.${i}`, String(ln.qtyAuth), { size: 9, center: true }); // QTY AUTH column
+    // Capture the QTY AUTH widget's vertical center so the Column A number on the
+    // same row can be aligned to it (the two quantity columns line up).
+    try {
+      const r = form.getTextField(`QTY.${i}`).acroField.getWidgets()[0].getRectangle();
+      qtyCenters[i] = r.y + r.height / 2;
+    } catch { /* field absent in this template revision */ }
   });
 
   form.updateFieldAppearances(helv);
@@ -116,23 +123,18 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
   const dateStr = formatDateHST(t.createdAt);
 
   const rowH = 24; // template row pitch
-  // Issued numbers were landing one row below their item row; anchor their
-  // loop one row height above rowTopY so each lands on its own item row.
-  const issuedTopY = rowTopY + rowH;
-  t.lines.forEach((ln) => {
-    const rowCenterY = issuedTopY - (ln.lineNo - 0.5) * rowH;
+  const issuedTopY = rowTopY + rowH; // fallback anchor if a QTY widget is missing
+  t.lines.forEach((ln, i) => {
+    // Align the Column A number vertically with the QTY AUTH number on the same
+    // row (centered on that widget); fall back to the computed row center.
+    const cy = qtyCenters[i];
+    const baselineY = cy !== undefined ? cy - 3.2 : issuedTopY - (ln.lineNo - 0.5) * rowH;
+    // Show the still-held balance when items were returned (gate on serial count,
+    // not the typed issued qty, so a no-return receipt never adjusts), else the
+    // issued qty. All numbers are black.
     const held = ln.heldQty ?? ln.serials.length;
-    // When items were actually returned (held below the line's serial count),
-    // show only the current still-held balance (red) — not the old issued qty.
-    // Gate on serial count, not the typed issued qty, so a receipt with no
-    // returns never adjusts even if a typed issued qty differs from the count.
-    if (held < ln.serials.length) {
-      const label = String(held);
-      page1.drawText(label, { x: colCenter - bold.widthOfTextAtSize(label, 9) / 2, y: rowCenterY, size: 9, font: bold, color: red });
-    } else {
-      const label = String(ln.qtyIssued);
-      page1.drawText(label, { x: colCenter - helv.widthOfTextAtSize(label, 9) / 2, y: rowCenterY, size: 9, font: helv });
-    }
+    const label = String(held < ln.serials.length ? held : ln.qtyIssued);
+    page1.drawText(label, { x: colCenter - helv.widthOfTextAtSize(label, 9) / 2, y: baselineY, size: 9, font: helv, color: black });
   });
 
   // Recipient signature + date sit vertically in the column below the last row.
