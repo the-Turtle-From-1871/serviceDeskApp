@@ -359,9 +359,12 @@ h3 {
   padding: 10px 12px;
   resize: vertical;
 }
-/* The native file-picker button sits at the top of the fixed-height input box;
-   flex-center it vertically. */
+/* The native file-picker button pins to the top of the fixed-height input box.
+   Use height:auto + symmetric vertical padding so equal space above/below the
+   button centers it (robust across browsers, not reliant on flex alone). */
 input[type="file"].input {
+  height: auto;
+  padding: 9px 12px;
   display: flex;
   align-items: center;
 }
