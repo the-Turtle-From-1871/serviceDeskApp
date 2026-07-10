@@ -192,19 +192,30 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
   }
 
   // Closing-technician attestation drawn in the open body of the FORM page,
-  // alongside the CLOSED marking: printed name, date, and signature (bold).
+  // rotated PARALLEL to the CLOSED watermark and offset below it so it clears
+  // the word: printed name, date, and signature (bold).
   if (t.closedBy) {
-    const ax = 232;
-    let ay = 368;
-    page1.drawText(`Accepted by: ${t.closedBy.name}`, { x: ax, y: ay, size: 12, font: bold, color: black });
-    ay -= 18;
-    page1.drawText(`Date: ${formatDateHST(t.closedBy.date)}`, { x: ax, y: ay, size: 12, font: bold, color: black });
-    ay -= 10;
+    const ang = 35, rad = (ang * Math.PI) / 180;
+    const dx = Math.sin(rad), dy = -Math.cos(rad); // perpendicular "below baseline" (down-right)
+    const { width, height } = page1.getSize();
+    // Start from the watermark anchor, pushed down the perpendicular so the
+    // block sits below the CLOSED glyphs, and advance each line down the same axis.
+    let bx = width * 0.24 + 70 * dx;
+    let by = height * 0.42 + 70 * dy;
+    const step = (d: number) => { bx += d * dx; by += d * dy; };
+    page1.drawText(`Accepted by: ${t.closedBy.name}`, { x: bx, y: by, size: 12, font: bold, color: black, rotate: degrees(ang) });
+    step(16);
+    page1.drawText(`Date: ${formatDateHST(t.closedBy.date)}`, { x: bx, y: by, size: 12, font: bold, color: black, rotate: degrees(ang) });
+    step(60);
     if (t.closedBy.signature && t.closedBy.signature.startsWith("data:image/png;base64,")) {
       try {
         const csig = await pdf.embedPng(Buffer.from(t.closedBy.signature.split(",")[1], "base64"));
-        const w = 200, h = Math.min((csig.height / csig.width) * w, 66);
-        page1.drawImage(csig, { x: ax, y: ay - h, width: w, height: h });
+        // Preserve aspect ratio (fit within 150x44) so the rotated signature
+        // isn't stretched/sheared.
+        const ar = csig.width / csig.height;
+        let w = 150, h = w / ar;
+        if (h > 44) { h = 44; w = h * ar; }
+        page1.drawImage(csig, { x: bx, y: by, width: w, height: h, rotate: degrees(ang) });
       } catch {
         /* signature optional — skip on failure */
       }
