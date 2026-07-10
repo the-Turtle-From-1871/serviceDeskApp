@@ -17,10 +17,11 @@ export default async function ReceiptPage({ params }: { params: Promise<{ receip
   const isAdmin = me?.role === "ADMIN";
   const isStaff = !!me && me.isActive;
   const closed = t.status === "CLOSED";
-  // The customer is the non-DCSIM party (receiver first). Only staff can notify,
-  // and only when the receipt is open and the customer has an email on file.
+  // The customer is the non-DCSIM party (receiver first). Staff can notify on an
+  // open receipt; the button itself is disabled (with a reason) when the customer
+  // has no email, so the option is always visible rather than silently missing.
   const customerEmail = !t.receiverIsDcsim ? t.receiverEmail : !t.senderIsDcsim ? t.senderEmail : null;
-  const canNotify = isStaff && !closed && !!customerEmail;
+  const showNotify = isStaff && !closed;
   const closing = closed ? await getClosingReturn(t.id) : null;
 
   return (
@@ -80,7 +81,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ receip
           {isAdmin && !closed && (
             <a className="btn btn-primary" href={`/receipts/${t.receiptNumber}/return`}>Process return</a>
           )}
-          {canNotify && <NotifyPickupButton receiptNumber={t.receiptNumber} />}
+          {showNotify && <NotifyPickupButton receiptNumber={t.receiptNumber} hasCustomerEmail={!!customerEmail} />}
           <a className="btn btn-secondary" href={`/receipts/${t.receiptNumber}/pdf?preview=1`} target="_blank" rel="noopener noreferrer">Preview PDF</a>
           <a className="btn btn-secondary" href={`/receipts/${t.receiptNumber}/pdf`}>Download PDF</a>
           <Link className="btn btn-ghost" href="/">Search another</Link>
