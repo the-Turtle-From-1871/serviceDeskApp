@@ -122,7 +122,7 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
   // row, with guard bars blacking out the remaining empty space (DA 2062 layout).
   const page1 = pdf.getPage(0);
   const black = rgb(0, 0, 0), red = rgb(0.78, 0.12, 0.12);
-  const colLeft = 621, colWidth = 23, colCenter = 632, rowTopY = 486, tableBottomY = 58;
+  const colWidth = 23, rowTopY = 486, tableBottomY = 58;
   const dateStr = formatDateHST(t.createdAt);
 
   const rowH = 24; // template row pitch
@@ -143,59 +143,56 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
     });
   });
 
-  // Recipient signature + date sit vertically in the column below the last row.
+  // Each transaction's signature + date sit VERTICALLY in its own column below the
+  // item rows, with guard bars blacking out the empty space above/below — one per
+  // signed column (A = recipient/issuance; B, C, … = each return's technician).
   const lastRowBottom = issuedTopY - t.lines.length * rowH;
   const sigBottom = Math.max(tableBottomY + 130, lastRowBottom - 150);
-  let blockTop = sigBottom;
-  let drewImage = false;
-  if (t.receiverSignature && t.receiverSignature.startsWith("data:image/png;base64,")) {
-    try {
-      const sig = await pdf.embedPng(Buffer.from(t.receiverSignature.split(",")[1], "base64"));
-      const barH = 22;
-      const barW = Math.min(barH * (sig.width / sig.height), 72);
-      page1.drawImage(sig, { x: 642, y: sigBottom, width: barW, height: barH, rotate: degrees(90) });
-      const dateY = sigBottom + barW + 10;
-      page1.drawText(dateStr, { x: colCenter + 4, y: dateY, size: 9, font: helv, rotate: degrees(90) });
-      blockTop = dateY + helv.widthOfTextAtSize(dateStr, 9);
-      drewImage = true;
-    } catch {
-      /* fall through to the text label below */
-    }
-  }
-  if (!drewImage) {
-    const label = `${partyHeaderShort(t.receiver)}   ${dateStr}`;
-    page1.drawText(label, { x: colCenter + 4, y: sigBottom, size: 9, font: helv, rotate: degrees(90) });
-    blockTop = sigBottom + helv.widthOfTextAtSize(label, 9);
-  }
-  // Each return transaction's technician signature + date, drawn vertically in
-  // the next column (B, C, …) at the same band as Column A's recipient signature,
-  // so every transaction column carries who accepted it.
-  const retSigs = t.columnSignatures ?? [];
-  for (let k = 0; k < retSigs.length && k + 1 < colCenters.length; k++) {
-    const cs = retSigs[k];
-    const cxJ = colCenters[k + 1]; // column B is index 1
-    const dStr = formatDateHST(cs.date);
+  const drawColumnSig = async (cx: number, signature: string, dStr: string, fallback: string) => {
+    let blockTop = sigBottom;
     let drew = false;
-    if (cs.signature && cs.signature.startsWith("data:image/png;base64,")) {
+    if (signature && signature.startsWith("data:image/png;base64,")) {
       try {
-        const sig = await pdf.embedPng(Buffer.from(cs.signature.split(",")[1], "base64"));
+        const sig = await pdf.embedPng(Buffer.from(signature.split(",")[1], "base64"));
         const barH = 22;
         const barW = Math.min(barH * (sig.width / sig.height), 72);
-        page1.drawImage(sig, { x: cxJ + 10, y: sigBottom, width: barW, height: barH, rotate: degrees(90) });
-        page1.drawText(dStr, { x: cxJ + 4, y: sigBottom + barW + 10, size: 9, font: helv, rotate: degrees(90) });
+        page1.drawImage(sig, { x: cx + 10, y: sigBottom, width: barW, height: barH, rotate: degrees(90) });
+        const dateY = sigBottom + barW + 10;
+        page1.drawText(dStr, { x: cx + 4, y: dateY, size: 9, font: helv, rotate: degrees(90) });
+        blockTop = dateY + helv.widthOfTextAtSize(dStr, 9);
         drew = true;
       } catch {
         /* fall through to the text label below */
       }
     }
     if (!drew) {
-      page1.drawText(`${cs.name}   ${dStr}`, { x: cxJ + 4, y: sigBottom, size: 9, font: helv, rotate: degrees(90) });
+      page1.drawText(fallback, { x: cx + 4, y: sigBottom, size: 9, font: helv, rotate: degrees(90) });
+      blockTop = sigBottom + helv.widthOfTextAtSize(fallback, 9);
     }
+    // Guard bars: black out the empty column below and above the signature block.
+    const gx = cx - 11;
+    if (sigBottom - 4 - tableBottomY > 1) {
+      page1.drawRectangle({ x: gx, y: tableBottomY, width: colWidth, height: sigBottom - 4 - tableBottomY, color: black });
+    }
+    if (lastRowBottom - (blockTop + 2) > 1) {
+      page1.drawRectangle({ x: gx, y: blockTop + 2, width: colWidth, height: lastRowBottom - (blockTop + 2), color: black });
+    }
+  };
+  // Column A = recipient/issuance; columns B, C, … = each return transaction.
+  const signedColumns = [
+    { signature: t.receiverSignature, dStr: dateStr, fallback: `${partyHeaderShort(t.receiver)}   ${dateStr}` },
+    ...(t.columnSignatures ?? []).map((cs) => {
+      const d = formatDateHST(cs.date);
+      return { signature: cs.signature, dStr: d, fallback: `${cs.name}   ${d}` };
+    }),
+  ];
+  for (let idx = 0; idx < signedColumns.length && idx < colCenters.length; idx++) {
+    const sc = signedColumns[idx];
+    await drawColumnSig(colCenters[idx], sc.signature, sc.dStr, sc.fallback);
   }
 
   // When the receipt is closed (all property returned), stamp the form page with
-  // a diagonal CLOSED watermark and strike the recipient signature block,
-  // per the DA 2062 "redline" clear-out treatment.
+  // a diagonal CLOSED watermark.
   if (t.status === "CLOSED") {
     const { width, height } = page1.getSize();
     page1.drawText("CLOSED", {
@@ -206,13 +203,6 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
       color: red,
       rotate: degrees(35),
       opacity: 0.28,
-    });
-    // Strike through the vertical signature block in muted red.
-    page1.drawLine({
-      start: { x: colLeft - 2, y: sigBottom },
-      end: { x: colLeft + colWidth + 2, y: blockTop + 2 },
-      thickness: 2,
-      color: red,
     });
   }
 
