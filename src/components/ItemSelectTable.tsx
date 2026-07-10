@@ -99,6 +99,8 @@ export function ItemSelectTable({ items, isAdmin }: { items: ItemRow[]; isAdmin:
 
   const create = () => { if (selected.size && !tooMany && !tooManyPerRow) router.push(`/receipts/new?items=${[...selected].join(",")}`); };
 
+  const printQr = () => { if (selected.size) window.open(`/admin/items/qr-sheet/pdf?items=${[...selected].join(",")}&preview=1`, "_blank", "noopener"); };
+
   const visibleCols = ITEM_COLUMNS.filter((c) => !isHidden(c.key));
 
   return (
@@ -125,6 +127,17 @@ export function ItemSelectTable({ items, isAdmin }: { items: ItemRow[]; isAdmin:
         >
           {sort.dir === "asc" ? "Asc ▲" : "Desc ▼"}
         </button>
+        {isAdmin && (
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={selected.size === 0}
+            onClick={printQr}
+            title={selected.size === 0 ? "Select items to print QR labels" : undefined}
+          >
+            Print QR codes{selected.size ? ` (${selected.size})` : ""}
+          </button>
+        )}
         <details className="col-menu spacer">
           <summary className="btn btn-secondary">Columns</summary>
           <div className="col-menu-panel">

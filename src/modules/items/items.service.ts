@@ -13,6 +13,14 @@ export function getItem(id: string) {
   return prisma.item.findUnique({ where: { id } });
 }
 
+export async function getItemsByIds(ids: string[]): Promise<Item[]> {
+  if (ids.length === 0) return [];
+  const found = await prisma.item.findMany({ where: { id: { in: ids } } });
+  // Preserve the caller's requested order (findMany does not guarantee it).
+  const byId = new Map(found.map((i) => [i.id, i]));
+  return ids.map((id) => byId.get(id)).filter((i): i is Item => !!i);
+}
+
 export function getItemWithCreator(id: string) {
   return prisma.item.findUnique({
     where: { id },
