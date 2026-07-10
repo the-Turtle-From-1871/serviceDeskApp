@@ -132,6 +132,51 @@ h3 {
   margin-left: auto;
 }
 
+/* Push the site footer to the bottom on short pages (body is a flex column). */
+.app-shell {
+  flex: 1 0 auto;
+}
+
+/* ---------- Site footer ---------- */
+.site-footer {
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.site-footer__inner {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+.site-footer__links {
+  display: flex;
+  gap: 20px;
+}
+
+/* ---------- Legal / prose pages (privacy, terms) ---------- */
+.legal h2 {
+  font-size: 17px;
+  margin: 22px 0 8px;
+}
+.legal p,
+.legal ul {
+  margin-bottom: 12px;
+}
+.legal ul {
+  padding-left: 20px;
+}
+.legal li {
+  margin-bottom: 6px;
+}
+.legal > :first-child {
+  margin-top: 0;
+}
+
 /* ---------- App header / nav ---------- */
 .app-header {
   background: var(--surface);
