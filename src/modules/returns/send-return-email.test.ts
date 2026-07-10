@@ -72,4 +72,31 @@ describe("sendReturnEmail", () => {
     await sendReturnEmail(base, { sender: { send } });
     expect(send.mock.calls[0][0].attachments).toBeUndefined();
   });
+
+  it("copies the admin inbox with a CLOSED subject and the PDF on a full return", async () => {
+    process.env.ADMIN_INBOX_EMAIL = "admin@army.mil";
+    const send = vi.fn(async (_m: EmailMessage) => {});
+    const pdf = new Uint8Array([1, 2, 3]);
+    await sendReturnEmail(
+      { ...base, kind: "FULL", byLine: [{ ...base.byLine[0], returnedNow: 2, heldAfter: 0 }], pdf },
+      { sender: { send } }
+    );
+    const adminMsg = send.mock.calls.find((c) => c[0].to === "admin@army.mil")![0];
+    expect(adminMsg.subject).toBe(`CLOSED ${base.receiptNumber}`);
+    expect(adminMsg.attachments).toEqual([{ filename: `hand-receipt-${base.receiptNumber}.pdf`, content: pdf }]);
+  });
+
+  it("does NOT copy the admin inbox on a partial return", async () => {
+    process.env.ADMIN_INBOX_EMAIL = "admin@army.mil";
+    const send = vi.fn(async (_m: EmailMessage) => {});
+    await sendReturnEmail(base, { sender: { send } }); // base.kind === "PARTIAL"
+    expect(send.mock.calls.filter((c) => c[0].to === "admin@army.mil")).toHaveLength(0);
+  });
+
+  it("does not copy the admin inbox when ADMIN_INBOX_EMAIL is unset", async () => {
+    delete process.env.ADMIN_INBOX_EMAIL;
+    const send = vi.fn(async (_m: EmailMessage) => {});
+    await sendReturnEmail({ ...base, kind: "FULL", byLine: [{ ...base.byLine[0], returnedNow: 2, heldAfter: 0 }] }, { sender: { send } });
+    expect(send.mock.calls.filter((c) => c[0].to === "admin@army.mil")).toHaveLength(0);
+  });
 });

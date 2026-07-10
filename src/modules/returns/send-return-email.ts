@@ -68,11 +68,6 @@ export async function sendReturnEmail(args: ReturnEmailArgs, deps: { sender?: Em
   const customer = !args.receiver.isDcsim && args.receiver.email ? args.receiver.email : undefined;
 
   const to = customer ?? desk;
-  if (!to) {
-    console.info("[return-email] no recipient (customer email + G6_SERVICE_DESK_EMAIL both unset); skipping notification");
-    return; // nobody to notify
-  }
-  const cc = to !== desk ? desk : undefined; // don't CC the same address we're sending to
 
   const subject =
     args.kind === "FULL"
@@ -80,16 +75,27 @@ export async function sendReturnEmail(args: ReturnEmailArgs, deps: { sender?: Em
       : `UPDATE: G6 Digital Hand Receipt - Partial Property Return Confirmation [ID: ${args.receiptNumber}]`;
 
   const text = args.kind === "FULL" ? fullBody(args) : partialBody(args);
+  const attachments = args.pdf ? [{ filename: `hand-receipt-${args.receiptNumber}.pdf`, content: args.pdf }] : undefined;
 
-  try {
-    await sender.send({
-      to,
-      cc,
-      subject,
-      text,
-      attachments: args.pdf ? [{ filename: `hand-receipt-${args.receiptNumber}.pdf`, content: args.pdf }] : undefined,
-    });
-  } catch (e) {
-    console.error(`[return-email] failed to email ${to}:`, e);
+  if (to) {
+    const cc = to !== desk ? desk : undefined; // don't CC the same address we're sending to
+    try {
+      await sender.send({ to, cc, subject, text, attachments });
+    } catch (e) {
+      console.error(`[return-email] failed to email ${to}:`, e);
+    }
+  } else {
+    console.info("[return-email] no recipient (customer email + G6_SERVICE_DESK_EMAIL both unset); skipping customer notification");
+  }
+
+  // Archive completed (full) returns to the admin/records inbox with a scannable
+  // subject. Partial returns are intentionally not copied here.
+  const adminInbox = process.env.ADMIN_INBOX_EMAIL;
+  if (args.kind === "FULL" && adminInbox) {
+    try {
+      await sender.send({ to: adminInbox, subject: `CLOSED ${args.receiptNumber}`, text, attachments });
+    } catch (e) {
+      console.error(`[return-email] failed to email admin inbox ${adminInbox}:`, e);
+    }
   }
 }
