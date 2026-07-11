@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useActionState } from "react";
 import { registerAction } from "@/app/actions/auth";
+import { PhoneInput } from "@/components/PhoneInput";
 
 export default function RegisterPage() {
   const [state, action, pending] = useActionState(registerAction, undefined);
@@ -18,7 +19,7 @@ export default function RegisterPage() {
             <div className="field"><label className="label" htmlFor="r-rank">Rank</label><input id="r-rank" className="input" name="rank" placeholder="e.g. SGT (optional)" autoComplete="off" /></div>
             <div className="field"><label className="label" htmlFor="r-name">Name</label><input id="r-name" className="input" name="name" required /></div>
             <div className="field"><label className="label" htmlFor="r-unit">Unit</label><input id="r-unit" className="input" name="unit" placeholder="e.g. A Co, 1-1 IN" /></div>
-            <div className="field"><label className="label" htmlFor="r-contact">Contact number</label><input id="r-contact" className="input" name="contactNumber" /></div>
+            <div className="field"><label className="label" htmlFor="r-contact">Contact number</label><PhoneInput id="r-contact" name="contactNumber" /></div>
             <div className="field"><label className="label" htmlFor="r-email">Email</label><input id="r-email" className="input" name="email" type="email" required autoComplete="email" /></div>
             <div className="field"><label className="label" htmlFor="r-pw">Password</label><input id="r-pw" className="input" name="password" type="password" placeholder="8+ characters" required autoComplete="new-password" /></div>
           </div>

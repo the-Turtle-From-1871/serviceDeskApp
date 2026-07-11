@@ -2,6 +2,7 @@
 import { useActionState } from "react";
 import { createUserAction } from "@/app/admin/actions/users";
 import { RANK_OPTIONS } from "@/lib/ranks";
+import { PhoneInput } from "@/components/PhoneInput";
 
 export function NewUserForm() {
   const [state, action, pending] = useActionState(createUserAction, undefined);
@@ -29,7 +30,7 @@ export function NewUserForm() {
         </div>
         <div className="field">
           <label className="label" htmlFor="nu-contact">Contact number</label>
-          <input id="nu-contact" className="input" name="contactNumber" placeholder="(optional)" />
+          <PhoneInput id="nu-contact" name="contactNumber" />
         </div>
         <div className="field">
           <label className="label" htmlFor="nu-pw">Temporary password</label>

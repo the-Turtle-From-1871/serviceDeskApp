@@ -2,6 +2,7 @@
 import { useActionState, useState } from "react";
 import { createReceiptAction } from "@/app/actions/receipts";
 import { SignaturePad } from "@/components/SignaturePad";
+import { PhoneInput } from "@/components/PhoneInput";
 
 type Prefill = { isDcsim?: boolean; name?: string; rank?: string; unit?: string; contact?: string; email?: string };
 export type BuilderLine = { make: string; model: string; serials: string[]; defaultQty: number };
@@ -24,7 +25,7 @@ function PartyFields({ role, prefill }: { role: "sender" | "receiver"; prefill?:
         <div className="form-grid">
           <div className="field"><label className="label">Rank</label><input className="input" name={`${role}Rank`} defaultValue={prefill?.rank ?? ""} required /></div>
           <div className="field"><label className="label">Unit</label><input className="input" name={`${role}Unit`} defaultValue={prefill?.unit ?? ""} required /></div>
-          <div className="field"><label className="label">Contact number</label><input className="input" name={`${role}Contact`} defaultValue={prefill?.contact ?? ""} required /></div>
+          <div className="field"><label className="label">Contact number</label><PhoneInput name={`${role}Contact`} defaultValue={prefill?.contact} required /></div>
           <div className="field"><label className="label">Email</label><input className="input" type="email" name={`${role}Email`} defaultValue={prefill?.email ?? ""} required /></div>
         </div>
       )}
