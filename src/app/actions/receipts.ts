@@ -23,9 +23,11 @@ export async function createReceiptAction(_prev: unknown, formData: FormData) {
       let pdf: Uint8Array | undefined;
       try { pdf = (await renderReceiptPdf(t.receiptNumber)) ?? undefined; }
       catch (err) { console.error("[createReceiptAction] pdf render for email failed:", err); }
+      const full = await getTransferByReceiptNumber(t.receiptNumber);
+      const items = (full?.lines ?? []).flatMap((ln) => ln.items.map((it) => ({ make: ln.make, model: ln.model, serialNumber: it.serialNumber })));
       await sendReceiptEmails({
         sender: parsed.data.sender, receiver: parsed.data.receiver,
-        receiptNumber: t.receiptNumber, receiptUrl: receiptUrl(t.receiptNumber), itemSummary: t.itemSummary,
+        receiptNumber: t.receiptNumber, receiptUrl: receiptUrl(t.receiptNumber), items,
         pdf,
       });
     } catch (err) { console.error("[createReceiptAction] receipt email failed:", err); }

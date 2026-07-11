@@ -1,62 +1,47 @@
 import { getEmailSender, type EmailSender } from "@/lib/email";
-import type { ReturnLineBalance } from "./plan";
-import { formatDateTimeHST } from "@/lib/datetime";
+
+export type EmailItem = { make: string; model: string; serialNumber: string };
 
 export type ReturnEmailArgs = {
   receiver: { isDcsim: boolean; name: string; email: string | null };
   receiptNumber: string;
   receiptUrl: string;
   kind: "PARTIAL" | "FULL";
-  returned: { serialNumber: string; make: string; model: string }[];
-  byLine: ReturnLineBalance[];
-  processedByName: string;
-  processedByEmail: string;
-  processedAt: Date;
+  returned: EmailItem[]; // items returned in this transaction
+  remaining: EmailItem[]; // items still in the customer's custody (UPDATED)
+  allItems: EmailItem[]; // every item on the receipt (CLOSED)
   pdf?: Uint8Array;
 };
 
-function partialBody(a: ReturnEmailArgs): string {
-  const items = a.returned.map((r) => `  - ${r.make} ${r.model} (SN ${r.serialNumber})`).join("\n");
-  const balances = a.byLine
-    .filter((l) => l.returnedNow > 0)
-    .map((l) => `  - ${l.make} ${l.model}: Old: ${l.heldBefore} -> New Remaining: ${l.heldAfter}`)
-    .join("\n");
+function itemLines(items: EmailItem[]): string {
+  return items.length ? items.map((i) => `  - ${i.make} ${i.model} (SN ${i.serialNumber})`).join("\n") : "  (none)";
+}
+
+// Partial return → "UPDATED": what was returned and what is still out.
+function updatedBody(a: ReturnEmailArgs): string {
   return [
-    `A partial property return has been processed by the G6 service desk for hand receipt ${a.receiptNumber}.`,
+    `Hand receipt ${a.receiptNumber} has been updated.`,
     ``,
-    `Items returned today (${a.returned.length}):`,
-    items,
+    `Returned:`,
+    itemLines(a.returned),
     ``,
-    `New remaining balance still in your custody:`,
-    balances,
+    `Not returned:`,
+    itemLines(a.remaining),
     ``,
-    `You remain financially liable for the remaining items under AR 735-5 until they are returned.`,
-    ``,
-    `View your hand receipt:`,
+    `View or download the signed hand receipt here:`,
     a.receiptUrl,
-    ``,
-    `Processed by ${a.processedByName} (${a.processedByEmail}) on ${formatDateTimeHST(a.processedAt)}.`,
   ].join("\n");
 }
 
-function fullBody(a: ReturnEmailArgs): string {
-  const items = a.returned.map((r) => `  - ${r.make} ${r.model} (SN ${r.serialNumber})`).join("\n");
+// Full return → "CLOSED": an itemized list of all items on the receipt.
+function closedBody(a: ReturnEmailArgs): string {
   return [
-    `All remaining equipment on hand receipt ${a.receiptNumber} has been returned and verified by the G6 service desk.`,
+    `Hand receipt ${a.receiptNumber} has been closed.`,
     ``,
-    `**** STATUS: CLEARED / CLOSED ****`,
+    itemLines(a.allItems),
     ``,
-    `Items turned in today (${a.returned.length}):`,
-    items,
-    ``,
-    `Your active balance for this hand receipt is now zero. Your accountability is officially closed and you are no longer financially liable for tracking ID ${a.receiptNumber}.`,
-    ``,
-    `A closed-out copy of the form (marked CLOSED) is available here:`,
+    `View or download the signed hand receipt here:`,
     a.receiptUrl,
-    ``,
-    `Save this email as your digital clearance record for out-processing, PCS, or ETS.`,
-    ``,
-    `Cleared by ${a.processedByName} (${a.processedByEmail}) on ${formatDateTimeHST(a.processedAt)}.`,
   ].join("\n");
 }
 
@@ -66,15 +51,10 @@ export async function sendReturnEmail(args: ReturnEmailArgs, deps: { sender?: Em
   const sender = deps.sender ?? getEmailSender();
   const desk = process.env.G6_SERVICE_DESK_EMAIL;
   const customer = !args.receiver.isDcsim && args.receiver.email ? args.receiver.email : undefined;
-
   const to = customer ?? desk;
 
-  const subject =
-    args.kind === "FULL"
-      ? `CLEARANCE RECORD: G6 Digital Hand Receipt - Final Property Return [ID: ${args.receiptNumber}]`
-      : `UPDATE: G6 Digital Hand Receipt - Partial Property Return Confirmation [ID: ${args.receiptNumber}]`;
-
-  const text = args.kind === "FULL" ? fullBody(args) : partialBody(args);
+  const subject = args.kind === "FULL" ? `CLOSED: ${args.receiptNumber}` : `UPDATED: ${args.receiptNumber}`;
+  const text = args.kind === "FULL" ? closedBody(args) : updatedBody(args);
   const attachments = args.pdf ? [{ filename: `hand-receipt-${args.receiptNumber}.pdf`, content: args.pdf }] : undefined;
 
   if (to) {
@@ -88,12 +68,12 @@ export async function sendReturnEmail(args: ReturnEmailArgs, deps: { sender?: Em
     console.info("[return-email] no recipient (customer email + G6_SERVICE_DESK_EMAIL both unset); skipping customer notification");
   }
 
-  // Archive completed (full) returns to the admin/records inbox with a scannable
-  // subject. Partial returns are intentionally not copied here.
+  // Archive completed (full/closed) returns to the admin/records inbox. Partial
+  // (updated) returns are intentionally not copied here.
   const adminInbox = process.env.ADMIN_INBOX_EMAIL;
   if (args.kind === "FULL" && adminInbox) {
     try {
-      await sender.send({ to: adminInbox, subject: `CLOSED ${args.receiptNumber}`, text, attachments });
+      await sender.send({ to: adminInbox, subject, text, attachments });
     } catch (e) {
       console.error(`[return-email] failed to email admin inbox ${adminInbox}:`, e);
     }

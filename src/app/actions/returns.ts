@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin, AuthError } from "@/lib/authz";
 import { processReturn } from "@/modules/returns/returns.service";
 import { sendReturnEmail } from "@/modules/returns/send-return-email";
+import { getTransferByReceiptNumber } from "@/modules/transfers/transfers.service";
 import { renderReceiptPdf } from "@/modules/receipts/render";
 import { receiptUrl } from "@/modules/items/qr";
 import type { ReturnPlan } from "@/modules/returns/plan";
@@ -53,16 +54,23 @@ export async function processReturnAction(_prev: unknown, formData: FormData): P
       let pdf: Uint8Array | undefined;
       try { pdf = (await renderReceiptPdf(res.receiptNumber)) ?? undefined; }
       catch (err) { console.error("[processReturnAction] pdf render for email failed:", err); }
+      const returned = res.plan.returned.map((r) => ({ make: r.make, model: r.model, serialNumber: r.serialNumber }));
+      const remaining = res.plan.remaining.map((r) => ({ make: r.make, model: r.model, serialNumber: r.serialNumber }));
+      // A full return closes the receipt; list every item on it. Only load that
+      // when needed (the partial "UPDATED" body uses returned + remaining).
+      let allItems: { make: string; model: string; serialNumber: string }[] = [];
+      if (res.plan.kind === "FULL") {
+        const full = await getTransferByReceiptNumber(res.receiptNumber);
+        allItems = (full?.lines ?? []).flatMap((ln) => ln.items.map((it) => ({ make: ln.make, model: ln.model, serialNumber: it.serialNumber })));
+      }
       await sendReturnEmail({
         receiver: res.receiver,
         receiptNumber: res.receiptNumber,
         receiptUrl: receiptUrl(res.receiptNumber),
         kind: res.plan.kind,
-        returned: res.plan.returned.map((r) => ({ serialNumber: r.serialNumber, make: r.make, model: r.model })),
-        byLine: res.plan.byLine,
-        processedByName: admin.name,
-        processedByEmail: admin.email,
-        processedAt: new Date(),
+        returned,
+        remaining,
+        allItems,
         pdf,
       });
     } catch (err) {
