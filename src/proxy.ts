@@ -13,5 +13,5 @@ export const config = {
   // requires auth. The `|$` branch in the negative lookahead excludes the bare `/`
   // root path (matched only when nothing remains after the leading slash) -- verified
   // against a standalone regex test, since the matcher supports full regex per the Next.js docs.
-  matcher: ["/((?!api/auth|login|register|privacy|terms|receipts/|i/|_next/static|_next/image|favicon.ico|$).*)"],
+  matcher: ["/((?!api/auth|login|register|forgot-password|reset-password|privacy|terms|receipts/|i/|_next/static|_next/image|favicon.ico|$).*)"],
 };

@@ -25,10 +25,25 @@ model User {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  createdItems     Item[]              @relation("CreatedItems")
-  createdTransfers Transfer[]          @relation("CreatedTransfers")
-  importBatches    ImportBatch[]       @relation("ImportBatches")
-  returnsProcessed ReturnTransaction[] @relation("ReturnsProcessed")
+  createdItems     Item[]               @relation("CreatedItems")
+  createdTransfers Transfer[]           @relation("CreatedTransfers")
+  importBatches    ImportBatch[]        @relation("ImportBatches")
+  returnsProcessed ReturnTransaction[]  @relation("ReturnsProcessed")
+  passwordResets   PasswordResetToken[] @relation("PasswordResets")
+}
+
+// Self-service password reset. Only the SHA-256 hash of the emailed token is
+// stored, so a DB leak can't be used to reset. Single-use (usedAt) + expiry.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  user      User      @relation("PasswordResets", fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
 }
 
 enum ItemStatus {

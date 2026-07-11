@@ -25,6 +25,7 @@ export default function LoginPage() {
           <div className="field">
             <label className="label" htmlFor="password">Password</label>
             <input id="password" className="input" name="password" type="password" required autoComplete="current-password" />
+            <Link href="/forgot-password" className="subtle" style={{ fontSize: 13, marginTop: 6, display: "inline-block" }}>Forgot password?</Link>
           </div>
           {state?.error && <p role="alert" className="alert-error">{state.error}</p>}
           <button disabled={pending} type="submit" className="btn btn-primary btn-block">
