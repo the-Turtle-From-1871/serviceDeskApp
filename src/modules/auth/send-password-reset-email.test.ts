@@ -14,6 +14,9 @@ describe("sendPasswordResetEmail", () => {
     expect(msg.subject).toBe("Reset your DCSIM Service Desk password");
     expect(msg.text).toContain("https://x/reset-password?token=abc");
     expect(msg.text).toContain("1 hour");
+    // Multipart: an HTML body with the link, for better inbox placement.
+    expect(msg.html).toContain("https://x/reset-password?token=abc");
+    expect(msg.html).toContain("Reset your password");
   });
 
   it("propagates a send failure so the caller can handle it", async () => {
