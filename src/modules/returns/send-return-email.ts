@@ -68,10 +68,10 @@ export async function sendReturnEmail(args: ReturnEmailArgs, deps: { sender?: Em
     console.info("[return-email] no recipient (customer email + G6_SERVICE_DESK_EMAIL both unset); skipping customer notification");
   }
 
-  // Archive completed (full/closed) returns to the admin/records inbox. Partial
-  // (updated) returns are intentionally not copied here.
+  // Archive every return — UPDATED (partial) and CLOSED (full) — to the
+  // admin/records inbox with the same subject/body the customer receives.
   const adminInbox = process.env.ADMIN_INBOX_EMAIL;
-  if (args.kind === "FULL" && adminInbox) {
+  if (adminInbox) {
     try {
       await sender.send({ to: adminInbox, subject, text, attachments });
     } catch (e) {

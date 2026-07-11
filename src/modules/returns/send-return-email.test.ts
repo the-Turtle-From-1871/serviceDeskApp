@@ -90,11 +90,13 @@ describe("sendReturnEmail", () => {
     expect(adminMsg.attachments).toEqual([{ filename: `hand-receipt-${base.receiptNumber}.pdf`, content: pdf }]);
   });
 
-  it("does NOT copy the admin inbox on a partial return", async () => {
+  it("copies the admin inbox with the UPDATED subject on a partial return", async () => {
     process.env.ADMIN_INBOX_EMAIL = "admin@army.mil";
     const send = vi.fn(async (_m: EmailMessage) => {});
     await sendReturnEmail(base, { sender: { send } }); // PARTIAL
-    expect(send.mock.calls.filter((c) => c[0].to === "admin@army.mil")).toHaveLength(0);
+    const adminMsg = send.mock.calls.find((c) => c[0].to === "admin@army.mil")![0];
+    expect(adminMsg.subject).toBe(`UPDATED: ${base.receiptNumber}`);
+    expect(adminMsg.text).toContain(`Hand receipt ${base.receiptNumber} has been updated.`);
   });
 
   it("does not copy the admin inbox when ADMIN_INBOX_EMAIL is unset", async () => {
