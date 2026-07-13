@@ -14,17 +14,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Service Desk App',
-  description: 'Internal Service Desk Portal',
-  // Add this verification object right here:
+  title: "Hand Receipt",
+  description: "Digital hand receipts — track custody of equipment with a signed transfer chain.",
   verification: {
     google: '53ce9f901de4dacc',
   },
-};
-
-export const metadata: Metadata = {
-  title: "Hand Receipt",
-  description: "Digital hand receipts — track custody of equipment with a signed transfer chain.",
 };
 
 export const viewport: Viewport = { width: "device-width", initialScale: 1 };
