@@ -1,10 +1,6 @@
-import { getEmailSender, type EmailSender } from "@/lib/email";
+import { getEmailSender, type EmailSender, escapeHtml } from "@/lib/email";
 
 export type PasswordResetEmailArgs = { to: string; name: string; resetUrl: string };
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
 
 // Emails a password-reset link as a multipart (text + HTML) message. A proper
 // HTML body — a real button and clear sender identity — lands in the inbox far

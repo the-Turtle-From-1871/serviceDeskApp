@@ -30,12 +30,58 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   callbacks: {
-    jwt({ token, user }) {
+    async jwt({ token, user }) {
+      // Sign-in: seed identity + a "password freshness" claim from the DB.
+      // This one extra read happens only at login.
       if (user) {
         token.id = user.id;
         token.role = user.role;
+        try {
+          const dbUser = await prisma.user.findUnique({
+            where: { id: user.id },
+            select: { passwordChangedAt: true },
+          });
+          token.pwdChangedAt = dbUser?.passwordChangedAt?.getTime() ?? null;
+        } catch (err) {
+          // Fail-open: a transient DB blip at login should not break sign-in.
+          console.error("jwt callback: failed to seed pwdChangedAt", err);
+        }
+        return token;
       }
-      return token;
+
+      // Subsequent calls (every auth() invocation, incl. proxy/middleware):
+      // re-check the DB stamp so a password reset revokes already-issued JWTs.
+      try {
+        const dbUser = await prisma.user.findUnique({
+          where: { id: token.id },
+          select: { passwordChangedAt: true },
+        });
+
+        // Account deleted -> revoke.
+        if (!dbUser) return null;
+
+        const dbStamp = dbUser.passwordChangedAt?.getTime() ?? null;
+
+        // Grandfather tokens issued before this claim existed: seed, don't revoke.
+        if (token.pwdChangedAt === undefined) {
+          token.pwdChangedAt = dbStamp;
+          return token;
+        }
+
+        // Password changed after this token was issued -> revoke.
+        if (
+          dbStamp !== null &&
+          (token.pwdChangedAt === null || dbStamp > token.pwdChangedAt)
+        ) {
+          return null;
+        }
+
+        return token;
+      } catch (err) {
+        // Fail-open: do not lock everyone out on a transient DB error.
+        console.error("jwt callback: freshness check failed", err);
+        return token;
+      }
     },
     session({ session, token }) {
       session.user.id = token.id;

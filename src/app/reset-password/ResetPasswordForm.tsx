@@ -1,10 +1,20 @@
 "use client";
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
 import { resetPasswordAction } from "@/app/actions/auth";
 
 export function ResetPasswordForm({ token }: { token: string }) {
   const [state, action, pending] = useActionState(resetPasswordAction, undefined);
+
+  // Scrub the raw token from the address bar / browser history on mount.
+  // The token lives in the hidden input (from the prop), so stripping the
+  // query param here does not affect form submission. No-op when there is
+  // nothing to strip.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!window.location.search.includes("token=")) return;
+    window.history.replaceState(null, "", "/reset-password");
+  }, []);
 
   if (state && "ok" in state) {
     return (

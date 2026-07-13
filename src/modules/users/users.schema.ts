@@ -8,11 +8,15 @@ const rank = z
   .transform((v) => v || undefined)
   .optional();
 
-const email = z
+export const emailField = z
   .string()
   .trim()
   .email()
   .transform((v) => v.toLowerCase());
+
+export const passwordField = z
+  .string()
+  .min(8, "Password must be at least 8 characters");
 
 const optionalText = z
   .string()
@@ -23,8 +27,8 @@ const optionalText = z
 export const newUserSchema = z.object({
   rank,
   name: z.string().trim().min(1),
-  email,
-  password: z.string().min(8, "Password must be at least 8 characters"),
+  email: emailField,
+  password: passwordField,
   role: z.enum(["ADMIN", "USER"]).default("USER"),
   unit: optionalText,
   contactNumber: optionalText,
