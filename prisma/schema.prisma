@@ -107,6 +107,10 @@ model Transfer {
   createdAt DateTime       @default(now())
 
   returns ReturnTransaction[] @relation("TransferReturns")
+
+  // [Ingest & Routing Queue] Back-reference for the service queue. Every ingested
+  // receipt is routed into the primary service queue (see ServiceQueueItem).
+  queueItems ServiceQueueItem[] @relation("TransferQueueItems")
 }
 
 model TransferLine {
@@ -167,4 +171,29 @@ model ReturnTransaction {
   createdAt            DateTime   @default(now())
 
   @@index([transferId])
+}
+
+// [Ingest & Routing Queue] Lifecycle states for a service-queue entry.
+enum ServiceQueueStatus {
+  // Primary/service state. Every ingested receipt lands here for processing and
+  // is shown on the Admin Queue as requiring active service/intervention.
+  PENDING
+  // "Ready to issue when needed" — an admin removed the item from the Admin
+  // Queue. The record is retained (never deleted) and drops off the active view.
+  READY_TO_ISSUE
+}
+
+// [Ingest & Routing Queue] Operational queue entry for a receipt (Transfer).
+// The ingestion pipeline creates one PENDING entry per incoming receipt so it is
+// processed in the service queue before reaching admin views.
+model ServiceQueueItem {
+  id         String             @id @default(cuid())
+  transfer   Transfer           @relation("TransferQueueItems", fields: [transferId], references: [id], onDelete: Cascade)
+  transferId String
+  status     ServiceQueueStatus @default(PENDING)
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+
+  @@index([transferId])
+  @@index([status])
 }

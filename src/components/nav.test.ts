@@ -15,11 +15,12 @@ describe("navItemsFor", () => {
       { label: "Account", href: "/account" },
     ]);
   });
-  it("admin: Search, Items, New item, Users, Audit, Account", () => {
+  it("admin: Search, Items, New item, Queue, Users, Audit, Account", () => {
     expect(navItemsFor({ loggedIn: true, isAdmin: true })).toEqual([
       { label: "Search", href: "/" },
       { label: "Items", href: "/items" },
       { label: "New item", href: "/admin/items/new" },
+      { label: "Queue", href: "/admin/queue" },
       { label: "Users", href: "/admin/users" },
       { label: "Audit", href: "/admin/audit" },
       { label: "Account", href: "/account" },

@@ -7,6 +7,7 @@ import { sendReceiptEmails } from "@/modules/receipts/send-receipt-email";
 import { sendPickupEmail, customerParty, pickupItems } from "@/modules/receipts/send-pickup-email";
 import { renderReceiptPdf } from "@/modules/receipts/render";
 import { receiptUrl } from "@/modules/items/qr";
+import { enqueueTransfer } from "@/modules/service-queue/service-queue.service";
 import { parseReceiptForm } from "./receipts.parse";
 
 export async function createReceiptAction(_prev: unknown, formData: FormData) {
@@ -19,6 +20,13 @@ export async function createReceiptAction(_prev: unknown, formData: FormData) {
   try {
     const t = await createTransfer({ ...parsed.data, createdByUserId: user.id });
     receiptNumber = t.receiptNumber;
+
+    // [Ingest & Routing Queue] Route every newly ingested receipt into the
+    // primary service queue (PENDING) before it reaches admin views. Best-effort:
+    // a queue hiccup must not fail the already-created receipt.
+    try { await enqueueTransfer(t.id); }
+    catch (err) { console.error("[createReceiptAction] service-queue enqueue failed:", err); }
+
     try {
       let pdf: Uint8Array | undefined;
       try { pdf = (await renderReceiptPdf(t.receiptNumber)) ?? undefined; }
