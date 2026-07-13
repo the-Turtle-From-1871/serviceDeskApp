@@ -57,6 +57,7 @@ $env:SEED_ADMIN_EMAIL="admin@yourorg.com"; $env:SEED_ADMIN_PASSWORD="<strong-pas
    | `DIRECT_URL`   | Supabase **session/direct** URL (5432)                  |
    | `AUTH_SECRET`  | a fresh secret — run `npx auth secret`                  |
    | `APP_URL`      | your deployed URL, e.g. `https://<app>.vercel.app`      |
+   | `CRON_SECRET`  | long random value (`openssl rand -hex 32`) — authenticates the purge cron (see §6) |
 
 4. **Deploy.** First deploy: you may not know the final URL yet — deploy once,
    copy the assigned domain into `APP_URL`, then redeploy so QR codes encode it.
@@ -66,6 +67,61 @@ $env:SEED_ADMIN_EMAIL="admin@yourorg.com"; $env:SEED_ADMIN_PASSWORD="<strong-pas
 - Visit the site → you should be redirected to `/login`.
 - Sign in with the seeded admin, create an item, print its QR, and scan it with a
   phone → it should open `https://<APP_URL>/i/<id>`.
+
+## 6. Background data purge (automatic cleanup)
+
+A scheduled worker permanently deletes stale records:
+
+- **Closed receipts** — 90 days after a receipt (`Transfer`) is closed.
+- **Deactivated accounts** — 3 months after a user is deactivated. Users still
+  referenced by items/receipts are **skipped** (reported as `skippedCount`), never
+  force-deleted.
+
+**How it runs.** `vercel.json` defines a Vercel Cron that calls
+`/api/cron/purge` daily at **08:00 UTC**. The endpoint has no user session, so it
+authenticates with a shared secret instead:
+
+- Set `CRON_SECRET` (Production env, step 4) to a long random value —
+  `openssl rand -hex 32`. Vercel automatically attaches it as
+  `Authorization: Bearer <CRON_SECRET>` on scheduled calls.
+- If `CRON_SECRET` is **unset**, the endpoint fails closed (every call → `401`)
+  and **nothing is ever purged** — a silent no-op. Setting it is required for the
+  cleanup to happen at all.
+- Vercel runs Crons on a schedule only on **Pro** plans. On Hobby, the schedule
+  won't auto-fire — trigger it manually (below).
+
+**Trigger it manually** — the same call the scheduler makes. Replace
+`<CRON_SECRET>` with the value from Vercel (do **not** hardcode the secret into
+committed scripts), and `<APP_URL>` with the deployed domain:
+
+```bash
+# bash / macOS / Linux
+curl -s -X POST https://<APP_URL>/api/cron/purge \
+  -H "Authorization: Bearer <CRON_SECRET>"
+```
+
+```powershell
+# Windows PowerShell
+Invoke-RestMethod -Method Post -Uri "https://<APP_URL>/api/cron/purge" `
+  -Headers @{ Authorization = "Bearer <CRON_SECRET>" }
+```
+
+Success is HTTP `200` with a JSON summary:
+
+```json
+{"ok":true,"transfers":{"deletedCount":0},"users":{"deletedCount":0,"skippedCount":0}}
+```
+
+- `deletedCount` — records permanently removed on this run.
+- `skippedCount` — accounts old enough to purge but kept because they still have
+  attached items/receipts.
+- A wrong or missing secret returns `401` and touches nothing.
+
+> ⚠️ This endpoint **permanently deletes** eligible data — there is no undo. It is
+> safe to call anytime (it only removes records past their retention window) but it
+> is **not** a dry run. The route is intentionally excluded from the auth
+> middleware (`src/proxy.ts` matcher) so the cron isn't redirected to `/login`;
+> its only protection is `CRON_SECRET`, so keep that value secret.
 
 ## Notes / caveats
 
