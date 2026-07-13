@@ -21,7 +21,9 @@ export default async function ReceiptPage({ params }: { params: Promise<{ receip
   // open receipt; the button itself is disabled (with a reason) when the customer
   // has no email, so the option is always visible rather than silently missing.
   const customerEmail = !t.receiverIsDcsim ? t.receiverEmail : !t.senderIsDcsim ? t.senderEmail : null;
-  const showNotify = isStaff && !closed;
+  // Pickup notifications are DCSIM-only: the button is completely hidden unless the
+  // recipient (receiver) is DCSIM. The backend re-checks this on submit.
+  const showNotify = isStaff && !closed && t.receiverIsDcsim;
   const closing = closed ? await getClosingReturn(t.id) : null;
 
   return (

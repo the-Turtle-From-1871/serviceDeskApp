@@ -1,6 +1,7 @@
 import prisma from "@/lib/prisma";
 import { planReturn, type HeldItem, type ReturnPlan } from "./plan";
 import { ReturnError } from "./returns.errors";
+import { computePurgeAfter, isTransferClosed } from "@/modules/transfers/lifecycle";
 
 export type ProcessReturnInput = {
   receiptNumber: string;
@@ -37,7 +38,9 @@ export async function processReturn(input: ProcessReturnInput): Promise<ProcessR
         include: { lines: { orderBy: { lineNo: "asc" }, include: { items: true } } },
       });
       if (!receipt) throw new ReturnError("NOT_FOUND", "Receipt not found.");
-      if (receipt.status !== "OPEN") throw new ReturnError("CLOSED", "This receipt is already closed.");
+      // Immutability guard: a CLOSED receipt is permanently read-only — no further
+      // returns, edits, or status changes.
+      if (isTransferClosed(receipt)) throw new ReturnError("CLOSED", "This receipt is already closed.");
 
       const held: HeldItem[] = receipt.lines.flatMap((l) =>
         l.items
@@ -58,7 +61,12 @@ export async function processReturn(input: ProcessReturnInput): Promise<ProcessR
       }
 
       if (plan.kind === "FULL") {
-        await tx.transfer.update({ where: { id: receipt.id }, data: { status: "CLOSED" } });
+        // Stamp closedAt (immutability marker) and derive the 90-day purge deadline.
+        const closedAt = new Date();
+        await tx.transfer.update({
+          where: { id: receipt.id },
+          data: { status: "CLOSED", closedAt, purgeAfter: computePurgeAfter(closedAt) },
+        });
       }
 
       await tx.returnTransaction.create({

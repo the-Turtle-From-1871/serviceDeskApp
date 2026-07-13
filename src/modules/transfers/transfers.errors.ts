@@ -1,5 +1,5 @@
 export class TransferError extends Error {
-  constructor(public code: "ITEM_NOT_FOUND" | "ITEM_RETIRED" | "TOO_MANY_LINES" | "TOO_MANY_PER_ROW") {
+  constructor(public code: "ITEM_NOT_FOUND" | "ITEM_RETIRED" | "TOO_MANY_LINES" | "TOO_MANY_PER_ROW" | "CLOSED") {
     super(code);
     this.name = "TransferError";
   }

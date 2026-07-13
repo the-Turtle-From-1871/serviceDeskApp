@@ -25,6 +25,11 @@ model User {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   passwordChangedAt DateTime?
+  // Set when the account transitions to inactive (cleared on reactivation). A
+  // dedicated signal — unlike updatedAt, which any edit bumps — so the account
+  // purge worker can hard-delete accounts deactivated for 3+ months. Existing
+  // already-deactivated users have null here and are treated as not-yet-eligible.
+  deactivatedAt     DateTime?
 
   createdItems     Item[]               @relation("CreatedItems")
   createdTransfers Transfer[]           @relation("CreatedTransfers")
@@ -106,7 +111,15 @@ model Transfer {
   status    TransferStatus @default(OPEN)
   createdAt DateTime       @default(now())
 
+  // Lifecycle: set when the receipt (ticket) transitions to CLOSED. Once set the
+  // record is immutable. `purgeAfter` = closedAt + 90 days; the purge worker
+  // permanently deletes records whose purgeAfter has passed.
+  closedAt   DateTime?
+  purgeAfter DateTime?
+
   returns ReturnTransaction[] @relation("TransferReturns")
+
+  @@index([purgeAfter])
 }
 
 model TransferLine {

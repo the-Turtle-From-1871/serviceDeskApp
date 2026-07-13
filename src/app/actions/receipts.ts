@@ -3,6 +3,7 @@ import { requireUser, AuthError } from "@/lib/authz";
 import { createTransfer, getTransferByReceiptNumber } from "@/modules/transfers/transfers.service";
 import { receiptSchema } from "@/modules/transfers/transfers.schema";
 import { TransferError } from "@/modules/transfers/transfers.errors";
+import { isTransferClosed } from "@/modules/transfers/lifecycle";
 import { sendReceiptEmails } from "@/modules/receipts/send-receipt-email";
 import { sendPickupEmail, customerParty, pickupItems } from "@/modules/receipts/send-pickup-email";
 import { renderReceiptPdf } from "@/modules/receipts/render";
@@ -62,7 +63,15 @@ export async function notifyPickupAction(_prev: unknown, formData: FormData) {
 
   const t = await getTransferByReceiptNumber(receiptNumber);
   if (!t) return { error: "Receipt not found." };
-  if (t.status === "CLOSED") return { error: "This receipt is closed — nothing to pick up." };
+  if (isTransferClosed(t)) return { error: "This receipt is closed — nothing to pick up." };
+
+  // Pickup notifications are DCSIM-only: reject the event unless the recipient
+  // (the receiver) is DCSIM. Mirrors the UI, which hides the button otherwise —
+  // this backend check is the authoritative guard against a forged submission.
+  if (!t.receiverIsDcsim) {
+    console.warn(`[notifyPickupAction] rejected non-DCSIM pickup notify for ${t.receiptNumber}`);
+    return { error: "Pickup notifications are not available for this receipt." };
+  }
 
   const customer = customerParty(t);
   if (!customer?.email) return { error: "No email on file for the customer." };

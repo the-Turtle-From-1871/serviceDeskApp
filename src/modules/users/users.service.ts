@@ -35,8 +35,14 @@ export async function registerUser(input: RegisterInput): Promise<User> {
   });
 }
 
+// Single source of truth for the active/inactive transition. Stamp deactivatedAt
+// when the account goes inactive (used by the account-purge worker) and clear it
+// on reactivation, so the timestamp always reflects the *current* deactivation.
 export function setUserActive(id: string, isActive: boolean): Promise<User> {
-  return prisma.user.update({ where: { id }, data: { isActive } });
+  return prisma.user.update({
+    where: { id },
+    data: { isActive, deactivatedAt: isActive ? null : new Date() },
+  });
 }
 
 export function setUserRole(id: string, role: Role): Promise<User> {
