@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   title: "Hand Receipt",
   description: "Digital hand receipts — track custody of equipment with a signed transfer chain.",
   verification: {
-    google: '53ce9f901de4dacc',
+    google: 'x_sRcTGltoMpbYm8ZCvfxlFIT92stDJQrKzlzTC5eZo',
   },
 };
 
