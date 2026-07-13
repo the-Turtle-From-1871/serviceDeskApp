@@ -7,6 +7,7 @@ export function navItemsFor({ loggedIn, isAdmin }: { loggedIn: boolean; isAdmin:
   if (isAdmin) {
     items.push(
       { label: "New item", href: "/admin/items/new" },
+      { label: "Queue", href: "/admin/queue" },
       { label: "Users", href: "/admin/users" },
       { label: "Audit", href: "/admin/audit" },
     );

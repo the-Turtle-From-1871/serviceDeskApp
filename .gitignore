@@ -56,3 +56,6 @@ next-env.d.ts
 
 # Vercel
 .vercel
+
+# Claude Code local worktrees & session data
+.claude/
