@@ -41,3 +41,18 @@
 
 ### 5. Error Handling
 - Catch exceptions gracefully in Server Actions. Return generic messages to the client (e.g., `"Something went wrong"`) and log detailed stack traces strictly on the server.
+
+
+## Backend Architecture & Feature Constraints
+
+
+### 🤖 Service & Ticket Lifecycles
+* **Immutable Closed State:** Once a ticket status transitions to "Closed", it becomes entirely immutable (cannot be reopened, edited, or modified).
+* **90-Day Purge:** Tickets must automatically calculate an expiration timestamp exactly 90 days after closing. A background worker must permanently delete these records upon expiration.
+* **DCSIM Notifications:** Entities are identified as "DCSIM" via a checkbox/boolean field. The "Notify for pickup" UI button must be completely hidden if the recipient isn't DCSIM, paired with backend validation to reject non-DCSIM notification events.
+
+
+### 🤖 Ingest & Routing Queue
+* **Admin Queue View:** This operational surface handles items requiring active service or intervention. The queue must be strictly sorted and grouped by date.
+* **Queue Removal Lifecycle:** When an admin removes an item from the Admin Queue, the backend must update its state to flag it as "Ready to issue when needed".
+* **Receipt Ingestion:** The initial data ingestion pipeline must automatically route all incoming raw receipt payloads directly into the primary service queue for processing before hitting admin views.
