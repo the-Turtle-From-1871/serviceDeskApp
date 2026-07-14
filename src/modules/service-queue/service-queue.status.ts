@@ -1,30 +1,35 @@
-import type { ServiceQueueStatus } from "@prisma/client";
+import type { ServiceQueueStatus, ServiceType } from "@prisma/client";
 
-// Pure status logic for the service queue. No DB / Prisma runtime import here
-// (only the erased `import type`), so this is unit-testable without a database.
+// Pure status/label logic for the service queue. No Prisma runtime import (only
+// the erased `import type`), so this is unit-testable without a database.
 
-// Primary/service state every freshly ingested receipt lands in. Items in this
-// state are shown on the Admin Queue as requiring active service/intervention.
+// In-queue state: the item needs active service/intervention.
 export const PRIMARY_QUEUE_STATUS: ServiceQueueStatus = "PENDING";
 
-// "Ready to issue when needed" — the state an item moves to when an admin
-// removes it from the Admin Queue. The record is retained, never deleted.
-export const READY_TO_ISSUE_STATUS: ServiceQueueStatus = "READY_TO_ISSUE";
+// Service done. Retained, drops off the active queue, reversible.
+export const COMPLETED_STATUS: ServiceQueueStatus = "COMPLETED";
 
-// Whether an item in the given status currently appears on the Admin Queue
-// (i.e. still requires active service/intervention).
+// Whether an item in this status currently appears on the queue.
 export function isActiveQueueStatus(status: ServiceQueueStatus): boolean {
   return status === PRIMARY_QUEUE_STATUS;
 }
 
-// Guard: only active (PENDING) items can be removed from the queue. Removing an
-// item already flagged "Ready to issue" is an invalid/redundant transition.
-export function canRemoveFromQueue(status: ServiceQueueStatus): boolean {
+// Guard: only a PENDING item can be marked completed.
+export function canComplete(status: ServiceQueueStatus): boolean {
   return status === PRIMARY_QUEUE_STATUS;
 }
 
-// The status an item transitions to when an admin removes it from the queue.
-// Removal is a state change ("Ready to issue when needed"), never a delete.
-export function statusAfterRemoval(): ServiceQueueStatus {
-  return READY_TO_ISSUE_STATUS;
+// Guard: only a COMPLETED item can be reopened back into the queue.
+export function canReopen(status: ServiceQueueStatus): boolean {
+  return status === COMPLETED_STATUS;
+}
+
+// Human label for the Service Type column. Fixed labels for REIMAGE/REPAIR; for
+// OTHER, the custom note is "what needs to be done" — fall back to "Other" when
+// the note is missing/blank.
+export function serviceTypeLabel(type: ServiceType, note: string | null): string {
+  if (type === "REIMAGE") return "Reimage";
+  if (type === "REPAIR") return "Repair";
+  const trimmed = (note ?? "").trim();
+  return trimmed || "Other";
 }

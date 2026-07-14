@@ -8,15 +8,19 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { formatDateTimeHST } from "@/lib/datetime";
 import { SiteHeader } from "@/components/SiteHeader";
 import { getCurrentUser } from "@/lib/session";
+import { getServiceRequestForItem } from "@/modules/service-queue/service-queue.service";
+import { serviceTypeLabel } from "@/modules/service-queue/service-queue.status";
+import { ServiceControls } from "./ServiceControls";
 
 export default async function PublicItemPage({ params }: { params: Promise<{ itemId: string }> }) {
   const { itemId } = await params;
-  // All four fetches depend only on itemId (known up front), so run them together.
-  const [item, user, receipts, qr] = await Promise.all([
+  // All five fetches depend only on itemId (known up front), so run them together.
+  const [item, user, receipts, qr, service] = await Promise.all([
     getItemWithCreator(itemId),
     getCurrentUser(),
     listReceiptsForItem(itemId),
     itemQrDataUrl(itemId).catch((e) => { console.error("[item-page] QR generation failed:", e); return ""; }),
+    getServiceRequestForItem(itemId),
   ]);
   if (!item) notFound();
   const loggedIn = !!user && user.isActive;
@@ -60,6 +64,36 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
                   : "Not yet transferred"}
               </dd>
             </dl>
+          </div>
+        )}
+
+        {loggedIn && (
+          <div className="card">
+            <div className="card__title">Service</div>
+            {service && service.status === "PENDING" ? (
+              <dl className="dl">
+                <dt>Status</dt>
+                <dd>Needs service</dd>
+                <dt>Service type</dt>
+                <dd>{serviceTypeLabel(service.serviceType, service.serviceNote)}</dd>
+                <dt>Hand receipt</dt>
+                <dd>
+                  {service.transfer
+                    ? <Link href={`/receipts/${service.transfer.receiptNumber}`}><strong>{service.transfer.receiptNumber}</strong></Link>
+                    : "—"}
+                </dd>
+              </dl>
+            ) : service && service.status === "COMPLETED" ? (
+              <p className="subtle">Service completed. {serviceTypeLabel(service.serviceType, service.serviceNote)}.</p>
+            ) : (
+              <p className="subtle">This item is not flagged for service.</p>
+            )}
+            {isAdmin && (
+              <ServiceControls
+                itemId={item.id}
+                request={service ? { id: service.id, serviceType: service.serviceType, serviceNote: service.serviceNote, status: service.status } : null}
+              />
+            )}
           </div>
         )}
 

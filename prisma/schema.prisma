@@ -71,6 +71,8 @@ model Item {
   transferItems TransferItem[]
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
+
+  serviceQueueItem ServiceQueueItem?
 }
 
 model Unit {
@@ -194,27 +196,37 @@ model ReturnTransaction {
   @@index([transferId])
 }
 
-// [Ingest & Routing Queue] Lifecycle states for a service-queue entry.
-enum ServiceQueueStatus {
-  // Primary/service state. Every ingested receipt lands here for processing and
-  // is shown on the Admin Queue as requiring active service/intervention.
-  PENDING
-  // "Ready to issue when needed" — an admin removed the item from the Admin
-  // Queue. The record is retained (never deleted) and drops off the active view.
-  READY_TO_ISSUE
+// [Service Queue] Service requested for a queued item.
+enum ServiceType {
+  REIMAGE
+  REPAIR
+  OTHER // free-text detail in ServiceQueueItem.serviceNote
 }
 
-// [Ingest & Routing Queue] Operational queue entry for a receipt (Transfer).
-// The ingestion pipeline creates one PENDING entry per incoming receipt so it is
-// processed in the service queue before reaching admin views.
-model ServiceQueueItem {
-  id         String             @id @default(cuid())
-  transfer   Transfer           @relation("TransferQueueItems", fields: [transferId], references: [id], onDelete: Cascade)
-  transferId String
-  status     ServiceQueueStatus @default(PENDING)
-  createdAt  DateTime           @default(now())
-  updatedAt  DateTime           @updatedAt
+// [Service Queue] Lifecycle for an item's service request.
+enum ServiceQueueStatus {
+  // In the queue: the item needs active service/intervention.
+  PENDING
+  // Service done. Retained (never deleted), drops off the active queue, and can
+  // be reopened (PENDING) from the item detail page.
+  COMPLETED
+}
 
-  @@index([transferId])
+// [Service Queue] One service request per item. Present with status PENDING ==
+// "needs service" (shown on the queue). The item may optionally be tied to the
+// hand receipt it was flagged on (transferId), shown on the item detail page.
+model ServiceQueueItem {
+  id          String             @id @default(cuid())
+  item        Item               @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  itemId      String             @unique
+  transfer    Transfer?          @relation("TransferQueueItems", fields: [transferId], references: [id], onDelete: SetNull)
+  transferId  String?
+  serviceType ServiceType
+  serviceNote String?
+  status      ServiceQueueStatus @default(PENDING)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
   @@index([status])
+  @@index([transferId])
 }

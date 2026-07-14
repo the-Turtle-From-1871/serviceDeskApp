@@ -8,7 +8,8 @@ import { sendReceiptEmails } from "@/modules/receipts/send-receipt-email";
 import { sendPickupEmail, customerParty, pickupItems } from "@/modules/receipts/send-pickup-email";
 import { renderReceiptPdf } from "@/modules/receipts/render";
 import { receiptUrl } from "@/modules/items/qr";
-import { enqueueTransfer } from "@/modules/service-queue/service-queue.service";
+import { upsertServiceRequest } from "@/modules/service-queue/service-queue.service";
+import { parseServiceMap } from "@/modules/service-queue/service-form";
 import { parseReceiptForm } from "./receipts.parse";
 
 export async function createReceiptAction(_prev: unknown, formData: FormData) {
@@ -22,11 +23,17 @@ export async function createReceiptAction(_prev: unknown, formData: FormData) {
     const t = await createTransfer({ ...parsed.data, createdByUserId: user.id });
     receiptNumber = t.receiptNumber;
 
-    // [Ingest & Routing Queue] Route every newly ingested receipt into the
-    // primary service queue (PENDING) before it reaches admin views. Best-effort:
-    // a queue hiccup must not fail the already-created receipt.
-    try { await enqueueTransfer(t.id); }
-    catch (err) { console.error("[createReceiptAction] service-queue enqueue failed:", err); }
+    // [Service Queue] For each item flagged "Needs service?" on the form, create
+    // an item-level service request tied to this receipt. Best-effort: a queue
+    // hiccup must not fail the already-created receipt.
+    const serviceMap = parseServiceMap(formData);
+    for (const [itemId, sel] of serviceMap) {
+      try {
+        await upsertServiceRequest({ itemId, serviceType: sel.serviceType, note: sel.note, transferId: t.id });
+      } catch (err) {
+        console.error(`[createReceiptAction] service enqueue failed for item ${itemId}:`, err);
+      }
+    }
 
     try {
       let pdf: Uint8Array | undefined;

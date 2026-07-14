@@ -46,9 +46,11 @@
 - Modify: `src/modules/transfers/transfers.service.ts` — `getCurrentOpenTransferId` helper.
 
 **Queue view**
-- Create: `src/components/persisted-pref.ts` — extracted localStorage store hook.
-- Modify: `src/components/ItemSelectTable.tsx` — import the extracted hook.
-- Create: `src/components/service-queue-view.ts` (+ `service-queue-view.test.ts`) — columns/sort/filter/parse.
+- Create: `src/components/persisted-pref.ts` — extracted localStorage store hook (shared).
+- Create: `src/components/column-view.ts` (+ `column-view.test.ts`) — generic `sortRows` / `parseSortPref` / `parseHiddenCols` shared by both table views.
+- Modify: `src/components/items-view.ts` — delegate its sort/parse to `column-view.ts` (public API unchanged).
+- Modify: `src/components/ItemSelectTable.tsx` — import the extracted localStorage hook.
+- Create: `src/components/service-queue-view.ts` (+ `service-queue-view.test.ts`) — queue columns/types/filter; sort+parse delegate to `column-view.ts`.
 - Create: `src/components/ServiceQueueTable.tsx` — client table.
 - Modify: `src/app/admin/queue/page.tsx` — item-level server page.
 
@@ -702,7 +704,7 @@ In `src/app/receipts/new/ReceiptBuilderForm.tsx`:
 
 ```tsx
 "use client";
-import { useActionState, useState } from "react";
+import { Fragment, useActionState, useState } from "react";
 import { createReceiptAction } from "@/app/actions/receipts";
 import { SignaturePad } from "@/components/SignaturePad";
 import { PhoneInput } from "@/components/PhoneInput";
@@ -770,8 +772,8 @@ function ServiceControls({ itemId }: { itemId: string }) {
             <thead><tr><th>#</th><th>Item</th><th>Serial</th><th>Service</th><th>Auth</th><th>Issued</th></tr></thead>
             <tbody>
               {lines.map((ln, i) => (
-                <>
-                  <tr key={`${ln.make}-${ln.model}`}>
+                <Fragment key={ln.items[0].itemId}>
+                  <tr>
                     <td>{i + 1}</td>
                     <td>{ln.make} {ln.model}
                       <input type="hidden" name={`line[${i}][make]`} value={ln.make} />
@@ -790,7 +792,7 @@ function ServiceControls({ itemId }: { itemId: string }) {
                       <td><ServiceControls itemId={it.itemId} /></td>
                     </tr>
                   ))}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -1105,18 +1107,34 @@ git commit -m "feat(items): service card + admin flag/complete/reopen on item de
 
 ---
 
-## Task 7: Extract the persisted-pref localStorage hook
+## Task 7: Extract shared table-view helpers (localStorage hook + generic sort/parse)
+
+Both table views (items + queue) share two concerns: a localStorage-backed pref
+store and generic sort/pref-parse logic. Extract both into shared modules and
+refactor the existing items view to consume them (its public API and behavior stay
+identical, so `items-view.test.ts` keeps passing). The queue view (Tasks 8-9) then
+reuses the same helpers instead of duplicating them.
 
 **Files:**
 - Create: `src/components/persisted-pref.ts`
-- Modify: `src/components/ItemSelectTable.tsx:1-63` (remove inline store; import from the new module)
+- Create: `src/components/column-view.ts`
+- Test: `src/components/column-view.test.ts`
+- Modify: `src/components/items-view.ts` (delegate sort/parse to `column-view.ts`)
+- Modify: `src/components/ItemSelectTable.tsx:1-63` (remove inline store; import from `persisted-pref`)
 
 **Interfaces:**
-- Produces:
+- Produces (`persisted-pref.ts`):
   - `makeStore<T>(key: string, parse: (raw: string | null) => T): { get(): T; set(v: T): void; subscribe(cb: () => void): () => void }`
   - `usePersistedPref<T>(store, serverDefault: T): [T, (value: T) => void]`
+- Produces (`column-view.ts`):
+  - `type SortDir = "asc" | "desc"`
+  - `type SortPref<F extends string> = { field: F | null; dir: SortDir }`
+  - `sortRows<T, F extends Extract<keyof T, string>>(rows: T[], field: F | null, dir: SortDir): T[]`
+  - `parseSortPref<F extends string>(raw: string | null, validFields: ReadonlySet<string>): SortPref<F>`
+  - `parseHiddenCols<F extends string>(raw: string | null, validFields: ReadonlySet<string>, columnCount: number): F[]`
+- Unchanged public API of `items-view.ts`: `sortItemRows`, `parseSortPref`, `parseHiddenCols`, `selectableIds`, `selectAllState`, `ITEM_COLUMNS`, types `ItemRow`, `SortField`, `SortDir`, `SortPref`, `SelectAllState`.
 
-- [ ] **Step 1: Create the shared module (verbatim move from ItemSelectTable)**
+- [ ] **Step 1: Create the persisted-pref module (verbatim move from ItemSelectTable)**
 
 Create `src/components/persisted-pref.ts`:
 
@@ -1180,16 +1198,161 @@ import { makeStore, usePersistedPref } from "@/components/persisted-pref";
 
 (c) Delete the inline `makeStore` function (lines ~27-55) and the inline `usePersistedPref` function (lines ~60-63). Keep the `sortStore`/`hiddenStore` `const` declarations (they now call the imported `makeStore`).
 
-- [ ] **Step 3: Verify the items view still builds and existing tests pass**
+- [ ] **Step 3: Write the generic column-view test**
+
+Create `src/components/column-view.test.ts`:
+
+```typescript
+import { describe, it, expect } from "vitest";
+import { sortRows, parseSortPref, parseHiddenCols } from "./column-view";
+
+type R = { id: string; name: string | null };
+const fields = new Set(["name", "code"]);
+const rows: R[] = [{ id: "b", name: "banana" }, { id: "a", name: "Apple" }, { id: "z", name: null }];
+
+describe("sortRows", () => {
+  it("sorts case-insensitively; blanks last both directions; no mutation", () => {
+    const before = rows.slice();
+    expect(sortRows(rows, "name", "asc").map((r) => r.id)).toEqual(["a", "b", "z"]);
+    expect(sortRows(rows, "name", "desc").map((r) => r.id)).toEqual(["b", "a", "z"]);
+    expect(sortRows(rows, null, "asc").map((r) => r.id)).toEqual(["b", "a", "z"]);
+    expect(rows).toEqual(before);
+  });
+});
+
+describe("parseSortPref", () => {
+  it("validates field against the allowed set and requires a real direction", () => {
+    expect(parseSortPref(JSON.stringify({ field: "name", dir: "desc" }), fields)).toEqual({ field: "name", dir: "desc" });
+    expect(parseSortPref(JSON.stringify({ field: "hacker", dir: "asc" }), fields)).toEqual({ field: null, dir: "asc" });
+    expect(parseSortPref(JSON.stringify({ field: "name", dir: "sideways" }), fields)).toEqual({ field: null, dir: "asc" });
+    expect(parseSortPref("not json", fields)).toEqual({ field: null, dir: "asc" });
+    expect(parseSortPref(null, fields)).toEqual({ field: null, dir: "asc" });
+  });
+});
+
+describe("parseHiddenCols", () => {
+  it("keeps known keys and never hides every column", () => {
+    expect(parseHiddenCols(JSON.stringify(["name", "bogus"]), fields, 2)).toEqual(["name"]);
+    expect(parseHiddenCols(JSON.stringify(["name", "code"]), fields, 2)).toEqual([]);
+    expect(parseHiddenCols("{}", fields, 2)).toEqual([]);
+    expect(parseHiddenCols(null, fields, 2)).toEqual([]);
+  });
+});
+```
+
+- [ ] **Step 4: Run the column-view test to verify it fails**
+
+Run: `npx vitest run src/components/column-view.test.ts`
+Expected: FAIL ("Cannot find module './column-view'").
+
+- [ ] **Step 5: Implement the generic column-view module**
+
+Create `src/components/column-view.ts`:
+
+```typescript
+export type SortDir = "asc" | "desc";
+export type SortPref<F extends string> = { field: F | null; dir: SortDir };
+
+const DEFAULT_SORT = { field: null, dir: "asc" as SortDir };
+
+/** Case-insensitive sort of rows by a string-valued field. Null/blank values
+ *  sort last in both directions. Returns a new array; input is not mutated. */
+export function sortRows<T, F extends Extract<keyof T, string>>(rows: T[], field: F | null, dir: SortDir): T[] {
+  const copy = rows.slice();
+  if (!field) return copy;
+  copy.sort((a, b) => {
+    const av = a[field] as unknown;
+    const bv = b[field] as unknown;
+    const aBlank = av == null || av === "";
+    const bBlank = bv == null || bv === "";
+    if (aBlank && bBlank) return 0;
+    if (aBlank) return 1;
+    if (bBlank) return -1;
+    const base = String(av).localeCompare(String(bv), undefined, { sensitivity: "base" });
+    return dir === "asc" ? base : -base;
+  });
+  return copy;
+}
+
+/** Parse a persisted sort pref, validating `field` against `validFields` and
+ *  requiring a real direction. Falls back to { field: null, dir: "asc" }. */
+export function parseSortPref<F extends string>(raw: string | null, validFields: ReadonlySet<string>): SortPref<F> {
+  if (!raw) return { ...DEFAULT_SORT };
+  try {
+    const v = JSON.parse(raw) as { field?: unknown; dir?: unknown };
+    const field = typeof v.field === "string" && validFields.has(v.field) ? (v.field as F) : null;
+    const dir = v.dir === "desc" ? "desc" : v.dir === "asc" ? "asc" : null;
+    if (!dir) return { ...DEFAULT_SORT };
+    return { field, dir };
+  } catch {
+    return { ...DEFAULT_SORT };
+  }
+}
+
+/** Parse persisted hidden-column keys. Never returns a set that hides every
+ *  column (that would leave a column-less table). */
+export function parseHiddenCols<F extends string>(raw: string | null, validFields: ReadonlySet<string>, columnCount: number): F[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    if (!Array.isArray(v)) return [];
+    const cols = v.filter((k): k is F => typeof k === "string" && validFields.has(k));
+    if (cols.length >= columnCount) return [];
+    return cols;
+  } catch {
+    return [];
+  }
+}
+```
+
+- [ ] **Step 6: Refactor `items-view.ts` to delegate to column-view (public API unchanged)**
+
+In `src/components/items-view.ts`:
+
+(a) Add imports at the top (above `export type SortField`):
+
+```typescript
+import { sortRows, parseSortPref as parseSortPrefGeneric, parseHiddenCols as parseHiddenColsGeneric, type SortDir, type SortPref as GenericSortPref } from "@/components/column-view";
+
+export type { SortDir };
+```
+
+(b) Delete the local `export type SortDir = ...` line (now re-exported from column-view) and change `SortPref` to alias the generic:
+
+```typescript
+export type SortPref = GenericSortPref<SortField>;
+```
+
+(c) Replace the bodies of `sortItemRows`, `parseSortPref`, and `parseHiddenCols` with delegations (keep their exact exported signatures). Delete the now-unused local `DEFAULT_SORT` constant:
+
+```typescript
+const SORT_FIELDS = new Set<string>(ITEM_COLUMNS.map((c) => c.key));
+
+export function sortItemRows(items: ItemRow[], field: SortField | null, dir: SortDir): ItemRow[] {
+  return sortRows(items, field, dir);
+}
+
+export function parseSortPref(raw: string | null): SortPref {
+  return parseSortPrefGeneric<SortField>(raw, SORT_FIELDS);
+}
+
+export function parseHiddenCols(raw: string | null): SortField[] {
+  return parseHiddenColsGeneric<SortField>(raw, SORT_FIELDS, ITEM_COLUMNS.length);
+}
+```
+
+Leave `ItemRow`, `SortField`, `ITEM_COLUMNS`, `selectableIds`, `SelectAllState`, and `selectAllState` exactly as they are.
+
+- [ ] **Step 7: Verify the items view + column-view still pass (behavior preserved)**
 
 Run: `npx vitest run src/components`
-Expected: PASS (`items-view.test.ts` unaffected). The extraction is behavior-preserving.
+Expected: PASS — `column-view.test.ts` passes and `items-view.test.ts` is unchanged and still green (the delegation is behavior-preserving).
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add src/components/persisted-pref.ts src/components/ItemSelectTable.tsx
-git commit -m "refactor(components): extract persisted-pref localStorage hook for reuse"
+git add src/components/persisted-pref.ts src/components/column-view.ts src/components/column-view.test.ts src/components/items-view.ts src/components/ItemSelectTable.tsx
+git commit -m "refactor(components): extract shared persisted-pref + column-view helpers"
 ```
 
 ---
@@ -1201,14 +1364,16 @@ git commit -m "refactor(components): extract persisted-pref localStorage hook fo
 - Test: `src/components/service-queue-view.test.ts`
 
 **Interfaces:**
+- Consumes: `sortRows`, `parseSortPref`, `parseHiddenCols`, `SortDir`, `SortPref` from `@/components/column-view` (Task 7).
 - Produces:
   - `type QueueSortField = "serialNumber" | "deviceName" | "homeUnit" | "serviceType"`
   - `type QueueRowVM = { id: string; itemId: string; serialNumber: string; deviceName: string | null; homeUnit: string | null; serviceType: string; serviceTypeRaw: "REIMAGE" | "REPAIR" | "OTHER" }`
-  - `type QueueSortPref = { field: QueueSortField | null; dir: "asc" | "desc" }`
+  - `type QueueSortPref = SortPref<QueueSortField>`
+  - `type QueueTypeFilter = "ALL" | "REIMAGE" | "REPAIR" | "OTHER"`
   - `QUEUE_COLUMNS: { key: QueueSortField; label: string }[]`
-  - `sortQueueRows(rows, field, dir): QueueRowVM[]`
+  - `sortQueueRows(rows, field, dir): QueueRowVM[]` (delegates to `sortRows`)
   - `filterQueueRows(rows, { search, type }): QueueRowVM[]`
-  - `parseQueueSort(raw): QueueSortPref`, `parseQueueHidden(raw): QueueSortField[]`
+  - `parseQueueSort(raw): QueueSortPref` (delegates to `parseSortPref`), `parseQueueHidden(raw): QueueSortField[]` (delegates to `parseHiddenCols`)
 
 - [ ] **Step 1: Write the test**
 
@@ -1287,11 +1452,22 @@ Expected: FAIL ("Cannot find module './service-queue-view'").
 
 - [ ] **Step 3: Implement `service-queue-view.ts`**
 
-Create `src/components/service-queue-view.ts`:
+Create `src/components/service-queue-view.ts`. Sort and pref-parsing delegate to
+the shared `column-view` helpers (Task 7); only the queue-specific columns, types,
+and the search/type `filterQueueRows` live here:
 
 ```typescript
+import {
+  sortRows,
+  parseSortPref,
+  parseHiddenCols,
+  type SortDir,
+  type SortPref,
+} from "@/components/column-view";
+
+export type { SortDir };
+
 export type QueueSortField = "serialNumber" | "deviceName" | "homeUnit" | "serviceType";
-export type SortDir = "asc" | "desc";
 
 export type QueueRowVM = {
   id: string;
@@ -1303,7 +1479,7 @@ export type QueueRowVM = {
   serviceTypeRaw: "REIMAGE" | "REPAIR" | "OTHER"; // for filtering
 };
 
-export type QueueSortPref = { field: QueueSortField | null; dir: SortDir };
+export type QueueSortPref = SortPref<QueueSortField>;
 export type QueueTypeFilter = "ALL" | "REIMAGE" | "REPAIR" | "OTHER";
 
 export const QUEUE_COLUMNS: { key: QueueSortField; label: string }[] = [
@@ -1314,25 +1490,9 @@ export const QUEUE_COLUMNS: { key: QueueSortField; label: string }[] = [
 ];
 
 const SORT_FIELDS = new Set<string>(QUEUE_COLUMNS.map((c) => c.key));
-const DEFAULT_SORT: QueueSortPref = { field: null, dir: "asc" };
 
-/** Case-insensitive sort by a field. Null/blank values sort last in both
- *  directions. Returns a new array; the input is not mutated. */
 export function sortQueueRows(rows: QueueRowVM[], field: QueueSortField | null, dir: SortDir): QueueRowVM[] {
-  const copy = rows.slice();
-  if (!field) return copy;
-  copy.sort((a, b) => {
-    const av = a[field];
-    const bv = b[field];
-    const aBlank = av == null || av === "";
-    const bBlank = bv == null || bv === "";
-    if (aBlank && bBlank) return 0;
-    if (aBlank) return 1;
-    if (bBlank) return -1;
-    const base = String(av).localeCompare(String(bv), undefined, { sensitivity: "base" });
-    return dir === "asc" ? base : -base;
-  });
-  return copy;
+  return sortRows(rows, field, dir);
 }
 
 /** Client-side search (SN / Device Name / Unit) + service-type filter. */
@@ -1347,30 +1507,11 @@ export function filterQueueRows(rows: QueueRowVM[], opts: { search: string; type
 }
 
 export function parseQueueSort(raw: string | null): QueueSortPref {
-  if (!raw) return DEFAULT_SORT;
-  try {
-    const v = JSON.parse(raw) as { field?: unknown; dir?: unknown };
-    const field = typeof v.field === "string" && SORT_FIELDS.has(v.field) ? (v.field as QueueSortField) : null;
-    const dir = v.dir === "desc" ? "desc" : v.dir === "asc" ? "asc" : null;
-    if (!dir) return DEFAULT_SORT;
-    return { field, dir };
-  } catch {
-    return DEFAULT_SORT;
-  }
+  return parseSortPref<QueueSortField>(raw, SORT_FIELDS);
 }
 
 export function parseQueueHidden(raw: string | null): QueueSortField[] {
-  if (!raw) return [];
-  try {
-    const v = JSON.parse(raw);
-    if (!Array.isArray(v)) return [];
-    const cols = v.filter((k): k is QueueSortField => typeof k === "string" && SORT_FIELDS.has(k));
-    // Never hide every data column — that would leave a column-less table.
-    if (cols.length >= QUEUE_COLUMNS.length) return [];
-    return cols;
-  } catch {
-    return [];
-  }
+  return parseHiddenCols<QueueSortField>(raw, SORT_FIELDS, QUEUE_COLUMNS.length);
 }
 ```
 

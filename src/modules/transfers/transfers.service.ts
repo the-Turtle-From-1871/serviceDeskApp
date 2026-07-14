@@ -126,3 +126,15 @@ export async function getLastReceiver(itemId: string): Promise<PartyInput | null
     email: last.receiverEmail ?? undefined,
   };
 }
+
+// The item's current holder receipt id: the most-recent transfer, but only when
+// it is still OPEN (a CLOSED receipt means it was returned — no current holder).
+// Used to tie a service request flagged from the item page to the live receipt.
+export async function getCurrentOpenTransferId(itemId: string): Promise<string | null> {
+  const last = await prisma.transfer.findFirst({
+    where: { lines: { some: { items: { some: { itemId } } } } },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, status: true },
+  });
+  return last && last.status === "OPEN" ? last.id : null;
+}
