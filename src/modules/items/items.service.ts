@@ -35,6 +35,7 @@ export function listItems(opts: { search?: string } = {}) {
     where: search
       ? {
           OR: [
+            { deviceName: { contains: search, mode: "insensitive" } },
             { make: { contains: search, mode: "insensitive" } },
             { model: { contains: search, mode: "insensitive" } },
             { serialNumber: { contains: search, mode: "insensitive" } },
