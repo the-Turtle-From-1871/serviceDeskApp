@@ -2,7 +2,8 @@ import type { Item, ItemStatus, Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { newItemSchema, type NewItemInput } from "./items.schema";
 import { parseItemsCsv } from "./csv";
-import { planImport, type SkippedRow } from "./import";
+import { planImport, type SkippedRow, type UnresolvedRow } from "./import";
+import { loadUnitMap, learnUnits, type UnitResolution } from "./units.service";
 
 export async function createItem(input: NewItemInput, createdById: string): Promise<Item> {
   const data = newItemSchema.parse(input);
@@ -34,6 +35,7 @@ export function listItems(opts: { search?: string } = {}) {
     where: search
       ? {
           OR: [
+            { deviceName: { contains: search, mode: "insensitive" } },
             { make: { contains: search, mode: "insensitive" } },
             { model: { contains: search, mode: "insensitive" } },
             { serialNumber: { contains: search, mode: "insensitive" } },
@@ -67,18 +69,46 @@ export function searchItemsBySerial(q: string): Promise<Item[]> {
   });
 }
 
-export async function importItems(
-  text: string,
-  filename: string,
-  createdById: string
-): Promise<{ added: number; skipped: SkippedRow[]; error?: string }> {
+export async function analyzeImport(text: string): Promise<{
+  counts: { toImport: number; skipped: number; autoDetected: number };
+  skipped: SkippedRow[];
+  unresolved: UnresolvedRow[];
+  error?: string;
+}> {
   const { rows, error } = parseItemsCsv(text);
-  if (error) return { added: 0, skipped: [], error };
+  if (error) return { counts: { toImport: 0, skipped: 0, autoDetected: 0 }, skipped: [], unresolved: [], error };
 
   const existing = new Set(
     (await prisma.item.findMany({ select: { serialNumber: true } })).map((i) => i.serialNumber)
   );
-  const { toCreate, skipped } = planImport(rows, existing);
+  const units = await loadUnitMap();
+  const { toCreate, skipped, unresolved, detected } = planImport(rows, existing, units);
+
+  return {
+    counts: { toImport: toCreate.length, skipped: skipped.length, autoDetected: detected },
+    skipped,
+    unresolved,
+  };
+}
+
+export async function commitImport(
+  text: string,
+  filename: string,
+  resolutions: UnitResolution[],
+  createdById: string
+): Promise<{ added: number; skipped: SkippedRow[]; detected: number; error?: string }> {
+  const { rows, error } = parseItemsCsv(text);
+  if (error) return { added: 0, skipped: [], detected: 0, error };
+
+  // Persist what the admin taught us BEFORE planning, so detection re-runs with
+  // the enriched map and applies each new unit to every row that shares its code.
+  await learnUnits(resolutions);
+
+  const existing = new Set(
+    (await prisma.item.findMany({ select: { serialNumber: true } })).map((i) => i.serialNumber)
+  );
+  const units = await loadUnitMap();
+  const { toCreate, skipped, detected } = planImport(rows, existing, units);
 
   await prisma.$transaction([
     prisma.item.createMany({ data: toCreate.map((d) => ({ ...d, createdById })) }),
@@ -93,5 +123,5 @@ export async function importItems(
     }),
   ]);
 
-  return { added: toCreate.length, skipped };
+  return { added: toCreate.length, skipped, detected };
 }

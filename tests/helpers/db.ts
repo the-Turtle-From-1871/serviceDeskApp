@@ -12,7 +12,7 @@ export async function resetDb() {
 
   // All three tables exist as of P2 Task 1 (Item + Transfer created together).
   await prisma.$executeRawUnsafe(
-    `TRUNCATE TABLE "Transfer","Item","User" RESTART IDENTITY CASCADE;`
+    `TRUNCATE TABLE "Transfer","Item","User","Unit" RESTART IDENTITY CASCADE;`
   );
 }
 

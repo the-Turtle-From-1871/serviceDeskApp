@@ -24,7 +24,7 @@ export default async function ItemsListPage({ searchParams }: { searchParams: Pr
         </div>
 
         <form className="row" style={{ gap: 8 }}>
-          <input className="input" name="q" defaultValue={q ?? ""} placeholder="Search make, model, or serial number" style={{ maxWidth: 360 }} />
+          <input className="input" name="q" defaultValue={q ?? ""} placeholder="Search device name, make, model, or serial number" style={{ maxWidth: 360 }} />
           <button className="btn btn-secondary">Search</button>
         </form>
 

@@ -55,6 +55,25 @@ export function parseSortPref(raw: string | null): SortPref {
   }
 }
 
+/** Ids of the rows a user can actually select. Retired items render no
+ *  checkbox, so they can never be part of a selection. */
+export function selectableIds(items: ItemRow[]): string[] {
+  return items.filter((it) => it.status === "ACTIVE").map((it) => it.id);
+}
+
+export type SelectAllState = "none" | "some" | "all";
+
+/** Tri-state for the header checkbox, derived from the selectable rows only.
+ *  A list with nothing selectable is always "none" — never "all" — so the
+ *  header box cannot claim a selection that no row could hold. */
+export function selectAllState(items: ItemRow[], selected: ReadonlySet<string>): SelectAllState {
+  const ids = selectableIds(items);
+  if (ids.length === 0) return "none";
+  const hits = ids.filter((id) => selected.has(id)).length;
+  if (hits === 0) return "none";
+  return hits === ids.length ? "all" : "some";
+}
+
 export function parseHiddenCols(raw: string | null): SortField[] {
   if (!raw) return [];
   try {

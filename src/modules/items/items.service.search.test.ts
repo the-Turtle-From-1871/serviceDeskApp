@@ -1,9 +1,40 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("@/lib/prisma", () => ({ default: { item: { findMany: vi.fn(async () => []), findUnique: vi.fn(async () => null) } } }));
 import prisma from "@/lib/prisma";
-import { searchItemsBySerial, getItemWithCreator } from "./items.service";
+import { searchItemsBySerial, getItemWithCreator, listItems } from "./items.service";
 
 beforeEach(() => vi.clearAllMocks());
+
+describe("listItems", () => {
+  const whereOf = () => vi.mocked(prisma.item.findMany).mock.calls[0][0]?.where as
+    | { OR: Record<string, { contains: string; mode: string }>[] }
+    | undefined;
+
+  it("searches device name alongside make, model and serial", async () => {
+    await listItems({ search: "router" });
+    const fields = whereOf()!.OR.map((c) => Object.keys(c)[0]);
+    expect(fields).toEqual(["deviceName", "make", "model", "serialNumber"]);
+  });
+
+  it("matches device name case-insensitively on a partial value", async () => {
+    await listItems({ search: "Edge Rou" });
+    const deviceName = whereOf()!.OR.find((c) => "deviceName" in c)!.deviceName;
+    expect(deviceName).toEqual({ contains: "Edge Rou", mode: "insensitive" });
+  });
+
+  it("trims the query before searching", async () => {
+    await listItems({ search: "  router  " });
+    expect(whereOf()!.OR[0].deviceName.contains).toBe("router");
+  });
+
+  it("applies no filter for a blank or missing query", async () => {
+    await listItems({ search: "   " });
+    expect(whereOf()).toBeUndefined();
+    vi.clearAllMocks();
+    await listItems();
+    expect(whereOf()).toBeUndefined();
+  });
+});
 
 describe("searchItemsBySerial", () => {
   it("returns [] for a blank query without hitting the DB", async () => {
