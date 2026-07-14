@@ -1,55 +1,84 @@
-import type { Prisma, ServiceQueueItem } from "@prisma/client";
+import type { Prisma, ServiceQueueItem, ServiceType } from "@prisma/client";
 import prisma from "@/lib/prisma";
-import { PRIMARY_QUEUE_STATUS, READY_TO_ISSUE_STATUS, canRemoveFromQueue } from "./service-queue.status";
-import { toQueueItemCreateData } from "./service-queue.enqueue";
+import { canComplete, canReopen } from "./service-queue.status";
 import { ServiceQueueError } from "./service-queue.errors";
 
-// Either the root client or a transaction client, so ingestion can optionally
-// enqueue atomically inside an existing transaction.
-type Db = typeof prisma | Prisma.TransactionClient;
+// Trimmed fields the queue list and item card render — never pull unrelated PII.
+const queueItemSelect = { serialNumber: true, deviceName: true, homeUnit: true } satisfies Prisma.ItemSelect;
+const queueTransferSelect = { receiptNumber: true } satisfies Prisma.TransferSelect;
 
-// The trimmed Transfer fields the Admin Queue renders — never pull signature
-// blobs / full PII into the list view.
-const queueTransferSelect = {
-  receiptNumber: true,
-  itemSummary: true,
-  receiverName: true,
-  receiverUnit: true,
-  status: true,
-  createdAt: true,
-} satisfies Prisma.TransferSelect;
-
-export type QueueItemWithTransfer = ServiceQueueItem & {
-  transfer: Prisma.TransferGetPayload<{ select: typeof queueTransferSelect }>;
+export type QueueRow = ServiceQueueItem & {
+  item: Prisma.ItemGetPayload<{ select: typeof queueItemSelect }>;
+  transfer: Prisma.TransferGetPayload<{ select: typeof queueTransferSelect }> | null;
 };
 
-// Route an ingested receipt into the primary service queue (PENDING). Accepts an
-// optional db/tx client so the ingestion pipeline can enqueue atomically.
-export function enqueueTransfer(transferId: string, db: Db = prisma): Promise<ServiceQueueItem> {
-  return db.serviceQueueItem.create({ data: toQueueItemCreateData(transferId) });
+export type ItemServiceRequest = ServiceQueueItem & {
+  transfer: Prisma.TransferGetPayload<{ select: typeof queueTransferSelect }> | null;
+};
+
+type UpsertInput = { itemId: string; serviceType: ServiceType; note?: string | null; transferId?: string | null };
+
+// Normalize the note: trimmed value or null. OTHER requires a non-empty note.
+function normalizeNote(serviceType: ServiceType, note: string | null | undefined): string | null {
+  const trimmed = (note ?? "").trim();
+  if (serviceType === "OTHER" && !trimmed) throw new ServiceQueueError("NOTE_REQUIRED");
+  return trimmed || null;
 }
 
-// Items still requiring active service/intervention (the Admin Queue). Callers
-// group these by date for display (see groupByDate).
-export function listActiveQueue(): Promise<QueueItemWithTransfer[]> {
-  return prisma.serviceQueueItem.findMany({
-    where: { status: PRIMARY_QUEUE_STATUS },
-    orderBy: { createdAt: "desc" },
-    include: { transfer: { select: queueTransferSelect } },
-  }) as Promise<QueueItemWithTransfer[]>;
+// Create or update the item's single service request, (re)setting it to PENDING.
+// `async` so the normalizeNote NOTE_REQUIRED throw surfaces as a rejected promise
+// (a sync throw would escape callers' `.rejects`/try-await handling).
+export async function upsertServiceRequest(input: UpsertInput): Promise<ServiceQueueItem> {
+  const serviceNote = normalizeNote(input.serviceType, input.note);
+  const transferId = input.transferId ?? null;
+  return prisma.serviceQueueItem.upsert({
+    where: { itemId: input.itemId },
+    create: { itemId: input.itemId, serviceType: input.serviceType, serviceNote, transferId, status: "PENDING" },
+    update: { serviceType: input.serviceType, serviceNote, transferId, status: "PENDING" },
+  });
 }
 
-// Remove an item from the Admin Queue. Never deletes — transitions the record to
-// "Ready to issue when needed" (READY_TO_ISSUE) so it drops off the active view
-// while being retained. Guards against re-removing an already-removed item.
-export function removeFromQueue(id: string): Promise<ServiceQueueItem> {
+// Unflag: remove the item's service request entirely.
+export async function clearServiceRequest(itemId: string): Promise<void> {
+  await prisma.serviceQueueItem.delete({ where: { itemId } });
+}
+
+// PENDING -> COMPLETED. Guarded; never deletes.
+export function completeServiceItem(id: string): Promise<ServiceQueueItem> {
+  return transition(id, canComplete, "COMPLETED");
+}
+
+// COMPLETED -> PENDING (reopen from the item detail page). Guarded.
+export function reopenServiceItem(id: string): Promise<ServiceQueueItem> {
+  return transition(id, canReopen, "PENDING");
+}
+
+function transition(
+  id: string,
+  guard: (s: ServiceQueueItem["status"]) => boolean,
+  next: ServiceQueueItem["status"],
+): Promise<ServiceQueueItem> {
   return prisma.$transaction(async (tx) => {
     const current = await tx.serviceQueueItem.findUnique({ where: { id } });
     if (!current) throw new ServiceQueueError("NOT_FOUND");
-    if (!canRemoveFromQueue(current.status)) throw new ServiceQueueError("INVALID_STATUS");
-    return tx.serviceQueueItem.update({
-      where: { id },
-      data: { status: READY_TO_ISSUE_STATUS },
-    });
+    if (!guard(current.status)) throw new ServiceQueueError("INVALID_STATUS");
+    return tx.serviceQueueItem.update({ where: { id }, data: { status: next } });
   });
+}
+
+// The active queue: PENDING rows with the fields the item table renders.
+export function listActiveQueue(): Promise<QueueRow[]> {
+  return prisma.serviceQueueItem.findMany({
+    where: { status: "PENDING" },
+    orderBy: { createdAt: "desc" },
+    include: { item: { select: queueItemSelect }, transfer: { select: queueTransferSelect } },
+  }) as Promise<QueueRow[]>;
+}
+
+// The item's current service request (any status), for the item detail card.
+export function getServiceRequestForItem(itemId: string): Promise<ItemServiceRequest | null> {
+  return prisma.serviceQueueItem.findUnique({
+    where: { itemId },
+    include: { transfer: { select: queueTransferSelect } },
+  }) as Promise<ItemServiceRequest | null>;
 }
