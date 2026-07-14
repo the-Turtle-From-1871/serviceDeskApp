@@ -72,6 +72,7 @@ function ServiceControls({ itemId }: { itemId: string }) {
               style={{ minWidth: 200 }}
               name={`service[${itemId}][note]`}
               placeholder="Describe the service needed"
+              aria-label="Describe the service needed"
               required
             />
           )}

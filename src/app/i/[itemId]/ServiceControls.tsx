@@ -27,7 +27,7 @@ export function ServiceControls({ itemId, request }: Props) {
             </select>
           </label>
           {type === "OTHER" && (
-            <input className="input" style={{ minWidth: 200 }} name="note" placeholder="Describe the service needed" defaultValue={request?.serviceNote ?? ""} required />
+            <input className="input" style={{ minWidth: 200 }} name="note" placeholder="Describe the service needed" aria-label="Describe the service needed" defaultValue={request?.serviceNote ?? ""} required />
           )}
           <button className="btn btn-primary" disabled={pending} type="submit">
             {pending ? "Saving…" : request ? "Update service" : "Flag for service"}
