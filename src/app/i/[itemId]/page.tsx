@@ -67,7 +67,8 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
           <div className="card stack-sm" style={{ textAlign: "center" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={qr} alt={`QR code for ${item.make} ${item.model}`} width={220} height={220} style={{ margin: "0 auto" }} />
-            <p className="subtle">Scan to view this item · {itemUrl(item.id)}</p>
+            <p className="subtle">Scan to view this item</p>
+            <p className="qr-url">{itemUrl(item.id)}</p>
           </div>
         )}
 
