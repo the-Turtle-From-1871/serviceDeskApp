@@ -702,7 +702,7 @@ In `src/app/receipts/new/ReceiptBuilderForm.tsx`:
 
 ```tsx
 "use client";
-import { useActionState, useState } from "react";
+import { Fragment, useActionState, useState } from "react";
 import { createReceiptAction } from "@/app/actions/receipts";
 import { SignaturePad } from "@/components/SignaturePad";
 import { PhoneInput } from "@/components/PhoneInput";
@@ -770,8 +770,8 @@ function ServiceControls({ itemId }: { itemId: string }) {
             <thead><tr><th>#</th><th>Item</th><th>Serial</th><th>Service</th><th>Auth</th><th>Issued</th></tr></thead>
             <tbody>
               {lines.map((ln, i) => (
-                <>
-                  <tr key={`${ln.make}-${ln.model}`}>
+                <Fragment key={ln.items[0].itemId}>
+                  <tr>
                     <td>{i + 1}</td>
                     <td>{ln.make} {ln.model}
                       <input type="hidden" name={`line[${i}][make]`} value={ln.make} />
@@ -790,7 +790,7 @@ function ServiceControls({ itemId }: { itemId: string }) {
                       <td><ServiceControls itemId={it.itemId} /></td>
                     </tr>
                   ))}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>
