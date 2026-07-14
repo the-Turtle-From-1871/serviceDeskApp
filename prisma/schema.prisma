@@ -73,6 +73,14 @@ model Item {
   updatedAt     DateTime       @updatedAt
 }
 
+model Unit {
+  id           String   @id @default(cuid())
+  abbreviation String   @unique
+  fullName     String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
 enum TransferStatus {
   OPEN
   CLOSED
