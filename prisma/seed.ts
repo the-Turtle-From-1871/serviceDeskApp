@@ -17,7 +17,9 @@ async function seedUnits() {
 }
 
 async function seedAdmin() {
-  const email = process.env.SEED_ADMIN_EMAIL;
+  // Normalize like the app does (users.schema.ts) so a mixed-case env value
+  // can't seed a non-canonical identity.
+  const email = process.env.SEED_ADMIN_EMAIL?.trim().toLowerCase();
   const password = process.env.SEED_ADMIN_PASSWORD;
   if (!email || !password) {
     throw new Error(

@@ -15,7 +15,11 @@ model User {
   id                String    @id @default(cuid())
   rank              String?
   name              String
-  email             String    @unique
+  // citext: email identity is case-insensitive at the DB level, so both the
+  // unique constraint and every lookup ignore case. Without it a mixed-case row
+  // would be unfindable by the app's lowercased lookups (lockout) and would not
+  // collide with its lowercase twin (duplicate identity).
+  email             String    @unique @db.Citext
   unit              String?
   contactNumber     String?
   passwordHash      String
