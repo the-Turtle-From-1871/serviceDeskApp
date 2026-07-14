@@ -3,6 +3,8 @@ import {
   sortItemRows,
   parseSortPref,
   parseHiddenCols,
+  selectableIds,
+  selectAllState,
   ITEM_COLUMNS,
   type ItemRow,
 } from "./items-view";
@@ -81,5 +83,51 @@ describe("parseHiddenCols", () => {
   it("never hides every data column", () => {
     const all = ITEM_COLUMNS.map((c) => c.key);
     expect(parseHiddenCols(JSON.stringify(all))).toEqual([]);
+  });
+});
+
+describe("selectableIds", () => {
+  it("returns only active rows — retired rows have no checkbox", () => {
+    const rows = [
+      row({ id: "a", status: "ACTIVE" }),
+      row({ id: "b", status: "RETIRED" }),
+      row({ id: "c", status: "ACTIVE" }),
+    ];
+    expect(selectableIds(rows)).toEqual(["a", "c"]);
+  });
+
+  it("returns empty for an empty or fully retired list", () => {
+    expect(selectableIds([])).toEqual([]);
+    expect(selectableIds([row({ id: "a", status: "RETIRED" })])).toEqual([]);
+  });
+});
+
+describe("selectAllState", () => {
+  const rows = [
+    row({ id: "a", status: "ACTIVE" }),
+    row({ id: "b", status: "RETIRED" }),
+    row({ id: "c", status: "ACTIVE" }),
+  ];
+
+  it("is none when nothing is selected", () => {
+    expect(selectAllState(rows, new Set())).toBe("none");
+  });
+
+  it("is some when only part of the active rows are selected", () => {
+    expect(selectAllState(rows, new Set(["a"]))).toBe("some");
+  });
+
+  it("is all once every active row is selected, ignoring retired rows", () => {
+    expect(selectAllState(rows, new Set(["a", "c"]))).toBe("all");
+  });
+
+  it("is none when there is nothing selectable at all", () => {
+    expect(selectAllState([], new Set())).toBe("none");
+    expect(selectAllState([row({ id: "b", status: "RETIRED" })], new Set(["b"]))).toBe("none");
+  });
+
+  it("ignores selected ids that are not in the list", () => {
+    expect(selectAllState(rows, new Set(["a", "c", "ghost"]))).toBe("all");
+    expect(selectAllState(rows, new Set(["ghost"]))).toBe("none");
   });
 });

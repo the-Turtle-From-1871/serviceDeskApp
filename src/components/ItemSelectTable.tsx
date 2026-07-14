@@ -10,6 +10,8 @@ import {
   sortItemRows,
   parseSortPref,
   parseHiddenCols,
+  selectableIds,
+  selectAllState,
   type ItemRow,
   type SortField,
   type SortPref,
@@ -64,6 +66,10 @@ export function ItemSelectTable({ items, isAdmin }: { items: ItemRow[]; isAdmin:
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const toggle = (id: string) => setSelected((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+
+  const allState = useMemo(() => selectAllState(items, selected), [items, selected]);
+  const selectableCount = useMemo(() => selectableIds(items).length, [items]);
+  const toggleAll = () => setSelected(allState === "all" ? new Set() : new Set(selectableIds(items)));
 
   // View preferences persisted to localStorage (survive reloads + navigation).
   const [sort, setSort] = usePersistedPref(sortStore, DEFAULT_SORT);
@@ -159,7 +165,18 @@ export function ItemSelectTable({ items, isAdmin }: { items: ItemRow[]; isAdmin:
         <table className="table">
           <thead>
             <tr>
-              <th></th>
+              <th>
+                <input
+                  type="checkbox"
+                  checked={allState === "all"}
+                  disabled={selectableCount === 0}
+                  // React has no `indeterminate` prop — it is a DOM-only property.
+                  ref={(el) => { if (el) el.indeterminate = allState === "some"; }}
+                  onChange={toggleAll}
+                  aria-label={allState === "all" ? "Deselect all items" : "Select all items"}
+                  title={selectableCount === 0 ? "No selectable items" : undefined}
+                />
+              </th>
               {visibleCols.map((c) => (
                 <th key={c.key}>{c.label}{sort.field === c.key ? (sort.dir === "asc" ? " ▲" : " ▼") : ""}</th>
               ))}
