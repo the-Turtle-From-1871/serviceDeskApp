@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -16,6 +16,7 @@ import {
   type SortField,
   type SortPref,
 } from "@/components/items-view";
+import { makeStore, usePersistedPref } from "@/components/persisted-pref";
 
 export type { ItemRow };
 
@@ -24,43 +25,8 @@ const HIDDEN_KEY = "items:hiddenCols";
 const DEFAULT_SORT: SortPref = { field: null, dir: "asc" };
 const DEFAULT_HIDDEN: SortField[] = [];
 
-/** A tiny localStorage-backed store, created at module scope so its mutable
- *  cache lives outside React's render cycle. Read via useSyncExternalStore so
- *  the server snapshot (default) is used during SSR/hydration and the persisted
- *  value takes over on the client — no hydration mismatch, no setState-in-effect.
- *  Also syncs across tabs via the `storage` event. */
-function makeStore<T>(key: string, parse: (raw: string | null) => T) {
-  const listeners = new Set<() => void>();
-  let cacheRaw: string | null | undefined;
-  let cacheVal: T;
-  return {
-    get(): T {
-      let raw: string | null = null;
-      try { raw = window.localStorage.getItem(key); } catch { /* unavailable */ }
-      if (cacheRaw !== raw) { cacheRaw = raw; cacheVal = parse(raw); }
-      return cacheVal;
-    },
-    set(value: T) {
-      try { window.localStorage.setItem(key, JSON.stringify(value)); } catch { /* unavailable */ }
-      cacheRaw = undefined;
-      listeners.forEach((l) => l());
-    },
-    subscribe(cb: () => void) {
-      listeners.add(cb);
-      const onStorage = (e: StorageEvent) => { if (e.key === key) { cacheRaw = undefined; cb(); } };
-      window.addEventListener("storage", onStorage);
-      return () => { listeners.delete(cb); window.removeEventListener("storage", onStorage); };
-    },
-  };
-}
-
 const sortStore = makeStore(SORT_KEY, parseSortPref);
 const hiddenStore = makeStore(HIDDEN_KEY, parseHiddenCols);
-
-function usePersistedPref<T>(store: { get: () => T; set: (v: T) => void; subscribe: (cb: () => void) => () => void }, serverDefault: T): [T, (value: T) => void] {
-  const value = useSyncExternalStore(store.subscribe, store.get, () => serverDefault);
-  return [value, store.set];
-}
 
 export function ItemSelectTable({ items, isAdmin }: { items: ItemRow[]; isAdmin: boolean }) {
   const router = useRouter();
