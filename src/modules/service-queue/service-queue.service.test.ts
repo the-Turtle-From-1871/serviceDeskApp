@@ -28,6 +28,7 @@ import {
   completeServiceItem,
   reopenServiceItem,
   listActiveQueue,
+  getServiceRequestForItem,
 } from "./service-queue.service";
 import { ServiceQueueError } from "./service-queue.errors";
 
@@ -99,5 +100,15 @@ describe("listActiveQueue", () => {
     expect(arg.where).toEqual({ status: "PENDING" });
     expect(arg.include.item.select).toMatchObject({ serialNumber: true, deviceName: true, homeUnit: true });
     expect(arg.include.transfer.select).toMatchObject({ receiptNumber: true });
+  });
+});
+
+describe("getServiceRequestForItem", () => {
+  it("finds the item's row by itemId with the transfer's receiptNumber included", async () => {
+    vi.mocked(prisma.serviceQueueItem.findUnique).mockResolvedValueOnce({ id: "sq1", itemId: "i1", status: "PENDING" });
+    await getServiceRequestForItem("i1");
+    const arg = vi.mocked(prisma.serviceQueueItem.findUnique).mock.calls[0][0];
+    expect(arg.where).toEqual({ itemId: "i1" });
+    expect(arg.include.transfer.select).toEqual({ receiptNumber: true });
   });
 });

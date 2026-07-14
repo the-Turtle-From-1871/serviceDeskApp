@@ -41,6 +41,9 @@ function PartyFields({ role, prefill }: { role: "sender" | "receiver"; prefill?:
 function ServiceControls({ itemId }: { itemId: string }) {
   const [needs, setNeeds] = useState(false);
   const [type, setType] = useState("REIMAGE");
+  // Lifted (rather than left uncontrolled on the conditionally-rendered input)
+  // so a typed note survives unchecking/rechecking "Needs service?".
+  const [note, setNote] = useState("");
   return (
     <div className="stack-sm">
       <label className="row" style={{ gap: 6 }}>
@@ -73,6 +76,8 @@ function ServiceControls({ itemId }: { itemId: string }) {
               name={`service[${itemId}][note]`}
               placeholder="Describe the service needed"
               aria-label="Describe the service needed"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
               required
             />
           )}

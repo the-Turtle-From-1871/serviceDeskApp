@@ -18,15 +18,34 @@ export async function createReceiptAction(_prev: unknown, formData: FormData) {
   const parsed = receiptSchema.safeParse(raw);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
 
+  // [Service Queue] Parse per-item "Needs service?" selections and constrain
+  // them to items actually on this receipt (ignore any stray itemIds that
+  // showed up in the service[...] form keys but weren't submitted as items).
+  const receiptItemIds = new Set(parsed.data.itemIds);
+  const serviceMap = new Map(
+    [...parseServiceMap(formData)].filter(([itemId]) => receiptItemIds.has(itemId)),
+  );
+
+  // Validate up front — OTHER requires a non-empty note — so a bad selection
+  // fails fast and loudly before anything is created. (HTML5 `required` can be
+  // bypassed with JS off or a crafted POST; upsertServiceRequest would throw
+  // ServiceQueueError("NOTE_REQUIRED") for it, but by then the per-item write
+  // is best-effort and would silently swallow the failure.)
+  for (const [, sel] of serviceMap) {
+    if (sel.serviceType === "OTHER" && !sel.note) {
+      return { error: "Please describe the service needed for items marked “Other”." };
+    }
+  }
+
   let receiptNumber: string;
   try {
     const t = await createTransfer({ ...parsed.data, createdByUserId: user.id });
     receiptNumber = t.receiptNumber;
 
     // [Service Queue] For each item flagged "Needs service?" on the form, create
-    // an item-level service request tied to this receipt. Best-effort: a queue
-    // hiccup must not fail the already-created receipt.
-    const serviceMap = parseServiceMap(formData);
+    // an item-level service request tied to this receipt. Best-effort ONLY for
+    // genuine DB/write hiccups — selection validity was already checked above,
+    // so a queue hiccup here must not fail the already-created receipt.
     for (const [itemId, sel] of serviceMap) {
       try {
         await upsertServiceRequest({ itemId, serviceType: sel.serviceType, note: sel.note, transferId: t.id });

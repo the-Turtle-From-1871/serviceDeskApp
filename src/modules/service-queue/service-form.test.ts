@@ -38,4 +38,14 @@ describe("parseServiceMap", () => {
   it("returns an empty map when nothing is flagged", () => {
     expect(parseServiceMap(fd([])).size).toBe(0);
   });
+
+  it("normalizes a whitespace-only OTHER note to null", () => {
+    const f = fd([
+      ["service[i1][needs]", "on"],
+      ["service[i1][type]", "OTHER"],
+      ["service[i1][note]", "   "],
+    ]);
+    const m = parseServiceMap(f);
+    expect(m.get("i1")).toEqual({ serviceType: "OTHER", note: null });
+  });
 });
