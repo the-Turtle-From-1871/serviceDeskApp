@@ -1,11 +1,13 @@
 "use client";
-import { useActionState, useState } from "react";
+import { Fragment, useActionState, useState } from "react";
 import { createReceiptAction } from "@/app/actions/receipts";
 import { SignaturePad } from "@/components/SignaturePad";
 import { PhoneInput } from "@/components/PhoneInput";
+import { SERVICE_TYPE_OPTIONS } from "@/modules/service-queue/service-form";
 
 type Prefill = { isDcsim?: boolean; name?: string; rank?: string; unit?: string; contact?: string; email?: string };
-export type BuilderLine = { make: string; model: string; serials: string[]; defaultQty: number };
+export type BuilderItem = { serialNumber: string; itemId: string };
+export type BuilderLine = { make: string; model: string; items: BuilderItem[]; defaultQty: number };
 
 function PartyFields({ role, prefill }: { role: "sender" | "receiver"; prefill?: Prefill }) {
   const [isDcsim, setIsDcsim] = useState(prefill?.isDcsim ?? false);
@@ -30,6 +32,52 @@ function PartyFields({ role, prefill }: { role: "sender" | "receiver"; prefill?:
         </div>
       )}
     </fieldset>
+  );
+}
+
+// Per-serial "Needs service?" capture. Checking it reveals the service type;
+// choosing "Other" reveals a custom-message input. Field names are namespaced by
+// itemId so parseServiceMap can reconstruct the per-item selection server-side.
+function ServiceControls({ itemId }: { itemId: string }) {
+  const [needs, setNeeds] = useState(false);
+  const [type, setType] = useState("REIMAGE");
+  return (
+    <div className="stack-sm">
+      <label className="row" style={{ gap: 6 }}>
+        <input
+          type="checkbox"
+          name={`service[${itemId}][needs]`}
+          checked={needs}
+          onChange={(e) => setNeeds(e.target.checked)}
+        />
+        Needs service?
+      </label>
+      {needs && (
+        <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+          <select
+            className="select"
+            style={{ width: "auto", minWidth: 130 }}
+            name={`service[${itemId}][type]`}
+            value={type}
+            onChange={(e) => setType(e.target.value)}
+            aria-label="Service type"
+          >
+            {SERVICE_TYPE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          {type === "OTHER" && (
+            <input
+              className="input"
+              style={{ minWidth: 200 }}
+              name={`service[${itemId}][note]`}
+              placeholder="Describe the service needed"
+              required
+            />
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -58,19 +106,30 @@ export function ReceiptBuilderForm({ itemIds, lines, senderPrefill }: { itemIds:
         <legend className="card__title">Items ({lines.length} {lines.length === 1 ? "row" : "rows"})</legend>
         <div className="table-wrap">
           <table className="table">
-            <thead><tr><th>#</th><th>Item</th><th>Serials</th><th>Auth</th><th>Issued</th></tr></thead>
+            <thead><tr><th>#</th><th>Item</th><th>Serial</th><th>Service</th><th>Auth</th><th>Issued</th></tr></thead>
             <tbody>
               {lines.map((ln, i) => (
-                <tr key={`${ln.make}-${ln.model}`}>
-                  <td>{i + 1}</td>
-                  <td>{ln.make} {ln.model}
-                    <input type="hidden" name={`line[${i}][make]`} value={ln.make} />
-                    <input type="hidden" name={`line[${i}][model]`} value={ln.model} />
-                  </td>
-                  <td className="mono">{ln.serials.join(", ")}</td>
-                  <td><input className="input" style={{ width: 72 }} type="number" min={1} name={`line[${i}][qtyAuth]`} defaultValue={ln.defaultQty} required /></td>
-                  <td><input className="input" style={{ width: 72 }} type="number" min={1} name={`line[${i}][qtyIssued]`} defaultValue={ln.defaultQty} required /></td>
-                </tr>
+                <Fragment key={ln.items[0].itemId}>
+                  <tr>
+                    <td>{i + 1}</td>
+                    <td>{ln.make} {ln.model}
+                      <input type="hidden" name={`line[${i}][make]`} value={ln.make} />
+                      <input type="hidden" name={`line[${i}][model]`} value={ln.model} />
+                    </td>
+                    <td className="mono">{ln.items[0].serialNumber}</td>
+                    <td><ServiceControls itemId={ln.items[0].itemId} /></td>
+                    <td rowSpan={ln.items.length}><input className="input" style={{ width: 72 }} type="number" min={1} name={`line[${i}][qtyAuth]`} defaultValue={ln.defaultQty} required /></td>
+                    <td rowSpan={ln.items.length}><input className="input" style={{ width: 72 }} type="number" min={1} name={`line[${i}][qtyIssued]`} defaultValue={ln.defaultQty} required /></td>
+                  </tr>
+                  {ln.items.slice(1).map((it) => (
+                    <tr key={it.itemId}>
+                      <td></td>
+                      <td></td>
+                      <td className="mono">{it.serialNumber}</td>
+                      <td><ServiceControls itemId={it.itemId} /></td>
+                    </tr>
+                  ))}
+                </Fragment>
               ))}
             </tbody>
           </table>

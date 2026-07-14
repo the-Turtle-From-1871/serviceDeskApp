@@ -39,7 +39,12 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
         ) : (
           <ReceiptBuilderForm
             itemIds={loaded.map((i) => i.id)}
-            lines={lines.map((l) => ({ make: l.make, model: l.model, serials: l.serials, defaultQty: l.defaultQty }))}
+            lines={lines.map((l) => ({
+              make: l.make,
+              model: l.model,
+              defaultQty: l.defaultQty,
+              items: l.serials.map((serialNumber, k) => ({ serialNumber, itemId: l.itemIds[k] })),
+            }))}
             senderPrefill={senderPrefill}
           />
         )}
