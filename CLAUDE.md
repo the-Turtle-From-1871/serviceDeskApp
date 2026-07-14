@@ -52,7 +52,8 @@
 * **DCSIM Notifications:** Entities are identified as "DCSIM" via a checkbox/boolean field. The "Notify for pickup" UI button must be completely hidden if the recipient isn't DCSIM, paired with backend validation to reject non-DCSIM notification events.
 
 
-### 🤖 Ingest & Routing Queue
-* **Admin Queue View:** This operational surface handles items requiring active service or intervention. The queue must be strictly sorted and grouped by date.
-* **Queue Removal Lifecycle:** When an admin removes an item from the Admin Queue, the backend must update its state to flag it as "Ready to issue when needed".
-* **Receipt Ingestion:** The initial data ingestion pipeline must automatically route all incoming raw receipt payloads directly into the primary service queue for processing before hitting admin views.
+### 🤖 Service Queue (item-level)
+* **Needs-service flag:** Items are placed in the service queue by a per-item "Needs service?" flag captured on the hand-receipt builder (per serial) or on the item detail page. Each flagged item carries a service type: **Reimage**, **Repair**, or **Other** (with a custom message stored in `serviceNote`).
+* **Item-level queue:** The queue holds one entry per item (`ServiceQueueItem`, unique `itemId`), and only items whose entry is `PENDING` appear. Each entry may be tied to the hand receipt it was flagged on (`transferId`), shown on the item detail page.
+* **Mark Completed (reversible):** Removing an item from the queue sets its status to `COMPLETED` — the record is retained (never deleted) and drops off the active queue. It can be reopened to `PENDING` from the item detail page.
+* **Queue view:** The `/admin/queue` view lists SN, Device Name, Unit (item home unit), Service Type, and Actions (View + Mark Completed), with search, service-type filter, sort, and user-toggleable columns.
