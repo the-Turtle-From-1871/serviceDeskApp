@@ -1,15 +1,22 @@
-// tsx does not auto-load .env (unlike the Prisma CLI, which loads it via
-// prisma.config.ts's `import "dotenv/config"`). Load it explicitly here so
-// src/lib/prisma.ts's driver adapter sees DATABASE_URL.
 import "dotenv/config";
 
 import prisma from "../src/lib/prisma";
 import { hashPassword } from "../src/lib/password";
+import { UNIT_SEED } from "./units.data";
 
-async function main() {
-  // No hardcoded credentials: the initial admin identity/password must come
-  // from the environment. Fail clearly if they're missing rather than falling
-  // back to a well-known default.
+async function seedUnits() {
+  for (const u of UNIT_SEED) {
+    const abbreviation = u.abbreviation.toUpperCase();
+    await prisma.unit.upsert({
+      where: { abbreviation },
+      update: { fullName: u.fullName },
+      create: { abbreviation, fullName: u.fullName },
+    });
+  }
+  console.log(`Seeded ${UNIT_SEED.length} units.`);
+}
+
+async function seedAdmin() {
   const email = process.env.SEED_ADMIN_EMAIL;
   const password = process.env.SEED_ADMIN_PASSWORD;
   if (!email || !password) {
@@ -18,13 +25,11 @@ async function main() {
         "Set them in your environment (e.g. .env) before running `npm run db:seed`.",
     );
   }
-
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
     console.log(`Admin ${email} already exists — skipping.`);
     return;
   }
-
   await prisma.user.create({
     data: {
       name: "Administrator",
@@ -34,6 +39,11 @@ async function main() {
     },
   });
   console.log(`Seeded admin ${email}. Change this password after first login.`);
+}
+
+async function main() {
+  await seedUnits();
+  await seedAdmin();
 }
 
 main().finally(() => prisma.$disconnect());
