@@ -1,9 +1,11 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/authz";
-import { createItem, updateItem, setItemStatus, importItems } from "@/modules/items/items.service";
+import { createItem, updateItem, setItemStatus, analyzeImport, commitImport } from "@/modules/items/items.service";
 import { newItemSchema } from "@/modules/items/items.schema";
-import type { SkippedRow } from "@/modules/items/import";
+import { z } from "zod";
+import { resolutionSchema, type UnitResolution } from "@/modules/items/units.service";
+import type { SkippedRow, UnresolvedRow } from "@/modules/items/import";
 
 export async function createItemAction(_prev: unknown, formData: FormData) {
   const admin = await requireAdmin();
@@ -35,23 +37,54 @@ export async function toggleItemStatusAction(formData: FormData) {
   revalidatePath("/items");
 }
 
-export async function importItemsAction(
-  _prev: unknown,
-  formData: FormData
-): Promise<{ added: number; skipped: SkippedRow[] } | { error: string }> {
-  const admin = await requireAdmin();
+function readCsvFile(formData: FormData): { file: File } | { error: string } {
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) return { error: "Choose a CSV file to import." };
   if (!file.name.toLowerCase().endsWith(".csv")) return { error: "The file must be a .csv file." };
+  return { file };
+}
+
+export async function analyzeImportAction(
+  formData: FormData
+): Promise<{ counts: { toImport: number; skipped: number; autoDetected: number }; skipped: SkippedRow[]; unresolved: UnresolvedRow[] } | { error: string }> {
+  await requireAdmin();
+  const f = readCsvFile(formData);
+  if ("error" in f) return f;
   try {
-    const text = await file.text();
-    const res = await importItems(text, file.name, admin.id);
+    const text = await f.file.text();
+    const res = await analyzeImport(text);
+    if (res.error) return { error: res.error };
+    return { counts: res.counts, skipped: res.skipped, unresolved: res.unresolved };
+  } catch (e) {
+    console.error("[analyzeImportAction] unexpected error:", e);
+    return { error: "Something went wrong reading the file. Please try again." };
+  }
+}
+
+export async function commitImportAction(
+  formData: FormData
+): Promise<{ added: number; skipped: SkippedRow[]; detected: number } | { error: string }> {
+  const admin = await requireAdmin();
+  const f = readCsvFile(formData);
+  if ("error" in f) return f;
+
+  let resolutions: UnitResolution[];
+  try {
+    const raw = JSON.parse(String(formData.get("resolutions") ?? "[]"));
+    resolutions = z.array(resolutionSchema).parse(raw);
+  } catch {
+    return { error: "The unit assignments were invalid. Please re-check them and try again." };
+  }
+
+  try {
+    const text = await f.file.text();
+    const res = await commitImport(text, f.file.name, resolutions, admin.id);
     if (res.error) return { error: res.error };
     revalidatePath("/items");
     revalidatePath("/admin/audit");
-    return { added: res.added, skipped: res.skipped };
+    return { added: res.added, skipped: res.skipped, detected: res.detected };
   } catch (e) {
-    console.error("[importItemsAction] unexpected error:", e);
+    console.error("[commitImportAction] unexpected error:", e);
     return { error: "Something went wrong importing the file. Please try again." };
   }
 }
