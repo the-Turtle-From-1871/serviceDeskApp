@@ -601,6 +601,20 @@ input[type="file"].input {
   font-size: 13px;
 }
 
+/* Visible to assistive tech only — used for live-region announcements that
+   would be redundant on screen (e.g. the contact combobox result count). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ---------- Badges ---------- */
 .badge {
   display: inline-flex;
