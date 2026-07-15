@@ -1,5 +1,5 @@
 "use client";
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useState } from "react";
 import { updateItemDetailsAction } from "@/app/actions/items";
 
 export type ItemDetailsValues = {
@@ -29,15 +29,22 @@ export function ItemDetailsCard({ item, isAdmin, units, dateLogged, loggedBy, ha
   const [state, action, pending] = useActionState(updateItemDetailsAction, undefined);
 
   // Leave edit mode once a save succeeds; the server re-renders with new values.
-  // Keyed on `state` IDENTITY, not on a derived boolean: every successful submit
-  // returns a fresh object, so a second save also closes the editor — while
-  // merely re-opening the editor does not change `state`, so it stays open.
-  // (A boolean dep, or setting state during render, would leave `ok` true
-  // forever and slam the form shut every time Edit was clicked again.)
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: see note above.
+  // "Storing information from previous renders" pattern (see
+  // https://react.dev/reference/react/useState#storing-information-from-previous-renders):
+  // compared on `state` IDENTITY, not a derived boolean, and only written when it
+  // changes from the previous render — never unconditionally — so this is a
+  // guarded render-time write, not the unconditional kind react-hooks/set-state-in-render
+  // flags. useActionState returns the SAME object across re-renders until a new
+  // submit resolves, so every successful submit yields a fresh object (closing the
+  // editor, even on a second save), while merely re-opening the editor via the
+  // Edit button leaves `state` unchanged (so it stays open). A boolean dep, or an
+  // unconditional write, would leave `ok` true forever and slam the form shut every
+  // time Edit was clicked again — do not "simplify" this into either.
+  const [prevState, setPrevState] = useState(state);
+  if (state !== prevState) {
+    setPrevState(state);
     if (state && "ok" in state && state.ok) setEditing(false);
-  }, [state]);
+  }
 
   return (
     <div className="card">
