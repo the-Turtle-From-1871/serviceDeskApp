@@ -3,6 +3,8 @@ import { listUsers } from "@/modules/users/users.service";
 import { toggleUserActiveAction, setUserRoleAction } from "@/app/admin/actions/users";
 import { requireAdmin, AuthError } from "@/lib/authz";
 import { NewUserForm } from "./NewUserForm";
+import { listContacts } from "@/modules/contacts/contacts.service";
+import { ContactBookSection } from "./ContactBookSection";
 
 export default async function UsersPage() {
   let admin;
@@ -12,7 +14,7 @@ export default async function UsersPage() {
     if (e instanceof AuthError) redirect(e.code === "FORBIDDEN" ? "/" : "/login");
     throw e;
   }
-  const users = await listUsers();
+  const [users, contacts] = await Promise.all([listUsers(), listContacts()]);
   return (
     <div className="stack">
       <div>
@@ -81,6 +83,22 @@ export default async function UsersPage() {
           </tbody>
         </table>
       </div>
+
+      <div>
+        <h2 className="page-title">Contact book</h2>
+        <p className="subtle">Saved recipients, ordered by last name.</p>
+      </div>
+      <ContactBookSection
+        contacts={contacts.map((c) => ({
+          id: c.id,
+          rank: c.rank,
+          firstName: c.firstName,
+          lastName: c.lastName,
+          unit: c.unit,
+          contactNumber: c.contactNumber,
+          email: c.email,
+        }))}
+      />
     </div>
   );
 }
