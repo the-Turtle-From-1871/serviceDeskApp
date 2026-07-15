@@ -43,22 +43,20 @@ function renderForm(senderPrefill?: Parameters<typeof ReceiptBuilderForm>[0]["se
   );
 }
 
-const dcsimBox = (party: "Sender" | "Recipient") =>
-  within(screen.getByRole("group", { name: party })).getByRole("checkbox") as HTMLInputElement;
+const party = (p: "Sender" | "Recipient") => within(screen.getByRole("group", { name: p }));
+const dcsimBox = (p: "Sender" | "Recipient") => party(p).getByRole("checkbox") as HTMLInputElement;
 
-// Rank/Unit/Contact/Email have <label>s with no htmlFor and no wrapping, so they
-// are not programmatically associated — getByLabelText cannot find them. Query
-// by the posted field name instead. (That missing association is its own a11y
-// bug; it is pre-existing and not what this file is testing.)
-const field = (c: HTMLElement, name: string) => c.querySelector(`[name="${name}"]`) as HTMLInputElement;
-
-async function fillParty(user: ReturnType<typeof userEvent.setup>, c: HTMLElement, role: "sender" | "receiver") {
-  const name = field(c, `${role}Name`);
-  if (!name.value) await user.type(name, role === "sender" ? "Jane Doe" : "Bob Smith");
-  await user.type(field(c, `${role}Rank`), "SGT");
-  await user.type(field(c, `${role}Unit`), "A Co");
-  await user.type(field(c, `${role}Contact`), "5551112222");
-  await user.type(field(c, `${role}Email`), `${role}@unit.mil`);
+// Queried BY LABEL, which only works because each label is tied to its input via
+// htmlFor/id. Reaching for querySelector('[name=...]') here would pass against
+// unlabeled fields and quietly lose the guarantee — see the a11y test below.
+async function fillParty(user: ReturnType<typeof userEvent.setup>, p: "Sender" | "Recipient") {
+  const q = party(p);
+  const name = q.getByLabelText("Name") as HTMLInputElement;
+  if (!name.value) await user.type(name, p === "Sender" ? "Jane Doe" : "Bob Smith");
+  await user.type(q.getByLabelText("Rank"), "SGT");
+  await user.type(q.getByLabelText("Unit"), "A Co");
+  await user.type(q.getByLabelText("Contact number"), "5551112222");
+  await user.type(q.getByLabelText("Email"), `${p.toLowerCase()}@unit.mil`);
 }
 
 describe("ReceiptBuilderForm — the DCSIM checkbox survives a failed submit", () => {
@@ -66,14 +64,14 @@ describe("ReceiptBuilderForm — the DCSIM checkbox survives a failed submit", (
     const user = userEvent.setup();
     // The load-bearing precondition: the sender STARTS DCSIM, because the items'
     // last receiver was one of our technicians. The operator then unchecks it.
-    const { container } = renderForm({ isDcsim: true, name: "SGT Tech" });
+    renderForm({ isDcsim: true, name: "SGT Tech" });
 
     expect(dcsimBox("Sender").checked).toBe(true);
     await user.click(dcsimBox("Sender"));
     expect(dcsimBox("Sender").checked).toBe(false);
 
-    await fillParty(user, container, "sender");
-    await fillParty(user, container, "receiver");
+    await fillParty(user, "Sender");
+    await fillParty(user, "Recipient");
     await user.click(screen.getByRole("button", { name: /Create hand receipt/i }));
     await waitFor(() => expect(createReceiptAction).toHaveBeenCalled());
     await screen.findByRole("alert");
@@ -87,11 +85,11 @@ describe("ReceiptBuilderForm — the DCSIM checkbox survives a failed submit", (
 
   it("posts senderIsDcsim consistently with what the operator sees", async () => {
     const user = userEvent.setup();
-    const { container } = renderForm({ isDcsim: true, name: "SGT Tech" });
+    renderForm({ isDcsim: true, name: "SGT Tech" });
 
     await user.click(dcsimBox("Sender"));
-    await fillParty(user, container, "sender");
-    await fillParty(user, container, "receiver");
+    await fillParty(user, "Sender");
+    await fillParty(user, "Recipient");
     await user.click(screen.getByRole("button", { name: /Create hand receipt/i }));
     await waitFor(() => expect(createReceiptAction).toHaveBeenCalledTimes(1));
     await screen.findByRole("alert");
@@ -110,29 +108,46 @@ describe("ReceiptBuilderForm — the DCSIM checkbox survives a failed submit", (
     // quantity back to the default. The operator fixes the real error, resubmits,
     // and the receipt is filed for the wrong count.
     const user = userEvent.setup();
-    const { container } = renderForm();
+    renderForm();
 
-    const qty = field(container, "line[0][qtyAuth]");
-    await user.clear(qty);
-    await user.type(qty, "3");
-    expect(qty.value).toBe("3");
+    const qty = () => screen.getByLabelText("Quantity authorized, Dell L5420") as HTMLInputElement;
+    await user.clear(qty());
+    await user.type(qty(), "3");
+    expect(qty().value).toBe("3");
 
-    await fillParty(user, container, "sender");
-    await fillParty(user, container, "receiver");
+    await fillParty(user, "Sender");
+    await fillParty(user, "Recipient");
     await user.click(screen.getByRole("button", { name: /Create hand receipt/i }));
     await waitFor(() => expect(createReceiptAction).toHaveBeenCalled());
     await screen.findByRole("alert");
 
-    expect(field(container, "line[0][qtyAuth]").value).toBe("3");
+    expect(qty().value).toBe("3");
+  });
+
+  // These were the only labels in the app not tied to their input — 13 other
+  // forms do it — so a screen reader read eight fields on this page (four per
+  // party) as unnamed edit boxes. getByLabelText resolves through htmlFor/id, so
+  // it fails if the association is ever dropped again. That is the point.
+  it("gives every field an accessible name, on both parties", () => {
+    renderForm();
+
+    for (const p of ["Sender", "Recipient"] as const) {
+      for (const label of ["Name", "Rank", "Unit", "Contact number", "Email"]) {
+        expect(party(p).getByLabelText(label)).toBeDefined();
+      }
+    }
+    // The <th> orients a sighted user; the input itself needs its own name.
+    expect(screen.getByLabelText("Quantity authorized, Dell L5420")).toBeDefined();
+    expect(screen.getByLabelText("Quantity issued, Dell L5420")).toBeDefined();
   });
 
   it("leaves the receiver's checkbox alone (it never starts checked)", async () => {
     const user = userEvent.setup();
-    const { container } = renderForm({ isDcsim: true, name: "SGT Tech" });
+    renderForm({ isDcsim: true, name: "SGT Tech" });
 
     await user.click(dcsimBox("Sender"));
-    await fillParty(user, container, "sender");
-    await fillParty(user, container, "receiver");
+    await fillParty(user, "Sender");
+    await fillParty(user, "Recipient");
     await user.click(screen.getByRole("button", { name: /Create hand receipt/i }));
     await screen.findByRole("alert");
 

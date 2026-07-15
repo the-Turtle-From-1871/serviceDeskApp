@@ -112,10 +112,16 @@ function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, 
       )}
       {!isDcsim && (
         <div className="form-grid form-grid-fluid">
-          <div className="field"><label className="label">Rank</label><input className="input" name={`${role}Rank`} value={rank} onChange={(e) => setRank(e.target.value)} required /></div>
-          <div className="field"><label className="label">Unit</label><input className="input" name={`${role}Unit`} value={unit} onChange={(e) => setUnit(e.target.value)} required /></div>
-          <div className="field"><label className="label">Contact number</label><PhoneInput name={`${role}Contact`} value={contact} onChange={setContact} required /></div>
-          <div className="field"><label className="label">Email</label><input className="input" type="email" name={`${role}Email`} value={email} onChange={(e) => setEmail(e.target.value)} required /></div>
+          {/* htmlFor/id on every one: these four were the only labels in the app
+              not tied to their input (13 other forms do it), so a screen reader
+              announced eight fields here — four per party — as unnamed edit
+              boxes. Sighted users saw the labels; the accessibility tree didn't
+              have them. ids are namespaced by role, like `${role}-name` above,
+              since both parties render this fieldset. */}
+          <div className="field"><label className="label" htmlFor={`${role}-rank`}>Rank</label><input id={`${role}-rank`} className="input" name={`${role}Rank`} value={rank} onChange={(e) => setRank(e.target.value)} required /></div>
+          <div className="field"><label className="label" htmlFor={`${role}-unit`}>Unit</label><input id={`${role}-unit`} className="input" name={`${role}Unit`} value={unit} onChange={(e) => setUnit(e.target.value)} required /></div>
+          <div className="field"><label className="label" htmlFor={`${role}-contact`}>Contact number</label><PhoneInput id={`${role}-contact`} name={`${role}Contact`} value={contact} onChange={setContact} required /></div>
+          <div className="field"><label className="label" htmlFor={`${role}-email`}>Email</label><input id={`${role}-email`} className="input" type="email" name={`${role}Email`} value={email} onChange={(e) => setEmail(e.target.value)} required /></div>
         </div>
       )}
     </fieldset>
@@ -127,7 +133,10 @@ function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, 
 // back to the default — the operator fixes the real error, resubmits, and the
 // receipt is filed for the wrong count. Same reasoning as the lifted party
 // fields above. Verified by ReceiptBuilderForm.test.tsx.
-function QtyInput({ name, defaultQty }: { name: string; defaultQty: number }) {
+// `label` is announced via aria-label: the column's <th> orients a sighted user,
+// but it gives the input itself no accessible name, so a screen reader would
+// otherwise read a bare number box. Matches ServiceControls' aria-labels below.
+function QtyInput({ name, defaultQty, label }: { name: string; defaultQty: number; label: string }) {
   const [qty, setQty] = useState(String(defaultQty));
   return (
     <input
@@ -136,6 +145,7 @@ function QtyInput({ name, defaultQty }: { name: string; defaultQty: number }) {
       type="number"
       min={1}
       name={name}
+      aria-label={label}
       value={qty}
       onChange={(e) => setQty(e.target.value)}
       required
@@ -255,8 +265,8 @@ export function ReceiptBuilderForm({ itemIds, lines, senderPrefill, signatures, 
                     </td>
                     <td className="mono">{ln.items[0].serialNumber}</td>
                     <td><ServiceControls itemId={ln.items[0].itemId} /></td>
-                    <td rowSpan={ln.items.length}><QtyInput name={`line[${i}][qtyAuth]`} defaultQty={ln.defaultQty} /></td>
-                    <td rowSpan={ln.items.length}><QtyInput name={`line[${i}][qtyIssued]`} defaultQty={ln.defaultQty} /></td>
+                    <td rowSpan={ln.items.length}><QtyInput name={`line[${i}][qtyAuth]`} defaultQty={ln.defaultQty} label={`Quantity authorized, ${ln.make} ${ln.model}`} /></td>
+                    <td rowSpan={ln.items.length}><QtyInput name={`line[${i}][qtyIssued]`} defaultQty={ln.defaultQty} label={`Quantity issued, ${ln.make} ${ln.model}`} /></td>
                   </tr>
                   {ln.items.slice(1).map((it) => (
                     <tr key={it.itemId}>
