@@ -41,6 +41,7 @@ model User {
   returnsProcessed ReturnTransaction[]  @relation("ReturnsProcessed")
   passwordResets   PasswordResetToken[] @relation("PasswordResets")
   itemEdits        ItemEdit[]           @relation("ItemEdits")
+  signatures       Signature[]          @relation("UserSignatures")
 }
 
 // Self-service password reset. Only the SHA-256 hash of the emailed token is
@@ -259,4 +260,21 @@ model ItemEdit {
 
   @@index([itemId])
   @@index([createdAt])
+}
+
+// A named signature belonging to an ADMIN account. `name` is the technician the
+// signature belongs to — it is printed on the DA 2062 as the signer when this
+// signature is chosen on a return, so it is an identity, not a label.
+// Non-admin accounts keep the single `User.signatureImage` instead.
+model Signature {
+  id        String   @id @default(cuid())
+  user      User     @relation("UserSignatures", fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  name      String
+  image     String   // PNG data URL
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, name])
+  @@index([userId])
 }
