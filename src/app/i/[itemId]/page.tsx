@@ -54,7 +54,13 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
               homeUnit: item.homeUnit,
               currentUser: item.currentUser,
               currentPosition: item.currentPosition,
-              notes: item.notes,
+              // ItemDetailsCard is a client component, so its props are
+              // serialized into the RSC Flight payload and reach the
+              // browser regardless of what the card renders. Gate the
+              // value here, server-side — do NOT "simplify" this back to
+              // item.notes, or a non-admin can read admin-only notes out
+              // of the response even though the UI hides them.
+              notes: isAdmin ? item.notes : null,
             }}
             isAdmin={isAdmin}
             units={units}

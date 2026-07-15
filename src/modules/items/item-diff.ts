@@ -3,6 +3,13 @@
 
 // Every field whose changes are recorded in ItemEdit. Callers pass any subset:
 // the user-facing card edits four of them, the admin form edits six.
+// NOTE: deviceName, make, model, and serialNumber back NOT NULL columns on
+// Item. They're typed `string | null` here (and norm() below maps ""/blank
+// to null) only because this module doesn't enforce non-blank itself — every
+// caller's Zod schema (newItemSchema / itemDetailsSchema) enforces
+// `.min(1)` on these before the value ever reaches updateItemFields. Do not
+// pass a blank/whitespace value for these four fields, or the write will
+// attempt to null out a NOT NULL column and fail.
 export type ItemLoggedFields = {
   homeUnit: string | null;
   deviceName: string | null;
