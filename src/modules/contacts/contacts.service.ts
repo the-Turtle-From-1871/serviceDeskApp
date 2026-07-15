@@ -58,8 +58,11 @@ export async function updateContact(input: UpdateContactInput): Promise<Contact>
 }
 
 export async function deleteContact(id: string): Promise<void> {
-  // deleteMany (not delete) so a missing id is a count of 0 rather than a raw
-  // Prisma throw, matching signatures.service.deleteSignature.
+  // deleteMany (not delete) so a missing id yields a count of 0 rather than a
+  // raw Prisma throw, letting the action distinguish already-gone from a real
+  // failure. (Unlike signatures.service.deleteSignature, this isn't about
+  // ownership scoping — the contact book is shared org-wide, so there's no
+  // `userId` to scope on.)
   const { count } = await prisma.contact.deleteMany({ where: { id } });
   if (count === 0) throw new ContactError("NOT_FOUND");
 }

@@ -47,9 +47,33 @@ function ContactFields({ idPrefix, contact }: { idPrefix: string; contact?: Cont
 
 function NewContactForm() {
   const [state, action, pending] = useActionState(createContactAction, undefined);
+  const ok = state !== undefined && "ok" in state && state.ok;
+  // React 19 auto-resets uncontrolled fields after a successful form action,
+  // but PhoneInput is controlled from React's perspective (it always renders
+  // `value={shown}`), so its internal `inner` state survives that reset. Without
+  // forcing a remount here, the contact-number field keeps showing the previous
+  // contact's number, and a bulk-entry admin who doesn't retouch it saves the
+  // next contact under someone else's phone number. Bumping `key` on success
+  // unmounts/remounts ContactFields, which re-runs PhoneInput's
+  // `useState(() => formatPhone(defaultValue ?? ""))` initializer and clears it
+  // along with the rest of the (already-blank) uncontrolled fields.
+  //
+  // This is done as a render-phase state adjustment (comparing `state` against
+  // a mirrored `prevState`), not a useEffect, both because the lint rule flags
+  // synchronous setState-in-effect and because `ok` alone can't detect a
+  // second, back-to-back success: it goes true -> true across two submissions,
+  // never re-triggering an effect keyed on it. `state` is a fresh object
+  // literal from the server action on every success, so comparing its identity
+  // catches each submission individually.
+  const [prevState, setPrevState] = useState(state);
+  const [seq, setSeq] = useState(0);
+  if (state !== prevState) {
+    setPrevState(state);
+    if (ok) setSeq((n) => n + 1);
+  }
   return (
     <form action={action} className="stack-sm">
-      <ContactFields idPrefix="nc" />
+      <ContactFields key={seq} idPrefix="nc" />
       <div className="row">
         <button disabled={pending} type="submit" className="btn btn-primary">
           {pending ? "Adding…" : "Add contact"}
