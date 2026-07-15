@@ -20,11 +20,16 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
   const tooMany = lines.length > MAX_RECEIPT_ROWS;
   const tooManyPerRow = lines.some((l) => l.serials.length > MAX_ITEMS_PER_ROW);
 
+  // Named signatures are an ADMIN capability, so gate on the ROLE — not on
+  // "a non-admin happens to own no rows". A demoted admin keeps their Signature
+  // rows (nothing deletes them; the FK only cascades on user deletion), so an
+  // ownership-only check would leave them the capability after it was revoked.
+  // Mirrors account/page.tsx:22. Also keeps every signature image out of the
+  // RSC payload for users who can never use one.
+  //
   // Sender prefill only when every item shares an identical last receiver.
-  // A non-admin has none (named signatures are admin-only), which renders the
-  // pad — the intended fallback.
   const [signatures, lastReceivers] = await Promise.all([
-    listSignatures(user.id),
+    user.role === "ADMIN" ? listSignatures(user.id) : Promise.resolve([]),
     Promise.all(loaded.map((i) => getLastReceiver(i.id))),
   ]);
   const first = lastReceivers[0];

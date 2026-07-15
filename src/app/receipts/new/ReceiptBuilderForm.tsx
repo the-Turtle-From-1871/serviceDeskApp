@@ -10,12 +10,14 @@ type Prefill = { isDcsim?: boolean; name?: string; rank?: string; unit?: string;
 export type BuilderItem = { serialNumber: string; itemId: string };
 export type BuilderLine = { make: string; model: string; items: BuilderItem[]; defaultQty: number };
 
-function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName }: {
+function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, onNameChange }: {
   role: "sender" | "receiver";
   prefill?: Prefill;
   isDcsim: boolean;
   onIsDcsimChange: (v: boolean) => void;
   hideName?: boolean;
+  name: string;
+  onNameChange: (v: string) => void;
 }) {
   const cap = role === "sender" ? "Sender" : "Recipient";
   return (
@@ -27,11 +29,14 @@ function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName }: {
       </label>
       {/* Hidden while a saved signature is picked: the name is taken from that
           signature server-side, so an editable field here could only disagree
-          with the ink. Not rendered (rather than disabled) so nothing posts. */}
+          with the ink. Not rendered (rather than disabled) so nothing posts.
+          The value is LIFTED (like ServiceControls' note below) rather than left
+          uncontrolled: hiding unmounts the input, and an uncontrolled one would
+          lose whatever was typed, then remount blank. */}
       {!hideName && (
         <div className="field">
           <label className="label">{isDcsim ? "DCSIM technician name" : "Name"}</label>
-          <input className="input" name={`${role}Name`} defaultValue={prefill?.name ?? ""} required />
+          <input className="input" name={`${role}Name`} value={name} onChange={(e) => onNameChange(e.target.value)} required />
         </div>
       )}
       {!isDcsim && (
@@ -102,6 +107,8 @@ export function ReceiptBuilderForm({ itemIds, lines, senderPrefill, signatures }
   const [state, action, pending] = useActionState(createReceiptAction, undefined);
   const [senderIsDcsim, setSenderIsDcsim] = useState(senderPrefill?.isDcsim ?? false);
   const [receiverIsDcsim, setReceiverIsDcsim] = useState(false);
+  const [senderName, setSenderName] = useState(senderPrefill?.name ?? "");
+  const [receiverName, setReceiverName] = useState("");
   const [pickedId, setPickedId] = useState<string | null>(null);
   const receipt = state && "receiptNumber" in state ? state.receiptNumber : undefined;
 
@@ -167,8 +174,8 @@ export function ReceiptBuilderForm({ itemIds, lines, senderPrefill, signatures }
           </table>
         </div>
       </fieldset>
-      <PartyFields role="sender" prefill={senderPrefill} isDcsim={senderIsDcsim} onIsDcsimChange={setSenderIsDcsim} />
-      <PartyFields role="receiver" isDcsim={receiverIsDcsim} onIsDcsimChange={onReceiverDcsimChange} hideName={hideReceiverName} />
+      <PartyFields role="sender" prefill={senderPrefill} isDcsim={senderIsDcsim} onIsDcsimChange={setSenderIsDcsim} name={senderName} onNameChange={setSenderName} />
+      <PartyFields role="receiver" isDcsim={receiverIsDcsim} onIsDcsimChange={onReceiverDcsimChange} hideName={hideReceiverName} name={receiverName} onNameChange={setReceiverName} />
       <fieldset className="card stack-sm">
         <legend className="card__title">Recipient signature{receiverIsDcsim ? " (DCSIM)" : ""}</legend>
         {receiverIsDcsim ? (

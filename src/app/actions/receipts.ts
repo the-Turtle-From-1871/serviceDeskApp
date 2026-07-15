@@ -25,6 +25,15 @@ export async function createReceiptAction(_prev: unknown, formData: FormData) {
   // normal name + PNG data URL and needs no change.
   const signatureId = String(formData.get("signatureId") ?? "").trim();
   if (signatureId) {
+    // ADMIN-only, checked on the ROLE rather than relying on getOwnedSignature
+    // finding nothing. A demoted admin keeps their Signature rows, so an
+    // ownership-only check would let them keep using a capability that was
+    // revoked. Roles are re-read from the DB per request, so this takes effect
+    // immediately on demotion.
+    if (user.role !== "ADMIN") {
+      console.warn(`[createReceiptAction] rejected signatureId from non-admin ${user.id}`);
+      return { error: "A saved signature can only be used when the recipient is DCSIM." };
+    }
     // DCSIM-only, enforced here and not merely hidden in the UI: a saved
     // signature must never land on an outside recipient, who has to sign in
     // person. Mirrors notifyPickupAction's guard below.

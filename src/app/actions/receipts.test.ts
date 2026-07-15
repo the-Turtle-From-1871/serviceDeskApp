@@ -114,6 +114,20 @@ describe("createReceiptAction — DCSIM recipient signature", () => {
     expect(createTransfer).not.toHaveBeenCalled();
   });
 
+  // A demoted admin keeps their Signature rows, so getOwnedSignature would still
+  // find one. The role check is what actually revokes the capability.
+  it("rejects a signatureId from a non-admin (e.g. a demoted admin who still owns signatures)", async () => {
+    requireUser.mockResolvedValue({ ...USER, role: "USER" });
+    getOwnedSignature.mockResolvedValue({ name: "SGT Alvarez", image: SAVED_SIG });
+    const fd = makeFormData({ receiverIsDcsim: "on", signatureId: "sig-1" });
+
+    const res = await createReceiptAction(undefined, fd);
+
+    expect(res).toEqual({ error: "A saved signature can only be used when the recipient is DCSIM." });
+    expect(getOwnedSignature).not.toHaveBeenCalled();
+    expect(createTransfer).not.toHaveBeenCalled();
+  });
+
   it("rejects a bogus or another user's signatureId, and creates nothing", async () => {
     getOwnedSignature.mockResolvedValue(null);
     const fd = makeFormData({ receiverIsDcsim: "on", signatureId: "not-mine" });

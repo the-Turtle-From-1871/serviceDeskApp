@@ -59,7 +59,13 @@ export function TechnicianSignatureField({
             className="select"
             style={{ width: "auto", minWidth: 180 }}
             value={selectedId}
-            onChange={(e) => setSelectedId(e.target.value)}
+            // Discard any drawn ink whenever the selection changes. SignaturePad
+            // reports upward only on stroke-end and on Clear — never on mount —
+            // so without this, leaving and re-entering "Draw a new one…" mounts a
+            // visually BLANK pad while `drawn` still holds the earlier squiggle,
+            // and the hidden input silently re-posts it. On this form that ships
+            // one person's ink under another person's name on a DA 2062.
+            onChange={(e) => { setSelectedId(e.target.value); setDrawn(""); }}
           >
             <option value="" disabled>— Select who signed —</option>
             {signatures.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
