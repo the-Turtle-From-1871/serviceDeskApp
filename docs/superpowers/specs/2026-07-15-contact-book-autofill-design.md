@@ -240,7 +240,13 @@ locally → the form posts the same field names as today, so
 ## Out of scope
 
 - Per-user private contact books (the book is shared org-wide).
-- Autofill on the sender side (it already prefills from last-receiver).
+- ~~Autofill on the sender side (it already prefills from last-receiver).~~
+  **Reversed 2026-07-15, after shipping.** The original call leaned on the sender
+  already prefilling from the last receiver, but that only helps when the items
+  come back from whoever the last receipt says held them. An outside person
+  handing equipment back is a sender, and is exactly who the book holds — so both
+  parties now get the combobox, gated on DCSIM rather than on role. The sender's
+  last-receiver prefill still seeds the fields; a pick overrides it.
 - Saving a recipient to the book from the builder (admin-curated only).
 - Server-side contact search, pagination, and fuzzy/typo-tolerant matching. At
   the stated scale (tens to a few hundred; ~500 contacts ≈ 75KB JSON) the whole

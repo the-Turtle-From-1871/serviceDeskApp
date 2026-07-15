@@ -20,8 +20,9 @@ function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, 
   hideName?: boolean;
   name: string;
   onNameChange: (v: string) => void;
-  // Present only for the side that autofills from the contact book (the
-  // recipient). Absent on the sender, which keeps its plain name input.
+  // The contact book. Passed to both parties: a sender is an outside person too
+  // whenever equipment is being handed back, and they are exactly who the book
+  // holds. Optional so a caller can still render a party without the book.
   contacts?: ContactOption[];
 }) {
   const cap = role === "sender" ? "Sender" : "Recipient";
@@ -53,15 +54,12 @@ function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, 
     setEmail(c.email);
   };
 
-  // Contacts are outside recipients. A DCSIM party is our own technician — they
-  // have an account and a saved-signature picker, and the four fields below
-  // aren't even rendered for them — so the book never applies there.
-  //
-  // `role` is checked explicitly rather than relying on "only the receiver is
-  // passed contacts": that happens to hold today, but it makes the sender one
-  // stray prop away from silently sprouting a contact picker, with nothing to
-  // catch it at compile time.
-  const showCombobox = role === "receiver" && contacts !== undefined && !isDcsim;
+  // Gated on DCSIM, not on role: the book holds outside people, and either party
+  // can be one — an outside recipient being issued kit, or an outside sender
+  // handing it back. A DCSIM party is our own technician (account + saved-
+  // signature picker), and the four fields below aren't even rendered for them,
+  // so the book never applies there.
+  const showCombobox = contacts !== undefined && !isDcsim;
 
   return (
     <fieldset className="card stack-sm">
@@ -236,7 +234,11 @@ export function ReceiptBuilderForm({ itemIds, lines, senderPrefill, signatures, 
           </table>
         </div>
       </fieldset>
-      <PartyFields role="sender" prefill={senderPrefill} isDcsim={senderIsDcsim} onIsDcsimChange={setSenderIsDcsim} name={senderName} onNameChange={setSenderName} />
+      {/* The sender gets the book too. `senderPrefill` (the last receiver of these
+          items) still seeds the fields on load — a pick just overrides it, which is
+          what you want when the items are coming back from someone other than
+          whoever the receipt says last held them. */}
+      <PartyFields role="sender" prefill={senderPrefill} isDcsim={senderIsDcsim} onIsDcsimChange={setSenderIsDcsim} name={senderName} onNameChange={setSenderName} contacts={contacts} />
       <PartyFields role="receiver" isDcsim={receiverIsDcsim} onIsDcsimChange={onReceiverDcsimChange} hideName={hideReceiverName} name={receiverName} onNameChange={setReceiverName} contacts={contacts} />
       <fieldset className="card stack-sm">
         <legend className="card__title">Recipient signature{receiverIsDcsim ? " (DCSIM)" : ""}</legend>
