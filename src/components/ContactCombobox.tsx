@@ -63,7 +63,14 @@ export function ContactCombobox({
       e.preventDefault();
       pick(matches[activeIndex]);
     } else if (e.key === "Escape") {
+      // Clearing `active` is load-bearing, not hygiene. Escape only closes the
+      // list, and onFocus reopens it — so without this, focusing away and back
+      // WITHOUT retyping (nothing else resets `active`) reopens the list with the
+      // dismissed suggestion still highlighted, and the next Enter silently picks
+      // it instead of submitting what was typed. Escape means "I don't want this
+      // suggestion", so it must drop the highlight, not just hide it.
       setOpen(false);
+      setActive(null);
     }
   };
 
