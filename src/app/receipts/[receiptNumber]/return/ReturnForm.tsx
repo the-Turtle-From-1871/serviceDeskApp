@@ -10,7 +10,7 @@ export function ReturnForm({ receiptNumber, held, signatures }: { receiptNumber:
   const [state, action, pending] = useActionState(processReturnAction, undefined);
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [verified, setVerified] = useState(false);
-  const [signature, setSignature] = useState(signatures[0]?.image ?? "");
+  const [signature, setSignature] = useState("");
 
   const lines = useMemo(() => {
     const by = new Map<number, { lineNo: number; make: string; model: string; items: HeldItem[] }>();

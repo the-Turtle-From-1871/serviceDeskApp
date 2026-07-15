@@ -22,6 +22,7 @@ export default async function AuditPage() {
   const returns = await prisma.returnTransaction.findMany({
     orderBy: { createdAt: "desc" },
     take: 50,
+    include: { processedByUser: { select: { name: true } } },
   });
   const itemEdits = await prisma.itemEdit.findMany({
     orderBy: { createdAt: "desc" },
@@ -69,7 +70,7 @@ export default async function AuditPage() {
           <div className="table-wrap">
             <table className="table">
               <thead>
-                <tr><th>Date</th><th>By</th><th>Receipt</th><th>Kind</th><th>Returned</th><th>Remaining</th></tr>
+                <tr><th>Date</th><th>Signed by</th><th>Processed by</th><th>Receipt</th><th>Kind</th><th>Returned</th><th>Remaining</th></tr>
               </thead>
               <tbody>
                 {returns.map((r) => {
@@ -77,7 +78,8 @@ export default async function AuditPage() {
                   return (
                     <tr key={r.id}>
                       <td className="subtle" data-label="Date">{formatDateTimeHST(r.createdAt)}</td>
-                      <td data-label="By">{r.processedByName}</td>
+                      <td data-label="Signed by">{r.processedByName}</td>
+                      <td data-label="Processed by">{r.processedByUser?.name ?? r.processedByEmail ?? "—"}</td>
                       <td data-label="Receipt"><Link href={`/receipts/${r.receiptNumber}`}>{r.receiptNumber}</Link></td>
                       <td data-label="Kind">{r.kind}</td>
                       <td data-label="Returned">
