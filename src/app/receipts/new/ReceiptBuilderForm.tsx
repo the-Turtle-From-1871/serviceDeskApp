@@ -1,5 +1,5 @@
 "use client";
-import { Fragment, useActionState, useState } from "react";
+import { Fragment, useActionState, useEffect, useRef, useState } from "react";
 import { createReceiptAction } from "@/app/actions/receipts";
 import { SignaturePad } from "@/components/SignaturePad";
 import { TechnicianSignatureField, type PickableSignature } from "@/components/TechnicianSignatureField";
@@ -61,11 +61,28 @@ function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, 
   // so the book never applies there.
   const showCombobox = contacts !== undefined && !isDcsim;
 
+  // React resets the form after the action settles — including when it settles
+  // to an error — and a reset restores every control to its defaultChecked /
+  // defaultValue. For a controlled TEXT input React keeps defaultValue in step
+  // with value, so the reset is a no-op. It does NOT do the same for a
+  // controlled checkbox: defaultChecked stays frozen at its mount value.
+  //
+  // So a sender that starts DCSIM (its items' last receiver was a technician)
+  // and is then unchecked gets silently re-checked by the next failed submit,
+  // while React state — and this whole fieldset — still render unchecked. The
+  // operator fixes the real error, resubmits, and files a receipt claiming the
+  // sender was DCSIM. Keeping defaultChecked in step makes the reset a no-op
+  // here too. Verified by ReceiptBuilderForm.test.tsx.
+  const dcsimRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (dcsimRef.current) dcsimRef.current.defaultChecked = isDcsim;
+  }, [isDcsim]);
+
   return (
     <fieldset className="card stack-sm">
       <legend className="card__title">{cap}</legend>
       <label className="row">
-        <input type="checkbox" name={`${role}IsDcsim`} checked={isDcsim} onChange={(e) => onIsDcsimChange(e.target.checked)} />
+        <input ref={dcsimRef} type="checkbox" name={`${role}IsDcsim`} checked={isDcsim} onChange={(e) => onIsDcsimChange(e.target.checked)} />
         This side is DCSIM
       </label>
       {/* Hidden while a saved signature is picked: the name is taken from that
@@ -102,6 +119,27 @@ function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, 
         </div>
       )}
     </fieldset>
+  );
+}
+
+// Controlled, not `defaultValue`, so React's post-action form reset can't touch
+// it. Uncontrolled, a submit that failed validation snapped a typed quantity
+// back to the default — the operator fixes the real error, resubmits, and the
+// receipt is filed for the wrong count. Same reasoning as the lifted party
+// fields above. Verified by ReceiptBuilderForm.test.tsx.
+function QtyInput({ name, defaultQty }: { name: string; defaultQty: number }) {
+  const [qty, setQty] = useState(String(defaultQty));
+  return (
+    <input
+      className="input"
+      style={{ width: 72 }}
+      type="number"
+      min={1}
+      name={name}
+      value={qty}
+      onChange={(e) => setQty(e.target.value)}
+      required
+    />
   );
 }
 
@@ -217,8 +255,8 @@ export function ReceiptBuilderForm({ itemIds, lines, senderPrefill, signatures, 
                     </td>
                     <td className="mono">{ln.items[0].serialNumber}</td>
                     <td><ServiceControls itemId={ln.items[0].itemId} /></td>
-                    <td rowSpan={ln.items.length}><input className="input" style={{ width: 72 }} type="number" min={1} name={`line[${i}][qtyAuth]`} defaultValue={ln.defaultQty} required /></td>
-                    <td rowSpan={ln.items.length}><input className="input" style={{ width: 72 }} type="number" min={1} name={`line[${i}][qtyIssued]`} defaultValue={ln.defaultQty} required /></td>
+                    <td rowSpan={ln.items.length}><QtyInput name={`line[${i}][qtyAuth]`} defaultQty={ln.defaultQty} /></td>
+                    <td rowSpan={ln.items.length}><QtyInput name={`line[${i}][qtyIssued]`} defaultQty={ln.defaultQty} /></td>
                   </tr>
                   {ln.items.slice(1).map((it) => (
                     <tr key={it.itemId}>
