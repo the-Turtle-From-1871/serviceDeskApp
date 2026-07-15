@@ -11,10 +11,33 @@ import { receiptUrl } from "@/modules/items/qr";
 import { upsertServiceRequest } from "@/modules/service-queue/service-queue.service";
 import { parseServiceMap } from "@/modules/service-queue/service-form";
 import { parseReceiptForm } from "./receipts.parse";
+import { getOwnedSignature } from "@/modules/signatures/signatures.service";
 
 export async function createReceiptAction(_prev: unknown, formData: FormData) {
   const user = await requireUser();
   const raw = parseReceiptForm(formData);
+
+  // A picked saved signature posts ONLY its id. Resolve the signer's name and
+  // image from the DB, scoped to the acting user, and overwrite whatever the
+  // client posted for them — so a crafted POST can forge neither the name
+  // printed on the DA 2062 nor the ink under it, and cannot borrow another
+  // user's signature. Runs BEFORE safeParse so receiptSchema still sees a
+  // normal name + PNG data URL and needs no change.
+  const signatureId = String(formData.get("signatureId") ?? "").trim();
+  if (signatureId) {
+    // DCSIM-only, enforced here and not merely hidden in the UI: a saved
+    // signature must never land on an outside recipient, who has to sign in
+    // person. Mirrors notifyPickupAction's guard below.
+    if (!raw.receiver.isDcsim) {
+      console.warn("[createReceiptAction] rejected signatureId on a non-DCSIM recipient");
+      return { error: "A saved signature can only be used when the recipient is DCSIM." };
+    }
+    const owned = await getOwnedSignature(signatureId, user.id);
+    if (!owned) return { error: "That signature is no longer available. Pick another or draw one." };
+    raw.receiver.name = owned.name;
+    raw.receiverSignature = owned.image;
+  }
+
   const parsed = receiptSchema.safeParse(raw);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
 
