@@ -3,11 +3,12 @@ import { requireUser } from "@/lib/authz";
 import { getItem } from "@/modules/items/items.service";
 import { getLastReceiver } from "@/modules/transfers/transfers.service";
 import { groupItemsIntoLines, MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW } from "@/modules/transfers/receipt-lines";
+import { listSignatures } from "@/modules/signatures/signatures.service";
 import { SiteHeader } from "@/components/SiteHeader";
 import { ReceiptBuilderForm } from "./ReceiptBuilderForm";
 
 export default async function NewReceiptPage({ searchParams }: { searchParams: Promise<{ items?: string }> }) {
-  await requireUser();
+  const user = await requireUser();
   const { items: itemsParam } = await searchParams;
   const ids = (itemsParam ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   if (ids.length === 0) notFound();
@@ -20,7 +21,12 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
   const tooManyPerRow = lines.some((l) => l.serials.length > MAX_ITEMS_PER_ROW);
 
   // Sender prefill only when every item shares an identical last receiver.
-  const lastReceivers = await Promise.all(loaded.map((i) => getLastReceiver(i.id)));
+  // A non-admin has none (named signatures are admin-only), which renders the
+  // pad — the intended fallback.
+  const [signatures, lastReceivers] = await Promise.all([
+    listSignatures(user.id),
+    Promise.all(loaded.map((i) => getLastReceiver(i.id))),
+  ]);
   const first = lastReceivers[0];
   const allSame = first != null && lastReceivers.every((r) => r && JSON.stringify(r) === JSON.stringify(first));
   const senderPrefill = allSame
@@ -46,6 +52,7 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
               items: l.serials.map((serialNumber, k) => ({ serialNumber, itemId: l.itemIds[k] })),
             }))}
             senderPrefill={senderPrefill}
+            signatures={signatures}
           />
         )}
       </main>
