@@ -1,5 +1,5 @@
 "use client";
-import { useId, useMemo, useRef, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { matchContacts, type ContactOption } from "@/modules/contacts/contact-match";
 
 // A type-ahead over the contact book that also IS the name field — the posted
@@ -25,32 +25,41 @@ export function ContactCombobox({
   onPick: (c: ContactOption) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [active, setActive] = useState(0);
+  // `null` means "not navigated": the user hasn't pressed ArrowUp/ArrowDown or
+  // hovered an option yet. Distinct from index 0, so a first Enter press while
+  // merely typing doesn't get mistaken for "a suggestion is highlighted".
+  const [active, setActive] = useState<number | null>(null);
   const listId = useId();
-  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const matches = useMemo(() => matchContacts(contacts, value), [contacts, value]);
   const show = open && matches.length > 0;
   // Clamp: `matches` can shrink under a stale `active` between renders.
-  const activeIndex = Math.min(active, Math.max(matches.length - 1, 0));
+  const activeIndex = active === null ? null : Math.min(active, Math.max(matches.length - 1, 0));
 
   const pick = (c: ContactOption) => {
     onPick(c);
     setOpen(false);
-    setActive(0);
+    setActive(null);
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (!show) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setActive((i) => (Math.min(i, matches.length - 1) + 1) % matches.length);
+      setActive((i) => (i === null ? 0 : (Math.min(i, matches.length - 1) + 1) % matches.length));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setActive((i) => (Math.min(i, matches.length - 1) - 1 + matches.length) % matches.length);
+      setActive((i) =>
+        i === null
+          ? matches.length - 1
+          : (Math.min(i, matches.length - 1) - 1 + matches.length) % matches.length
+      );
     } else if (e.key === "Enter") {
-      // Only swallow Enter while a suggestion is highlighted, so Enter otherwise
-      // still submits the form as usual.
+      // Only swallow Enter while a suggestion is genuinely highlighted (the user
+      // navigated with ArrowUp/ArrowDown or hovered an option). Otherwise let the
+      // keypress fall through so the form submits normally with whatever the user
+      // typed — a recipient not in the contact book must stay fully submittable.
+      if (activeIndex === null) return;
       e.preventDefault();
       pick(matches[activeIndex]);
     } else if (e.key === "Escape") {
@@ -66,22 +75,18 @@ export function ContactCombobox({
         name={name}
         role="combobox"
         aria-expanded={show}
-        aria-controls={listId}
+        aria-controls={show ? listId : undefined}
         aria-autocomplete="list"
-        aria-activedescendant={show ? `${listId}-${activeIndex}` : undefined}
+        aria-activedescendant={show && activeIndex !== null ? `${listId}-${activeIndex}` : undefined}
         autoComplete="off"
         value={value}
         onChange={(e) => {
           onValueChange(e.target.value);
           setOpen(true);
-          setActive(0);
+          setActive(null);
         }}
         onFocus={() => setOpen(true)}
-        // Deferred: a click on an option fires after blur, so closing
-        // immediately would unmount the option before it registers.
-        onBlur={() => {
-          blurTimer.current = setTimeout(() => setOpen(false), 120);
-        }}
+        onBlur={() => setOpen(false)}
         onKeyDown={onKeyDown}
         required
       />
@@ -95,10 +100,10 @@ export function ContactCombobox({
             position: "absolute", zIndex: 20, insetInlineStart: 0, insetInlineEnd: 0,
             marginBlockStart: 4, maxHeight: 260, overflowY: "auto", padding: 4, listStyle: "none",
           }}
-          // Cancel the deferred close: mousedown beats blur, so the click lands.
-          onMouseDown={() => {
-            if (blurTimer.current) clearTimeout(blurTimer.current);
-          }}
+          // mousedown fires before the input's blur, so preventing default here
+          // stops the blur (and thus the close) from happening at all — the
+          // click then lands on the option with focus still on the input.
+          onMouseDown={(e) => e.preventDefault()}
         >
           {matches.map((c, i) => (
             <li
