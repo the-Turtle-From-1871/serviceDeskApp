@@ -40,12 +40,13 @@ export function matchContacts(
 ): ContactOption[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
+  if (limit <= 0) return [];
 
   const out: ContactOption[] = [];
   for (const c of contacts) {
     if (!haystack(c).includes(q)) continue;
     out.push(c);
-    if (out.length === limit) break;
+    if (out.length >= limit) break;
   }
   return out;
 }
