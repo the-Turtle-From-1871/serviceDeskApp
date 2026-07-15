@@ -11,16 +11,21 @@ import { getCurrentUser } from "@/lib/session";
 import { getServiceRequestForItem } from "@/modules/service-queue/service-queue.service";
 import { serviceTypeLabel } from "@/modules/service-queue/service-queue.status";
 import { ServiceControls } from "./ServiceControls";
+import prisma from "@/lib/prisma";
+import { listUnits } from "@/modules/items/units.service";
+import { ItemDetailsCard } from "./ItemDetailsCard";
 
 export default async function PublicItemPage({ params }: { params: Promise<{ itemId: string }> }) {
   const { itemId } = await params;
-  // All five fetches depend only on itemId (known up front), so run them together.
-  const [item, user, receipts, qr, service] = await Promise.all([
+  // All fetches depend only on itemId (known up front), so run them together.
+  const [item, user, receipts, qr, service, units, lastEdit] = await Promise.all([
     getItemWithCreator(itemId),
     getCurrentUser(),
     listReceiptsForItem(itemId),
     itemQrDataUrl(itemId).catch((e) => { console.error("[item-page] QR generation failed:", e); return ""; }),
     getServiceRequestForItem(itemId),
+    listUnits(),
+    prisma.itemEdit.findFirst({ where: { itemId }, orderBy: { createdAt: "desc" } }),
   ]);
   if (!item) notFound();
   const loggedIn = !!user && user.isActive;
@@ -42,29 +47,26 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
         </div>
 
         {loggedIn && (
-          <div className="card">
-            <div className="card__title">Item details</div>
-            <dl className="dl">
-              <dt>Device Name</dt>
-              <dd>{item.deviceName || "—"}</dd>
-              {isAdmin && (
-                <>
-                  <dt>Notes</dt>
-                  <dd>{item.notes || "—"}</dd>
-                </>
-              )}
-              <dt>Date logged</dt>
-              <dd>{formatDateTimeHST(item.createdAt)}</dd>
-              <dt>Logged by</dt>
-              <dd>{item.createdBy ? formatParty({ isDcsim: false, name: item.createdBy.name, rank: item.createdBy.rank, unit: null }) : "—"}</dd>
-              <dt>Current holder</dt>
-              <dd>
-                {currentHolder
-                  ? formatParty({ isDcsim: currentHolder.receiverIsDcsim, name: currentHolder.receiverName, rank: currentHolder.receiverRank, unit: currentHolder.receiverUnit })
-                  : "Not yet transferred"}
-              </dd>
-            </dl>
-          </div>
+          <ItemDetailsCard
+            item={{
+              id: item.id,
+              deviceName: item.deviceName,
+              homeUnit: item.homeUnit,
+              currentUser: item.currentUser,
+              currentPosition: item.currentPosition,
+              notes: item.notes,
+            }}
+            isAdmin={isAdmin}
+            units={units}
+            dateLogged={formatDateTimeHST(item.createdAt)}
+            loggedBy={item.createdBy ? formatParty({ isDcsim: false, name: item.createdBy.name, rank: item.createdBy.rank, unit: null }) : "—"}
+            handReceiptHolder={
+              currentHolder
+                ? formatParty({ isDcsim: currentHolder.receiverIsDcsim, name: currentHolder.receiverName, rank: currentHolder.receiverRank, unit: currentHolder.receiverUnit })
+                : "Not yet transferred"
+            }
+            lastEdited={lastEdit ? `${lastEdit.editedByName} · ${formatDateTimeHST(lastEdit.createdAt)}` : null}
+          />
         )}
 
         {loggedIn && (
