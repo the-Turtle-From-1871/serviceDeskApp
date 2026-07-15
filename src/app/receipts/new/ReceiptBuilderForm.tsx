@@ -28,7 +28,15 @@ function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, 
 
   // LIFTED from `defaultValue` (uncontrolled) so picking a contact can drive all
   // four at once — same reasoning as `name` above and ServiceControls' `note`
-  // below. Seeded from `prefill`, so the sender side behaves exactly as before.
+  // below.
+  //
+  // This deliberately changes DCSIM-toggle behavior for BOTH parties, not just
+  // the receiver: these four used to be uncontrolled inputs INSIDE the
+  // `{!isDcsim && ...}` block, so toggling DCSIM off and back on remounted them
+  // and silently discarded whatever had been typed. The state now lives above
+  // that block, so edits survive the round-trip. That is the same bug `name` and
+  // `note` were already lifted to fix, so the four now match them rather than
+  // being the last fields that still lose your work.
   const [rank, setRank] = useState(prefill?.rank ?? "");
   const [unit, setUnit] = useState(prefill?.unit ?? "");
   const [contact, setContact] = useState(prefill?.contact ?? "");
@@ -48,7 +56,12 @@ function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, 
   // Contacts are outside recipients. A DCSIM party is our own technician — they
   // have an account and a saved-signature picker, and the four fields below
   // aren't even rendered for them — so the book never applies there.
-  const showCombobox = contacts !== undefined && !isDcsim;
+  //
+  // `role` is checked explicitly rather than relying on "only the receiver is
+  // passed contacts": that happens to hold today, but it makes the sender one
+  // stray prop away from silently sprouting a contact picker, with nothing to
+  // catch it at compile time.
+  const showCombobox = role === "receiver" && contacts !== undefined && !isDcsim;
 
   return (
     <fieldset className="card stack-sm">
