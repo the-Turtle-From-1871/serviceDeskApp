@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getItemWithCreator } from "@/modules/items/items.service";
-import { listReceiptsForItem } from "@/modules/transfers/transfers.service";
+import { listReceiptsForItem, getHoldingTransfer } from "@/modules/transfers/transfers.service";
 import { formatParty } from "@/modules/transfers/party";
 import { itemQrDataUrl, itemUrl } from "@/modules/items/qr";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -18,10 +18,15 @@ import { ItemDetailsCard } from "./ItemDetailsCard";
 export default async function PublicItemPage({ params }: { params: Promise<{ itemId: string }> }) {
   const { itemId } = await params;
   // All fetches depend only on itemId (known up front), so run them together.
-  const [item, user, receipts, qr, service, units, lastEdit] = await Promise.all([
+  const [item, user, receipts, currentHolder, qr, service, units, lastEdit] = await Promise.all([
     getItemWithCreator(itemId),
     getCurrentUser(),
     listReceiptsForItem(itemId),
+    // Custody is NOT `receipts.find(t => t.status === "OPEN")`: a PARTIAL return
+    // leaves the receipt OPEN, so that would still name the customer as holding
+    // an item they already handed back. getHoldingTransfer checks this item's
+    // own returnedAt.
+    getHoldingTransfer(itemId),
     itemQrDataUrl(itemId).catch((e) => { console.error("[item-page] QR generation failed:", e); return ""; }),
     getServiceRequestForItem(itemId),
     listUnits(),
@@ -30,9 +35,6 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
   if (!item) notFound();
   const loggedIn = !!user && user.isActive;
   const isAdmin = user?.role === "ADMIN";
-  // Current custodian = most recent OPEN transfer's receiver; a CLOSED
-  // transfer must never read as the holder.
-  const currentHolder = receipts.find((t) => t.status === "OPEN");
   return (
     <>
       <SiteHeader />

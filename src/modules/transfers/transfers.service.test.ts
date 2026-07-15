@@ -29,9 +29,14 @@ vi.mock("@/lib/prisma", () => {
 
 // @ts-expect-error test-only export
 import { __tx } from "@/lib/prisma";
-import prisma from "@/lib/prisma";
-import { createTransfer, getLastReceiver } from "./transfers.service";
+import { createTransfer } from "./transfers.service";
 import type { PartyInput, LineQtyInput } from "./transfers.schema";
+
+// getLastReceiver / getHoldingTransfer / getCurrentOpenTransferId are covered in
+// custody.test.ts against a REAL database. They answer "who holds this item?"
+// from the interaction between receipt status and each item's returnedAt — a
+// mocked findFirst just replays whatever shape the test author imagined, which
+// is exactly how the partial-return bug survived here.
 
 const sender = { isDcsim: true, name: "Tech" } as PartyInput;
 const receiver = { isDcsim: false, name: "Jane", rank: "SGT", unit: "A Co", contact: "808", email: "j@u.mil" } as PartyInput;
@@ -100,50 +105,3 @@ describe("createTransfer (multi-item)", () => {
   });
 });
 
-describe("getLastReceiver", () => {
-  it("maps the last receiver snapshot into a PartyInput", async () => {
-    const p = await getLastReceiver("itm1");
-    expect(p).toEqual({ isDcsim: false, name: "Prev", rank: "PVT", unit: "B Co", contact: "x", email: "p@u.mil" });
-  });
-
-  it("maps null receiver snapshot fields to undefined for a DCSIM receiver", async () => {
-    vi.mocked(prisma.transfer.findFirst).mockResolvedValueOnce({
-      status: "OPEN",
-      receiverIsDcsim: true,
-      receiverName: "DCSIM Tech",
-      receiverRank: null,
-      receiverUnit: null,
-      receiverContact: null,
-      receiverEmail: null,
-    } as Awaited<ReturnType<typeof prisma.transfer.findFirst>>);
-    const p = await getLastReceiver("itm1");
-    expect(p).toEqual({
-      isDcsim: true,
-      name: "DCSIM Tech",
-      rank: undefined,
-      unit: undefined,
-      contact: undefined,
-      email: undefined,
-    });
-  });
-
-  it("returns null when the most-recent transfer is CLOSED (item already returned, no current holder)", async () => {
-    vi.mocked(prisma.transfer.findFirst).mockResolvedValueOnce({
-      status: "CLOSED",
-      receiverIsDcsim: false,
-      receiverName: "Prev",
-      receiverRank: "PVT",
-      receiverUnit: "B Co",
-      receiverContact: "x",
-      receiverEmail: "p@u.mil",
-    } as Awaited<ReturnType<typeof prisma.transfer.findFirst>>);
-    const p = await getLastReceiver("itm1");
-    expect(p).toBeNull();
-  });
-
-  it("returns null when there is no prior transfer at all", async () => {
-    vi.mocked(prisma.transfer.findFirst).mockResolvedValueOnce(null);
-    const p = await getLastReceiver("itm1");
-    expect(p).toBeNull();
-  });
-});

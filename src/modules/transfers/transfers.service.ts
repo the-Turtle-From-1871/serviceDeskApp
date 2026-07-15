@@ -109,32 +109,49 @@ export function listReceiptsForItem(itemId: string): Promise<Transfer[]> {
   });
 }
 
-export async function getLastReceiver(itemId: string): Promise<PartyInput | null> {
+/** The receipt that currently holds this item, or null when nothing does.
+ *
+ *  "Currently holds" means all three: it is the item's most-recent receipt, that
+ *  receipt is still OPEN, and THIS item has not been returned on it.
+ *
+ *  The per-item `returnedAt` check is the load-bearing part. A PARTIAL return
+ *  stamps `returnedAt` on the items handed back but leaves the receipt OPEN for
+ *  the rest, so receipt status alone reports a holder who already returned the
+ *  item. Every "who holds this item" question must come through here — answering
+ *  it from `status` at the call site is how that bug got into three places.
+ */
+export async function getHoldingTransfer(itemId: string): Promise<Transfer | null> {
   const last = await prisma.transfer.findFirst({
     where: { lines: { some: { items: { some: { itemId } } } } },
     orderBy: { createdAt: "desc" },
+    include: { lines: { select: { items: { where: { itemId }, select: { returnedAt: true } } } } },
   });
-  // Only the most-recent transfer reflects current custody; a CLOSED receipt
-  // means the item was returned, so there is no current holder to prefill.
   if (!last || last.status !== "OPEN") return null;
+  const rows = last.lines.flatMap((l) => l.items);
+  // Fail closed: no row means the item isn't really on this receipt (impossible
+  // via the where clause above, so it would mean this query changed), and any
+  // returned row means it's already back. Naming no holder is always safer than
+  // naming the wrong one — this value prefills a DA 2062.
+  if (rows.length === 0 || rows.some((r) => r.returnedAt !== null)) return null;
+  return last;
+}
+
+export async function getLastReceiver(itemId: string): Promise<PartyInput | null> {
+  const holder = await getHoldingTransfer(itemId);
+  if (!holder) return null;
   return {
-    isDcsim: last.receiverIsDcsim,
-    name: last.receiverName,
-    rank: last.receiverRank ?? undefined,
-    unit: last.receiverUnit ?? undefined,
-    contact: last.receiverContact ?? undefined,
-    email: last.receiverEmail ?? undefined,
+    isDcsim: holder.receiverIsDcsim,
+    name: holder.receiverName,
+    rank: holder.receiverRank ?? undefined,
+    unit: holder.receiverUnit ?? undefined,
+    contact: holder.receiverContact ?? undefined,
+    email: holder.receiverEmail ?? undefined,
   };
 }
 
-// The item's current holder receipt id: the most-recent transfer, but only when
-// it is still OPEN (a CLOSED receipt means it was returned — no current holder).
-// Used to tie a service request flagged from the item page to the live receipt.
+// The receipt id currently holding this item — used to tie a service request
+// flagged from the item page to the live receipt.
 export async function getCurrentOpenTransferId(itemId: string): Promise<string | null> {
-  const last = await prisma.transfer.findFirst({
-    where: { lines: { some: { items: { some: { itemId } } } } },
-    orderBy: { createdAt: "desc" },
-    select: { id: true, status: true },
-  });
-  return last && last.status === "OPEN" ? last.id : null;
+  const holder = await getHoldingTransfer(itemId);
+  return holder?.id ?? null;
 }
