@@ -34,13 +34,15 @@ function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, 
           uncontrolled: hiding unmounts the input, and an uncontrolled one would
           lose whatever was typed, then remount blank. */}
       {!hideName && (
-        <div className="field">
+        // Capped: this field is outside .form-grid, so on the wide builder page
+        // it would otherwise stretch to the full ~1190px card.
+        <div className="field" style={{ maxWidth: 360 }}>
           <label className="label">{isDcsim ? "DCSIM technician name" : "Name"}</label>
           <input className="input" name={`${role}Name`} value={name} onChange={(e) => onNameChange(e.target.value)} required />
         </div>
       )}
       {!isDcsim && (
-        <div className="form-grid">
+        <div className="form-grid form-grid-fluid">
           <div className="field"><label className="label">Rank</label><input className="input" name={`${role}Rank`} defaultValue={prefill?.rank ?? ""} required /></div>
           <div className="field"><label className="label">Unit</label><input className="input" name={`${role}Unit`} defaultValue={prefill?.unit ?? ""} required /></div>
           <div className="field"><label className="label">Contact number</label><PhoneInput name={`${role}Contact`} defaultValue={prefill?.contact} required /></div>
@@ -60,9 +62,12 @@ function ServiceControls({ itemId }: { itemId: string }) {
   // Lifted (rather than left uncontrolled on the conditionally-rendered input)
   // so a typed note survives unchecking/rechecking "Needs service?".
   const [note, setNote] = useState("");
+  // One horizontal row, not a stack-sm column: the checkbox, the type, and the
+  // note sit inline so an item occupies a single table row on a desktop. `.row`
+  // still wraps, so a narrow screen stacks them as before.
   return (
-    <div className="stack-sm">
-      <label className="row" style={{ gap: 6 }}>
+    <div className="row" style={{ gap: 8 }}>
+      <label className="row" style={{ gap: 6, whiteSpace: "nowrap" }}>
         <input
           type="checkbox"
           name={`service[${itemId}][needs]`}
@@ -72,7 +77,7 @@ function ServiceControls({ itemId }: { itemId: string }) {
         Needs service?
       </label>
       {needs && (
-        <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+        <div className="row" style={{ gap: 6, flexWrap: "wrap", flex: "1 1 auto", minWidth: 0 }}>
           <select
             className="select"
             style={{ width: "auto", minWidth: 130 }}
@@ -86,9 +91,12 @@ function ServiceControls({ itemId }: { itemId: string }) {
             ))}
           </select>
           {type === "OTHER" && (
+            // width:auto overrides the global `.input { width: 100% }`, which
+            // would otherwise claim a whole flex line and push the type select
+            // onto its own row regardless of how much space the column has.
             <input
               className="input"
-              style={{ minWidth: 200 }}
+              style={{ width: "auto", flex: "1 1 200px", minWidth: 200 }}
               name={`service[${itemId}][note]`}
               placeholder="Describe the service needed"
               aria-label="Describe the service needed"

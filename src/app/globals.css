@@ -439,6 +439,15 @@ input[type="file"].input {
   grid-template-columns: repeat(2, 1fr);
   gap: 16px;
 }
+/* Opt-in variant for grids on a WIDE page (the hand-receipt builder): fit as
+   many >=240px columns as the width allows, rather than stretching a fixed two
+   to ~600px each. Deliberately NOT the default for .form-grid — that class is
+   also used inside narrow cards (the 420px register card, the 960px admin
+   pages), where auto-fit would silently collapse the register form to one
+   column and re-flow the admin forms to three. */
+.form-grid-fluid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
 .form-grid .col-span-2 {
   grid-column: 1 / -1;
 }

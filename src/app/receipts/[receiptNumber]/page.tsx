@@ -79,15 +79,16 @@ export default async function ReceiptPage({ params }: { params: Promise<{ receip
           <div><strong>Status:</strong> {t.status}</div>
         </div>
 
-        {((isAdmin && !closed) || showNotify) && (
-          <div className="row">
-            {isAdmin && !closed && (
-              <a className="btn btn-primary" href={`/receipts/${t.receiptNumber}/return`}>Process return</a>
-            )}
-            {showNotify && <NotifyPickupButton receiptNumber={t.receiptNumber} hasCustomerEmail={!!customerEmail} />}
-          </div>
-        )}
+        {/* One row for every action, so a hidden button just reflows instead of
+            stranding the rest on their own line. Splitting these in two left
+            "Process return" alone above the PDF buttons on every non-DCSIM
+            receipt (where Notify is hidden) — two lines on a desktop wide enough
+            for one. `.row` wraps, so narrow screens still stack. */}
         <div className="row">
+          {isAdmin && !closed && (
+            <a className="btn btn-primary" href={`/receipts/${t.receiptNumber}/return`}>Process return</a>
+          )}
+          {showNotify && <NotifyPickupButton receiptNumber={t.receiptNumber} hasCustomerEmail={!!customerEmail} />}
           <a className="btn btn-secondary" href={`/receipts/${t.receiptNumber}/pdf?preview=1`} target="_blank" rel="noopener noreferrer">Preview PDF</a>
           <a className="btn btn-secondary" href={`/receipts/${t.receiptNumber}/pdf`}>Download PDF</a>
           <Link className="btn btn-ghost" href="/">Search another</Link>

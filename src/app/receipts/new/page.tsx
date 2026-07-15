@@ -41,7 +41,11 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
   return (
     <>
       <SiteHeader />
-      <main className="container container-mid stack">
+      {/* container-wide (not -mid) so each item's row — serial, the inline
+          "Needs service?" controls, and the qty inputs — fits on ONE line on a
+          desktop instead of wrapping into a ~143px-tall stack. Matches the Items
+          list and the site header, which are already wide. */}
+      <main className="container container-wide stack">
         <h1 className="page-title">New hand receipt</h1>
         {tooMany ? (
           <div className="card empty">This selection has {lines.length} item types — the form holds {MAX_RECEIPT_ROWS}. Split it into two receipts.</div>
