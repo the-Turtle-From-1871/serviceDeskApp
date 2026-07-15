@@ -1,7 +1,8 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/authz";
-import { createItem, updateItem, setItemStatus, analyzeImport, commitImport } from "@/modules/items/items.service";
+import { createItem, updateItemFields, setItemStatus, analyzeImport, commitImport } from "@/modules/items/items.service";
+import { ItemError } from "@/modules/items/items.errors";
 import { newItemSchema } from "@/modules/items/items.schema";
 import { z } from "zod";
 import { resolutionSchema, type UnitResolution } from "@/modules/items/units.service";
@@ -17,15 +18,27 @@ export async function createItemAction(_prev: unknown, formData: FormData) {
   return { itemId: item.id };
 }
 
+// Admin edit of an item's identity fields. Routes through the SAME
+// updateItemFields as the user-level action so admin changes land in the same
+// ItemEdit history rather than bypassing it.
 export async function updateItemAction(_prev: unknown, formData: FormData) {
-  await requireAdmin();
+  const admin = await requireAdmin();
   const id = String(formData.get("id"));
   const parsed = newItemSchema.partial().safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  await updateItem(id, parsed.data);
+  try {
+    await updateItemFields(id, parsed.data, { id: admin.id, name: admin.name });
+  } catch (e) {
+    if (e instanceof ItemError && e.code === "NOT_FOUND") {
+      return { error: "That item no longer exists." };
+    }
+    console.error("[updateItemAction] unexpected error:", e);
+    return { error: "Something went wrong saving your changes. Please try again." };
+  }
   revalidatePath("/items");
+  revalidatePath(`/i/${id}`);
   return { ok: true };
 }
 
