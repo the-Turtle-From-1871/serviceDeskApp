@@ -60,8 +60,13 @@ the work. Named signatures fix exactly that.
   (`app/actions/returns.ts:34,45`).
 - `return/page.tsx:22` loads the admin's `signatureImage` and passes it in.
 - `processReturnAction` (`app/actions/returns.ts:18`) → `requireAdmin()`.
-- `lib/signature.ts` → `signatureError(raw)` validates a signature data URL.
-- `transfers.schema.ts` → `MAX_SIGNATURE_BYTES = 5_000_000` (5 MB).
+- `lib/signature.ts` → `signatureError(raw)` validates a signature data URL and
+  caps it at **`MAX_SIGNATURE_LEN = 250_000`** (250 KB). This is the validator the
+  account and return actions use, so **saved signatures are already sensibly
+  capped** — named signatures inherit that.
+- `transfers.schema.ts` → `MAX_SIGNATURE_BYTES = 5_000_000` (5 MB) — a **separate**
+  limit that applies only to `receiptSchema`'s `receiverSignature` (the recipient
+  signing a hand receipt), not to saved signatures.
 
 ## Data model
 
@@ -190,9 +195,11 @@ the DA 2062's evidentiary value.
 
 - Wiring non-admin signatures into any flow.
 - Renaming an existing signature (add/delete only).
-- Tightening `MAX_SIGNATURE_BYTES` from 5 MB to ~100 KB. This is the *actual*
-  storage exposure (~800× larger than any real signature) and is worth a
-  follow-up, but it touches receipt validation and is unrelated to named
-  signatures.
+- Tightening `MAX_SIGNATURE_BYTES` (5 MB) in `transfers.schema.ts`. That ceiling
+  governs only the **recipient** signature on a hand receipt — ~570× the largest
+  signature ever actually stored (8.7 KB), so it is the one real storage
+  exposure. It is unrelated to named signatures (which go through
+  `signatureError`'s 250 KB cap) and touches receipt validation, so it belongs in
+  its own change.
 - Multiple named signatures for non-admin accounts.
 - Applying the migration to production (separate, explicitly-confirmed step).
