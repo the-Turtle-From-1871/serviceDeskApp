@@ -2,6 +2,7 @@
 import { Fragment, useActionState, useState } from "react";
 import { createReceiptAction } from "@/app/actions/receipts";
 import { SignaturePad } from "@/components/SignaturePad";
+import { TechnicianSignatureField, type PickableSignature } from "@/components/TechnicianSignatureField";
 import { PhoneInput } from "@/components/PhoneInput";
 import { SERVICE_TYPE_OPTIONS } from "@/modules/service-queue/service-form";
 
@@ -9,20 +10,35 @@ type Prefill = { isDcsim?: boolean; name?: string; rank?: string; unit?: string;
 export type BuilderItem = { serialNumber: string; itemId: string };
 export type BuilderLine = { make: string; model: string; items: BuilderItem[]; defaultQty: number };
 
-function PartyFields({ role, prefill }: { role: "sender" | "receiver"; prefill?: Prefill }) {
-  const [isDcsim, setIsDcsim] = useState(prefill?.isDcsim ?? false);
+function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, onNameChange }: {
+  role: "sender" | "receiver";
+  prefill?: Prefill;
+  isDcsim: boolean;
+  onIsDcsimChange: (v: boolean) => void;
+  hideName?: boolean;
+  name: string;
+  onNameChange: (v: string) => void;
+}) {
   const cap = role === "sender" ? "Sender" : "Recipient";
   return (
     <fieldset className="card stack-sm">
       <legend className="card__title">{cap}</legend>
       <label className="row">
-        <input type="checkbox" name={`${role}IsDcsim`} checked={isDcsim} onChange={(e) => setIsDcsim(e.target.checked)} />
+        <input type="checkbox" name={`${role}IsDcsim`} checked={isDcsim} onChange={(e) => onIsDcsimChange(e.target.checked)} />
         This side is DCSIM
       </label>
-      <div className="field">
-        <label className="label">{isDcsim ? "DCSIM technician name" : "Name"}</label>
-        <input className="input" name={`${role}Name`} defaultValue={prefill?.name ?? ""} required />
-      </div>
+      {/* Hidden while a saved signature is picked: the name is taken from that
+          signature server-side, so an editable field here could only disagree
+          with the ink. Not rendered (rather than disabled) so nothing posts.
+          The value is LIFTED (like ServiceControls' note below) rather than left
+          uncontrolled: hiding unmounts the input, and an uncontrolled one would
+          lose whatever was typed, then remount blank. */}
+      {!hideName && (
+        <div className="field">
+          <label className="label">{isDcsim ? "DCSIM technician name" : "Name"}</label>
+          <input className="input" name={`${role}Name`} value={name} onChange={(e) => onNameChange(e.target.value)} required />
+        </div>
+      )}
       {!isDcsim && (
         <div className="form-grid">
           <div className="field"><label className="label">Rank</label><input className="input" name={`${role}Rank`} defaultValue={prefill?.rank ?? ""} required /></div>
@@ -87,9 +103,26 @@ function ServiceControls({ itemId }: { itemId: string }) {
   );
 }
 
-export function ReceiptBuilderForm({ itemIds, lines, senderPrefill }: { itemIds: string[]; lines: BuilderLine[]; senderPrefill?: Prefill }) {
+export function ReceiptBuilderForm({ itemIds, lines, senderPrefill, signatures }: { itemIds: string[]; lines: BuilderLine[]; senderPrefill?: Prefill; signatures: PickableSignature[] }) {
   const [state, action, pending] = useActionState(createReceiptAction, undefined);
+  const [senderIsDcsim, setSenderIsDcsim] = useState(senderPrefill?.isDcsim ?? false);
+  const [receiverIsDcsim, setReceiverIsDcsim] = useState(false);
+  const [senderName, setSenderName] = useState(senderPrefill?.name ?? "");
+  const [receiverName, setReceiverName] = useState("");
+  const [pickedId, setPickedId] = useState<string | null>(null);
   const receipt = state && "receiptNumber" in state ? state.receiptNumber : undefined;
+
+  // Clearing the pick here is load-bearing, not hygiene. TechnicianSignatureField
+  // UNMOUNTS when DCSIM is unchecked, so it never reports null on the way out.
+  // Without this, pick -> uncheck -> recheck remounts it with a fresh selection
+  // (posting no signatureId) while a stale pickedId keeps the name field hidden,
+  // and the form posts an empty receiverName that fails validation with no
+  // visible field to fix.
+  const onReceiverDcsimChange = (v: boolean) => {
+    setReceiverIsDcsim(v);
+    if (!v) setPickedId(null);
+  };
+  const hideReceiverName = receiverIsDcsim && pickedId !== null;
 
   if (receipt) {
     return (
@@ -141,11 +174,23 @@ export function ReceiptBuilderForm({ itemIds, lines, senderPrefill }: { itemIds:
           </table>
         </div>
       </fieldset>
-      <PartyFields role="sender" prefill={senderPrefill} />
-      <PartyFields role="receiver" />
+      <PartyFields role="sender" prefill={senderPrefill} isDcsim={senderIsDcsim} onIsDcsimChange={setSenderIsDcsim} name={senderName} onNameChange={setSenderName} />
+      <PartyFields role="receiver" isDcsim={receiverIsDcsim} onIsDcsimChange={onReceiverDcsimChange} hideName={hideReceiverName} name={receiverName} onNameChange={setReceiverName} />
       <fieldset className="card stack-sm">
-        <legend className="card__title">Recipient signature</legend>
-        <SignaturePad name="receiverSignature" />
+        <legend className="card__title">Recipient signature{receiverIsDcsim ? " (DCSIM)" : ""}</legend>
+        {receiverIsDcsim ? (
+          // A DCSIM recipient is our own technician at the desk, so they may pick
+          // their saved signature. An outside recipient must always draw in person.
+          <TechnicianSignatureField
+            name="receiverSignature"
+            signatures={signatures}
+            label="Who received it?"
+            drawHint={null}
+            onPickedChange={setPickedId}
+          />
+        ) : (
+          <SignaturePad name="receiverSignature" />
+        )}
       </fieldset>
       <div className="row">
         <button className="btn btn-primary" disabled={pending} type="submit">{pending ? "Creating…" : "Create hand receipt"}</button>

@@ -111,9 +111,13 @@ All three default to today's behavior, so `ReturnForm` needs **no change**:
   `drawHint ?? DEFAULT` — that would resurrect the default for the deliberate
   `null`, printing the wrong sentence on the receipt form. A default parameter
   applies to `undefined` only, which is exactly the intent.
-- `onPickedChange?: (picked: { id: string; name: string } | null) => void` — fires
-  with the picked signature, or `null` when the selection is cleared or "Draw a new
-  one…" is chosen.
+- `onPickedChange?: (pickedId: string | null) => void` — fires with the picked
+  signature's id, or `null` when the selection is cleared or "Draw a new one…" is
+  chosen. A **primitive, not the object**: the parent only needs to know *whether*
+  something is picked (the name comes from the DB server-side), and a primitive
+  keeps the reporting effect's dependency stable. Reporting the found object would
+  re-fire the effect whenever the parent re-created its `signatures` array, which
+  loops if the callback sets parent state — which it does.
 
 **Why `onPickedChange` is needed, and `onChange` is not enough:** the existing
 `onChange` reports the image *value*, which is non-empty for both a picked **and**
