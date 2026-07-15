@@ -40,6 +40,7 @@ model User {
   importBatches    ImportBatch[]        @relation("ImportBatches")
   returnsProcessed ReturnTransaction[]  @relation("ReturnsProcessed")
   passwordResets   PasswordResetToken[] @relation("PasswordResets")
+  itemEdits        ItemEdit[]           @relation("ItemEdits")
 }
 
 // Self-service password reset. Only the SHA-256 hash of the emailed token is
@@ -69,6 +70,11 @@ model Item {
   homeUnit      String?
   deviceName    String?
   notes         String?
+  // The person actually using the device, and their role/billet. Distinct from
+  // the hand-receipt holder (derived from the latest OPEN Transfer), which stays
+  // the signed custody record and is never edited here.
+  currentUser     String?
+  currentPosition String?
   status        ItemStatus     @default(ACTIVE)
   createdBy     User           @relation("CreatedItems", fields: [createdById], references: [id])
   createdById   String
@@ -77,6 +83,7 @@ model Item {
   updatedAt     DateTime       @updatedAt
 
   serviceQueueItem ServiceQueueItem?
+  edits            ItemEdit[]
 }
 
 model Unit {
@@ -233,4 +240,23 @@ model ServiceQueueItem {
 
   @@index([status])
   @@index([transferId])
+}
+
+// History of edits to an Item's loggable fields. One row per save that actually
+// changed something (a no-op save writes nothing).
+model ItemEdit {
+  id           String   @id @default(cuid())
+  item         Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  itemId       String
+  // Nullable + SetNull, with a denormalized name snapshot, so history survives
+  // the editor's account being deleted (mirrors ReturnTransaction.processedBy*).
+  editedBy     User?    @relation("ItemEdits", fields: [editedById], references: [id], onDelete: SetNull)
+  editedById   String?
+  editedByName String
+  // [{ field, from, to }] — only the fields that changed.
+  changes      Json
+  createdAt    DateTime @default(now())
+
+  @@index([itemId])
+  @@index([createdAt])
 }
