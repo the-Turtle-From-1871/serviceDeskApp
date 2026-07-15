@@ -42,6 +42,7 @@ model User {
   passwordResets   PasswordResetToken[] @relation("PasswordResets")
   itemEdits        ItemEdit[]           @relation("ItemEdits")
   signatures       Signature[]          @relation("UserSignatures")
+  createdContacts  Contact[]            @relation("CreatedContacts")
 }
 
 // Self-service password reset. Only the SHA-256 hash of the emailed token is
@@ -277,4 +278,34 @@ model Signature {
 
   @@unique([userId, name])
   @@index([userId])
+}
+
+// A saved recipient for hand receipts — shared org-wide (any signed-in user
+// reads it for autofill; only admins write to it). Distinct from User: these are
+// outside people who receive equipment and have no login account.
+model Contact {
+  id String @id @default(cuid())
+  rank String?
+  // Split (rather than a single free-text `name` like User.name) so ordering by
+  // last name is a plain indexed DB sort. Parsing a surname out of one column
+  // misfiles "Van Der Berg" and "Doe Jr.". Transfer.receiverName stays a single
+  // String; autofill composes "First Last" when filling it.
+  firstName String
+  lastName  String
+  unit          String?
+  contactNumber String?
+  // citext + unique: one inbox, one contact. Mirrors User.email — the app
+  // lowercases on write, so a mixed-case row would otherwise be unfindable by
+  // lookups and would not collide with its lowercase twin.
+  email String @unique @db.Citext
+
+  // Nullable + SetNull (mirrors ItemEdit.editedBy): the shared book must survive
+  // deletion of the account that happened to add a row.
+  createdBy   User?   @relation("CreatedContacts", fields: [createdById], references: [id], onDelete: SetNull)
+  createdById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([lastName, firstName])
 }

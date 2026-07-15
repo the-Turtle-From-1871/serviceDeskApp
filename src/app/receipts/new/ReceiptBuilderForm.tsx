@@ -4,13 +4,15 @@ import { createReceiptAction } from "@/app/actions/receipts";
 import { SignaturePad } from "@/components/SignaturePad";
 import { TechnicianSignatureField, type PickableSignature } from "@/components/TechnicianSignatureField";
 import { PhoneInput } from "@/components/PhoneInput";
+import { ContactCombobox } from "@/components/ContactCombobox";
+import type { ContactOption } from "@/modules/contacts/contact-match";
 import { SERVICE_TYPE_OPTIONS } from "@/modules/service-queue/service-form";
 
 type Prefill = { isDcsim?: boolean; name?: string; rank?: string; unit?: string; contact?: string; email?: string };
 export type BuilderItem = { serialNumber: string; itemId: string };
 export type BuilderLine = { make: string; model: string; items: BuilderItem[]; defaultQty: number };
 
-function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, onNameChange }: {
+function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, onNameChange, contacts }: {
   role: "sender" | "receiver";
   prefill?: Prefill;
   isDcsim: boolean;
@@ -18,8 +20,49 @@ function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, 
   hideName?: boolean;
   name: string;
   onNameChange: (v: string) => void;
+  // Present only for the side that autofills from the contact book (the
+  // recipient). Absent on the sender, which keeps its plain name input.
+  contacts?: ContactOption[];
 }) {
   const cap = role === "sender" ? "Sender" : "Recipient";
+
+  // LIFTED from `defaultValue` (uncontrolled) so picking a contact can drive all
+  // four at once — same reasoning as `name` above and ServiceControls' `note`
+  // below.
+  //
+  // This deliberately changes DCSIM-toggle behavior for BOTH parties, not just
+  // the receiver: these four used to be uncontrolled inputs INSIDE the
+  // `{!isDcsim && ...}` block, so toggling DCSIM off and back on remounted them
+  // and silently discarded whatever had been typed. The state now lives above
+  // that block, so edits survive the round-trip. That is the same bug `name` and
+  // `note` were already lifted to fix, so the four now match them rather than
+  // being the last fields that still lose your work.
+  const [rank, setRank] = useState(prefill?.rank ?? "");
+  const [unit, setUnit] = useState(prefill?.unit ?? "");
+  const [contact, setContact] = useState(prefill?.contact ?? "");
+  const [email, setEmail] = useState(prefill?.email ?? "");
+
+  // Missing optionals fill as "", leaving the existing `required` validation to
+  // prompt: an incomplete contact degrades to a partly-filled form, never a
+  // blocked one. Every field stays editable — a pick is a starting point.
+  const onPick = (c: ContactOption) => {
+    onNameChange(`${c.firstName} ${c.lastName}`);
+    setRank(c.rank ?? "");
+    setUnit(c.unit ?? "");
+    setContact(c.contactNumber ?? "");
+    setEmail(c.email);
+  };
+
+  // Contacts are outside recipients. A DCSIM party is our own technician — they
+  // have an account and a saved-signature picker, and the four fields below
+  // aren't even rendered for them — so the book never applies there.
+  //
+  // `role` is checked explicitly rather than relying on "only the receiver is
+  // passed contacts": that happens to hold today, but it makes the sender one
+  // stray prop away from silently sprouting a contact picker, with nothing to
+  // catch it at compile time.
+  const showCombobox = role === "receiver" && contacts !== undefined && !isDcsim;
+
   return (
     <fieldset className="card stack-sm">
       <legend className="card__title">{cap}</legend>
@@ -37,16 +80,27 @@ function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, 
         // Capped: this field is outside .form-grid, so on the wide builder page
         // it would otherwise stretch to the full ~1190px card.
         <div className="field" style={{ maxWidth: 360 }}>
-          <label className="label">{isDcsim ? "DCSIM technician name" : "Name"}</label>
-          <input className="input" name={`${role}Name`} value={name} onChange={(e) => onNameChange(e.target.value)} required />
+          <label className="label" htmlFor={`${role}-name`}>{isDcsim ? "DCSIM technician name" : "Name"}</label>
+          {showCombobox ? (
+            <ContactCombobox
+              id={`${role}-name`}
+              name={`${role}Name`}
+              contacts={contacts}
+              value={name}
+              onValueChange={onNameChange}
+              onPick={onPick}
+            />
+          ) : (
+            <input id={`${role}-name`} className="input" name={`${role}Name`} value={name} onChange={(e) => onNameChange(e.target.value)} required />
+          )}
         </div>
       )}
       {!isDcsim && (
         <div className="form-grid form-grid-fluid">
-          <div className="field"><label className="label">Rank</label><input className="input" name={`${role}Rank`} defaultValue={prefill?.rank ?? ""} required /></div>
-          <div className="field"><label className="label">Unit</label><input className="input" name={`${role}Unit`} defaultValue={prefill?.unit ?? ""} required /></div>
-          <div className="field"><label className="label">Contact number</label><PhoneInput name={`${role}Contact`} defaultValue={prefill?.contact} required /></div>
-          <div className="field"><label className="label">Email</label><input className="input" type="email" name={`${role}Email`} defaultValue={prefill?.email ?? ""} required /></div>
+          <div className="field"><label className="label">Rank</label><input className="input" name={`${role}Rank`} value={rank} onChange={(e) => setRank(e.target.value)} required /></div>
+          <div className="field"><label className="label">Unit</label><input className="input" name={`${role}Unit`} value={unit} onChange={(e) => setUnit(e.target.value)} required /></div>
+          <div className="field"><label className="label">Contact number</label><PhoneInput name={`${role}Contact`} value={contact} onChange={setContact} required /></div>
+          <div className="field"><label className="label">Email</label><input className="input" type="email" name={`${role}Email`} value={email} onChange={(e) => setEmail(e.target.value)} required /></div>
         </div>
       )}
     </fieldset>
@@ -111,7 +165,7 @@ function ServiceControls({ itemId }: { itemId: string }) {
   );
 }
 
-export function ReceiptBuilderForm({ itemIds, lines, senderPrefill, signatures }: { itemIds: string[]; lines: BuilderLine[]; senderPrefill?: Prefill; signatures: PickableSignature[] }) {
+export function ReceiptBuilderForm({ itemIds, lines, senderPrefill, signatures, contacts }: { itemIds: string[]; lines: BuilderLine[]; senderPrefill?: Prefill; signatures: PickableSignature[]; contacts: ContactOption[] }) {
   const [state, action, pending] = useActionState(createReceiptAction, undefined);
   const [senderIsDcsim, setSenderIsDcsim] = useState(senderPrefill?.isDcsim ?? false);
   const [receiverIsDcsim, setReceiverIsDcsim] = useState(false);
@@ -183,7 +237,7 @@ export function ReceiptBuilderForm({ itemIds, lines, senderPrefill, signatures }
         </div>
       </fieldset>
       <PartyFields role="sender" prefill={senderPrefill} isDcsim={senderIsDcsim} onIsDcsimChange={setSenderIsDcsim} name={senderName} onNameChange={setSenderName} />
-      <PartyFields role="receiver" isDcsim={receiverIsDcsim} onIsDcsimChange={onReceiverDcsimChange} hideName={hideReceiverName} name={receiverName} onNameChange={setReceiverName} />
+      <PartyFields role="receiver" isDcsim={receiverIsDcsim} onIsDcsimChange={onReceiverDcsimChange} hideName={hideReceiverName} name={receiverName} onNameChange={setReceiverName} contacts={contacts} />
       <fieldset className="card stack-sm">
         <legend className="card__title">Recipient signature{receiverIsDcsim ? " (DCSIM)" : ""}</legend>
         {receiverIsDcsim ? (

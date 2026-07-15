@@ -167,9 +167,13 @@ which are needed when there is no async boundary.
 **State lifting.** `PartyFields` currently uses `defaultValue` (uncontrolled) for
 rank, unit, contact, and email. Autofill requires driving them, so all four
 become `PartyFields`-local state seeded from `prefill`. This is the same lifting
-the file already documents for `name` and for `ServiceControls.note`. Because the
-state is local and seeded from `prefill`, the **sender side is behaviorally
-unchanged** — it still prefills from last-receiver and stays editable.
+the file already documents for `name` and for `ServiceControls.note`. The sender
+side still prefills from last-receiver and stays editable, but its behavior is
+not unchanged: these four fields used to be uncontrolled inputs inside the
+`{!isDcsim && ...}` block, so a DCSIM toggle round-trip remounted them and
+silently discarded typed edits. With the state lifted above that block, edits
+now survive a DCSIM toggle on **both** parties, since `PartyFields` is shared —
+deliberately, for the same reason `name` and `note` are already lifted.
 
 `name` stays parent-owned (`ReceiptBuilderForm`), because the DCSIM signature
 interplay already depends on it there.
