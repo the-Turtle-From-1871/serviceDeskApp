@@ -29,3 +29,11 @@ export async function learnUnits(resolutions: UnitResolution[]): Promise<void> {
     });
   }
 }
+
+// Units for the item-detail unit picker's <datalist>, ordered for display.
+export function listUnits(): Promise<{ abbreviation: string; fullName: string }[]> {
+  return prisma.unit.findMany({
+    select: { abbreviation: true, fullName: true },
+    orderBy: { fullName: "asc" },
+  });
+}

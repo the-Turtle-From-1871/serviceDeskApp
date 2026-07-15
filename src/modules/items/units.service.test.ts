@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, expect, test } from "vitest";
 import prisma from "@/lib/prisma";
 import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
-import { loadUnitMap, learnUnits } from "./units.service";
+import { loadUnitMap, learnUnits, listUnits } from "./units.service";
 
 beforeAll(() => migrateTestDb());
 beforeEach(() => resetDb());
@@ -33,4 +33,14 @@ test("learnUnits rejects a non-alphanumeric abbreviation and writes nothing", as
 test("learnUnits accepts an empty array (no-op)", async () => {
   await learnUnits([]);
   expect(await prisma.unit.count()).toBe(0);
+});
+
+test("listUnits returns abbreviation + fullName ordered by fullName", async () => {
+  await prisma.unit.create({ data: { abbreviation: "ZED", fullName: "Zulu Company" } });
+  await prisma.unit.create({ data: { abbreviation: "ALP", fullName: "Alpha Company" } });
+  const units = await listUnits();
+  expect(units).toEqual([
+    { abbreviation: "ALP", fullName: "Alpha Company" },
+    { abbreviation: "ZED", fullName: "Zulu Company" },
+  ]);
 });

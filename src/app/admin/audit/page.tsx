@@ -23,6 +23,11 @@ export default async function AuditPage() {
     orderBy: { createdAt: "desc" },
     take: 50,
   });
+  const itemEdits = await prisma.itemEdit.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 50,
+    include: { item: { select: { id: true, serialNumber: true, deviceName: true } } },
+  });
   return (
     <div className="stack">
       <div>
@@ -80,6 +85,41 @@ export default async function AuditPage() {
                         {items.length > 0 && <span className="subtle"> ({items.map((i) => i.serialNumber || "?").join(", ")})</span>}
                       </td>
                       <td data-label="Remaining">{r.remainingCount}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {itemEdits.length > 0 && (
+        <div className="stack-sm">
+          <h2 className="card__title">Item edits</h2>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr><th>Date</th><th>By</th><th>Item</th><th>Changed</th></tr>
+              </thead>
+              <tbody>
+                {itemEdits.map((e) => {
+                  const changes = Array.isArray(e.changes)
+                    ? (e.changes as unknown as { field: string; from: string | null; to: string | null }[])
+                    : [];
+                  return (
+                    <tr key={e.id}>
+                      <td className="subtle" data-label="Date">{formatDateTimeHST(e.createdAt)}</td>
+                      <td data-label="By">{e.editedByName}</td>
+                      <td data-label="Item">
+                        <Link href={`/i/${e.item.id}`}>{e.item.deviceName || e.item.serialNumber}</Link>
+                      </td>
+                      <td data-label="Changed">
+                        {changes.map((c) => (
+                          <div key={c.field} className="subtle">
+                            {c.field}: {c.from ?? "—"} → {c.to ?? "—"}
+                          </div>
+                        ))}
+                      </td>
                     </tr>
                   );
                 })}

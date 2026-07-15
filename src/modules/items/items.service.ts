@@ -4,6 +4,8 @@ import { newItemSchema, type NewItemInput } from "./items.schema";
 import { parseItemsCsv } from "./csv";
 import { planImport, type SkippedRow, type UnresolvedRow } from "./import";
 import { loadUnitMap, learnUnits, type UnitResolution } from "./units.service";
+import { diffItemFields, type ItemLoggedFields } from "./item-diff";
+import { ItemError } from "./items.errors";
 
 export async function createItem(input: NewItemInput, createdById: string): Promise<Item> {
   const data = newItemSchema.parse(input);
@@ -46,9 +48,39 @@ export function listItems(opts: { search?: string } = {}) {
   });
 }
 
-export async function updateItem(id: string, input: Partial<NewItemInput>): Promise<Item> {
-  const data = newItemSchema.partial().parse(input);
-  return prisma.item.update({ where: { id }, data });
+export type ItemEditor = { id: string; name: string };
+
+/** Update an item's loggable fields and record ONE ItemEdit describing the diff,
+ *  atomically. Writes no history row when nothing actually changed.
+ *
+ *  Enforces NO permissions and trusts `editor` — the calling Server Action owns
+ *  the auth guard and the permitted field set. */
+export async function updateItemFields(
+  itemId: string,
+  data: Partial<ItemLoggedFields>,
+  editor: ItemEditor,
+): Promise<Item> {
+  return prisma.$transaction(async (tx) => {
+    const before = await tx.item.findUnique({ where: { id: itemId } });
+    if (!before) throw new ItemError("NOT_FOUND");
+
+    const changes = diffItemFields(before, data);
+    if (changes.length === 0) return before;
+
+    const updated = await tx.item.update({
+      where: { id: itemId },
+      data: Object.fromEntries(changes.map((c) => [c.field, c.to])),
+    });
+    await tx.itemEdit.create({
+      data: {
+        itemId,
+        editedById: editor.id,
+        editedByName: editor.name,
+        changes: changes as unknown as Prisma.InputJsonValue,
+      },
+    });
+    return updated;
+  });
 }
 
 export function setItemStatus(id: string, status: ItemStatus): Promise<Item> {
