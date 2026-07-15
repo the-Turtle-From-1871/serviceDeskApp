@@ -47,7 +47,6 @@ function ContactFields({ idPrefix, contact }: { idPrefix: string; contact?: Cont
 
 function NewContactForm() {
   const [state, action, pending] = useActionState(createContactAction, undefined);
-  const ok = state !== undefined && "ok" in state && state.ok;
   // React 19 auto-resets uncontrolled fields after a successful form action,
   // but PhoneInput is controlled from React's perspective (it always renders
   // `value={shown}`), so its internal `inner` state survives that reset. Without
@@ -60,16 +59,25 @@ function NewContactForm() {
   //
   // This is done as a render-phase state adjustment (comparing `state` against
   // a mirrored `prevState`), not a useEffect, both because the lint rule flags
-  // synchronous setState-in-effect and because `ok` alone can't detect a
+  // synchronous setState-in-effect and because an `ok` boolean can't detect a
   // second, back-to-back success: it goes true -> true across two submissions,
   // never re-triggering an effect keyed on it. `state` is a fresh object
-  // literal from the server action on every success, so comparing its identity
-  // catches each submission individually.
+  // literal from the server action on every result (it crosses the RSC boundary
+  // and deserializes anew), so comparing its identity catches each submission
+  // individually.
+  // Remount on EVERY settled result, not just success. React calls
+  // requestFormReset unconditionally and gates it on the action's promise
+  // resolving rather than on what it resolved to — so a duplicate-email error
+  // already blanks the five uncontrolled fields. Bumping only on success would
+  // leave the phone as the one field that survives an error: type Bob + Bob's
+  // number, hit the duplicate error, abandon Bob and type Carol without
+  // retouching the phone, and Carol saves under Bob's number. Same wrong number
+  // on a DA 2062, just a narrower path there.
   const [prevState, setPrevState] = useState(state);
   const [seq, setSeq] = useState(0);
   if (state !== prevState) {
     setPrevState(state);
-    if (ok) setSeq((n) => n + 1);
+    setSeq((n) => n + 1);
   }
   return (
     <form action={action} className="stack-sm">
