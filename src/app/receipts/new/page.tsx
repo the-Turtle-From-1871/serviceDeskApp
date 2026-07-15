@@ -4,6 +4,7 @@ import { getItem } from "@/modules/items/items.service";
 import { getLastReceiver } from "@/modules/transfers/transfers.service";
 import { groupItemsIntoLines, MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW } from "@/modules/transfers/receipt-lines";
 import { listSignatures } from "@/modules/signatures/signatures.service";
+import { listContacts } from "@/modules/contacts/contacts.service";
 import { SiteHeader } from "@/components/SiteHeader";
 import { ReceiptBuilderForm } from "./ReceiptBuilderForm";
 
@@ -28,9 +29,10 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
   // RSC payload for users who can never use one.
   //
   // Sender prefill only when every item shares an identical last receiver.
-  const [signatures, lastReceivers] = await Promise.all([
+  const [signatures, lastReceivers, contacts] = await Promise.all([
     user.role === "ADMIN" ? listSignatures(user.id) : Promise.resolve([]),
     Promise.all(loaded.map((i) => getLastReceiver(i.id))),
+    listContacts(),
   ]);
   const first = lastReceivers[0];
   const allSame = first != null && lastReceivers.every((r) => r && JSON.stringify(r) === JSON.stringify(first));
@@ -62,6 +64,15 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
             }))}
             senderPrefill={senderPrefill}
             signatures={signatures}
+            contacts={contacts.map((c) => ({
+              id: c.id,
+              rank: c.rank,
+              firstName: c.firstName,
+              lastName: c.lastName,
+              unit: c.unit,
+              contactNumber: c.contactNumber,
+              email: c.email,
+            }))}
           />
         )}
       </main>
