@@ -269,6 +269,16 @@ test("updateContact changes the stored fields", async () => {
   expect(u.unit).toBe("B Co");
 });
 
+test("updateContact clears an optional the admin blanked out", async () => {
+  // Prisma reads `undefined` as "leave this column alone", and the schema turns
+  // a blank field into `undefined` — so this is the difference between clearing
+  // a unit and silently keeping the old one.
+  const c = await createContact({ ...BASE, rank: "SGT", unit: "A Co" }, adminId);
+  const u = await updateContact({ id: c.id, ...BASE, rank: "", unit: "  " });
+  expect(u.rank).toBeNull();
+  expect(u.unit).toBeNull();
+});
+
 test("updateContact rejects an email already used by another contact", async () => {
   await createContact(BASE, adminId);
   const other = await createContact({ firstName: "Bob", lastName: "Smith", email: "bob@unit.mil" }, adminId);
@@ -346,7 +356,19 @@ export async function createContact(input: NewContactInput, createdById: string)
 export async function updateContact(input: UpdateContactInput): Promise<Contact> {
   const { id, ...data } = updateContactSchema.parse(input);
   try {
-    return await prisma.contact.update({ where: { id }, data });
+    return await prisma.contact.update({
+      where: { id },
+      // The optionals are mapped `undefined` -> `null` explicitly. The schema
+      // turns a blank field into `undefined`, and Prisma reads `undefined` as
+      // "leave this column alone" — so without this, clearing a contact's unit
+      // in the edit form would silently keep the old value.
+      data: {
+        ...data,
+        rank: data.rank ?? null,
+        unit: data.unit ?? null,
+        contactNumber: data.contactNumber ?? null,
+      },
+    });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2025") {
       throw new ContactError("NOT_FOUND");
@@ -363,7 +385,7 @@ export async function deleteContact(id: string): Promise<void> {
 }
 ```
 
-Note: `undefined` optionals are written as SQL NULL by Prisma on create. On `update`, an omitted key means "leave unchanged" — but `newContactSchema` always produces every key (present-or-`undefined`), and Prisma treats an explicit `undefined` as "skip". If a test shows a cleared optional not persisting on update, map `undefined` → `null` explicitly in `updateContact`'s `data`.
+Note on `undefined` vs `null`: on **create**, an `undefined` optional lets the nullable column default to NULL, which is what we want. On **update**, Prisma reads `undefined` as "leave this column alone" — which is why `updateContact` maps the optionals to `null` explicitly. Without that mapping, blanking a contact's unit in the edit form would appear to save and silently keep the old value. The "clears an optional the admin blanked out" test covers this.
 
 - [ ] **Step 10: Run the test to verify it passes**
 
@@ -371,7 +393,7 @@ Note: `undefined` optionals are written as SQL NULL by Prisma on create. On `upd
 npx vitest run src/modules/contacts/contacts.service.test.ts
 ```
 
-Expected: PASS — 9 tests.
+Expected: PASS — 10 tests.
 
 - [ ] **Step 11: Lint and commit**
 
