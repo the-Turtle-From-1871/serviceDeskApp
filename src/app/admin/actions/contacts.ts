@@ -49,7 +49,8 @@ export async function updateContactAction(_prev: unknown, formData: FormData) {
 
 export async function deleteContactAction(formData: FormData) {
   await requireAdmin();
-  const id = String(formData.get("id"));
+  const id = String(formData.get("id") ?? "").trim();
+  if (!id) return;
   try {
     await deleteContact(id);
   } catch (e) {
@@ -57,7 +58,10 @@ export async function deleteContactAction(formData: FormData) {
     // outcome the user wanted — don't turn it into a 500.
     if (!(e instanceof ContactError && e.code === "NOT_FOUND")) {
       console.error("[deleteContactAction] failed:", e);
-      throw e;
+      // Never rethrow the original error: Next.js only redacts thrown Server
+      // Action errors to a generic digest in production — in dev it serializes
+      // the real message to the client. Throw a new, generic one instead.
+      throw new Error(GENERIC);
     }
   }
   revalidatePath("/admin/users");

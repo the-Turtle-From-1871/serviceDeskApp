@@ -142,4 +142,24 @@ describe("deleteContactAction", () => {
     f.set("id", "gone");
     await expect(deleteContactAction(f)).resolves.toBeUndefined();
   });
+
+  it("returns without calling the service when id is missing", async () => {
+    const f = new FormData();
+    await expect(deleteContactAction(f)).resolves.toBeUndefined();
+    expect(deleteContact).not.toHaveBeenCalled();
+  });
+
+  it("rejects with a generic message and does not leak an unexpected error", async () => {
+    deleteContact.mockRejectedValue(new Error("connect ECONNREFUSED 10.0.0.1:5432"));
+    const f = new FormData();
+    f.set("id", "c1");
+    let error: Error | undefined;
+    try {
+      await deleteContactAction(f);
+    } catch (e) {
+      error = e as Error;
+    }
+    expect(error).toBeInstanceOf(Error);
+    expect(JSON.stringify(error?.message)).not.toContain("ECONNREFUSED");
+  });
 });
