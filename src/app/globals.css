@@ -1115,18 +1115,16 @@ input[type="file"].input {
   min-height: var(--tap-lg);
 }
 
-/* The "Scan to add" button. Static in the items card on desktop; on a phone it
-   lifts to a fixed thumb-reachable bar at the bottom of the viewport, so it is
-   reachable one-handed (laptop in the other) without scrolling past a long item
-   list. env(safe-area-inset-bottom) clears the iPhone home indicator. */
+/* The "Scan to add" button. Desktop leaves it where it sits in the items card
+   (just under the title). On a phone it moves to the BOTTOM of the items
+   fieldset — in normal flow, appended after the table — rather than floating
+   over the screen. The fieldset is a flex column (.stack-sm), so order:1 pushes
+   the button past the table without moving it in the DOM; full width makes it a
+   thumb-friendly tap target. */
 @media (max-width: 720px) {
   .scan-add {
-    position: fixed;
-    left: 16px;
-    right: 16px;
-    bottom: calc(16px + env(safe-area-inset-bottom));
-    z-index: 40;
+    order: 1;
+    width: 100%;
     min-height: var(--tap-lg);
-    box-shadow: var(--shadow-md);
   }
 }
