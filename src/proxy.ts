@@ -14,5 +14,11 @@ export const config = {
   // auth. The `|$` branch in the negative lookahead excludes the bare `/` root path
   // (matched only when nothing remains after the leading slash) -- verified against a
   // standalone regex test, since the matcher supports full regex per the Next.js docs.
-  matcher: ["/((?!api/auth|api/cron|login|register|forgot-password|reset-password|privacy|terms|receipts/|i/|_next/static|_next/image|favicon.ico|$).*)"],
+  // `wasm/` is the in-page QR scanner's self-hosted decode binary (public/wasm/,
+  // an open-source zxing-wasm build — not user data). It must be excluded like the
+  // other static assets: auth-gating it would make the scanner's WASM load depend on
+  // the session cookie riding along on that fetch, block CDN caching of a 1MB binary,
+  // and re-run the proxy on every scanner open. Not sensitive, so serving it public
+  // is correct (mirrors _next/static, which ships the app's JS the same way).
+  matcher: ["/((?!api/auth|api/cron|login|register|forgot-password|reset-password|privacy|terms|receipts/|i/|_next/static|_next/image|favicon.ico|wasm/|$).*)"],
 };

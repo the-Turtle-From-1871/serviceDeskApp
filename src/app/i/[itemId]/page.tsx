@@ -48,6 +48,18 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
           <StatusBadge status={item.status} />
         </div>
 
+        {/* Gated on ACTIVE as well as auth: the builder filters retired items out
+            on load (receipts/new/page.tsx:17), so offering the button for one
+            would hand the operator a dead end. `?items=` is the builder's
+            existing contract — no new plumbing. */}
+        {loggedIn && item.status === "ACTIVE" && (
+          <div className="row">
+            <Link className="btn btn-primary" href={`/receipts/new?items=${item.id}`}>
+              Create hand receipt
+            </Link>
+          </div>
+        )}
+
         {loggedIn && (
           <ItemDetailsCard
             item={{

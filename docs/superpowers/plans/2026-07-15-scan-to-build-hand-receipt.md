@@ -335,7 +335,9 @@ describe("lookupScannedItem", () => {
   });
 
   it("checks auth before touching any data", async () => {
-    requireUser.mockRejectedValue(new AuthError("UNAUTHORIZED"));
+    // AuthError's code is "UNAUTHENTICATED" | "FORBIDDEN"; the action maps ANY
+    // AuthError to its own "UNAUTHORIZED" result code (asserted below).
+    requireUser.mockRejectedValue(new AuthError("UNAUTHENTICATED"));
     expect(await lookupScannedItem("i1")).toEqual({ ok: false, code: "UNAUTHORIZED" });
     expect(getItem).not.toHaveBeenCalled();
   });
@@ -1526,10 +1528,14 @@ Create `scripts/copy-wasm.mjs`:
 // artifact are then the same file. Runs before dev and build.
 import { copyFileSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
 
 const require = createRequire(import.meta.url);
-const src = join(dirname(require.resolve("zxing-wasm/package.json")), "dist/reader/zxing_reader.wasm");
+// Resolve the wasm through its OWN export subpath. zxing-wasm's `exports` map
+// does NOT expose `./package.json` (so require.resolve("zxing-wasm/package.json")
+// throws ERR_PACKAGE_PATH_NOT_EXPORTED on Node 20+), but it DOES export
+// `./reader/zxing_reader.wasm` -> the real binary. This still resolves the
+// lockfile-verified copy, so audited artifact == executed artifact.
+const src = require.resolve("zxing-wasm/reader/zxing_reader.wasm");
 mkdirSync("public/wasm", { recursive: true });
 copyFileSync(src, "public/wasm/zxing_reader.wasm");
 console.log(`[copy-wasm] ${src} -> public/wasm/zxing_reader.wasm`);

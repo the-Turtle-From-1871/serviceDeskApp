@@ -1,5 +1,5 @@
 "use client";
-import { Fragment, useActionState, useEffect, useRef, useState } from "react";
+import { Fragment, useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { createReceiptAction } from "@/app/actions/receipts";
 import { SignaturePad } from "@/components/SignaturePad";
 import { TechnicianSignatureField, type PickableSignature } from "@/components/TechnicianSignatureField";
@@ -9,8 +9,16 @@ import type { ContactOption } from "@/modules/contacts/contact-match";
 import { SERVICE_TYPE_OPTIONS } from "@/modules/service-queue/service-form";
 
 type Prefill = { isDcsim?: boolean; name?: string; rank?: string; unit?: string; contact?: string; email?: string };
-export type BuilderItem = { serialNumber: string; itemId: string };
-export type BuilderLine = { make: string; model: string; items: BuilderItem[]; defaultQty: number };
+import { groupItemsIntoLines, MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW, type LineItem } from "@/modules/transfers/receipt-lines";
+import { parseItemScan } from "@/modules/items/scan-url";
+import { lookupScannedItem } from "@/app/actions/scan";
+import { QrScanner } from "@/components/QrScanner";
+import { beep } from "@/lib/beep";
+
+// `holderName` is the item's current holder, used to warn when a scan brings in
+// equipment held by someone other than the sender on the form. It rides along
+// with the item because groupItemsIntoLines only carries ids and serials.
+export type BuilderItem = LineItem & { holderName: string | null };
 
 function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, onNameChange, contacts }: {
   role: "sender" | "receiver";
@@ -128,16 +136,19 @@ function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, 
   );
 }
 
-// Controlled, not `defaultValue`, so React's post-action form reset can't touch
-// it. Uncontrolled, a submit that failed validation snapped a typed quantity
-// back to the default — the operator fixes the real error, resubmits, and the
-// receipt is filed for the wrong count. Same reasoning as the lifted party
-// fields above. Verified by ReceiptBuilderForm.test.tsx.
-// `label` is announced via aria-label: the column's <th> orients a sighted user,
-// but it gives the input itself no accessible name, so a screen reader would
-// otherwise read a bare number box. Matches ServiceControls' aria-labels below.
-function QtyInput({ name, defaultQty, label }: { name: string; defaultQty: number; label: string }) {
-  const [qty, setQty] = useState(String(defaultQty));
+// Controlled by the FORM, not by itself. Two reasons, both load-bearing:
+//
+// 1. React resets the form after any settled action, including a failed one. An
+//    uncontrolled qty snapped a typed value back to its default, so the
+//    operator fixed the real error, resubmitted, and filed the wrong count.
+//    (Verified by ReceiptBuilderForm.test.tsx.)
+// 2. The value must TRACK the line's item count while untouched. Seeding state
+//    from defaultQty froze it at mount — fine when the list could not change,
+//    wrong the moment a scan can grow a line.
+//
+// `label` is announced via aria-label: the column's <th> orients a sighted user
+// but gives the input no accessible name.
+function QtyInput({ name, value, onChange, label }: { name: string; value: string; onChange: (v: string) => void; label: string }) {
   return (
     <input
       className="input"
@@ -146,8 +157,8 @@ function QtyInput({ name, defaultQty, label }: { name: string; defaultQty: numbe
       min={1}
       name={name}
       aria-label={label}
-      value={qty}
-      onChange={(e) => setQty(e.target.value)}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
       required
     />
   );
@@ -211,8 +222,150 @@ function ServiceControls({ itemId }: { itemId: string }) {
   );
 }
 
-export function ReceiptBuilderForm({ itemIds, lines, senderPrefill, signatures, contacts }: { itemIds: string[]; lines: BuilderLine[]; senderPrefill?: Prefill; signatures: PickableSignature[]; contacts: ContactOption[] }) {
+export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, contacts }: {
+  initialItems: BuilderItem[];
+  senderPrefill?: Prefill;
+  signatures: PickableSignature[];
+  contacts: ContactOption[];
+}) {
   const [state, action, pending] = useActionState(createReceiptAction, undefined);
+  // The item list is now the form's own state, seeded from the URL. It must NOT
+  // go back to being a prop: re-deriving it from `?items=` on each change would
+  // remount this component and discard the drawn signature and every typed
+  // field — the exact bug class the comments above already exist to prevent.
+  const [items, setItems] = useState<BuilderItem[]>(initialItems);
+  const lines = useMemo(() => groupItemsIntoLines(items), [items]);
+
+  // Keep the URL in step so a reload rebuilds the same list. This restores
+  // PARITY with today (where items survive a refresh because they come from the
+  // URL) rather than adding a feature — and it matters most on the device this
+  // targets: iOS Safari evicts background tabs, and a page holding a live
+  // camera plus a WASM decoder is a prime candidate. A reload here is the
+  // operator switching apps for ten seconds, not fat-fingering refresh.
+  //
+  // replaceState, NOT pushState: a scan is not a history entry. Back must leave
+  // the builder, not un-scan one laptop at a time. Next 16 integrates the
+  // native History API with its router — see
+  // node_modules/next/dist/docs/01-app/01-getting-started/04-linking-and-navigating.md
+  useEffect(() => {
+    if (items.length === 0) return; // `?items=` empty would notFound() on reload
+    window.history.replaceState(null, "", `?items=${items.map((i) => i.itemId).join(",")}`);
+  }, [items]);
+
+  const removeItem = (itemId: string) => {
+    const removed = items.find((i) => i.itemId === itemId);
+    setItems((prev) => prev.filter((i) => i.itemId !== itemId));
+    // Drop the qty override for a make/model no longer on the receipt, so
+    // removing every item of a type and re-scanning it starts from the live
+    // count, not a stale edit. Folded here from a useEffect (which tripped
+    // react-hooks/set-state-in-effect); removeItem is the only path that
+    // shrinks the list, so this covers every case the effect did.
+    if (removed && !items.some((i) => i.itemId !== itemId && i.make === removed.make && i.model === removed.model)) {
+      const key = lineKey(removed);
+      setQtyEdits((prev) => {
+        if (!(key in prev)) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
+  };
+
+  const [scanning, setScanning] = useState(false);
+  const [toast, setToast] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  // A QR sitting in frame decodes many times a second, so the same id inside
+  // this window is the camera repeating itself, not a second laptop.
+  const lastDecode = useRef<{ id: string; at: number }>({ id: "", at: 0 });
+  // Serializes lookups. The decode loop fires onDecode without awaiting, so
+  // without this two different ids interleave their read-modify-write of the
+  // item list and the second drops the first. One in flight at a time.
+  const looking = useRef(false);
+  // Mirrors `items` so onDecode reads the LIVE list across its await instead of
+  // the snapshot its closure captured. Updated on every render, and eagerly
+  // after an append so a second scan landing before the next render still sees
+  // the first.
+  const itemsRef = useRef(items);
+  useEffect(() => { itemsRef.current = items; }, [items]);
+
+  const say = (kind: "ok" | "err", text: string) => {
+    setToast({ kind, text });
+    beep(kind);
+  };
+
+  const holderNote = (holder: string | null) =>
+    holder && senderName && holder !== senderName ? ` — held by ${holder}, not ${senderName}` : "";
+
+  // Every refusal KEEPS the camera open: rapid-fire only works if a bad scan is
+  // a blip, not a dead end.
+  const onDecode = async (text: string) => {
+    const id = parseItemScan(text);
+    // Rejected client-side, so a stray barcode never costs a round trip.
+    if (!id) return say("err", "Not an item code");
+
+    if (looking.current) return; // a lookup is already in flight; drop this frame
+
+    // Time-window dedupe: the same id within 1.5s of the last PROCESSED decode is
+    // the camera repeating a QR still in frame. Checked AFTER the in-flight guard
+    // and recorded only when we actually proceed — otherwise a decode dropped for
+    // concurrency would arm the window against its own retry and suppress a
+    // legitimate item for up to 1.5s.
+    const now = Date.now();
+    if (lastDecode.current.id === id && now - lastDecode.current.at < 1500) return;
+    lastDecode.current = { id, at: now };
+
+    looking.current = true;
+    try {
+      const dup = itemsRef.current.find((i) => i.itemId === id);
+      if (dup) return say("err", `Already added — ${dup.make} ${dup.model} · SN ${dup.serialNumber}`);
+
+      const res = await lookupScannedItem(id);
+      if (!res.ok) {
+        const msg: Record<typeof res.code, string> = {
+          NOT_FOUND: "That item no longer exists",
+          RETIRED: "That item is retired and can't be transferred",
+          UNAUTHORIZED: "Your session expired — sign in again",
+          FAILED: "Couldn't look up that item — try again",
+        };
+        return say("err", msg[res.code]);
+      }
+
+      const newItem: BuilderItem = {
+        itemId: res.item.id, make: res.item.make, model: res.item.model,
+        serialNumber: res.item.serialNumber, holderName: res.holderName,
+      };
+      // Built from the LIVE list (itemsRef), not a captured snapshot.
+      const next = [...itemsRef.current, newItem];
+      // The server gate on load swaps the whole form for a card
+      // (receipts/new/page.tsx:52-55). Doing that here would destroy a
+      // half-filled form, so the SCAN is refused and the form left untouched.
+      // createTransfer remains the authority.
+      const nextLines = groupItemsIntoLines(next);
+      if (nextLines.length > MAX_RECEIPT_ROWS) return say("err", `This receipt is full — ${MAX_RECEIPT_ROWS} item types max`);
+      if (nextLines.some((l) => l.serials.length > MAX_ITEMS_PER_ROW)) {
+        return say("err", `Too many of one item — ${MAX_ITEMS_PER_ROW} per make and model max`);
+      }
+
+      itemsRef.current = next; // eager, so a scan landing before re-render sees it
+      setItems(next);
+      // Spec: the mixed-holder warning does double duty — a toast at scan time
+      // AND a persistent row marker (added below). This is the toast half.
+      say("ok", `Added: ${newItem.make} ${newItem.model} · SN ${newItem.serialNumber}${holderNote(newItem.holderName)}`);
+    } finally {
+      looking.current = false;
+    }
+  };
+
+  // Keyed by line (make+model), matching how groupItemsIntoLines groups. An
+  // ABSENT entry means "untouched" and renders the live item count; a present
+  // one is the operator's explicit value and wins from then on. Storing only
+  // overrides is what makes tracking-until-edited fall out for free.
+  const [qtyEdits, setQtyEdits] = useState<Record<string, { auth?: string; issued?: string }>>({});
+  const lineKey = (ln: { make: string; model: string }) => `${ln.make} ${ln.model}`;
+  const qtyValue = (ln: { make: string; model: string; defaultQty: number }, field: "auth" | "issued") =>
+    qtyEdits[lineKey(ln)]?.[field] ?? String(ln.defaultQty);
+  const setQty = (ln: { make: string; model: string }, field: "auth" | "issued", v: string) =>
+    setQtyEdits((prev) => ({ ...prev, [lineKey(ln)]: { ...prev[lineKey(ln)], [field]: v } }));
+
   const [senderIsDcsim, setSenderIsDcsim] = useState(senderPrefill?.isDcsim ?? false);
   const [receiverIsDcsim, setReceiverIsDcsim] = useState(false);
   const [senderName, setSenderName] = useState(senderPrefill?.name ?? "");
@@ -232,6 +385,49 @@ export function ReceiptBuilderForm({ itemIds, lines, senderPrefill, signatures, 
   };
   const hideReceiverName = receiverIsDcsim && pickedId !== null;
 
+  // A signature attests to a SPECIFIC item list. If the list changes, the ink no
+  // longer covers what will be filed, so it is discarded and the operator is
+  // told why (silently clearing it would read as a glitch and get re-signed
+  // without anyone understanding what changed).
+  //
+  // The key remount is what actually clears the pad: SignaturePad owns its
+  // canvas and its hidden input, so re-mounting is the only way to blank both.
+  // Applies to a picked saved technician signature too — a DCSIM recipient's
+  // saved ink is still their attestation to a list, so pickedId is dropped as
+  // well (TechnicianSignatureField never reports null on the way out; see the
+  // comment on onReceiverDcsimChange above).
+  const itemsKey = items.map((i) => i.itemId).join(",");
+  const [hasSignature, setHasSignature] = useState(false);
+  const [sigCleared, setSigCleared] = useState(false);
+
+  // A guarded render-time write, compared on the KEY and only written when it
+  // changes — the "Storing information from previous renders" pattern, matching
+  // ItemDetailsCard.tsx:43-47. Not an effect: an effect would clear the ink one
+  // paint AFTER the new row is on screen, leaving a frame where the signature
+  // and the changed list are both live.
+  const [prevItemsKey, setPrevItemsKey] = useState(itemsKey);
+  if (itemsKey !== prevItemsKey) {
+    setPrevItemsKey(itemsKey);
+    if (hasSignature || pickedId !== null) setSigCleared(true);
+    setHasSignature(false);
+    setPickedId(null);
+  }
+
+  const onSignatureChange = (dataUrl: string) => {
+    setHasSignature(!!dataUrl);
+    if (dataUrl) setSigCleared(false);
+  };
+
+  // Warns only when a sender name is present AND differs: an item never
+  // transferred has no holder to disagree with, and a blank sender cannot
+  // conflict with anything. Added, never blocked — see the spec.
+  const holderOf = new Map(items.map((i) => [i.itemId, i.holderName]));
+  const holderWarning = (itemId: string) => {
+    const holder = holderOf.get(itemId);
+    if (!holder || !senderName || holder === senderName) return null;
+    return `Held by ${holder}, not ${senderName}`;
+  };
+
   if (receipt) {
     return (
       <div className="card stack-sm">
@@ -248,36 +444,82 @@ export function ReceiptBuilderForm({ itemIds, lines, senderPrefill, signatures, 
 
   return (
     <form action={action} className="stack">
-      {itemIds.map((id) => <input key={id} type="hidden" name="itemId" value={id} />)}
+      {items.map((it) => <input key={it.itemId} type="hidden" name="itemId" value={it.itemId} />)}
       <fieldset className="card stack-sm">
         <legend className="card__title">Items ({lines.length} {lines.length === 1 ? "row" : "rows"})</legend>
+        {/* "Scan to add", not "Scan": the phone's own camera app also scans these
+            stickers, but it can only OPEN the item page — it cannot feed a form
+            that is already open. Naming the action keeps the two apart. */}
+        <button type="button" className="btn btn-secondary scan-add" onClick={() => setScanning(true)}>Scan to add</button>
+        {/* Shown here only once the sheet is CLOSED. While scanning, the sheet
+            itself shows this same toast via `notice` (passed to QrScanner
+            below) — rendering it here too would put two elements on screen
+            carrying the same text (and, for the mixed-holder "ok" case, the
+            same text a persisted row marker also carries). Gating on
+            `!scanning` keeps exactly one of them mounted at a time. */}
+        {toast && !scanning && (
+          <p role="status" aria-live="polite" className={toast.kind === "ok" ? "alert-success" : "alert-error"}>{toast.text}</p>
+        )}
         <div className="table-wrap">
           <table className="table">
-            <thead><tr><th>#</th><th>Item</th><th>Serial</th><th>Service</th><th>Auth</th><th>Issued</th></tr></thead>
+            <thead><tr><th>#</th><th>Item</th><th>Serial</th><th>Service</th><th>Auth</th><th>Issued</th><th></th></tr></thead>
             <tbody>
               {lines.map((ln, i) => (
-                <Fragment key={ln.items[0].itemId}>
-                  <tr>
-                    <td data-label="Line">{i + 1}</td>
-                    <td data-label="Item">{ln.make} {ln.model}
-                      <input type="hidden" name={`line[${i}][make]`} value={ln.make} />
-                      <input type="hidden" name={`line[${i}][model]`} value={ln.model} />
-                    </td>
-                    <td className="mono" data-label="Serial">{ln.items[0].serialNumber}</td>
-                    <td className="is-stacked" data-label="Service"><ServiceControls itemId={ln.items[0].itemId} /></td>
-                    {/* rowSpan stays. The quantities are per LINE, not per serial —
-                        one pair of inputs covers every serial of this make/model.
-                        Splitting them per row would emit duplicate
-                        `line[i][qtyAuth]` fields and change what the form submits. */}
-                    <td rowSpan={ln.items.length} data-label={ln.items.length > 1 ? `Qty authorized (all ${ln.items.length} serials)` : "Qty authorized"}><QtyInput name={`line[${i}][qtyAuth]`} defaultQty={ln.defaultQty} label={`Quantity authorized, ${ln.make} ${ln.model}`} /></td>
-                    <td rowSpan={ln.items.length} data-label={ln.items.length > 1 ? `Qty issued (all ${ln.items.length} serials)` : "Qty issued"}><QtyInput name={`line[${i}][qtyIssued]`} defaultQty={ln.defaultQty} label={`Quantity issued, ${ln.make} ${ln.model}`} /></td>
-                  </tr>
-                  {ln.items.slice(1).map((it) => (
-                    <tr key={it.itemId}>
-                      <td className="is-empty"></td>
-                      <td className="is-empty"></td>
-                      <td className="mono" data-label="Serial">{it.serialNumber}</td>
-                      <td className="is-stacked" data-label="Service"><ServiceControls itemId={it.itemId} /></td>
+                <Fragment key={`${ln.make} ${ln.model}`}>
+                  {ln.itemIds.map((itemId, k) => (
+                    <tr key={itemId}>
+                      {k === 0 ? (
+                        <>
+                          <td data-label="Line">{i + 1}</td>
+                          <td data-label="Item">{ln.make} {ln.model}
+                            <input type="hidden" name={`line[${i}][make]`} value={ln.make} />
+                            <input type="hidden" name={`line[${i}][model]`} value={ln.model} />
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="is-empty"></td>
+                          <td className="is-empty"></td>
+                        </>
+                      )}
+                      {/* The warning lives with the SERIAL, which is what the mobile
+                          card leads with (globals.css:980-988) and what an operator
+                          matches against the sticker. `.is-stacked` only when it is
+                          present — a restacked cell is a flex row, so two children
+                          would otherwise sit side by side and collide. */}
+                      <td className={holderWarning(itemId) ? "mono is-stacked" : "mono"} data-label="Serial">
+                        {ln.serials[k]}
+                        {holderWarning(itemId) && <span className="subtle">{holderWarning(itemId)}</span>}
+                      </td>
+                      <td className="is-stacked" data-label="Service"><ServiceControls itemId={itemId} /></td>
+                      {k === 0 && (
+                        <>
+                          {/* rowSpan stays. The quantities are per LINE, not per serial —
+                              one pair of inputs covers every serial of this make/model.
+                              Splitting them per row would emit duplicate
+                              `line[i][qtyAuth]` fields and change what the form submits. */}
+                          <td rowSpan={ln.itemIds.length} data-label={ln.itemIds.length > 1 ? `Qty authorized (all ${ln.itemIds.length} serials)` : "Qty authorized"}>
+                            <QtyInput name={`line[${i}][qtyAuth]`} value={qtyValue(ln, "auth")} onChange={(v) => setQty(ln, "auth", v)} label={`Quantity authorized, ${ln.make} ${ln.model}`} />
+                          </td>
+                          <td rowSpan={ln.itemIds.length} data-label={ln.itemIds.length > 1 ? `Qty issued (all ${ln.itemIds.length} serials)` : "Qty issued"}>
+                            <QtyInput name={`line[${i}][qtyIssued]`} value={qtyValue(ln, "issued")} onChange={(v) => setQty(ln, "issued", v)} label={`Quantity issued, ${ln.make} ${ln.model}`} />
+                          </td>
+                        </>
+                      )}
+                      {/* `.actions--end`, never an inline justifyContent — an inline style
+                          outranks the mobile rule that re-aligns actions inside a stacked
+                          card, which is the bug a08d9e5 fixed in three places. */}
+                      <td className="actions actions--end" data-label="">
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => removeItem(itemId)}
+                          disabled={items.length === 1}
+                          aria-label={`Remove ${ln.make} ${ln.model}, serial ${ln.serials[k]}`}
+                        >
+                          Remove
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </Fragment>
@@ -294,24 +536,36 @@ export function ReceiptBuilderForm({ itemIds, lines, senderPrefill, signatures, 
       <PartyFields role="receiver" isDcsim={receiverIsDcsim} onIsDcsimChange={onReceiverDcsimChange} hideName={hideReceiverName} name={receiverName} onNameChange={setReceiverName} contacts={contacts} />
       <fieldset className="card stack-sm">
         <legend className="card__title">Recipient signature{receiverIsDcsim ? " (DCSIM)" : ""}</legend>
+        {sigCleared && (
+          <p role="alert" className="alert-error">Items changed — please sign again.</p>
+        )}
         {receiverIsDcsim ? (
           // A DCSIM recipient is our own technician at the desk, so they may pick
           // their saved signature. An outside recipient must always draw in person.
+          // onChange IS wired here, not only onPickedChange: without it a DCSIM
+          // recipient's DRAWN ink (the common case — signatures=[] for non-admins,
+          // so this field is always in draw state for them) is wiped by the remount
+          // with no "please sign again" notice. onChange fires for both a draw and
+          // a pick (TechnicianSignatureField.tsx:47,50), so it feeds hasSignature
+          // and resets sigCleared on a re-pick.
           <TechnicianSignatureField
+            key={itemsKey}
             name="receiverSignature"
             signatures={signatures}
             label="Who received it?"
             drawHint={null}
+            onChange={onSignatureChange}
             onPickedChange={setPickedId}
           />
         ) : (
-          <SignaturePad name="receiverSignature" />
+          <SignaturePad key={itemsKey} name="receiverSignature" onChange={onSignatureChange} />
         )}
       </fieldset>
       <div className="row">
         <button className="btn btn-primary" disabled={pending} type="submit">{pending ? "Creating…" : "Create hand receipt"}</button>
         {state && "error" in state && state.error && <span role="alert" className="alert-error">{state.error}</span>}
       </div>
+      {scanning && <QrScanner onDecode={onDecode} onClose={() => setScanning(false)} notice={toast} />}
     </form>
   );
 }
