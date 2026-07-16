@@ -1,0 +1,27 @@
+  name: Nightly purge (cron)
+  on:
+    schedule:
+      - cron: "23 8 * * *"   # ~08:23 UTC daily (off the top of the hour for reliability)
+    workflow_dispatch: {}
+  concurrency:
+    group: nightly-purge
+    cancel-in-progress: false
+  jobs:
+    purge:
+      runs-on: ubuntu-latest
+      timeout-minutes: 5
+      steps:
+        - name: Trigger the purge endpoint
+          env:
+            CRON_SECRET: ${{ secrets.CRON_SECRET }}
+            PURGE_URL: https://servicedeskapp.vercel.app/api/cron/purge
+          run: |
+            set -euo pipefail
+            if [ -z "${CRON_SECRET}" ]; then
+              echo "::error::CRON_SECRET repository secret is not set."; exit 1
+            fi
+            resp=$(curl -sS --max-time 60 -w $'\n%{http_code}' -H "Authorization: Bearer ${CRON_SECRET}" "${PURGE_URL}")
+            code=$(printf '%s' "${resp}" | tail -n1); body=$(printf '%s' "${resp}" | sed '$d')
+            echo "HTTP ${code}"; echo "Response: ${body}"
+            [ "${code}" = "200" ] || { echo "::error::Got HTTP ${code} (401 = secret mismatch with Vercel)"; exit 1; }
+            case "${body}" in *'"ok":true'*) echo "Purge ran." ;; *) echo "::error::no ok:true"; exit 1 ;; esac
