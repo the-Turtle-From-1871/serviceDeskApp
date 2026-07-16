@@ -66,7 +66,7 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
               id: item.id,
               deviceName: item.deviceName,
               homeUnit: item.homeUnit,
-              currentUser: item.currentUser,
+              currentUserEmail: item.currentUserEmail,
               currentPosition: item.currentPosition,
               // ItemDetailsCard is a client component, so its props are
               // serialized into the RSC Flight payload and reach the

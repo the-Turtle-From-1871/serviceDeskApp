@@ -13,7 +13,7 @@
 export type ItemLoggedFields = {
   homeUnit: string | null;
   deviceName: string | null;
-  currentUser: string | null;
+  currentUserEmail: string | null;
   currentPosition: string | null;
   make: string | null;
   model: string | null;

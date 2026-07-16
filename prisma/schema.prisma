@@ -72,10 +72,12 @@ model Item {
   homeUnit      String?
   deviceName    String?
   notes         String?
-  // The person actually using the device, and their role/billet. Distinct from
-  // the hand-receipt holder (derived from the latest OPEN Transfer), which stays
-  // the signed custody record and is never edited here.
-  currentUser     String?
+  // The email of the person actually using the device. Distinct from the
+  // hand-receipt holder (derived from the latest OPEN Transfer), which stays the
+  // signed custody record and is never edited here. @map keeps the physical
+  // column name ("currentUser") so renaming the field for clarity needs no
+  // migration — the DB column is unchanged.
+  currentUserEmail String?       @map("currentUser")
   currentPosition String?
   status        ItemStatus     @default(ACTIVE)
   createdBy     User           @relation("CreatedItems", fields: [createdById], references: [id])

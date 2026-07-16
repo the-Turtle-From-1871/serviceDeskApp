@@ -5,7 +5,7 @@ describe("diffItemFields", () => {
   it("returns only the fields that actually changed", () => {
     expect(
       diffItemFields(
-        { deviceName: "L-1", homeUnit: "A Co", currentUser: null },
+        { deviceName: "L-1", homeUnit: "A Co", currentUserEmail: null },
         { deviceName: "L-2", homeUnit: "A Co" },
       ),
     ).toEqual([{ field: "deviceName", from: "L-1", to: "L-2" }]);
@@ -24,14 +24,14 @@ describe("diffItemFields", () => {
   });
 
   it("treats blank, whitespace and null as equivalent (no change)", () => {
-    expect(diffItemFields({ currentUser: null }, { currentUser: "   " })).toEqual([]);
-    expect(diffItemFields({ currentUser: "" }, { currentUser: null })).toEqual([]);
+    expect(diffItemFields({ currentUserEmail: null }, { currentUserEmail: "   " })).toEqual([]);
+    expect(diffItemFields({ currentUserEmail: "" }, { currentUserEmail: null })).toEqual([]);
   });
 
   it("trims before comparing and records the trimmed value", () => {
     expect(
-      diffItemFields({ currentUser: "SGT Smith" }, { currentUser: "  SGT Jones  " }),
-    ).toEqual([{ field: "currentUser", from: "SGT Smith", to: "SGT Jones" }]);
+      diffItemFields({ currentUserEmail: "SGT Smith" }, { currentUserEmail: "  SGT Jones  " }),
+    ).toEqual([{ field: "currentUserEmail", from: "SGT Smith", to: "SGT Jones" }]);
   });
 
   it("records a clear-to-null when the new value is blank", () => {
@@ -43,11 +43,11 @@ describe("diffItemFields", () => {
   it("records multiple changes", () => {
     expect(
       diffItemFields(
-        { currentUser: null, currentPosition: null },
-        { currentUser: "SPC Lin", currentPosition: "S6" },
+        { currentUserEmail: null, currentPosition: null },
+        { currentUserEmail: "SPC Lin", currentPosition: "S6" },
       ),
     ).toEqual([
-      { field: "currentUser", from: null, to: "SPC Lin" },
+      { field: "currentUserEmail", from: null, to: "SPC Lin" },
       { field: "currentPosition", from: null, to: "S6" },
     ]);
   });

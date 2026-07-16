@@ -6,7 +6,7 @@ export type ItemDetailsValues = {
   id: string;
   deviceName: string | null;
   homeUnit: string | null;
-  currentUser: string | null;
+  currentUserEmail: string | null;
   currentPosition: string | null;
   notes: string | null;
 };
@@ -82,8 +82,8 @@ export function ItemDetailsCard({ item, isAdmin, units, dateLogged, loggedBy, ha
               </datalist>
             </div>
             <div className="field">
-              <label className="label" htmlFor="ed-currentUser">Current user email</label>
-              <input id="ed-currentUser" className="input" type="email" name="currentUser" defaultValue={item.currentUser ?? ""} placeholder="e.g. jane.doe@unit.mil" />
+              <label className="label" htmlFor="ed-currentUserEmail">Current user email</label>
+              <input id="ed-currentUserEmail" className="input" type="email" name="currentUserEmail" defaultValue={item.currentUserEmail ?? ""} placeholder="e.g. jane.doe@unit.mil" />
             </div>
             <div className="field">
               <label className="label" htmlFor="ed-currentPosition">Current position</label>
@@ -107,7 +107,7 @@ export function ItemDetailsCard({ item, isAdmin, units, dateLogged, loggedBy, ha
           <dt>Home unit</dt>
           <dd>{item.homeUnit || dash}</dd>
           <dt>Current user email</dt>
-          <dd>{item.currentUser || dash}</dd>
+          <dd>{item.currentUserEmail || dash}</dd>
           <dt>Current position</dt>
           <dd>{item.currentPosition || dash}</dd>
           {isAdmin && (

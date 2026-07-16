@@ -28,7 +28,7 @@ const clearable = z.string().trim();
 export const itemDetailsSchema = z.object({
   deviceName: z.string().trim().min(1, "Device name is required"),
   homeUnit: clearable,
-  currentUser: clearable,
+  currentUserEmail: clearable,
   currentPosition: clearable,
 });
 

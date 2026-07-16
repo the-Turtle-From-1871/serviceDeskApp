@@ -61,11 +61,11 @@ test("updateItemFields changes fields and records one ItemEdit with the diff", a
   const item = await createItem({ make: "M", model: "N", serialNumber: "S", ...base }, adminId);
   const updated = await updateItemFields(
     item.id,
-    { homeUnit: "Cage 3", currentUser: "SGT Smith", currentPosition: "Supply Sergeant" },
+    { homeUnit: "Cage 3", currentUserEmail: "SGT Smith", currentPosition: "Supply Sergeant" },
     { id: adminId, name: "Admin" },
   );
   expect(updated.homeUnit).toBe("Cage 3");
-  expect(updated.currentUser).toBe("SGT Smith");
+  expect(updated.currentUserEmail).toBe("SGT Smith");
   expect(updated.currentPosition).toBe("Supply Sergeant");
 
   const edits = await prisma.itemEdit.findMany({ where: { itemId: item.id } });
@@ -74,7 +74,7 @@ test("updateItemFields changes fields and records one ItemEdit with the diff", a
   expect(edits[0].editedByName).toBe("Admin");
   expect(edits[0].changes).toEqual([
     { field: "homeUnit", from: null, to: "Cage 3" },
-    { field: "currentUser", from: null, to: "SGT Smith" },
+    { field: "currentUserEmail", from: null, to: "SGT Smith" },
     { field: "currentPosition", from: null, to: "Supply Sergeant" },
   ]);
 });
@@ -87,21 +87,21 @@ test("updateItemFields writes no history row for a no-op save", async () => {
 
 test("updateItemFields records only the fields that changed", async () => {
   const item = await createItem({ make: "M", model: "N", serialNumber: "S", ...base }, adminId);
-  await updateItemFields(item.id, { deviceName: "Radio", currentUser: "SPC Lin" }, { id: adminId, name: "Admin" });
+  await updateItemFields(item.id, { deviceName: "Radio", currentUserEmail: "SPC Lin" }, { id: adminId, name: "Admin" });
   const edit = await prisma.itemEdit.findFirstOrThrow({ where: { itemId: item.id } });
-  expect(edit.changes).toEqual([{ field: "currentUser", from: null, to: "SPC Lin" }]);
+  expect(edit.changes).toEqual([{ field: "currentUserEmail", from: null, to: "SPC Lin" }]);
 });
 
 test("updateItemFields clears a field when given a blank value", async () => {
   const item = await createItem({ make: "M", model: "N", serialNumber: "S", ...base }, adminId);
-  await updateItemFields(item.id, { currentUser: "SPC Lin" }, { id: adminId, name: "Admin" });
-  const cleared = await updateItemFields(item.id, { currentUser: "" }, { id: adminId, name: "Admin" });
-  expect(cleared.currentUser).toBeNull();
+  await updateItemFields(item.id, { currentUserEmail: "SPC Lin" }, { id: adminId, name: "Admin" });
+  const cleared = await updateItemFields(item.id, { currentUserEmail: "" }, { id: adminId, name: "Admin" });
+  expect(cleared.currentUserEmail).toBeNull();
 });
 
 test("updateItemFields throws NOT_FOUND for a missing item", async () => {
   await expect(
-    updateItemFields("nope", { currentUser: "X" }, { id: adminId, name: "Admin" }),
+    updateItemFields("nope", { currentUserEmail: "X" }, { id: adminId, name: "Admin" }),
   ).rejects.toMatchObject({ code: "NOT_FOUND" });
 });
 
