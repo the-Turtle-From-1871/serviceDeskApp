@@ -1,5 +1,5 @@
 "use client";
-import { Fragment, useActionState, useEffect, useRef, useState } from "react";
+import { Fragment, useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { createReceiptAction } from "@/app/actions/receipts";
 import { SignaturePad } from "@/components/SignaturePad";
 import { TechnicianSignatureField, type PickableSignature } from "@/components/TechnicianSignatureField";
@@ -9,8 +9,12 @@ import type { ContactOption } from "@/modules/contacts/contact-match";
 import { SERVICE_TYPE_OPTIONS } from "@/modules/service-queue/service-form";
 
 type Prefill = { isDcsim?: boolean; name?: string; rank?: string; unit?: string; contact?: string; email?: string };
-export type BuilderItem = { serialNumber: string; itemId: string };
-export type BuilderLine = { make: string; model: string; items: BuilderItem[]; defaultQty: number };
+import { groupItemsIntoLines, type LineItem } from "@/modules/transfers/receipt-lines";
+
+// `holderName` is the item's current holder, used to warn when a scan brings in
+// equipment held by someone other than the sender on the form. It rides along
+// with the item because groupItemsIntoLines only carries ids and serials.
+export type BuilderItem = LineItem & { holderName: string | null };
 
 function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, onNameChange, contacts }: {
   role: "sender" | "receiver";
@@ -211,8 +215,37 @@ function ServiceControls({ itemId }: { itemId: string }) {
   );
 }
 
-export function ReceiptBuilderForm({ itemIds, lines, senderPrefill, signatures, contacts }: { itemIds: string[]; lines: BuilderLine[]; senderPrefill?: Prefill; signatures: PickableSignature[]; contacts: ContactOption[] }) {
+export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, contacts }: {
+  initialItems: BuilderItem[];
+  senderPrefill?: Prefill;
+  signatures: PickableSignature[];
+  contacts: ContactOption[];
+}) {
   const [state, action, pending] = useActionState(createReceiptAction, undefined);
+  // The item list is now the form's own state, seeded from the URL. It must NOT
+  // go back to being a prop: re-deriving it from `?items=` on each change would
+  // remount this component and discard the drawn signature and every typed
+  // field — the exact bug class the comments above already exist to prevent.
+  const [items, setItems] = useState<BuilderItem[]>(initialItems);
+  const lines = useMemo(() => groupItemsIntoLines(items), [items]);
+
+  // Keep the URL in step so a reload rebuilds the same list. This restores
+  // PARITY with today (where items survive a refresh because they come from the
+  // URL) rather than adding a feature — and it matters most on the device this
+  // targets: iOS Safari evicts background tabs, and a page holding a live
+  // camera plus a WASM decoder is a prime candidate. A reload here is the
+  // operator switching apps for ten seconds, not fat-fingering refresh.
+  //
+  // replaceState, NOT pushState: a scan is not a history entry. Back must leave
+  // the builder, not un-scan one laptop at a time. Next 16 integrates the
+  // native History API with its router — see
+  // node_modules/next/dist/docs/01-app/01-getting-started/04-linking-and-navigating.md
+  useEffect(() => {
+    if (items.length === 0) return; // `?items=` empty would notFound() on reload
+    window.history.replaceState(null, "", `?items=${items.map((i) => i.itemId).join(",")}`);
+  }, [items]);
+
+  const removeItem = (itemId: string) => setItems((prev) => prev.filter((i) => i.itemId !== itemId));
   const [senderIsDcsim, setSenderIsDcsim] = useState(senderPrefill?.isDcsim ?? false);
   const [receiverIsDcsim, setReceiverIsDcsim] = useState(false);
   const [senderName, setSenderName] = useState(senderPrefill?.name ?? "");
@@ -248,36 +281,61 @@ export function ReceiptBuilderForm({ itemIds, lines, senderPrefill, signatures, 
 
   return (
     <form action={action} className="stack">
-      {itemIds.map((id) => <input key={id} type="hidden" name="itemId" value={id} />)}
+      {items.map((it) => <input key={it.itemId} type="hidden" name="itemId" value={it.itemId} />)}
       <fieldset className="card stack-sm">
         <legend className="card__title">Items ({lines.length} {lines.length === 1 ? "row" : "rows"})</legend>
         <div className="table-wrap">
           <table className="table">
-            <thead><tr><th>#</th><th>Item</th><th>Serial</th><th>Service</th><th>Auth</th><th>Issued</th></tr></thead>
+            <thead><tr><th>#</th><th>Item</th><th>Serial</th><th>Service</th><th>Auth</th><th>Issued</th><th></th></tr></thead>
             <tbody>
               {lines.map((ln, i) => (
-                <Fragment key={ln.items[0].itemId}>
-                  <tr>
-                    <td data-label="Line">{i + 1}</td>
-                    <td data-label="Item">{ln.make} {ln.model}
-                      <input type="hidden" name={`line[${i}][make]`} value={ln.make} />
-                      <input type="hidden" name={`line[${i}][model]`} value={ln.model} />
-                    </td>
-                    <td className="mono" data-label="Serial">{ln.items[0].serialNumber}</td>
-                    <td className="is-stacked" data-label="Service"><ServiceControls itemId={ln.items[0].itemId} /></td>
-                    {/* rowSpan stays. The quantities are per LINE, not per serial —
-                        one pair of inputs covers every serial of this make/model.
-                        Splitting them per row would emit duplicate
-                        `line[i][qtyAuth]` fields and change what the form submits. */}
-                    <td rowSpan={ln.items.length} data-label={ln.items.length > 1 ? `Qty authorized (all ${ln.items.length} serials)` : "Qty authorized"}><QtyInput name={`line[${i}][qtyAuth]`} defaultQty={ln.defaultQty} label={`Quantity authorized, ${ln.make} ${ln.model}`} /></td>
-                    <td rowSpan={ln.items.length} data-label={ln.items.length > 1 ? `Qty issued (all ${ln.items.length} serials)` : "Qty issued"}><QtyInput name={`line[${i}][qtyIssued]`} defaultQty={ln.defaultQty} label={`Quantity issued, ${ln.make} ${ln.model}`} /></td>
-                  </tr>
-                  {ln.items.slice(1).map((it) => (
-                    <tr key={it.itemId}>
-                      <td className="is-empty"></td>
-                      <td className="is-empty"></td>
-                      <td className="mono" data-label="Serial">{it.serialNumber}</td>
-                      <td className="is-stacked" data-label="Service"><ServiceControls itemId={it.itemId} /></td>
+                <Fragment key={`${ln.make} ${ln.model}`}>
+                  {ln.itemIds.map((itemId, k) => (
+                    <tr key={itemId}>
+                      {k === 0 ? (
+                        <>
+                          <td data-label="Line">{i + 1}</td>
+                          <td data-label="Item">{ln.make} {ln.model}
+                            <input type="hidden" name={`line[${i}][make]`} value={ln.make} />
+                            <input type="hidden" name={`line[${i}][model]`} value={ln.model} />
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="is-empty"></td>
+                          <td className="is-empty"></td>
+                        </>
+                      )}
+                      <td className="mono" data-label="Serial">{ln.serials[k]}</td>
+                      <td className="is-stacked" data-label="Service"><ServiceControls itemId={itemId} /></td>
+                      {k === 0 && (
+                        <>
+                          {/* rowSpan stays. The quantities are per LINE, not per serial —
+                              one pair of inputs covers every serial of this make/model.
+                              Splitting them per row would emit duplicate
+                              `line[i][qtyAuth]` fields and change what the form submits. */}
+                          <td rowSpan={ln.itemIds.length} data-label={ln.itemIds.length > 1 ? `Qty authorized (all ${ln.itemIds.length} serials)` : "Qty authorized"}>
+                            <QtyInput name={`line[${i}][qtyAuth]`} defaultQty={ln.defaultQty} label={`Quantity authorized, ${ln.make} ${ln.model}`} />
+                          </td>
+                          <td rowSpan={ln.itemIds.length} data-label={ln.itemIds.length > 1 ? `Qty issued (all ${ln.itemIds.length} serials)` : "Qty issued"}>
+                            <QtyInput name={`line[${i}][qtyIssued]`} defaultQty={ln.defaultQty} label={`Quantity issued, ${ln.make} ${ln.model}`} />
+                          </td>
+                        </>
+                      )}
+                      {/* `.actions--end`, never an inline justifyContent — an inline style
+                          outranks the mobile rule that re-aligns actions inside a stacked
+                          card, which is the bug a08d9e5 fixed in three places. */}
+                      <td className="actions actions--end" data-label="">
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => removeItem(itemId)}
+                          disabled={items.length === 1}
+                          aria-label={`Remove ${ln.make} ${ln.model}, serial ${ln.serials[k]}`}
+                        >
+                          Remove
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </Fragment>

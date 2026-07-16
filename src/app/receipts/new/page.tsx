@@ -55,12 +55,22 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
           <div className="card empty">One item type has more than {MAX_ITEMS_PER_ROW} items on a single row. Split that item across two receipts.</div>
         ) : (
           <ReceiptBuilderForm
-            itemIds={loaded.map((i) => i.id)}
-            lines={lines.map((l) => ({
-              make: l.make,
-              model: l.model,
-              defaultQty: l.defaultQty,
-              items: l.serials.map((serialNumber, k) => ({ serialNumber, itemId: l.itemIds[k] })),
+            initialItems={loaded.map((i, k) => ({
+              itemId: i.id,
+              make: i.make,
+              model: i.model,
+              serialNumber: i.serialNumber,
+              // The item's CURRENT holder, already fetched at line 34
+              // (`lastReceivers`, index-aligned with `loaded`). Do NOT hardcode
+              // null: `senderPrefill` is derived from these items ONLY when every
+              // holder matches (`allSame`, lines 38-41) — when holders DIFFER the
+              // prefill is undefined and the operator types a sender that can
+              // absolutely disagree with them. And `replaceState` now feeds every
+              // SCANNED item back into `?items=`, so a mixed-holder list reaches
+              // this page through the URL on an iOS reload — exactly the reload
+              // the sync exists to survive. Discarding holderName here would drop
+              // the spec's persistent warning on precisely that path.
+              holderName: lastReceivers[k]?.name ?? null,
             }))}
             senderPrefill={senderPrefill}
             signatures={signatures}

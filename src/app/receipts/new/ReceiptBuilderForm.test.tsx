@@ -8,6 +8,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+// Adds toBeDisabled() etc. — needed by the "last item can't be removed" test below.
+import "@testing-library/jest-dom/vitest";
 
 const createReceiptAction = vi.fn();
 vi.mock("@/app/actions/receipts", () => ({
@@ -35,11 +37,21 @@ beforeEach(() => {
   createReceiptAction.mockResolvedValue({ error: "Recipient signature is required." });
 });
 
-const LINES = [{ make: "Dell", model: "L5420", defaultQty: 1, items: [{ serialNumber: "SN1", itemId: "i1" }] }];
+const ITEMS = [
+  { itemId: "i1", make: "Dell", model: "L5420", serialNumber: "SN1", holderName: null },
+];
 
-function renderForm(senderPrefill?: Parameters<typeof ReceiptBuilderForm>[0]["senderPrefill"]) {
+function renderForm(
+  senderPrefill?: Parameters<typeof ReceiptBuilderForm>[0]["senderPrefill"],
+  initialItems: Parameters<typeof ReceiptBuilderForm>[0]["initialItems"] = ITEMS,
+) {
   return render(
-    <ReceiptBuilderForm itemIds={["i1"]} lines={LINES} senderPrefill={senderPrefill} signatures={[]} contacts={[]} />
+    <ReceiptBuilderForm
+      initialItems={initialItems}
+      senderPrefill={senderPrefill}
+      signatures={[]}
+      contacts={[]}
+    />
   );
 }
 
@@ -152,5 +164,61 @@ describe("ReceiptBuilderForm — the DCSIM checkbox survives a failed submit", (
     await screen.findByRole("alert");
 
     expect(dcsimBox("Recipient").checked).toBe(false);
+  });
+});
+
+describe("ReceiptBuilderForm — the item list is the form's own state", () => {
+  const TWO = [
+    { itemId: "i1", make: "Dell", model: "L5420", serialNumber: "SN1", holderName: null },
+    { itemId: "i2", make: "HP", model: "G8", serialNumber: "SN2", holderName: null },
+  ];
+
+  it("posts one itemId per item", async () => {
+    const user = userEvent.setup();
+    renderForm(undefined, TWO);
+    await fillParty(user, "Sender");
+    await fillParty(user, "Recipient");
+    await user.click(screen.getByRole("button", { name: /Create hand receipt/i }));
+    await waitFor(() => expect(createReceiptAction).toHaveBeenCalled());
+
+    const posted = createReceiptAction.mock.calls[0][1] as FormData;
+    expect(posted.getAll("itemId")).toEqual(["i1", "i2"]);
+  });
+
+  it("removes an item and stops posting it", async () => {
+    const user = userEvent.setup();
+    renderForm(undefined, TWO);
+
+    await user.click(screen.getByRole("button", { name: /Remove HP G8, serial SN2/i }));
+    expect(screen.queryByText("SN2")).toBeNull();
+
+    await fillParty(user, "Sender");
+    await fillParty(user, "Recipient");
+    await user.click(screen.getByRole("button", { name: /Create hand receipt/i }));
+    await waitFor(() => expect(createReceiptAction).toHaveBeenCalled());
+
+    const posted = createReceiptAction.mock.calls[0][1] as FormData;
+    expect(posted.getAll("itemId")).toEqual(["i1"]);
+  });
+
+  // A receipt with no items is not a receipt, and an empty `?items=` would
+  // notFound() on reload (receipts/new/page.tsx:15).
+  it("will not let the last item be removed", () => {
+    renderForm();
+    expect(screen.getByRole("button", { name: /Remove Dell L5420, serial SN1/i })).toBeDisabled();
+  });
+
+  // Keeps the URL recoverable after an iOS tab eviction. replaceState, not
+  // pushState: a scan is not a history entry.
+  it("keeps ?items= in step with the list", async () => {
+    const user = userEvent.setup();
+    const spy = vi.spyOn(window.history, "replaceState");
+    renderForm(undefined, TWO);
+
+    await waitFor(() => expect(spy).toHaveBeenCalledWith(null, "", "?items=i1,i2"));
+
+    await user.click(screen.getByRole("button", { name: /Remove HP G8, serial SN2/i }));
+    await waitFor(() => expect(spy).toHaveBeenLastCalledWith(null, "", "?items=i1"));
+    spy.mockRestore();
   });
 });
