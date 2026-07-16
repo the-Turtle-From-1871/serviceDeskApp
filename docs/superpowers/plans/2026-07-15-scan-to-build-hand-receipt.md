@@ -679,19 +679,26 @@ In `src/app/receipts/new/page.tsx`, replace lines 57-64 (the `itemIds` and `line
 
 ```tsx
           <ReceiptBuilderForm
-            initialItems={loaded.map((i) => ({
+            initialItems={loaded.map((i, k) => ({
               itemId: i.id,
               make: i.make,
               model: i.model,
               serialNumber: i.serialNumber,
-              // Initial items never warn: senderPrefill is DERIVED from them
-              // (lines 37-41), so it cannot disagree with them. Only a later
-              // scan can introduce a conflicting holder.
-              holderName: null,
+              // The item's CURRENT holder, already fetched at line 34
+              // (`lastReceivers`, index-aligned with `loaded`). Do NOT hardcode
+              // null: `senderPrefill` is derived from these items ONLY when every
+              // holder matches (`allSame`, lines 38-41) — when holders DIFFER the
+              // prefill is undefined and the operator types a sender that can
+              // absolutely disagree with them. And `replaceState` now feeds every
+              // SCANNED item back into `?items=`, so a mixed-holder list reaches
+              // this page through the URL on an iOS reload — exactly the reload
+              // the sync exists to survive. Discarding holderName here would drop
+              // the spec's persistent warning on precisely that path.
+              holderName: lastReceivers[k]?.name ?? null,
             }))}
 ```
 
-Leave `senderPrefill`, `signatures`, and `contacts` as they are. The `lines` local (line 20) stays — the `tooMany` / `tooManyPerRow` server gate still uses it.
+Leave `senderPrefill`, `signatures`, and `contacts` as they are. The `lines` local (line 20) stays — the `tooMany` / `tooManyPerRow` server gate still uses it. `lastReceivers` already exists (line 34); no new fetch.
 
 - [ ] **Step 7: Run the tests**
 
@@ -825,6 +832,18 @@ Add to `ReceiptBuilderForm`, below `removeItem`:
     qtyEdits[lineKey(ln)]?.[field] ?? String(ln.defaultQty);
   const setQty = (ln: { make: string; model: string }, field: "auth" | "issued", v: string) =>
     setQtyEdits((prev) => ({ ...prev, [lineKey(ln)]: { ...prev[lineKey(ln)], [field]: v } }));
+
+  // Drop overrides for a make/model no longer on the receipt. Without this,
+  // removing every item of a type and then re-scanning it resurrects the old
+  // edited count — the same wrong-count-on-a-custody-document class as defect
+  // #1. Identity-guarded so it can't loop.
+  useEffect(() => {
+    const keys = new Set(lines.map(lineKey));
+    setQtyEdits((prev) => {
+      const kept = Object.entries(prev).filter(([k]) => keys.has(k));
+      return kept.length === Object.keys(prev).length ? prev : Object.fromEntries(kept);
+    });
+  }, [lines]);
 ```
 
 - [ ] **Step 5: Wire the two call sites**
@@ -857,40 +876,54 @@ git commit -m "fix(receipts): quantities track the item count until edited"
 
 ---
 
-### Task 6: Service flags survive a sibling's removal (defect #2)
+### Task 6: Regression-guard the row key that protects service flags (defect #2)
+
+**No production change.** Defect #2 — removing a line's first item silently clearing a
+surviving item's "Needs service?" flag — was caused by keying rows on the *line's first*
+itemId. **Task 4 already fixed it** by keying every row on its OWN itemId
+(`<tr key={itemId}>`), so the existing internal-state `ServiceControls` (which this task
+deliberately leaves unchanged) stays mounted through a sibling's removal. Internal state is
+in fact *safer* here than a lifted map: removing an item unmounts its controls, so a
+remove-then-rescan starts from an honest default with no stale flag to resurrect.
+
+This task adds the test that **pins that key**, so a later refactor can't silently
+reintroduce the remount. There is no red step because there is no bug left to fix — this is
+a characterization/regression test, and that is stated honestly rather than dressed up as
+TDD-red. (An earlier draft lifted service state into the form here; that was redundant work
+riding on a test that would have started green, and it was removed.)
 
 **Files:**
-- Modify: `src/app/receipts/new/ReceiptBuilderForm.tsx` (local `ServiceControls`, lines 156-212)
-- Modify: `src/app/receipts/new/ReceiptBuilderForm.test.tsx`
+- Modify: `src/app/receipts/new/ReceiptBuilderForm.test.tsx` only.
 
-**Interfaces:**
-- Produces: `ServiceControls` signature becomes `{ itemId: string; sel: ServiceSel; onChange: (patch: Partial<ServiceSel>) => void }` with `type ServiceSel = { needs: boolean; type: string; note: string }`.
+**Interfaces:** none. `ServiceControls` keeps its current signature `{ itemId: string }`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Add the regression test**
 
 Append to `ReceiptBuilderForm.test.tsx`:
 
 ```tsx
-describe("ReceiptBuilderForm — service flags survive a list change", () => {
+describe("ReceiptBuilderForm — service flags survive a sibling's removal", () => {
   const TWO_SAME = [
     { itemId: "i1", make: "Dell", model: "L5420", serialNumber: "SN1", holderName: null },
     { itemId: "i2", make: "Dell", model: "L5420", serialNumber: "SN2", holderName: null },
   ];
 
-  // The defect: rows were keyed on the LINE's first itemId, so removing the
-  // first item changed the key, remounted the line, and silently cleared the
-  // SURVIVING item's flag.
+  // Guards Task 4's per-item row key. If a future change keys rows on the line's
+  // first itemId again, removing SN1 remounts SN2's row and this goes red.
+  // NOTE: getAllByRole("checkbox") also returns the two party DCSIM boxes, so
+  // scope to the Needs-service accessible name — do not index a mixed list.
   it("keeps the surviving item's flag when the first item of its line is removed", async () => {
     const user = userEvent.setup();
     renderForm(undefined, TWO_SAME);
 
-    const flags = screen.getAllByRole("checkbox", { name: /Needs service/i });
-    await user.click(flags[1]); // flag SN2
-    expect((screen.getAllByRole("checkbox", { name: /Needs service/i })[1] as HTMLInputElement).checked).toBe(true);
+    const flags = () => screen.getAllByRole("checkbox", { name: /Needs service/i });
+    expect(flags()).toHaveLength(2);
+    await user.click(flags()[1]); // flag SN2 (the second item)
+    expect((flags()[1] as HTMLInputElement).checked).toBe(true);
 
     await user.click(screen.getByRole("button", { name: /Remove Dell L5420, serial SN1/i }));
 
-    const left = screen.getAllByRole("checkbox", { name: /Needs service/i });
+    const left = flags();
     expect(left).toHaveLength(1);
     expect((left[0] as HTMLInputElement).checked).toBe(true);
   });
@@ -913,158 +946,87 @@ describe("ReceiptBuilderForm — service flags survive a list change", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [ ] **Step 2: Run the tests — they should PASS immediately**
 
 ```bash
 npm run test:ui
 ```
 
-Expected: FAIL — the surviving checkbox reports unchecked after the removal.
+Expected: PASS. That is correct here — the fix already shipped in Task 4, and these tests
+guard it. If either FAILS, Task 4's row key regressed; fix the key, not the test.
 
-- [ ] **Step 3: Make `ServiceControls` controlled**
+To prove the guard actually bites (optional, recommended once): temporarily change the row
+key in `ReceiptBuilderForm.tsx` back to `key={ln.itemIds[0]}` and confirm the first test
+goes red, then revert. A guard you never saw fail is a guard you don't know works.
 
-Replace the local `ServiceControls` (lines 156-212):
-
-```tsx
-export type ServiceSel = { needs: boolean; type: string; note: string };
-const NO_SERVICE: ServiceSel = { needs: false, type: "REIMAGE", note: "" };
-
-// Per-serial "Needs service?" capture. Field names are namespaced by itemId so
-// parseServiceMap can reconstruct the per-item selection server-side.
-//
-// The selection is held by the FORM, keyed by itemId — not here. Rows are
-// grouped into lines, so removing a line's first item changes that line's shape
-// and remounts its rows; local state would silently clear a SURVIVING item's
-// flag. Same reasoning as the lifted party fields above.
-function ServiceControls({ itemId, sel, onChange }: { itemId: string; sel: ServiceSel; onChange: (patch: Partial<ServiceSel>) => void }) {
-  return (
-    <div className="row" style={{ gap: 8 }}>
-      <label className="row" style={{ gap: 6, whiteSpace: "nowrap" }}>
-        <input
-          type="checkbox"
-          name={`service[${itemId}][needs]`}
-          checked={sel.needs}
-          onChange={(e) => onChange({ needs: e.target.checked })}
-        />
-        Needs service?
-      </label>
-      {sel.needs && (
-        <div className="row" style={{ gap: 6, flexWrap: "wrap", flex: "1 1 auto", minWidth: 0 }}>
-          <select
-            className="select"
-            style={{ width: "auto", minWidth: 130 }}
-            name={`service[${itemId}][type]`}
-            value={sel.type}
-            onChange={(e) => onChange({ type: e.target.value })}
-            aria-label="Service type"
-          >
-            {SERVICE_TYPE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-          {sel.type === "OTHER" && (
-            // width:auto overrides the global `.input { width: 100% }`, which
-            // would otherwise claim a whole flex line and push the type select
-            // onto its own row regardless of how much space the column has.
-            <input
-              className="input"
-              style={{ width: "auto", flex: "1 1 200px", minWidth: 200 }}
-              name={`service[${itemId}][note]`}
-              placeholder="Describe the service needed"
-              aria-label="Describe the service needed"
-              value={sel.note}
-              onChange={(e) => onChange({ note: e.target.value })}
-              required
-            />
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-```
-
-- [ ] **Step 4: Hold the selections in the form**
-
-Add below `qtyEdits`:
-
-```tsx
-  const [service, setService] = useState<Record<string, ServiceSel>>({});
-  const serviceFor = (itemId: string) => service[itemId] ?? NO_SERVICE;
-  const setServiceFor = (itemId: string, patch: Partial<ServiceSel>) =>
-    setService((prev) => ({ ...prev, [itemId]: { ...(prev[itemId] ?? NO_SERVICE), ...patch } }));
-```
-
-And drop a removed item's selection, so removing then re-scanning starts from an honest default rather than resurrecting a stale flag. Replace `removeItem` from Task 4:
-
-```tsx
-  const removeItem = (itemId: string) => {
-    setItems((prev) => prev.filter((i) => i.itemId !== itemId));
-    setService((prev) => {
-      const next = { ...prev };
-      delete next[itemId];
-      return next;
-    });
-  };
-```
-
-- [ ] **Step 5: Wire the call site**
-
-In the `<tbody>`, replace the Service cell:
-
-```tsx
-                      <td className="is-stacked" data-label="Service">
-                        <ServiceControls itemId={itemId} sel={serviceFor(itemId)} onChange={(p) => setServiceFor(itemId, p)} />
-                      </td>
-```
-
-- [ ] **Step 6: Run the tests**
+- [ ] **Step 3: Commit**
 
 ```bash
-npm run test:ui
-```
-
-Expected: PASS.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add src/app/receipts/new/ReceiptBuilderForm.tsx src/app/receipts/new/ReceiptBuilderForm.test.tsx
-git commit -m "fix(receipts): a service flag survives a sibling's removal"
+git add src/app/receipts/new/ReceiptBuilderForm.test.tsx
+git commit -m "test(receipts): pin the row key that keeps a service flag through a sibling removal"
 ```
 
 ---
 
 ### Task 7: A signature attests to a specific item list (defect #3)
 
-The integrity rule. Do not skip its test — it guards a custody document, not a nicety.
+The integrity rule, and the one the review hit hardest. Two failure modes it must cover,
+BOTH of which the first draft missed:
+
+1. **The DCSIM path is the common case, not an edge.** `receipts/new/page.tsx:33` passes
+   `signatures={[]}` to any non-ADMIN operator, so a DCSIM recipient's field renders
+   `TechnicianSignatureField` in its DRAW state every time. That component exports its own
+   `onChange` (`TechnicianSignatureField.tsx:35,50`), and if the builder doesn't wire it,
+   the `key` remount wipes the ink with **no notice** — the exact silent-glitch this rule
+   exists to prevent. So `onChange` must be wired to BOTH signature components.
+2. **The test must see the ink actually clear, not just the notice.** A mock with a
+   constant hidden-input value can't tell "remounted and blanked" from "notice appeared" —
+   delete `key={itemsKey}` and it stays green. The mocks below reflect the drawn/picked
+   value into the input so a test asserts `value === ""` after a list change.
 
 **Files:**
 - Modify: `src/app/receipts/new/ReceiptBuilderForm.tsx`
 - Modify: `src/app/receipts/new/ReceiptBuilderForm.test.tsx:17-26` (the signature mocks)
 
 **Interfaces:**
-- Consumes: `SignaturePad`'s existing optional `onChange?: (dataUrl: string) => void` (`components/SignaturePad.tsx:7`) — already reports on stroke-end and on clear. No change needed to that component.
+- Consumes: `SignaturePad.onChange?: (dataUrl: string) => void` (`SignaturePad.tsx:7`, fires on stroke-end and clear) AND `TechnicianSignatureField.onChange?: (value: string) => void` / `onPickedChange?: (id: string | null) => void` (`TechnicianSignatureField.tsx:35-36,50-51`). No change to either component.
 
-- [ ] **Step 1: Teach the mocks to sign**
+- [ ] **Step 1: Teach the mocks to sign, draw, and pick**
 
-Replace the two mocks at `ReceiptBuilderForm.test.tsx:17-26`:
+Replace the two mocks at `ReceiptBuilderForm.test.tsx:17-26`. Both reflect their value into
+the hidden input via an UNCONTROLLED `defaultValue=""` set imperatively on click — so a
+`key` remount recreates the input blank, exactly as the real canvas + hidden input do. No
+`React` import needed in the hoisted factory (no hooks used).
 
 ```tsx
-// jsdom has no canvas. The extra button lets a test drive onChange — which the
-// real pad fires on stroke-end and on clear (SignaturePad.tsx:21, :28) —
-// without one.
+// jsdom has no canvas. These stand-ins mirror the real components' report paths
+// (SignaturePad.tsx:21,28 and TechnicianSignatureField.tsx:50-51) so a test can
+// drive signing without one — and reflect the value into the hidden input so a
+// test can prove the ink is DISCARDED on a list change, not just that a notice
+// shows. defaultValue (uncontrolled) resets to "" on the key remount.
 vi.mock("@/components/SignaturePad", () => ({
   SignaturePad: ({ name, onChange }: { name: string; onChange?: (dataUrl: string) => void }) => (
     <>
-      <input type="hidden" name={name} value="data:image/png;base64,AAAA" readOnly />
-      <button type="button" onClick={() => onChange?.("data:image/png;base64,DRAWN")}>simulate-sign</button>
+      <input type="hidden" name={name} defaultValue="" />
+      <button type="button" onClick={() => {
+        (document.querySelector(`input[name="${name}"]`) as HTMLInputElement).value = "data:image/png;base64,DRAWN";
+        onChange?.("data:image/png;base64,DRAWN");
+      }}>simulate-sign</button>
     </>
   ),
 }));
 vi.mock("@/components/TechnicianSignatureField", () => ({
-  TechnicianSignatureField: ({ name }: { name: string }) => (
-    <input type="hidden" name={name} value="data:image/png;base64,AAAA" readOnly />
+  TechnicianSignatureField: ({ name, onChange, onPickedChange }: { name: string; onChange?: (v: string) => void; onPickedChange?: (id: string | null) => void }) => (
+    <>
+      <input type="hidden" name={name} defaultValue="" />
+      {/* DCSIM recipient DRAWS (the common case: signatures=[] for non-admins) */}
+      <button type="button" onClick={() => {
+        (document.querySelector(`input[name="${name}"]`) as HTMLInputElement).value = "data:image/png;base64,DRAWN";
+        onChange?.("data:image/png;base64,DRAWN");
+      }}>dcsim-draw</button>
+      {/* DCSIM recipient PICKS a saved signature: reports both signals, like the real one */}
+      <button type="button" onClick={() => { onPickedChange?.("sig-1"); onChange?.("data:image/png;base64,PICKED"); }}>dcsim-pick</button>
+    </>
   ),
 }));
 ```
@@ -1079,20 +1041,26 @@ describe("ReceiptBuilderForm — a signature attests to a specific item list", (
     { itemId: "i1", make: "Dell", model: "L5420", serialNumber: "SN1", holderName: null },
     { itemId: "i2", make: "HP", model: "G8", serialNumber: "SN2", holderName: null },
   ];
+  const sig = (c: HTMLElement) => c.querySelector('input[name="receiverSignature"]') as HTMLInputElement;
 
   // Today the list is frozen at mount, so signing last is inherently safe. Once
   // a scan can grow it, an operator can have the recipient sign and THEN add
   // laptops — filing a receipt with a signature over a list the signer never
   // saw. So a list change invalidates the ink.
-  it("clears the signature and says why when the list changes", async () => {
+  it("clears the DRAWN signature (ink, not just the notice) when the list changes", async () => {
     const user = userEvent.setup();
-    renderForm(undefined, TWO);
+    const { container } = renderForm(undefined, TWO);
 
     await user.click(screen.getByRole("button", { name: "simulate-sign" }));
+    expect(sig(container).value).toBe("data:image/png;base64,DRAWN");
     expect(screen.queryByText(/please sign again/i)).toBeNull();
 
     await user.click(screen.getByRole("button", { name: /Remove HP G8, serial SN2/i }));
 
+    // The ink is GONE — proves key={itemsKey} remounted the pad. Deleting that
+    // key leaves this line red while the notice still appears; that is the whole
+    // point of asserting the value, not just the message.
+    expect(sig(container).value).toBe("");
     expect(await screen.findByText(/Items changed — please sign again/i)).toBeDefined();
   });
 
@@ -1114,6 +1082,37 @@ describe("ReceiptBuilderForm — a signature attests to a specific item list", (
     expect(await screen.findByText(/please sign again/i)).toBeDefined();
 
     await user.click(screen.getByRole("button", { name: "simulate-sign" }));
+    expect(screen.queryByText(/please sign again/i)).toBeNull();
+  });
+
+  // The COMMON case: a DCSIM recipient with no saved signatures draws. If onChange
+  // is not wired to TechnicianSignatureField, the remount wipes the ink with NO
+  // notice — the silent glitch the rule exists to prevent.
+  it("clears a DCSIM recipient's DRAWN signature, with the notice", async () => {
+    const user = userEvent.setup();
+    const { container } = renderForm(undefined, TWO);
+    await user.click(dcsimBox("Recipient")); // recipient is DCSIM -> TechnicianSignatureField
+    await user.click(screen.getByRole("button", { name: "dcsim-draw" }));
+    expect(sig(container).value).toBe("data:image/png;base64,DRAWN");
+
+    await user.click(screen.getByRole("button", { name: /Remove HP G8, serial SN2/i }));
+
+    expect(sig(container).value).toBe("");
+    expect(await screen.findByText(/Items changed — please sign again/i)).toBeDefined();
+  });
+
+  // A picked saved signature is also an attestation to a list. And the notice must
+  // CLEAR on re-pick, or it sticks forever under a valid, freshly-picked signature.
+  it("clears a DCSIM recipient's PICKED signature and drops the notice on re-pick", async () => {
+    const user = userEvent.setup();
+    renderForm(undefined, TWO);
+    await user.click(dcsimBox("Recipient"));
+    await user.click(screen.getByRole("button", { name: "dcsim-pick" }));
+
+    await user.click(screen.getByRole("button", { name: /Remove HP G8, serial SN2/i }));
+    expect(await screen.findByText(/please sign again/i)).toBeDefined();
+
+    await user.click(screen.getByRole("button", { name: "dcsim-pick" }));
     expect(screen.queryByText(/please sign again/i)).toBeNull();
   });
 });
@@ -1179,12 +1178,19 @@ Replace the recipient-signature fieldset (lines 291-306):
         {receiverIsDcsim ? (
           // A DCSIM recipient is our own technician at the desk, so they may pick
           // their saved signature. An outside recipient must always draw in person.
+          // onChange IS wired here, not only onPickedChange: without it a DCSIM
+          // recipient's DRAWN ink (the common case — signatures=[] for non-admins,
+          // so this field is always in draw state for them) is wiped by the remount
+          // with no "please sign again" notice. onChange fires for both a draw and
+          // a pick (TechnicianSignatureField.tsx:47,50), so it feeds hasSignature
+          // and resets sigCleared on a re-pick.
           <TechnicianSignatureField
             key={itemsKey}
             name="receiverSignature"
             signatures={signatures}
             label="Who received it?"
             drawHint={null}
+            onChange={onSignatureChange}
             onPickedChange={setPickedId}
           />
         ) : (
@@ -1216,11 +1222,13 @@ git commit -m "fix(receipts): changing the item list invalidates the signature"
 **Files:**
 - Create: `src/components/QrScanner.tsx`
 - Create: `src/lib/beep.ts`
-- Modify: `package.json` (dependency)
-- Modify: `src/app/globals.css` (sheet styles)
+- Create: `scripts/copy-wasm.mjs`
+- Modify: `package.json` (dependency + `dev`/`build` scripts)
+- Modify: `.gitignore` (`/public/wasm/`)
+- Modify: `src/app/globals.css` (sheet + `.scan-add` styles)
 
 **Interfaces:**
-- Produces: `<QrScanner onDecode={(text: string) => void} onClose={() => void} />`. It emits raw decoded strings and knows nothing about items — that boundary is what makes it reusable for the returns flow and testable on its own.
+- Produces: `<QrScanner onDecode={(text: string) => void} onClose={() => void} notice?={{ kind: "ok" | "err"; text: string } | null} />`. It emits raw decoded strings and renders `notice` over the video; it knows nothing about items — that boundary is what makes it reusable for the returns flow and testable on its own.
 - Produces: `beep(kind: "ok" | "err"): void`.
 
 - [ ] **Step 1: Add the dependency**
@@ -1274,9 +1282,10 @@ Create `src/components/QrScanner.tsx`:
 "use client";
 import { useEffect, useRef, useState } from "react";
 
-type Props = { onDecode: (text: string) => void; onClose: () => void };
+type Notice = { kind: "ok" | "err"; text: string } | null;
+type Props = { onDecode: (text: string) => void; onClose: () => void; notice?: Notice };
 
-type Status = "starting" | "running" | "denied" | "unavailable";
+type Status = "starting" | "running" | "denied" | "unavailable" | "loadfailed";
 
 // A camera sheet that emits decoded strings. It owns the media stream and the
 // decode loop and NOTHING else — no knowledge of items, receipts, or the
@@ -1284,7 +1293,10 @@ type Status = "starting" | "running" | "denied" | "unavailable";
 //
 // Rendered as an OVERLAY, never a route. Routing away from the builder would
 // remount it and discard the drawn signature and every typed field.
-export function QrScanner({ onDecode, onClose }: Props) {
+//
+// `notice` is rendered ON TOP of the sheet: the sheet is opaque and full-screen,
+// so scan feedback left in the form behind it is invisible when it fires.
+export function QrScanner({ onDecode, onClose, notice }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [status, setStatus] = useState<Status>("starting");
   // Kept in a ref so the effect below subscribes ONCE and never re-binds on an
@@ -1320,13 +1332,40 @@ export function QrScanner({ onDecode, onClose }: Props) {
       if (!video) return;
       video.srcObject = stream;
       await video.play().catch(() => {});
-      setStatus("running");
 
       // Lazy: pulls zxing-wasm only when the sheet actually opens, keeping it
       // out of the builder's initial bundle. `/ponyfill` exports the class
-      // without patching globals (`/polyfill` is the global-patching variant).
-      const { BarcodeDetector } = await import("barcode-detector/ponyfill");
-      const detector = new BarcodeDetector({ formats: ["qr_code"] });
+      // without patching globals (`/polyfill` is the global-patching variant),
+      // and re-exports prepareZXingModule from zxing-wasm.
+      const { BarcodeDetector, prepareZXingModule } = await import("barcode-detector/ponyfill");
+      // Serve the .wasm from OUR origin, NOT the default jsDelivr CDN. The npm
+      // tarball is what package-lock.json hashes and `npm audit` covers; the CDN
+      // copy is a DIFFERENT, unverified binary — and it fails silently offline.
+      // The verified copy is staged into public/wasm by scripts/copy-wasm.mjs
+      // (Step 4a). locateFile receives the bare filename "zxing_reader.wasm".
+      prepareZXingModule({
+        overrides: {
+          locateFile: (path: string, prefix: string) =>
+            path.endsWith(".wasm") ? `/wasm/${path}` : `${prefix}${path}`,
+        },
+      });
+
+      let detector: InstanceType<typeof BarcodeDetector>;
+      try {
+        detector = new BarcodeDetector({ formats: ["qr_code"] });
+        // Force the module to load NOW, against a throwaway 1×1 canvas, so a
+        // failure (offline, blocked CSP, missing wasm) surfaces as a visible
+        // status instead of being swallowed frame-by-frame in tick() — which
+        // would leave the camera previewing forever while nothing ever decodes.
+        const probe = document.createElement("canvas");
+        probe.width = probe.height = 1;
+        await detector.detect(probe);
+      } catch {
+        setStatus("loadfailed");
+        return;
+      }
+      if (stopped) return;
+      setStatus("running");
 
       const tick = async () => {
         if (stopped) return;
@@ -1334,7 +1373,7 @@ export function QrScanner({ onDecode, onClose }: Props) {
           const hits = await detector.detect(video);
           if (hits[0]?.rawValue) onDecodeRef.current(hits[0].rawValue);
         } catch {
-          // A frame that fails to decode is the normal case, not an error.
+          // A frame that fails to decode is normal; the module already loaded.
         }
         if (!stopped) raf = requestAnimationFrame(tick);
       };
@@ -1368,6 +1407,18 @@ export function QrScanner({ onDecode, onClose }: Props) {
         {status === "unavailable" && (
           <p className="scan-sheet__msg" role="alert">
             This device has no camera available. Pick items from the Items list instead.
+          </p>
+        )}
+        {status === "loadfailed" && (
+          <p className="scan-sheet__msg" role="alert">
+            The scanner failed to load — check your connection and try again, or pick items
+            from the Items list instead.
+          </p>
+        )}
+        {/* Scan feedback, on top of the video. */}
+        {notice && (
+          <p className={`scan-sheet__notice ${notice.kind === "ok" ? "alert-success" : "alert-error"}`} role="status" aria-live="polite">
+            {notice.text}
           </p>
         )}
       </div>
@@ -1426,14 +1477,89 @@ Append to `src/app/globals.css`. The sheet is new surface outside any table, so 
   background: var(--surface);
   border-radius: var(--radius-sm);
 }
+/* Scan feedback, pinned over the video near the bottom of the frame so it does
+   not cover the aiming area. Full-width band, readable at a glance. */
+.scan-sheet__notice {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  margin: 0;
+  text-align: center;
+}
 .scan-sheet .btn {
   min-height: var(--tap-lg);
 }
+
+/* The "Scan to add" button. Static in the items card on desktop; on a phone it
+   lifts to a fixed thumb-reachable bar at the bottom of the viewport, so it is
+   reachable one-handed (laptop in the other) without scrolling past a long item
+   list. env(safe-area-inset-bottom) clears the iPhone home indicator. */
+@media (max-width: 720px) {
+  .scan-add {
+    position: fixed;
+    left: 16px;
+    right: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom));
+    z-index: 40;
+    min-height: var(--tap-lg);
+    box-shadow: var(--shadow-md);
+  }
+}
 ```
+
+- [ ] **Step 4a: Stage the WASM from the locked package, not the CDN**
+
+The scanner overrides `locateFile` to load `/wasm/zxing_reader.wasm` from our own
+origin. Something must put the **lockfile-verified** binary there — and it must be
+regenerated on every build so it can never drift from the installed package. A
+build script does that; do NOT hand-copy-and-commit the binary (a stale commit
+would silently serve a different version than `npm audit` covers).
+
+Create `scripts/copy-wasm.mjs`:
+
+```js
+// Stage the installed zxing-wasm reader binary into public/ so QrScanner serves
+// it same-origin instead of the default jsDelivr CDN. Resolving through the
+// package's own package.json guarantees this is the copy package-lock.json
+// pinned and `npm audit` covers — the audited artifact and the executed
+// artifact are then the same file. Runs before dev and build.
+import { copyFileSync, mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+
+const require = createRequire(import.meta.url);
+const src = join(dirname(require.resolve("zxing-wasm/package.json")), "dist/reader/zxing_reader.wasm");
+mkdirSync("public/wasm", { recursive: true });
+copyFileSync(src, "public/wasm/zxing_reader.wasm");
+console.log(`[copy-wasm] ${src} -> public/wasm/zxing_reader.wasm`);
+```
+
+Wire it into `package.json` scripts so both dev and the Vercel build stage it:
+
+```json
+    "dev": "node scripts/copy-wasm.mjs && next dev",
+    "build": "node scripts/copy-wasm.mjs && prisma generate && next build",
+```
+
+Ignore the generated copy — it is a build artifact, never committed. Append to `.gitignore`:
+
+```
+/public/wasm/
+```
+
+Run it once now so local dev and Task 10 work:
+
+```bash
+node scripts/copy-wasm.mjs
+ls public/wasm/zxing_reader.wasm
+```
+
+Expected: the file exists.
 
 - [ ] **Step 5: Verify it builds and lints**
 
-There is no jsdom test here: jsdom has no camera, no WASM, and no layout. The decode loop is verified in a real browser in Task 10.
+There is no jsdom test here: jsdom has no camera, no WASM, and no layout. The decode loop and the same-origin WASM fetch are verified in a real browser in Task 10.
 
 ```bash
 npx tsc --noEmit
@@ -1444,9 +1570,11 @@ Expected: 0 errors.
 
 - [ ] **Step 6: Commit**
 
+`package-lock.json` is included; the staged WASM under `public/wasm/` is gitignored.
+
 ```bash
-git add package.json package-lock.json src/components/QrScanner.tsx src/lib/beep.ts src/app/globals.css
-git commit -m "feat(scan): a camera sheet that emits decoded QR text"
+git add package.json package-lock.json scripts/copy-wasm.mjs .gitignore src/components/QrScanner.tsx src/lib/beep.ts src/app/globals.css
+git commit -m "feat(scan): a camera sheet that emits decoded QR text, self-hosted wasm"
 ```
 
 ---
@@ -1471,11 +1599,13 @@ vi.mock("@/app/actions/scan", () => ({
   lookupScannedItem: (id: string) => lookupScannedItem(id),
 }));
 // The camera is not what these tests are about. This stands in for it: a button
-// per fixture that emits one decoded string.
+// per fixture that emits one decoded string. (`notice` is accepted and ignored
+// here — it's exercised in the real browser, Task 10.)
 vi.mock("@/components/QrScanner", () => ({
-  QrScanner: ({ onDecode, onClose }: { onDecode: (t: string) => void; onClose: () => void }) => (
+  QrScanner: ({ onDecode, onClose }: { onDecode: (t: string) => void; onClose: () => void; notice?: unknown }) => (
     <div>
       <button type="button" onClick={() => onDecode("https://x.example/i/i2")}>emit-i2</button>
+      <button type="button" onClick={() => onDecode("https://x.example/i/i3")}>emit-i3</button>
       <button type="button" onClick={() => onDecode("https://x.example/i/i1")}>emit-i1</button>
       <button type="button" onClick={() => onDecode("WIFI:S:Guest;;")}>emit-junk</button>
       <button type="button" onClick={onClose}>emit-close</button>
@@ -1574,8 +1704,10 @@ describe("ReceiptBuilderForm — scanning adds items", () => {
     expect(await screen.findByText(/Couldn't look up that item — try again/i)).toBeDefined();
   });
 
-  // A QR sitting in frame decodes many times a second.
-  it("ignores a repeat decode of the same code", async () => {
+  // A QR sitting in frame decodes many times a second. The SECOND decode here
+  // is caught by the duplicate-item check (i2 is already on the list) — that is
+  // fine, but it does not exercise the time-window dedupe. The next test does.
+  it("does not add the same item twice from repeated decodes", async () => {
     const user = userEvent.setup();
     renderForm();
     await openScanner(user);
@@ -1584,6 +1716,44 @@ describe("ReceiptBuilderForm — scanning adds items", () => {
     await user.click(screen.getByRole("button", { name: "emit-i2" }));
 
     expect(lookupScannedItem).toHaveBeenCalledTimes(1);
+  });
+
+  // Concurrency safety — the CRITICAL bug the review caught. The decode loop
+  // fires onDecode without awaiting, so two lookups can be in flight at once. A
+  // handler that appended from a captured `items` snapshot would let the second
+  // resolution overwrite the first and silently drop a laptop off a custody
+  // document, AFTER the operator heard the beep confirming it. The `looking`
+  // guard serializes lookups; the live-ref append composes. With a DEFERRED
+  // first lookup, the overlapping second decode is dropped (not confirmed, so
+  // never falsely reported), and once the first resolves a re-emit of the
+  // second lands ON TOP of it — both items survive.
+  it("never drops a confirmed item when two scans overlap", async () => {
+    const user = userEvent.setup();
+    const HP3 = { ok: true as const, item: { id: "i3", make: "Acer", model: "A1", serialNumber: "SN3" }, holderName: null };
+    let releaseI2: (v: typeof HP) => void = () => {};
+    lookupScannedItem.mockImplementation((id: string) =>
+      id === "i2" ? new Promise((r) => { releaseI2 = r; }) : Promise.resolve(HP3));
+
+    renderForm();
+    await openScanner(user);
+    await user.click(screen.getByRole("button", { name: "emit-i2" })); // in flight, not resolved
+    await user.click(screen.getByRole("button", { name: "emit-i3" })); // overlaps -> dropped by the guard
+    expect(screen.queryByText("SN3")).toBeNull();
+
+    releaseI2(HP);                        // i2 resolves and is added
+    expect(await screen.findByText("SN2")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "emit-i3" })); // re-scan i3, now free
+    expect(await screen.findByText("SN3")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "emit-close" }));
+
+    await fillParty(user, "Sender");
+    await fillParty(user, "Recipient");
+    await user.click(screen.getByRole("button", { name: /Create hand receipt/i }));
+    await waitFor(() => expect(createReceiptAction).toHaveBeenCalled());
+
+    // BOTH survive: i2 was not clobbered by i3 landing on a stale snapshot.
+    const posted = createReceiptAction.mock.calls[0][1] as FormData;
+    expect(posted.getAll("itemId")).toEqual(["i1", "i2", "i3"]);
   });
 
   // Per the spec: added, not blocked — a dead end at the cart is worse. But the
@@ -1650,7 +1820,9 @@ import { beep } from "@/lib/beep";
 
 - [ ] **Step 4: Implement the scan handler**
 
-Add to `ReceiptBuilderForm`, after `removeItem`:
+Add to `ReceiptBuilderForm`, after `removeItem`.
+
+**This is the concurrency-critical code.** `QrScanner`'s decode loop (Task 8) calls `onDecode` WITHOUT awaiting it, then immediately schedules the next frame — so two different stickers scanned a few hundred ms apart overlap. A handler that read `items` from its render closure, awaited the server, then did `setItems([...items, new])` would build the new list from the PRE-await snapshot: scan A resolves and adds A, scan B (which captured the list before A landed) resolves and overwrites with `[...oldList, B]`, and **A is silently gone from a custody document** — after the operator already heard the beep confirming it. So: one lookup at a time (`looking` ref), read the live list through a ref (never a stale closure), and re-check for a raced duplicate inside the final append.
 
 ```tsx
   const [scanning, setScanning] = useState(false);
@@ -1658,11 +1830,24 @@ Add to `ReceiptBuilderForm`, after `removeItem`:
   // A QR sitting in frame decodes many times a second, so the same id inside
   // this window is the camera repeating itself, not a second laptop.
   const lastDecode = useRef<{ id: string; at: number }>({ id: "", at: 0 });
+  // Serializes lookups. The decode loop fires onDecode without awaiting, so
+  // without this two different ids interleave their read-modify-write of the
+  // item list and the second drops the first. One in flight at a time.
+  const looking = useRef(false);
+  // Mirrors `items` so onDecode reads the LIVE list across its await instead of
+  // the snapshot its closure captured. Updated on every render, and eagerly
+  // after an append so a second scan landing before the next render still sees
+  // the first.
+  const itemsRef = useRef(items);
+  useEffect(() => { itemsRef.current = items; }, [items]);
 
   const say = (kind: "ok" | "err", text: string) => {
     setToast({ kind, text });
     beep(kind);
   };
+
+  const holderNote = (holder: string | null) =>
+    holder && senderName && holder !== senderName ? ` — held by ${holder}, not ${senderName}` : "";
 
   // Every refusal KEEPS the camera open: rapid-fire only works if a bad scan is
   // a blip, not a dead end.
@@ -1671,57 +1856,78 @@ Add to `ReceiptBuilderForm`, after `removeItem`:
     // Rejected client-side, so a stray barcode never costs a round trip.
     if (!id) return say("err", "Not an item code");
 
+    if (looking.current) return; // a lookup is already in flight; drop this frame
+
+    // Time-window dedupe: the same id within 1.5s of the last PROCESSED decode is
+    // the camera repeating a QR still in frame. Checked AFTER the in-flight guard
+    // and recorded only when we actually proceed — otherwise a decode dropped for
+    // concurrency would arm the window against its own retry and suppress a
+    // legitimate item for up to 1.5s.
     const now = Date.now();
     if (lastDecode.current.id === id && now - lastDecode.current.at < 1500) return;
     lastDecode.current = { id, at: now };
 
-    const dup = items.find((i) => i.itemId === id);
-    if (dup) return say("err", `Already added — ${dup.make} ${dup.model} · SN ${dup.serialNumber}`);
+    looking.current = true;
+    try {
+      const dup = itemsRef.current.find((i) => i.itemId === id);
+      if (dup) return say("err", `Already added — ${dup.make} ${dup.model} · SN ${dup.serialNumber}`);
 
-    const res = await lookupScannedItem(id);
-    if (!res.ok) {
-      const msg: Record<typeof res.code, string> = {
-        NOT_FOUND: "That item no longer exists",
-        RETIRED: "That item is retired and can't be transferred",
-        UNAUTHORIZED: "Your session expired — sign in again",
-        FAILED: "Couldn't look up that item — try again",
+      const res = await lookupScannedItem(id);
+      if (!res.ok) {
+        const msg: Record<typeof res.code, string> = {
+          NOT_FOUND: "That item no longer exists",
+          RETIRED: "That item is retired and can't be transferred",
+          UNAUTHORIZED: "Your session expired — sign in again",
+          FAILED: "Couldn't look up that item — try again",
+        };
+        return say("err", msg[res.code]);
+      }
+
+      const newItem: BuilderItem = {
+        itemId: res.item.id, make: res.item.make, model: res.item.model,
+        serialNumber: res.item.serialNumber, holderName: res.holderName,
       };
-      return say("err", msg[res.code]);
-    }
+      // Built from the LIVE list (itemsRef), not a captured snapshot.
+      const next = [...itemsRef.current, newItem];
+      // The server gate on load swaps the whole form for a card
+      // (receipts/new/page.tsx:52-55). Doing that here would destroy a
+      // half-filled form, so the SCAN is refused and the form left untouched.
+      // createTransfer remains the authority.
+      const nextLines = groupItemsIntoLines(next);
+      if (nextLines.length > MAX_RECEIPT_ROWS) return say("err", `This receipt is full — ${MAX_RECEIPT_ROWS} item types max`);
+      if (nextLines.some((l) => l.serials.length > MAX_ITEMS_PER_ROW)) {
+        return say("err", `Too many of one item — ${MAX_ITEMS_PER_ROW} per make and model max`);
+      }
 
-    const next: BuilderItem[] = [...items, { itemId: res.item.id, make: res.item.make, model: res.item.model, serialNumber: res.item.serialNumber, holderName: res.holderName }];
-    // The server gate on load swaps the whole form for a card
-    // (receipts/new/page.tsx:52-55). Doing that here would destroy a half-filled
-    // form, so the SCAN is refused instead and the form is left untouched.
-    // createTransfer remains the authority.
-    const nextLines = groupItemsIntoLines(next);
-    if (nextLines.length > MAX_RECEIPT_ROWS) return say("err", `This receipt is full — ${MAX_RECEIPT_ROWS} item types max`);
-    if (nextLines.some((l) => l.serials.length > MAX_ITEMS_PER_ROW)) {
-      return say("err", `Too many of one item — ${MAX_ITEMS_PER_ROW} per make and model max`);
+      itemsRef.current = next; // eager, so a scan landing before re-render sees it
+      setItems(next);
+      // Spec: the mixed-holder warning does double duty — a toast at scan time
+      // AND a persistent row marker (added below). This is the toast half.
+      say("ok", `Added: ${newItem.make} ${newItem.model} · SN ${newItem.serialNumber}${holderNote(newItem.holderName)}`);
+    } finally {
+      looking.current = false;
     }
-
-    setItems(next);
-    say("ok", `Added: ${res.item.make} ${res.item.model} · SN ${res.item.serialNumber}`);
   };
 ```
 
-Add `useRef` to the React import if it is not already there (it is, from line 2).
+`useEffect` and `useRef` are already imported (line 2).
 
 - [ ] **Step 5: Render the button, the toast, and the sheet**
 
-Replace the items `<fieldset>` opening (lines 252-254) so the legend row carries the scan button:
+Replace the items `<fieldset>` opening (lines 252-254). **`<legend>` MUST be a direct child of `<fieldset>`** — wrapping it in a `<div>` strips the fieldset's accessible name, which is the exact a11y regression `b094448` just fixed elsewhere. So the legend stays bare and the button is a following sibling (it becomes the fixed-bottom control on mobile via `.scan-add`, styled in Task 8):
 
 ```tsx
       <fieldset className="card stack-sm">
-        <div className="row">
-          <legend className="card__title">Items ({lines.length} {lines.length === 1 ? "row" : "rows"})</legend>
-          <span className="spacer" />
-          {/* "Scan to add", not "Scan": the phone's own camera app also scans
-              these stickers, but it can only OPEN the item page — it cannot feed
-              a form that is already open. Naming the action keeps the two apart. */}
-          <button type="button" className="btn btn-secondary" onClick={() => setScanning(true)}>Scan to add</button>
-        </div>
-        {toast && (
+        <legend className="card__title">Items ({lines.length} {lines.length === 1 ? "row" : "rows"})</legend>
+        {/* "Scan to add", not "Scan": the phone's own camera app also scans these
+            stickers, but it can only OPEN the item page — it cannot feed a form
+            that is already open. Naming the action keeps the two apart. */}
+        <button type="button" className="btn btn-secondary scan-add" onClick={() => setScanning(true)}>Scan to add</button>
+        {/* Shown here for when the sheet is CLOSED. While the sheet is open it
+            covers this, so the same toast is ALSO rendered inside the sheet
+            (below) — otherwise every scan message fires behind an opaque
+            overlay and the operator never sees one. */}
+        {toast && !scanning && (
           <p role="status" aria-live="polite" className={toast.kind === "ok" ? "alert-success" : "alert-error"}>{toast.text}</p>
         )}
 ```
@@ -1740,7 +1946,9 @@ Add the holder marker to the serial cell in the `<tbody>`, replacing the serial 
                       </td>
 ```
 
-And define `holderWarning` next to `serviceFor`:
+And define `holderWarning` next to `holderNote` (from Step 4). It is the persistent
+row-marker half of the spec's mixed-holder warning; `holderNote` is the scan-time toast
+half. Both key off the same rule:
 
 ```tsx
   // Warns only when a sender name is present AND differs: an item never
@@ -1754,11 +1962,13 @@ And define `holderWarning` next to `serviceFor`:
   };
 ```
 
-Finally, render the sheet just before the closing `</form>`:
+Finally, render the sheet just before the closing `</form>`. Pass the toast in as `notice` so it renders OVER the video — the sheet is opaque and full-screen, so a toast left in the form behind it is invisible exactly when it fires:
 
 ```tsx
-      {scanning && <QrScanner onDecode={onDecode} onClose={() => setScanning(false)} />}
+      {scanning && <QrScanner onDecode={onDecode} onClose={() => setScanning(false)} notice={toast} />}
 ```
+
+This requires `QrScanner` to accept and render `notice` — added in Task 8. (Task 8 is authored before this task; if executing strictly in order, its `notice` prop already exists.)
 
 - [ ] **Step 6: Run the tests**
 
@@ -1801,6 +2011,7 @@ Confirm, with DOM measurement rather than eyeballing:
 - The Remove button is left-aligned inside the card, not pinned right — a pinned button means an inline `justifyContent` slipped in.
 - Every tap target ≥ 44px: check `getBoundingClientRect().height` on each `.btn` and `.btn-sm`.
 - A line holding two serials labels its quantity "Qty authorized (all 2 serials)".
+- The **"Scan to add" button is fixed to the bottom of the viewport** (not scrolled away with the item list), reachable with a thumb, and clears the home-indicator area.
 
 - [ ] **Step 3: Drive the camera in Chromium with a fake stream**
 
@@ -1810,11 +2021,16 @@ npx playwright test --headed  # or launch Chromium directly with the flags below
 
 Launch flags: `--use-fake-ui-for-media-stream --use-fake-device-for-media-stream --use-file-for-fake-video-capture=<a y4m of a known item QR>`.
 
-Confirm: the sheet opens; the code decodes; the row appears; the toast names the item; a second decode of the same code inside 1.5s does not add it twice; closing the sheet stops the stream (`videoRef.current.srcObject.getTracks()` are all `ended`).
+Confirm: the sheet opens; the code decodes; the row appears; **the toast naming the item is visible ON TOP of the sheet** (not hidden behind it — the bug that made every scan message invisible); a second decode of the same code inside 1.5s does not add it twice; closing the sheet stops the stream (`videoRef.current.srcObject.getTracks()` are all `ended`).
 
-- [ ] **Step 4: Measure the WASM payload**
+- [ ] **Step 4: Confirm the WASM is same-origin and measure it**
 
-In DevTools → Network, open the scanner and record the transfer size of the lazily-imported `zxing-wasm` chunk. Confirm it is NOT in the builder's initial bundle. If the size is unreasonable for field use over cellular, stop and raise it — `@zxing/browser` is the recorded fallback.
+This is the supply-chain check, not just a size check. In DevTools → Network, open the scanner and confirm:
+- The `.wasm` request goes to **our own origin** (`/wasm/zxing_reader.wasm`), with **no `jsdelivr.net` or `unpkg.com` request anywhere** — the default is the CDN, and `copy-wasm.mjs` + the `locateFile` override are what redirect it. If you see a CDN host, the override didn't take.
+- It is NOT in the builder's initial bundle (only loads when the sheet opens).
+- Record the transfer size. If it's unreasonable over cellular, raise it — `@zxing/browser` is the recorded fallback.
+
+Then verify offline behaviour: block `jsdelivr.net` in DevTools (or throttle to offline after the page loads, before opening the scanner) and confirm the scanner **still decodes** from the self-hosted copy, and that a genuine load failure shows the "scanner failed to load" message rather than a camera that previews forever while nothing decodes.
 
 - [ ] **Step 5: Verify on a real iPhone**
 
@@ -1855,20 +2071,56 @@ git commit -m "fix(scan): browser-verified corrections at 390x844"
 | Client-owned item list; no remount on scan | 4 |
 | Per-row remove | 4 |
 | `replaceState` URL sync (v1) | 4 |
-| Defect #1 — stale quantities | 5 |
-| Defect #2 — service flags reset on removal | 6 |
-| Defect #3 — signature attests to a list | 7 |
+| Defect #1 — stale quantities (+ override pruning) | 5 |
+| Defect #2 — service flags reset on removal (row-key guard) | 6 |
+| Defect #3 — signature attests to a list, **incl. DCSIM draw + pick** | 7 |
+| **Concurrent scans never drop a confirmed item** | 9 |
+| **Scan feedback visible over the sheet, not behind it** | 8, 9 |
 | `QrScanner`: playsInline, track cleanup, `facingMode`, lazy WASM | 8 |
+| **WASM self-hosted (not jsDelivr CDN); load-failure is visible** | 8 |
 | `barcode-detector`, validated | 8 |
 | Beep, no haptics | 8 |
-| Rapid-fire loop, dedupe, refusal table | 9 |
-| Mixed-holder warning: toast + persistent row marker | 9 |
+| Rapid-fire loop, dedupe (time-window), refusal table | 9 |
+| Mixed-holder warning: **scan-time toast + persistent row marker** | 9 |
+| Fixed-to-bottom mobile scan button | 8 (css), 9 (markup) |
 | Client-side limits refuse the scan, not the form | 9 |
+| `<legend>` accessible name preserved (no wrapping `<div>`) | 9 |
 | `data-label` / `.is-stacked` / `.actions--end` contract | 4, 8, 9, 10 |
 | Browser verification at 390×844 and 1280; real iPhone | 10 |
 
 **Not covered by any task, deliberately:** the `sessionStorage` snapshot (spec: *Deferred*), persisted drafts, and phone-as-peripheral. The spec defers all three.
 
-**Type consistency:** `BuilderItem` (Task 4) is used unchanged in Tasks 5, 6, 7, 9. `ScanLookup` (Task 3) is consumed in Task 9 with all four refusal codes handled. `ServiceSel` (Task 6) matches its `serviceFor`/`setServiceFor` call sites. `QtyInput`'s new signature (Task 5) is used at both call sites. `parseItemScan` returns `string | null`, and Task 9 branches on `!id`.
+**Type consistency:** `BuilderItem` (Task 4) is used unchanged in Tasks 5, 6, 7, 9. `ScanLookup` (Task 3) is consumed in Task 9 with all four refusal codes handled. `ServiceControls` keeps its `{ itemId }` signature (Task 6 makes no production change). `QtyInput`'s new signature (Task 5) is used at both call sites. `parseItemScan` returns `string | null`, and Task 9 branches on `!id`. `QrScanner`'s `notice` prop (Task 8) is passed by Task 9.
 
 **Known ordering constraint:** Tasks 4-7 all edit `ReceiptBuilderForm.tsx` and must land in order — each builds on the previous task's state. Task 1 is independent and can ship at any time. Tasks 2, 3, and 8 are independent of each other and of 4-7, so they can be worked in parallel, but Task 9 needs all of them.
+
+---
+
+## Revision log — adversarial review (2026-07-16)
+
+A multi-agent review of the first draft found ~12 real defects (deduped from 27 raw
+findings). Folded in here:
+
+- **Critical — concurrent scans dropped a confirmed item.** `onDecode` appended from its
+  render-closure `items` snapshot across an un-awaited lookup. Now serialized (`looking`
+  ref) and built from a live `itemsRef`; `lastDecode` is recorded only after the in-flight
+  guard so a concurrency-dropped scan doesn't suppress its own retry. Task 9 + new
+  concurrency test.
+- **Critical — scan feedback rendered behind the opaque sheet.** The toast now also renders
+  inside `QrScanner` via a `notice` prop. Tasks 8, 9.
+- **Critical — Task 7's test couldn't see the ink clear.** Mocks now reflect the value into
+  the hidden input; tests assert `value === ""` after a list change.
+- **Major — DCSIM signature path unwired.** `onChange` is now passed to
+  `TechnicianSignatureField` (the common case for non-admins), and `sigCleared` resets on
+  re-pick. DCSIM draw + pick tests added. Task 7.
+- **Major — WASM fetched from jsDelivr CDN at runtime.** Self-hosted via
+  `prepareZXingModule` + `scripts/copy-wasm.mjs`; module load hoisted so failure is a
+  visible status. Task 8 + Task 10 same-origin assertion.
+- **Major — mixed-holder scan-time toast and fixed-bottom mobile button were dropped.**
+  Both restored (Task 9 markup, Task 8 CSS).
+- **Major — `holderName: null` discarded the warning on reload.** Now sourced from
+  `lastReceivers`. Task 4.
+- **Major — Task 6's red step couldn't go red** (Task 4's re-key already fixed defect #2).
+  Task 6 is now an honest regression guard, no production change.
+- **Minor — qty override resurrection, and `<legend>` wrapped in a `<div>`.** Both fixed
+  (Tasks 5, 9).
