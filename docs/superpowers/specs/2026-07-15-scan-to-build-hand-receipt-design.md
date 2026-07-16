@@ -18,13 +18,17 @@ first item into a fresh receipt, then keep scanning to fill it.
 
 - A button on the item page that opens a new hand receipt containing that item.
 - In the builder, scan additional QR codes with the phone camera to add items, without
-  losing anything already entered.
+  losing typed work — with **one deliberate exception**: a signature is cleared when the
+  item list changes, because it attests to a specific list (see *Defects*, #3).
 - Works with the QR codes already printed and stuck to hardware. No reprint.
 
 ## Non-goals
 
-- Persisting a partially-built receipt across a refresh or a device change (see
-  *Deferred*).
+- Restoring typed party fields after a reload. The **item list is** restored — see
+  *Refresh and tab eviction*.
+- Restoring a drawn signature after a reload. Deliberate, not a gap — see the same
+  section.
+- Moving a partially-built receipt between devices.
 - Using the phone as a scanning peripheral for a form open on a desktop.
 - Any change to QR generation, label layout, or the printed sheet.
 
@@ -62,8 +66,8 @@ Considered and rejected:
   phone-as-peripheral setup later. Costs a schema migration, a draft lifecycle, and
   cleanup of abandoned drafts. Deferred, not dismissed.
 
-Accepted cost: once scanning starts, the URL is no longer the source of truth, so a hard
-refresh loses added items. Acceptable for v1.
+Cost: once scanning starts, client state — not the URL — is the source of truth. Handled
+in *Refresh and tab eviction* rather than accepted.
 
 ## Architecture
 
@@ -131,6 +135,45 @@ the initial load. But scanning can cross a limit mid-session, and replacing a ha
 form with a card at that point would destroy the operator's work. So the limits get a
 second, client-side check that refuses **the scan** and leaves the form untouched. The
 `createTransfer` checks remain authoritative.
+
+## Refresh and tab eviction
+
+**Framing.** Refreshing the builder already loses everything today — every party field,
+the signature, the quantities. The items survive only because they come from the URL. So
+client-owned state does not *create* a refresh problem; it adds the item list to a loss
+that already happens. Keeping the URL in sync restores **parity with today**, which is why
+it is v1 work and not a stretch goal.
+
+**Why this matters more here than anywhere else in the app.** iOS Safari aggressively
+evicts background tabs and silently reloads them on return. A page holding a live camera
+stream plus a WASM decoder is among the most memory-hungry things it can be asked to keep
+— a prime eviction candidate. On the exact device this feature targets, a reload is not
+the operator fat-fingering refresh; it is them switching apps for ten seconds.
+
+**Layer 1 — `replaceState` keeps `?items=` in sync. (v1)**
+
+Every add or remove rewrites the URL without navigating or remounting. A reload then
+re-renders the server page with the full list, and lines and sender prefill rebuild
+through the path they already take.
+
+Verified against the vendored docs rather than recall, per AGENTS.md: Next 16 supports
+`window.history.replaceState` to "update the browser's history stack without reloading the
+page", integrated with the router
+(`node_modules/next/dist/docs/01-app/01-getting-started/04-linking-and-navigating.md:343-345`).
+Use `replaceState`, not `pushState` — each scan is not a history entry, and Back should
+leave the builder rather than un-scan one laptop at a time.
+
+**Layer 2 — a `sessionStorage` snapshot of typed state. (follow-on)**
+
+Party fields, service flags, quantities; restored on mount, cleared on submit. Per-tab, so
+it survives eviction. Genuinely optional and can ship separately.
+
+**Layer 3 — the signature is never restored. (deliberate)**
+
+A signature is a person's mark on a custody document. Reattaching ink from storage would
+let a receipt carry a signature the signer never re-affirmed against the list actually
+filed. Re-drawing costs three seconds. It also carries a privacy cost — a signature image
+sitting in storage on a shared phone.
 
 ## Components
 
@@ -244,10 +287,11 @@ already supports multi-select with retired rows unselectable (`components/items-
 
 On a device with no camera the scan button does not render at all.
 
-## Two bugs to design out
+## Three defects to design out
 
-Both are the species this file already has scar tissue for. They do not exist today only
-because the item list never changes after mount.
+None exist today. All three are latent consequences of one assumption this feature breaks:
+**the item list is currently frozen at mount.** They are the species this file already has
+scar tissue for, so they get designed out rather than discovered.
 
 **1. Stale quantities.** `QtyInput` seeds its state once via `useState(String(defaultQty))`
 (`ReceiptBuilderForm.tsx:140`). Once a scan can grow a line, scanning a second identical
@@ -268,6 +312,23 @@ selection silently clears.
 
 *Fix:* lift the service selections into the form keyed by `itemId` — the pattern this file
 already applies to `note`, `rank`, `unit`, and the party fields.
+
+**3. A signature covering a list the signer never saw.** The most serious of the three.
+
+Today the item list is frozen at page load, so signing last is *inherently* safe — the ink
+always covers the final list. Once a scan can grow the list at any moment, an operator can
+have the recipient sign and then scan two more laptops, and the receipt files with a
+signature over a list the signer never saw. Rapid-fire scanning makes that sequence easy
+rather than exotic, and nothing in the form's order prevents it.
+
+*Fix:* treat a signature as covering a **specific item list**. If the list changes while a
+signature exists, clear it and say why — "Items changed — please sign again." Annoying by
+design, and correct: the alternative is a custody document attesting to something that
+never happened.
+
+Applies to a drawn `SignaturePad` signature and to a picked saved technician signature
+(`TechnicianSignatureField`) alike — a DCSIM recipient's saved ink is still their
+attestation to a list.
 
 ## Mobile
 
@@ -304,7 +365,11 @@ So the work is **not breaking the contract**:
   wrong-origin, and foreign-QR cases.
 - **`test:ui` (jsdom, opt-in per file):** the state logic — scan appends a row, duplicate
   refuses, qty tracks the count until edited, removing an item does not reset a sibling's
-  service flag. These are the regressions worth pinning.
+  service flag, **and a signature clears when the item list changes** (both a drawn one
+  and a picked saved one). These are the regressions worth pinning; the signature one
+  guards a custody-document integrity rule, so it is not optional.
+- **`replaceState` sync:** assert the URL tracks adds and removes, and that a reload at
+  that URL rebuilds the same lines. Cheap to pin and easy to regress silently.
 - **Real browser at 390×844 and 1280, with DOM measurement** for overflow and tap-target
   size. jsdom has no layout engine, and neither it nor `next build` can see any of the
   defects `a08d9e5` fixed — that commit says so explicitly. A green suite is not evidence
@@ -316,9 +381,8 @@ So the work is **not breaking the contract**:
 
 ## Deferred
 
-- **URL sync via `history.replaceState`** so a refresh recovers scanned items. Stretch
-  goal. Verify Next 16's handling against `node_modules/next/dist/docs` first — per
-  AGENTS.md, this is not the Next.js in anyone's training data.
-- **Persisted drafts** (the rejected Approach C). Revisit if the receipt needs to survive
-  a refresh or move between devices.
+- **`sessionStorage` snapshot** of typed party fields, service flags, and quantities
+  (Layer 2 above). Ships separately; the signature is excluded permanently, not pending.
+- **Persisted drafts** (the rejected Approach C). Revisit if a receipt needs to move
+  between devices — `replaceState` already covers surviving a reload.
 - **Phone as a scanning peripheral** for a desktop form. Needs a live channel and pairing.
