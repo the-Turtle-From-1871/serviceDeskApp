@@ -446,16 +446,13 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, co
             stickers, but it can only OPEN the item page — it cannot feed a form
             that is already open. Naming the action keeps the two apart. */}
         <button type="button" className="btn btn-secondary scan-add" onClick={() => setScanning(true)}>Scan to add</button>
-        {/* Shown here whenever the sheet is CLOSED. An "ok" toast restates
-            what the row already shows live (make/model/serial, plus the
-            holder note that ALSO persists as the row's marker below) — no
-            need to duplicate it here while the sheet covers this anyway, and
-            keeping it gated avoids literally two elements carrying the same
-            holder text at once. An "err" toast is the operator's only signal
-            that a scan did nothing, so it stays visible even with the sheet
-            open — same reasoning as `notice` (passed to the sheet below) for
-            when the sheet's own display is what's covering this. */}
-        {toast && (toast.kind === "err" || !scanning) && (
+        {/* Shown here only once the sheet is CLOSED. While scanning, the sheet
+            itself shows this same toast via `notice` (passed to QrScanner
+            below) — rendering it here too would put two elements on screen
+            carrying the same text (and, for the mixed-holder "ok" case, the
+            same text a persisted row marker also carries). Gating on
+            `!scanning` keeps exactly one of them mounted at a time. */}
+        {toast && !scanning && (
           <p role="status" aria-live="polite" className={toast.kind === "ok" ? "alert-success" : "alert-error"}>{toast.text}</p>
         )}
         <div className="table-wrap">

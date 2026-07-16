@@ -61,16 +61,19 @@ vi.mock("@/app/actions/scan", () => ({
   lookupScannedItem: (id: string) => lookupScannedItem(id),
 }));
 // The camera is not what these tests are about. This stands in for it: a button
-// per fixture that emits one decoded string. (`notice` is accepted and ignored
-// here — it's exercised in the real browser, Task 10.)
+// per fixture that emits one decoded string. `notice` IS rendered here — the
+// real QrScanner (src/components/QrScanner.tsx) shows it as feedback over the
+// video sheet, and the refusal tests below assert their error text while the
+// sheet is open, so the mock must surface it the same way the real one does.
 vi.mock("@/components/QrScanner", () => ({
-  QrScanner: ({ onDecode, onClose }: { onDecode: (t: string) => void; onClose: () => void; notice?: unknown }) => (
+  QrScanner: ({ onDecode, onClose, notice }: { onDecode: (t: string) => void; onClose: () => void; notice?: { kind: "ok" | "err"; text: string } | null }) => (
     <div>
       <button type="button" onClick={() => onDecode("https://x.example/i/i2")}>emit-i2</button>
       <button type="button" onClick={() => onDecode("https://x.example/i/i3")}>emit-i3</button>
       <button type="button" onClick={() => onDecode("https://x.example/i/i1")}>emit-i1</button>
       <button type="button" onClick={() => onDecode("WIFI:S:Guest;;")}>emit-junk</button>
       <button type="button" onClick={onClose}>emit-close</button>
+      {notice && <p data-testid="scan-notice">{notice.text}</p>}
     </div>
   ),
 }));
@@ -586,7 +589,12 @@ describe("ReceiptBuilderForm — scanning adds items", () => {
     await user.click(screen.getByRole("button", { name: "emit-i2" }));
 
     expect(await screen.findByText("SN2")).toBeDefined();
-    expect(await screen.findByText(/Held by CPL Jones, not SGT Smith/i)).toBeDefined();
+    // Two elements now legitimately carry this text — the scan-time toast (via
+    // the mock's `notice`, matching the real sheet) and the persistent row
+    // marker — so a bare findByText double-matches. Scope each query to prove
+    // BOTH halves of the "double duty" spec without colliding.
+    expect((await screen.findByTestId("scan-notice")).textContent).toMatch(/held by CPL Jones, not SGT Smith/i);
+    expect(within(screen.getByRole("table")).getByText(/Held by CPL Jones, not SGT Smith/i)).toBeDefined();
   });
 
   it("says nothing about a holder that matches the sender", async () => {
@@ -597,6 +605,9 @@ describe("ReceiptBuilderForm — scanning adds items", () => {
     await user.click(screen.getByRole("button", { name: "emit-i2" }));
 
     await screen.findByText("SN2");
+    // A matching holder means holderNote is "" — no row marker, and the
+    // notice text (the plain "Added: …" ok toast, no holder clause) doesn't
+    // mention a holder either.
     expect(screen.queryByText(/Held by/i)).toBeNull();
   });
 
