@@ -261,3 +261,46 @@ describe("ReceiptBuilderForm — quantities track the item count", () => {
     expect(issued().value).toBe("1"); // untouched, so it still tracks
   });
 });
+
+describe("ReceiptBuilderForm — service flags survive a sibling's removal", () => {
+  const TWO_SAME = [
+    { itemId: "i1", make: "Dell", model: "L5420", serialNumber: "SN1", holderName: null },
+    { itemId: "i2", make: "Dell", model: "L5420", serialNumber: "SN2", holderName: null },
+  ];
+
+  // Guards Task 4's per-item row key. If a future change keys rows on the line's
+  // first itemId again, removing SN1 remounts SN2's row and this goes red.
+  // NOTE: getAllByRole("checkbox") also returns the two party DCSIM boxes, so
+  // scope to the Needs-service accessible name — do not index a mixed list.
+  it("keeps the surviving item's flag when the first item of its line is removed", async () => {
+    const user = userEvent.setup();
+    renderForm(undefined, TWO_SAME);
+
+    const flags = () => screen.getAllByRole("checkbox", { name: /Needs service/i });
+    expect(flags()).toHaveLength(2);
+    await user.click(flags()[1]); // flag SN2 (the second item)
+    expect((flags()[1] as HTMLInputElement).checked).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: /Remove Dell L5420, serial SN1/i }));
+
+    const left = flags();
+    expect(left).toHaveLength(1);
+    expect((left[0] as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("posts the flag under the surviving item's id", async () => {
+    const user = userEvent.setup();
+    renderForm(undefined, TWO_SAME);
+
+    await user.click(screen.getAllByRole("checkbox", { name: /Needs service/i })[1]);
+    await user.click(screen.getByRole("button", { name: /Remove Dell L5420, serial SN1/i }));
+    await fillParty(user, "Sender");
+    await fillParty(user, "Recipient");
+    await user.click(screen.getByRole("button", { name: /Create hand receipt/i }));
+    await waitFor(() => expect(createReceiptAction).toHaveBeenCalled());
+
+    const posted = createReceiptAction.mock.calls[0][1] as FormData;
+    expect(posted.get("service[i2][needs]")).toBe("on");
+    expect(posted.get("service[i1][needs]")).toBeNull();
+  });
+});
