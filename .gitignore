@@ -59,3 +59,6 @@ next-env.d.ts
 
 # Claude Code local worktrees & session data
 .claude/
+
+# Local DB dumps taken before destructive prod operations. Never commit: real data.
+backups/
