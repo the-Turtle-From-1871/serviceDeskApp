@@ -292,6 +292,39 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, co
   };
   const hideReceiverName = receiverIsDcsim && pickedId !== null;
 
+  // A signature attests to a SPECIFIC item list. If the list changes, the ink no
+  // longer covers what will be filed, so it is discarded and the operator is
+  // told why (silently clearing it would read as a glitch and get re-signed
+  // without anyone understanding what changed).
+  //
+  // The key remount is what actually clears the pad: SignaturePad owns its
+  // canvas and its hidden input, so re-mounting is the only way to blank both.
+  // Applies to a picked saved technician signature too — a DCSIM recipient's
+  // saved ink is still their attestation to a list, so pickedId is dropped as
+  // well (TechnicianSignatureField never reports null on the way out; see the
+  // comment on onReceiverDcsimChange above).
+  const itemsKey = items.map((i) => i.itemId).join(",");
+  const [hasSignature, setHasSignature] = useState(false);
+  const [sigCleared, setSigCleared] = useState(false);
+
+  // A guarded render-time write, compared on the KEY and only written when it
+  // changes — the "Storing information from previous renders" pattern, matching
+  // ItemDetailsCard.tsx:43-47. Not an effect: an effect would clear the ink one
+  // paint AFTER the new row is on screen, leaving a frame where the signature
+  // and the changed list are both live.
+  const [prevItemsKey, setPrevItemsKey] = useState(itemsKey);
+  if (itemsKey !== prevItemsKey) {
+    setPrevItemsKey(itemsKey);
+    if (hasSignature || pickedId !== null) setSigCleared(true);
+    setHasSignature(false);
+    setPickedId(null);
+  }
+
+  const onSignatureChange = (dataUrl: string) => {
+    setHasSignature(!!dataUrl);
+    if (dataUrl) setSigCleared(false);
+  };
+
   if (receipt) {
     return (
       <div className="card stack-sm">
@@ -379,18 +412,29 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, co
       <PartyFields role="receiver" isDcsim={receiverIsDcsim} onIsDcsimChange={onReceiverDcsimChange} hideName={hideReceiverName} name={receiverName} onNameChange={setReceiverName} contacts={contacts} />
       <fieldset className="card stack-sm">
         <legend className="card__title">Recipient signature{receiverIsDcsim ? " (DCSIM)" : ""}</legend>
+        {sigCleared && (
+          <p role="alert" className="alert-error">Items changed — please sign again.</p>
+        )}
         {receiverIsDcsim ? (
           // A DCSIM recipient is our own technician at the desk, so they may pick
           // their saved signature. An outside recipient must always draw in person.
+          // onChange IS wired here, not only onPickedChange: without it a DCSIM
+          // recipient's DRAWN ink (the common case — signatures=[] for non-admins,
+          // so this field is always in draw state for them) is wiped by the remount
+          // with no "please sign again" notice. onChange fires for both a draw and
+          // a pick (TechnicianSignatureField.tsx:47,50), so it feeds hasSignature
+          // and resets sigCleared on a re-pick.
           <TechnicianSignatureField
+            key={itemsKey}
             name="receiverSignature"
             signatures={signatures}
             label="Who received it?"
             drawHint={null}
+            onChange={onSignatureChange}
             onPickedChange={setPickedId}
           />
         ) : (
-          <SignaturePad name="receiverSignature" />
+          <SignaturePad key={itemsKey} name="receiverSignature" onChange={onSignatureChange} />
         )}
       </fieldset>
       <div className="row">

@@ -13,15 +13,46 @@ const createReceiptAction = vi.fn();
 vi.mock("@/app/actions/receipts", () => ({
   createReceiptAction: (prev: unknown, fd: FormData) => createReceiptAction(prev, fd),
 }));
-// jsdom has no canvas, and the pad is not what these tests are about.
+// jsdom has no canvas. These stand-ins mirror the real components' report paths
+// (SignaturePad.tsx:21,28 and TechnicianSignatureField.tsx:50-51) so a test can
+// drive signing without one — and reflect the value into the hidden input so a
+// test can prove the ink is DISCARDED on a list change, not just that a notice
+// shows.
+//
+// The hidden input intentionally carries NEITHER `value` NOR `defaultValue`:
+// for `type="hidden"` there is no separate dirty-value store (the "value" IDL
+// attribute for hidden inputs is a *direct alias* for the "value" CONTENT
+// attribute — see https://html.spec.whatwg.org/#dom-input-value-default). A
+// `defaultValue` prop would make React re-apply that attribute on every
+// unrelated commit (any re-render, not just a `key` remount), stomping the
+// value we just set. With no value/defaultValue prop at all, React never
+// touches this element after it mounts, so an imperative `.value =` sticks
+// across ordinary re-renders — and a `key` remount still creates a brand-new
+// element, whose native default value is "", so the reset-on-remount behavior
+// this test suite depends on is unaffected.
 vi.mock("@/components/SignaturePad", () => ({
-  SignaturePad: ({ name }: { name: string }) => (
-    <input type="hidden" name={name} value="data:image/png;base64,AAAA" readOnly />
+  SignaturePad: ({ name, onChange }: { name: string; onChange?: (dataUrl: string) => void }) => (
+    <>
+      <input type="hidden" name={name} />
+      <button type="button" onClick={() => {
+        (document.querySelector(`input[name="${name}"]`) as HTMLInputElement).value = "data:image/png;base64,DRAWN";
+        onChange?.("data:image/png;base64,DRAWN");
+      }}>simulate-sign</button>
+    </>
   ),
 }));
 vi.mock("@/components/TechnicianSignatureField", () => ({
-  TechnicianSignatureField: ({ name }: { name: string }) => (
-    <input type="hidden" name={name} value="data:image/png;base64,AAAA" readOnly />
+  TechnicianSignatureField: ({ name, onChange, onPickedChange }: { name: string; onChange?: (v: string) => void; onPickedChange?: (id: string | null) => void }) => (
+    <>
+      <input type="hidden" name={name} />
+      {/* DCSIM recipient DRAWS (the common case: signatures=[] for non-admins) */}
+      <button type="button" onClick={() => {
+        (document.querySelector(`input[name="${name}"]`) as HTMLInputElement).value = "data:image/png;base64,DRAWN";
+        onChange?.("data:image/png;base64,DRAWN");
+      }}>dcsim-draw</button>
+      {/* DCSIM recipient PICKS a saved signature: reports both signals, like the real one */}
+      <button type="button" onClick={() => { onPickedChange?.("sig-1"); onChange?.("data:image/png;base64,PICKED"); }}>dcsim-pick</button>
+    </>
   ),
 }));
 
@@ -302,5 +333,86 @@ describe("ReceiptBuilderForm — service flags survive a sibling's removal", () 
     const posted = createReceiptAction.mock.calls[0][1] as FormData;
     expect(posted.get("service[i2][needs]")).toBe("on");
     expect(posted.get("service[i1][needs]")).toBeNull();
+  });
+});
+
+describe("ReceiptBuilderForm — a signature attests to a specific item list", () => {
+  const TWO = [
+    { itemId: "i1", make: "Dell", model: "L5420", serialNumber: "SN1", holderName: null },
+    { itemId: "i2", make: "HP", model: "G8", serialNumber: "SN2", holderName: null },
+  ];
+  const sig = (c: HTMLElement) => c.querySelector('input[name="receiverSignature"]') as HTMLInputElement;
+
+  // Today the list is frozen at mount, so signing last is inherently safe. Once
+  // a scan can grow it, an operator can have the recipient sign and THEN add
+  // laptops — filing a receipt with a signature over a list the signer never
+  // saw. So a list change invalidates the ink.
+  it("clears the DRAWN signature (ink, not just the notice) when the list changes", async () => {
+    const user = userEvent.setup();
+    const { container } = renderForm(undefined, TWO);
+
+    await user.click(screen.getByRole("button", { name: "simulate-sign" }));
+    expect(sig(container).value).toBe("data:image/png;base64,DRAWN");
+    expect(screen.queryByText(/please sign again/i)).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: /Remove HP G8, serial SN2/i }));
+
+    // The ink is GONE — proves key={itemsKey} remounted the pad. Deleting that
+    // key leaves this line red while the notice still appears; that is the whole
+    // point of asserting the value, not just the message.
+    expect(sig(container).value).toBe("");
+    expect(await screen.findByText(/Items changed — please sign again/i)).toBeDefined();
+  });
+
+  it("says nothing when the list changes before anyone has signed", async () => {
+    const user = userEvent.setup();
+    renderForm(undefined, TWO);
+
+    await user.click(screen.getByRole("button", { name: /Remove HP G8, serial SN2/i }));
+
+    expect(screen.queryByText(/please sign again/i)).toBeNull();
+  });
+
+  it("drops the notice once the recipient signs again", async () => {
+    const user = userEvent.setup();
+    renderForm(undefined, TWO);
+
+    await user.click(screen.getByRole("button", { name: "simulate-sign" }));
+    await user.click(screen.getByRole("button", { name: /Remove HP G8, serial SN2/i }));
+    expect(await screen.findByText(/please sign again/i)).toBeDefined();
+
+    await user.click(screen.getByRole("button", { name: "simulate-sign" }));
+    expect(screen.queryByText(/please sign again/i)).toBeNull();
+  });
+
+  // The COMMON case: a DCSIM recipient with no saved signatures draws. If onChange
+  // is not wired to TechnicianSignatureField, the remount wipes the ink with NO
+  // notice — the silent glitch the rule exists to prevent.
+  it("clears a DCSIM recipient's DRAWN signature, with the notice", async () => {
+    const user = userEvent.setup();
+    const { container } = renderForm(undefined, TWO);
+    await user.click(dcsimBox("Recipient")); // recipient is DCSIM -> TechnicianSignatureField
+    await user.click(screen.getByRole("button", { name: "dcsim-draw" }));
+    expect(sig(container).value).toBe("data:image/png;base64,DRAWN");
+
+    await user.click(screen.getByRole("button", { name: /Remove HP G8, serial SN2/i }));
+
+    expect(sig(container).value).toBe("");
+    expect(await screen.findByText(/Items changed — please sign again/i)).toBeDefined();
+  });
+
+  // A picked saved signature is also an attestation to a list. And the notice must
+  // CLEAR on re-pick, or it sticks forever under a valid, freshly-picked signature.
+  it("clears a DCSIM recipient's PICKED signature and drops the notice on re-pick", async () => {
+    const user = userEvent.setup();
+    renderForm(undefined, TWO);
+    await user.click(dcsimBox("Recipient"));
+    await user.click(screen.getByRole("button", { name: "dcsim-pick" }));
+
+    await user.click(screen.getByRole("button", { name: /Remove HP G8, serial SN2/i }));
+    expect(await screen.findByText(/please sign again/i)).toBeDefined();
+
+    await user.click(screen.getByRole("button", { name: "dcsim-pick" }));
+    expect(screen.queryByText(/please sign again/i)).toBeNull();
   });
 });
