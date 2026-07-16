@@ -54,26 +54,24 @@ export function ServiceQueueTable({ rows }: { rows: QueueRowVM[] }) {
 
   return (
     <>
-      <div className="row" style={{ gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+      <div className="toolbar" style={{ gap: 8, alignItems: "flex-end" }}>
         <input
-          className="input"
+          className="input toolbar__search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search SN, device name, or unit"
-          style={{ maxWidth: 320 }}
           aria-label="Search the service queue"
         />
         <label className="stack" style={{ gap: 4 }}>
           <span className="subtle" style={{ fontSize: 12 }}>Service type</span>
-          <select className="select" style={{ width: "auto", minWidth: 130 }} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as QueueTypeFilter)}>
+          <select className="select toolbar__control" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as QueueTypeFilter)}>
             {TYPE_FILTERS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
           </select>
         </label>
         <label className="stack" style={{ gap: 4 }}>
           <span className="subtle" style={{ fontSize: 12 }}>Sort by</span>
           <select
-            className="select"
-            style={{ width: "auto", minWidth: 150 }}
+            className="select toolbar__control"
             value={sort.field ?? ""}
             onChange={(e) => setSort({ ...sort, field: (e.target.value || null) as QueueSortField | null })}
           >
@@ -128,7 +126,7 @@ export function ServiceQueueTable({ rows }: { rows: QueueRowVM[] }) {
                   {!isHidden("homeUnit") && <td data-label="Unit">{r.homeUnit ? r.homeUnit : <span className="subtle">—</span>}</td>}
                   {!isHidden("serviceType") && <td data-label="Service Type">{r.serviceType}</td>}
                   <td data-label="">
-                    <div className="actions" style={{ justifyContent: "flex-end" }}>
+                    <div className="actions actions--end">
                       <Link href={`/i/${r.itemId}`} className="btn btn-ghost btn-sm">View</Link>
                       <form action={completeServiceAction}>
                         <input type="hidden" name="id" value={r.id} />

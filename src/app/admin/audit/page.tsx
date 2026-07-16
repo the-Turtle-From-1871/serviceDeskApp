@@ -52,7 +52,7 @@ export default async function AuditPage() {
                       <td data-label="By">{b.createdBy.name}</td>
                       <td data-label="File">{b.filename}</td>
                       <td data-label="Added">{b.addedCount}</td>
-                      <td data-label="Skipped">
+                      <td className="is-stacked" data-label="Skipped">
                         {b.skippedCount}
                         {skipped.length > 0 && <span className="subtle"> ({skipped.map((s) => s.serialNumber || "?").join(", ")})</span>}
                       </td>
@@ -82,7 +82,7 @@ export default async function AuditPage() {
                       <td data-label="Processed by">{r.processedByUser?.name ?? r.processedByEmail ?? "—"}</td>
                       <td data-label="Receipt"><Link href={`/receipts/${r.receiptNumber}`}>{r.receiptNumber}</Link></td>
                       <td data-label="Kind">{r.kind}</td>
-                      <td data-label="Returned">
+                      <td className="is-stacked" data-label="Returned">
                         {r.returnedCount}
                         {items.length > 0 && <span className="subtle"> ({items.map((i) => i.serialNumber || "?").join(", ")})</span>}
                       </td>
@@ -115,7 +115,10 @@ export default async function AuditPage() {
                       <td data-label="Item">
                         <Link href={`/i/${e.item.id}`}>{e.item.deviceName || e.item.serialNumber}</Link>
                       </td>
-                      <td data-label="Changed">
+                      {/* is-stacked: a restacked cell is a flex row, so these
+                          sibling divs laid out side by side and collided once
+                          an edit touched more than one field. */}
+                      <td className="is-stacked" data-label="Changed">
                         {changes.map((c) => (
                           <div key={c.field} className="subtle">
                             {c.field}: {c.from ?? "—"} → {c.to ?? "—"}

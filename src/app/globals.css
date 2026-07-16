@@ -1,51 +1,61 @@
 /* ============================================================
    Hand Receipt — design system
-   A clean, readable light theme (slate + indigo).
+   "Property book": green-bar ledger stock, ink, and one stamp blue.
+   The artifact this app produces is a signed custody document, so the
+   surfaces read as accounting paper rather than as a SaaS dashboard,
+   and the serial number — the thing an operator matches against a
+   sticker on real hardware — is the one element allowed to shout.
    ============================================================ */
 
 :root {
-  /* Surfaces */
-  --bg: #eef2f6;
-  --surface: #ffffff;
-  --surface-2: #f8fafc;
-  --border: #e2e8f0;
-  --border-strong: #cbd5e1;
+  /* Surfaces — green-bar ledger stock */
+  --bg: #e3e8df;
+  --surface: #fbfcf9;
+  --surface-2: #f1f4ec;
+  --border: #d2d9cb;
+  --border-strong: #b4bfa9;
 
-  /* Text */
-  --text: #0f172a;
-  --text-muted: #64748b;
-  --text-subtle: #94a3b8;
+  /* Text — ink */
+  --text: #191c18;
+  --text-muted: #5c665a;
+  --text-subtle: #8a9487;
 
-  /* Brand / accents */
-  --primary: #4f46e5;
-  --primary-hover: #4338ca;
-  --primary-soft: #eef2ff;
+  /* Brand / accents — the blue of a stamp pad */
+  --primary: #1d4e6f;
+  --primary-hover: #163d57;
+  --primary-soft: #e7eff4;
   --primary-fg: #ffffff;
-  --danger: #dc2626;
-  --danger-hover: #b91c1c;
-  --danger-soft: #fef2f2;
-  --success: #16a34a;
-  --ring: rgba(79, 70, 229, 0.35);
+  --danger: #a3341f;
+  --danger-hover: #832714;
+  --danger-soft: #fbefec;
+  --success: #2f6b3a;
+  --ring: rgba(29, 78, 111, 0.38);
 
-  /* Status palette */
-  --amber: #b45309;
-  --amber-soft: #fffbeb;
-  --amber-border: #fde68a;
-  --green: #15803d;
-  --green-soft: #f0fdf4;
-  --green-border: #bbf7d0;
-  --slate: #475569;
-  --slate-soft: #f1f5f9;
-  --slate-border: #e2e8f0;
-  --red-soft: #fef2f2;
-  --red-border: #fecaca;
+  /* Status palette — retuned to sit on the ledger ground */
+  --amber: #8a5a12;
+  --amber-soft: #fbf4e6;
+  --amber-border: #e6cf9c;
+  --green: #2f6b3a;
+  --green-soft: #eef5ec;
+  --green-border: #b9d3b6;
+  --slate: #4d564b;
+  --slate-soft: #eef1ea;
+  --slate-border: #d2d9cb;
+  --red-soft: #fbefec;
+  --red-border: #e7c3b8;
 
-  --radius: 12px;
-  --radius-sm: 8px;
-  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
-  --shadow-md: 0 4px 16px rgba(15, 23, 42, 0.08);
+  /* Form stock, not floating cards: tight radii, hairlines over blur. */
+  --radius: 5px;
+  --radius-sm: 3px;
+  --shadow-sm: 0 1px 0 rgba(25, 28, 24, 0.05);
+  --shadow-md: 0 6px 18px rgba(25, 28, 24, 0.12);
   --font-sans: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Touch floor: 44px (Apple HIG) for anything tappable on a phone;
+     `--tap-lg` is reserved for primary and destructive actions. */
+  --tap: 44px;
+  --tap-lg: 48px;
 }
 
 * {
@@ -292,9 +302,14 @@ h3 {
   font-weight: 600;
   margin-bottom: 14px;
 }
+/* Fluid down to ~21px at 390px so headings like "Find an item or hand
+   receipt" stop wrapping mid-phrase; capped at the original 26px so the
+   desktop rendering is byte-identical to before. */
 .page-title {
-  font-size: 26px;
+  font-size: clamp(21px, 1.5vw + 15px, 26px);
   font-weight: 700;
+  line-height: 1.2;
+  text-wrap: balance;
   margin-bottom: 4px;
 }
 .subtle {
@@ -552,6 +567,96 @@ input[type="file"].input {
   cursor: not-allowed;
 }
 
+/* ---------- Home search (mode select + query box) ----------
+   `.select` and `.input` are both width:100%, so inside a wrapping `.row` each
+   one claimed a whole line and the pair stacked at EVERY width — this row has
+   never rendered as a row. The select takes its content width; the query box
+   takes what's left. */
+.search-row > .select {
+  flex: 0 0 auto;
+  width: auto;
+}
+.search-row > .input {
+  flex: 1 1 220px;
+  width: auto;
+  min-width: 0;
+}
+@media (max-width: 720px) {
+  /* Stacked IS right on a phone — a serial number deserves the full width to
+     type into. The bug was only ever the desktop rendering. */
+  .search-row > .select,
+  .search-row > .input {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+}
+
+/* ---------- Table toolbars (search / filter / sort / columns) ----------
+   Desktop behaviour is identical to the `.row` these replace. On mobile the
+   controls stop wrapping into a ragged 3-4 line block and become one full-width
+   column, which is also what makes them hittable at 44px. */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+/* A control that sizes to its content on desktop. This lives in CSS rather than
+   an inline `style={{width:"auto",minWidth:150}}` precisely so the media query
+   below can reach it — an inline style would outrank any stylesheet rule. */
+.toolbar__control {
+  width: auto;
+  min-width: 150px;
+}
+.toolbar__search {
+  max-width: 320px;
+}
+@media (max-width: 720px) {
+  /* Deliberately NOT a one-per-line column. Full-width stacking looks tidy but
+     turns four controls into ~250px of chrome above the first result — it trades
+     the crowding for scrolling, which is the same problem wearing a hat. Letting
+     them pair up two-per-line keeps the toolbar near two rows while still
+     clearing 44px. */
+  .toolbar {
+    align-items: stretch;
+    gap: 10px;
+  }
+  /* `.spacer` (margin-left:auto) is a desktop alignment device; left alone it
+     eats the free space on a wrapped line and forces its owner onto a line of
+     its own. */
+  .toolbar .spacer { margin-left: 0; }
+  /* Flex sizing applies to DIRECT children only. `.toolbar .select` also caught
+     the select nested inside `label.stack` — a column-direction parent, where
+     `flex-basis: 150px` sets HEIGHT and grew the select into a 150px-tall box. */
+  .toolbar > * {
+    flex: 1 1 150px;
+    min-width: 0;
+  }
+  .toolbar > .btn,
+  .toolbar > .col-menu {
+    flex: 1 1 auto;
+  }
+  /* A nested control just fills its label; it must not flex in that column. */
+  .toolbar__control {
+    flex: none;
+    width: 100%;
+    min-width: 0;
+  }
+  .toolbar__search { max-width: none; }
+  .toolbar .col-menu > summary { width: 100%; }
+  .toolbar .col-menu-panel { left: 0; right: 0; }
+}
+
+/* Inputs are tap targets as much as buttons are, and this app is mostly forms.
+   Textareas keep their own auto height. */
+@media (max-width: 720px) {
+  .input,
+  .select {
+    height: var(--tap);
+  }
+  .textarea { height: auto; }
+}
+
 /* ---------- Tables ---------- */
 .table-wrap {
   overflow-x: auto;
@@ -596,9 +701,21 @@ input[type="file"].input {
      (@media max-width:720px, below) re-enables wrapping. */
   flex-wrap: nowrap;
 }
+/* Right-aligns an action column on desktop. Was an inline
+   `style={{justifyContent:"flex-end"}}`, which outranked the mobile rule that
+   re-aligns actions to flex-start and so survived into the stacked card. */
+.table .actions--end {
+  justify-content: flex-end;
+}
+/* The serial number is the primary key a human matches against a sticker on
+   real hardware, so it gets tabular figures (equal-width digits make two
+   serials comparable down the column) and never breaks across lines. */
 .mono {
   font-family: var(--font-mono);
   font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
 }
 
 /* Visible to assistive tech only — used for live-region announcements that
@@ -820,7 +937,12 @@ input[type="file"].input {
   }
   .table td::before {
     content: attr(data-label);
-    flex: 0 0 auto;
+    /* Shrinkable, not `0 0 auto`: a rigid label plus a fixed-width control
+       (the builder's 72px qty box) overflows the card and puts a horizontal
+       scrollbar on the whole table. The label yields; the value never does. */
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
     font-weight: 600;
     font-size: 12px;
     text-transform: uppercase;
@@ -831,6 +953,80 @@ input[type="file"].input {
   .table td[data-label=""] { justify-content: flex-start; }
   .table .actions { justify-content: flex-start; flex-wrap: wrap; }
 
-  .container { padding: 20px 14px 56px; }
-  .app-header__inner { padding: 12px 14px; }
+  /* A restacked cell is a flex row, so a cell with SEVERAL children laid them
+     out side by side — the audit log's per-field change list rendered
+     horizontally and collided. `.is-stacked` opts a cell back into a column;
+     the label keeps its own line above the values. */
+  .table td.is-stacked {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+  /* An empty continuation cell (the builder's rowSpan gaps) has nothing to say
+     on mobile — as a block it renders as a ghost band of pure padding. */
+  .table td.is-empty { display: none; }
+
+  /* ---- The serial number leads the card ----
+     A restacked row is otherwise six identical label/value lines, and the one
+     an operator is actually matching against a sticker on the hardware is
+     buried at line four. Promoting it to a header — the card's own title, in
+     mono at size, with the label dropped — is the whole point of the mobile
+     layout: you hold the phone next to the laptop and compare one string.
+     Needs `tr` to be a flex column so `order` can reach it. */
+  .table tbody tr {
+    display: flex;
+    flex-direction: column;
+  }
+  .table td.mono[data-label] {
+    order: -1;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 16px;
+    font-size: 16px;
+    letter-spacing: 0.02em;
+    color: var(--text);
+  }
+  .table td.mono[data-label]::before {
+    content: attr(data-label);
+    font-size: 10px;
+    opacity: 0.75;
+  }
+
+  /* Touch floor. `.btn` is 40px and `.btn-sm` 32px by default — both under the
+     44px minimum, and between them they are the primary tap target on every
+     list row and in the whole mobile nav. Raising them here repairs six files
+     at once without touching a single component. */
+  .btn { height: var(--tap); }
+  .btn-sm {
+    height: var(--tap);
+    padding: 0 14px;
+    font-size: 14px;
+  }
+  /* Primary and destructive actions get the larger target — a mis-tapped
+     "Retire" is expensive, a mis-tapped "View" is not. */
+  .btn-primary,
+  .btn-danger { height: var(--tap-lg); }
+  .nav-toggle { width: var(--tap); height: var(--tap); }
+  /* Checkboxes are tap targets too, not decorations. 13px is the UA default. */
+  .table input[type="checkbox"],
+  .col-menu-panel input[type="checkbox"],
+  label > input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 auto;
+  }
+  /* A checkbox's real tap target is the label wrapping it — the box itself is
+     20px. Give any such row a full-height hit area rather than a bullseye. */
+  .col-menu-panel label,
+  label.row:has(> input[type="checkbox"]) {
+    min-height: var(--tap);
+  }
+
+  /* Mobile gets MORE room per row, not a shrunken desktop: the density win
+     comes from collapsing chrome (see .toolbar below), not from tightening. */
+  .container { padding: 20px 16px 56px; }
+  .app-header__inner { padding: 12px 16px; }
+  .card { padding: 18px 16px; }
+  .table td { padding: 10px 16px; }
+  .table tr { border-bottom: 10px solid var(--bg); }
 }

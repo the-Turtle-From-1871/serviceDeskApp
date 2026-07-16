@@ -19,8 +19,11 @@ export default async function ItemsListPage({ searchParams }: { searchParams: Pr
             <h1 className="page-title">Items</h1>
             <p className="subtle">{items.length} item{items.length === 1 ? "" : "s"}</p>
           </div>
+          {/* `spacer` (margin-left:auto) belongs on the FIRST button only. On both,
+              flexbox splits the free space between them and drifts them apart
+              instead of grouping them opposite the title. */}
           {isAdmin && <Link href="/admin/items/new" className="btn btn-primary spacer">+ Log new item</Link>}
-          {isAdmin && <Link href="/admin/items/import" className="btn btn-secondary spacer">Import CSV</Link>}
+          {isAdmin && <Link href="/admin/items/import" className="btn btn-secondary">Import CSV</Link>}
         </div>
 
         <form className="row" style={{ gap: 8 }}>

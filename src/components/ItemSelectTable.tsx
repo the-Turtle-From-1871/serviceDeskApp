@@ -77,12 +77,11 @@ export function ItemSelectTable({ items, isAdmin }: { items: ItemRow[]; isAdmin:
 
   return (
     <>
-      <div className="row" style={{ gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+      <div className="toolbar" style={{ gap: 8, alignItems: "flex-end" }}>
         <label className="stack" style={{ gap: 4 }}>
           <span className="subtle" style={{ fontSize: 12 }}>Sort by</span>
           <select
-            className="select"
-            style={{ width: "auto", minWidth: 150 }}
+            className="select toolbar__control"
             value={sort.field ?? ""}
             onChange={(e) => setSort({ ...sort, field: (e.target.value || null) as SortField | null })}
           >
@@ -152,14 +151,14 @@ export function ItemSelectTable({ items, isAdmin }: { items: ItemRow[]; isAdmin:
           <tbody>
             {sorted.map((it) => (
               <tr key={it.id}>
-                <td>{it.status === "ACTIVE" && <input type="checkbox" checked={selected.has(it.id)} onChange={() => toggle(it.id)} aria-label={`Select ${it.deviceName ?? ""} ${it.make} ${it.model} ${it.serialNumber}`} />}</td>
+                <td data-label="Select">{it.status === "ACTIVE" && <input type="checkbox" checked={selected.has(it.id)} onChange={() => toggle(it.id)} aria-label={`Select ${it.deviceName ?? ""} ${it.make} ${it.model} ${it.serialNumber}`} />}</td>
                 {!isHidden("deviceName") && <td data-label="Device Name">{it.deviceName ? it.deviceName : <span className="subtle">—</span>}</td>}
                 {!isHidden("make") && <td data-label="Make">{it.make}</td>}
                 {!isHidden("model") && <td data-label="Model">{it.model}</td>}
                 {!isHidden("serialNumber") && <td className="mono" data-label="Serial">{it.serialNumber}</td>}
                 {!isHidden("status") && <td data-label="Status"><StatusBadge status={it.status} /></td>}
                 <td data-label="">
-                  <div className="actions" style={{ justifyContent: "flex-end" }}>
+                  <div className="actions actions--end">
                     <Link href={`/i/${it.id}`} className="btn btn-ghost btn-sm">View</Link>
                     {isAdmin && <Link href={`/admin/items/${it.id}/qr`} className="btn btn-ghost btn-sm">QR</Link>}
                     {isAdmin && <Link href={`/admin/items/${it.id}/edit`} className="btn btn-ghost btn-sm">Edit</Link>}

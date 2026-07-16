@@ -56,7 +56,7 @@ export default async function UsersPage() {
                     </span>
                   </td>
                   <td data-label="">
-                    <div className="actions" style={{ justifyContent: "flex-end" }}>
+                    <div className="actions actions--end">
                       <form action={setUserRoleAction}>
                         <input type="hidden" name="id" value={u.id} />
                         <input type="hidden" name="role" value={u.role === "ADMIN" ? "USER" : "ADMIN"} />

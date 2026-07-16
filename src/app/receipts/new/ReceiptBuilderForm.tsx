@@ -258,22 +258,26 @@ export function ReceiptBuilderForm({ itemIds, lines, senderPrefill, signatures, 
               {lines.map((ln, i) => (
                 <Fragment key={ln.items[0].itemId}>
                   <tr>
-                    <td>{i + 1}</td>
-                    <td>{ln.make} {ln.model}
+                    <td data-label="Line">{i + 1}</td>
+                    <td data-label="Item">{ln.make} {ln.model}
                       <input type="hidden" name={`line[${i}][make]`} value={ln.make} />
                       <input type="hidden" name={`line[${i}][model]`} value={ln.model} />
                     </td>
-                    <td className="mono">{ln.items[0].serialNumber}</td>
-                    <td><ServiceControls itemId={ln.items[0].itemId} /></td>
-                    <td rowSpan={ln.items.length}><QtyInput name={`line[${i}][qtyAuth]`} defaultQty={ln.defaultQty} label={`Quantity authorized, ${ln.make} ${ln.model}`} /></td>
-                    <td rowSpan={ln.items.length}><QtyInput name={`line[${i}][qtyIssued]`} defaultQty={ln.defaultQty} label={`Quantity issued, ${ln.make} ${ln.model}`} /></td>
+                    <td className="mono" data-label="Serial">{ln.items[0].serialNumber}</td>
+                    <td className="is-stacked" data-label="Service"><ServiceControls itemId={ln.items[0].itemId} /></td>
+                    {/* rowSpan stays. The quantities are per LINE, not per serial —
+                        one pair of inputs covers every serial of this make/model.
+                        Splitting them per row would emit duplicate
+                        `line[i][qtyAuth]` fields and change what the form submits. */}
+                    <td rowSpan={ln.items.length} data-label={ln.items.length > 1 ? `Qty authorized (all ${ln.items.length} serials)` : "Qty authorized"}><QtyInput name={`line[${i}][qtyAuth]`} defaultQty={ln.defaultQty} label={`Quantity authorized, ${ln.make} ${ln.model}`} /></td>
+                    <td rowSpan={ln.items.length} data-label={ln.items.length > 1 ? `Qty issued (all ${ln.items.length} serials)` : "Qty issued"}><QtyInput name={`line[${i}][qtyIssued]`} defaultQty={ln.defaultQty} label={`Quantity issued, ${ln.make} ${ln.model}`} /></td>
                   </tr>
                   {ln.items.slice(1).map((it) => (
                     <tr key={it.itemId}>
-                      <td></td>
-                      <td></td>
-                      <td className="mono">{it.serialNumber}</td>
-                      <td><ServiceControls itemId={it.itemId} /></td>
+                      <td className="is-empty"></td>
+                      <td className="is-empty"></td>
+                      <td className="mono" data-label="Serial">{it.serialNumber}</td>
+                      <td className="is-stacked" data-label="Service"><ServiceControls itemId={it.itemId} /></td>
                     </tr>
                   ))}
                 </Fragment>

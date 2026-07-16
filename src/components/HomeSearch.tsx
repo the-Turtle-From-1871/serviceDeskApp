@@ -41,7 +41,7 @@ export function HomeSearch() {
 
   return (
     <div className="stack">
-      <div className="row">
+      <div className="row search-row">
         <select className="select" aria-label="Search by" value={mode} onChange={(e) => setMode(e.target.value === "receipt" ? "receipt" : "serial")}>
           <option value="serial">Serial number</option>
           <option value="receipt">Hand receipt number</option>
