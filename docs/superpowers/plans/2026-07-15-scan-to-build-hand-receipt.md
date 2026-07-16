@@ -335,7 +335,9 @@ describe("lookupScannedItem", () => {
   });
 
   it("checks auth before touching any data", async () => {
-    requireUser.mockRejectedValue(new AuthError("UNAUTHORIZED"));
+    // AuthError's code is "UNAUTHENTICATED" | "FORBIDDEN"; the action maps ANY
+    // AuthError to its own "UNAUTHORIZED" result code (asserted below).
+    requireUser.mockRejectedValue(new AuthError("UNAUTHENTICATED"));
     expect(await lookupScannedItem("i1")).toEqual({ ok: false, code: "UNAUTHORIZED" });
     expect(getItem).not.toHaveBeenCalled();
   });
