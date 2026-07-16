@@ -9,7 +9,11 @@ import type { ContactOption } from "@/modules/contacts/contact-match";
 import { SERVICE_TYPE_OPTIONS } from "@/modules/service-queue/service-form";
 
 type Prefill = { isDcsim?: boolean; name?: string; rank?: string; unit?: string; contact?: string; email?: string };
-import { groupItemsIntoLines, type LineItem } from "@/modules/transfers/receipt-lines";
+import { groupItemsIntoLines, MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW, type LineItem } from "@/modules/transfers/receipt-lines";
+import { parseItemScan } from "@/modules/items/scan-url";
+import { lookupScannedItem } from "@/app/actions/scan";
+import { QrScanner } from "@/components/QrScanner";
+import { beep } from "@/lib/beep";
 
 // `holderName` is the item's current holder, used to warn when a scan brings in
 // equipment held by someone other than the sender on the form. It rides along
@@ -250,6 +254,90 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, co
 
   const removeItem = (itemId: string) => setItems((prev) => prev.filter((i) => i.itemId !== itemId));
 
+  const [scanning, setScanning] = useState(false);
+  const [toast, setToast] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  // A QR sitting in frame decodes many times a second, so the same id inside
+  // this window is the camera repeating itself, not a second laptop.
+  const lastDecode = useRef<{ id: string; at: number }>({ id: "", at: 0 });
+  // Serializes lookups. The decode loop fires onDecode without awaiting, so
+  // without this two different ids interleave their read-modify-write of the
+  // item list and the second drops the first. One in flight at a time.
+  const looking = useRef(false);
+  // Mirrors `items` so onDecode reads the LIVE list across its await instead of
+  // the snapshot its closure captured. Updated on every render, and eagerly
+  // after an append so a second scan landing before the next render still sees
+  // the first.
+  const itemsRef = useRef(items);
+  useEffect(() => { itemsRef.current = items; }, [items]);
+
+  const say = (kind: "ok" | "err", text: string) => {
+    setToast({ kind, text });
+    beep(kind);
+  };
+
+  const holderNote = (holder: string | null) =>
+    holder && senderName && holder !== senderName ? ` — held by ${holder}, not ${senderName}` : "";
+
+  // Every refusal KEEPS the camera open: rapid-fire only works if a bad scan is
+  // a blip, not a dead end.
+  const onDecode = async (text: string) => {
+    const id = parseItemScan(text);
+    // Rejected client-side, so a stray barcode never costs a round trip.
+    if (!id) return say("err", "Not an item code");
+
+    if (looking.current) return; // a lookup is already in flight; drop this frame
+
+    // Time-window dedupe: the same id within 1.5s of the last PROCESSED decode is
+    // the camera repeating a QR still in frame. Checked AFTER the in-flight guard
+    // and recorded only when we actually proceed — otherwise a decode dropped for
+    // concurrency would arm the window against its own retry and suppress a
+    // legitimate item for up to 1.5s.
+    const now = Date.now();
+    if (lastDecode.current.id === id && now - lastDecode.current.at < 1500) return;
+    lastDecode.current = { id, at: now };
+
+    looking.current = true;
+    try {
+      const dup = itemsRef.current.find((i) => i.itemId === id);
+      if (dup) return say("err", `Already added — ${dup.make} ${dup.model} · SN ${dup.serialNumber}`);
+
+      const res = await lookupScannedItem(id);
+      if (!res.ok) {
+        const msg: Record<typeof res.code, string> = {
+          NOT_FOUND: "That item no longer exists",
+          RETIRED: "That item is retired and can't be transferred",
+          UNAUTHORIZED: "Your session expired — sign in again",
+          FAILED: "Couldn't look up that item — try again",
+        };
+        return say("err", msg[res.code]);
+      }
+
+      const newItem: BuilderItem = {
+        itemId: res.item.id, make: res.item.make, model: res.item.model,
+        serialNumber: res.item.serialNumber, holderName: res.holderName,
+      };
+      // Built from the LIVE list (itemsRef), not a captured snapshot.
+      const next = [...itemsRef.current, newItem];
+      // The server gate on load swaps the whole form for a card
+      // (receipts/new/page.tsx:52-55). Doing that here would destroy a
+      // half-filled form, so the SCAN is refused and the form left untouched.
+      // createTransfer remains the authority.
+      const nextLines = groupItemsIntoLines(next);
+      if (nextLines.length > MAX_RECEIPT_ROWS) return say("err", `This receipt is full — ${MAX_RECEIPT_ROWS} item types max`);
+      if (nextLines.some((l) => l.serials.length > MAX_ITEMS_PER_ROW)) {
+        return say("err", `Too many of one item — ${MAX_ITEMS_PER_ROW} per make and model max`);
+      }
+
+      itemsRef.current = next; // eager, so a scan landing before re-render sees it
+      setItems(next);
+      // Spec: the mixed-holder warning does double duty — a toast at scan time
+      // AND a persistent row marker (added below). This is the toast half.
+      say("ok", `Added: ${newItem.make} ${newItem.model} · SN ${newItem.serialNumber}${holderNote(newItem.holderName)}`);
+    } finally {
+      looking.current = false;
+    }
+  };
+
   // Keyed by line (make+model), matching how groupItemsIntoLines groups. An
   // ABSENT entry means "untouched" and renders the live item count; a present
   // one is the operator's explicit value and wins from then on. Storing only
@@ -325,6 +413,16 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, co
     if (dataUrl) setSigCleared(false);
   };
 
+  // Warns only when a sender name is present AND differs: an item never
+  // transferred has no holder to disagree with, and a blank sender cannot
+  // conflict with anything. Added, never blocked — see the spec.
+  const holderOf = new Map(items.map((i) => [i.itemId, i.holderName]));
+  const holderWarning = (itemId: string) => {
+    const holder = holderOf.get(itemId);
+    if (!holder || !senderName || holder === senderName) return null;
+    return `Held by ${holder}, not ${senderName}`;
+  };
+
   if (receipt) {
     return (
       <div className="card stack-sm">
@@ -344,6 +442,22 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, co
       {items.map((it) => <input key={it.itemId} type="hidden" name="itemId" value={it.itemId} />)}
       <fieldset className="card stack-sm">
         <legend className="card__title">Items ({lines.length} {lines.length === 1 ? "row" : "rows"})</legend>
+        {/* "Scan to add", not "Scan": the phone's own camera app also scans these
+            stickers, but it can only OPEN the item page — it cannot feed a form
+            that is already open. Naming the action keeps the two apart. */}
+        <button type="button" className="btn btn-secondary scan-add" onClick={() => setScanning(true)}>Scan to add</button>
+        {/* Shown here whenever the sheet is CLOSED. An "ok" toast restates
+            what the row already shows live (make/model/serial, plus the
+            holder note that ALSO persists as the row's marker below) — no
+            need to duplicate it here while the sheet covers this anyway, and
+            keeping it gated avoids literally two elements carrying the same
+            holder text at once. An "err" toast is the operator's only signal
+            that a scan did nothing, so it stays visible even with the sheet
+            open — same reasoning as `notice` (passed to the sheet below) for
+            when the sheet's own display is what's covering this. */}
+        {toast && (toast.kind === "err" || !scanning) && (
+          <p role="status" aria-live="polite" className={toast.kind === "ok" ? "alert-success" : "alert-error"}>{toast.text}</p>
+        )}
         <div className="table-wrap">
           <table className="table">
             <thead><tr><th>#</th><th>Item</th><th>Serial</th><th>Service</th><th>Auth</th><th>Issued</th><th></th></tr></thead>
@@ -366,7 +480,15 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, co
                           <td className="is-empty"></td>
                         </>
                       )}
-                      <td className="mono" data-label="Serial">{ln.serials[k]}</td>
+                      {/* The warning lives with the SERIAL, which is what the mobile
+                          card leads with (globals.css:980-988) and what an operator
+                          matches against the sticker. `.is-stacked` only when it is
+                          present — a restacked cell is a flex row, so two children
+                          would otherwise sit side by side and collide. */}
+                      <td className={holderWarning(itemId) ? "mono is-stacked" : "mono"} data-label="Serial">
+                        {ln.serials[k]}
+                        {holderWarning(itemId) && <span className="subtle">{holderWarning(itemId)}</span>}
+                      </td>
                       <td className="is-stacked" data-label="Service"><ServiceControls itemId={itemId} /></td>
                       {k === 0 && (
                         <>
@@ -441,6 +563,7 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, co
         <button className="btn btn-primary" disabled={pending} type="submit">{pending ? "Creating…" : "Create hand receipt"}</button>
         {state && "error" in state && state.error && <span role="alert" className="alert-error">{state.error}</span>}
       </div>
+      {scanning && <QrScanner onDecode={onDecode} onClose={() => setScanning(false)} notice={toast} />}
     </form>
   );
 }

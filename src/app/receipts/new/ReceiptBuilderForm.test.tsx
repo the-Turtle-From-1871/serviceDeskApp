@@ -56,6 +56,26 @@ vi.mock("@/components/TechnicianSignatureField", () => ({
   ),
 }));
 
+const lookupScannedItem = vi.fn();
+vi.mock("@/app/actions/scan", () => ({
+  lookupScannedItem: (id: string) => lookupScannedItem(id),
+}));
+// The camera is not what these tests are about. This stands in for it: a button
+// per fixture that emits one decoded string. (`notice` is accepted and ignored
+// here — it's exercised in the real browser, Task 10.)
+vi.mock("@/components/QrScanner", () => ({
+  QrScanner: ({ onDecode, onClose }: { onDecode: (t: string) => void; onClose: () => void; notice?: unknown }) => (
+    <div>
+      <button type="button" onClick={() => onDecode("https://x.example/i/i2")}>emit-i2</button>
+      <button type="button" onClick={() => onDecode("https://x.example/i/i3")}>emit-i3</button>
+      <button type="button" onClick={() => onDecode("https://x.example/i/i1")}>emit-i1</button>
+      <button type="button" onClick={() => onDecode("WIFI:S:Guest;;")}>emit-junk</button>
+      <button type="button" onClick={onClose}>emit-close</button>
+    </div>
+  ),
+}));
+vi.mock("@/lib/beep", () => ({ beep: vi.fn() }));
+
 import { ReceiptBuilderForm } from "./ReceiptBuilderForm";
 
 afterEach(cleanup);
@@ -414,5 +434,184 @@ describe("ReceiptBuilderForm — a signature attests to a specific item list", (
 
     await user.click(screen.getByRole("button", { name: "dcsim-pick" }));
     expect(screen.queryByText(/please sign again/i)).toBeNull();
+  });
+});
+
+describe("ReceiptBuilderForm — scanning adds items", () => {
+  const HP = { ok: true as const, item: { id: "i2", make: "HP", model: "G8", serialNumber: "SN2" }, holderName: null };
+
+  const openScanner = async (user: ReturnType<typeof userEvent.setup>) =>
+    user.click(screen.getByRole("button", { name: /Scan to add/i }));
+
+  beforeEach(() => lookupScannedItem.mockResolvedValue(HP));
+
+  it("adds a scanned item to the list", async () => {
+    const user = userEvent.setup();
+    renderForm();
+    await openScanner(user);
+    await user.click(screen.getByRole("button", { name: "emit-i2" }));
+
+    expect(await screen.findByText("SN2")).toBeDefined();
+    expect(lookupScannedItem).toHaveBeenCalledWith("i2");
+  });
+
+  it("posts the scanned item alongside the original", async () => {
+    const user = userEvent.setup();
+    renderForm();
+    await openScanner(user);
+    await user.click(screen.getByRole("button", { name: "emit-i2" }));
+    await screen.findByText("SN2");
+    await user.click(screen.getByRole("button", { name: "emit-close" }));
+
+    await fillParty(user, "Sender");
+    await fillParty(user, "Recipient");
+    await user.click(screen.getByRole("button", { name: /Create hand receipt/i }));
+    await waitFor(() => expect(createReceiptAction).toHaveBeenCalled());
+
+    const posted = createReceiptAction.mock.calls[0][1] as FormData;
+    expect(posted.getAll("itemId")).toEqual(["i1", "i2"]);
+  });
+
+  it("rejects a foreign QR without calling the server", async () => {
+    const user = userEvent.setup();
+    renderForm();
+    await openScanner(user);
+    await user.click(screen.getByRole("button", { name: "emit-junk" }));
+
+    expect(await screen.findByText(/Not an item code/i)).toBeDefined();
+    expect(lookupScannedItem).not.toHaveBeenCalled();
+  });
+
+  it("names the duplicate rather than adding it twice", async () => {
+    const user = userEvent.setup();
+    renderForm();
+    await openScanner(user);
+    await user.click(screen.getByRole("button", { name: "emit-i1" }));
+
+    expect(await screen.findByText(/Already added — Dell L5420 · SN SN1/i)).toBeDefined();
+    expect(lookupScannedItem).not.toHaveBeenCalled();
+  });
+
+  it("refuses a retired item", async () => {
+    lookupScannedItem.mockResolvedValue({ ok: false, code: "RETIRED" });
+    const user = userEvent.setup();
+    renderForm();
+    await openScanner(user);
+    await user.click(screen.getByRole("button", { name: "emit-i2" }));
+
+    expect(await screen.findByText(/That item is retired and can't be transferred/i)).toBeDefined();
+    expect(screen.queryByText("SN2")).toBeNull();
+  });
+
+  it("refuses an unknown item", async () => {
+    lookupScannedItem.mockResolvedValue({ ok: false, code: "NOT_FOUND" });
+    const user = userEvent.setup();
+    renderForm();
+    await openScanner(user);
+    await user.click(screen.getByRole("button", { name: "emit-i2" }));
+
+    expect(await screen.findByText(/That item no longer exists/i)).toBeDefined();
+  });
+
+  it("surfaces a lookup failure", async () => {
+    lookupScannedItem.mockResolvedValue({ ok: false, code: "FAILED" });
+    const user = userEvent.setup();
+    renderForm();
+    await openScanner(user);
+    await user.click(screen.getByRole("button", { name: "emit-i2" }));
+
+    expect(await screen.findByText(/Couldn't look up that item — try again/i)).toBeDefined();
+  });
+
+  // A QR sitting in frame decodes many times a second. The SECOND decode here
+  // is caught by the duplicate-item check (i2 is already on the list) — that is
+  // fine, but it does not exercise the time-window dedupe. The next test does.
+  it("does not add the same item twice from repeated decodes", async () => {
+    const user = userEvent.setup();
+    renderForm();
+    await openScanner(user);
+    await user.click(screen.getByRole("button", { name: "emit-i2" }));
+    await screen.findByText("SN2");
+    await user.click(screen.getByRole("button", { name: "emit-i2" }));
+
+    expect(lookupScannedItem).toHaveBeenCalledTimes(1);
+  });
+
+  // Concurrency safety — the CRITICAL bug the review caught. The decode loop
+  // fires onDecode without awaiting, so two lookups can be in flight at once. A
+  // handler that appended from a captured `items` snapshot would let the second
+  // resolution overwrite the first and silently drop a laptop off a custody
+  // document, AFTER the operator heard the beep confirming it. The `looking`
+  // guard serializes lookups; the live-ref append composes. With a DEFERRED
+  // first lookup, the overlapping second decode is dropped (not confirmed, so
+  // never falsely reported), and once the first resolves a re-emit of the
+  // second lands ON TOP of it — both items survive.
+  it("never drops a confirmed item when two scans overlap", async () => {
+    const user = userEvent.setup();
+    const HP3 = { ok: true as const, item: { id: "i3", make: "Acer", model: "A1", serialNumber: "SN3" }, holderName: null };
+    let releaseI2: (v: typeof HP) => void = () => {};
+    lookupScannedItem.mockImplementation((id: string) =>
+      id === "i2" ? new Promise((r) => { releaseI2 = r; }) : Promise.resolve(HP3));
+
+    renderForm();
+    await openScanner(user);
+    await user.click(screen.getByRole("button", { name: "emit-i2" })); // in flight, not resolved
+    await user.click(screen.getByRole("button", { name: "emit-i3" })); // overlaps -> dropped by the guard
+    expect(screen.queryByText("SN3")).toBeNull();
+
+    releaseI2(HP);                        // i2 resolves and is added
+    expect(await screen.findByText("SN2")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "emit-i3" })); // re-scan i3, now free
+    expect(await screen.findByText("SN3")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "emit-close" }));
+
+    await fillParty(user, "Sender");
+    await fillParty(user, "Recipient");
+    await user.click(screen.getByRole("button", { name: /Create hand receipt/i }));
+    await waitFor(() => expect(createReceiptAction).toHaveBeenCalled());
+
+    // BOTH survive: i2 was not clobbered by i3 landing on a stale snapshot.
+    const posted = createReceiptAction.mock.calls[0][1] as FormData;
+    expect(posted.getAll("itemId")).toEqual(["i1", "i2", "i3"]);
+  });
+
+  // Per the spec: added, not blocked — a dead end at the cart is worse. But the
+  // toast vanishes while the operator is looking at a laptop, so the row keeps
+  // saying it, right up to signature time.
+  it("adds an item held by someone else, and keeps saying so on the row", async () => {
+    lookupScannedItem.mockResolvedValue({ ...HP, holderName: "CPL Jones" });
+    const user = userEvent.setup();
+    renderForm({ isDcsim: false, name: "SGT Smith", rank: "SGT", unit: "A Co", contact: "5551112222", email: "s@x.mil" });
+    await openScanner(user);
+    await user.click(screen.getByRole("button", { name: "emit-i2" }));
+
+    expect(await screen.findByText("SN2")).toBeDefined();
+    expect(await screen.findByText(/Held by CPL Jones, not SGT Smith/i)).toBeDefined();
+  });
+
+  it("says nothing about a holder that matches the sender", async () => {
+    lookupScannedItem.mockResolvedValue({ ...HP, holderName: "SGT Smith" });
+    const user = userEvent.setup();
+    renderForm({ isDcsim: false, name: "SGT Smith", rank: "SGT", unit: "A Co", contact: "5551112222", email: "s@x.mil" });
+    await openScanner(user);
+    await user.click(screen.getByRole("button", { name: "emit-i2" }));
+
+    await screen.findByText("SN2");
+    expect(screen.queryByText(/Held by/i)).toBeNull();
+  });
+
+  // Replacing a half-filled form with a card (what the server gate does on load)
+  // would destroy the operator's work — the exact thing this design avoids.
+  it("refuses a scan that would overflow the receipt, leaving the form alone", async () => {
+    const full = Array.from({ length: 18 }, (_, k) => ({
+      itemId: `f${k}`, make: `Make${k}`, model: "M", serialNumber: `S${k}`, holderName: null,
+    }));
+    const user = userEvent.setup();
+    renderForm(undefined, full);
+    await openScanner(user);
+    await user.click(screen.getByRole("button", { name: "emit-i2" }));
+
+    expect(await screen.findByText(/This receipt is full — 18 item types max/i)).toBeDefined();
+    expect(screen.queryByText("SN2")).toBeNull();
   });
 });
