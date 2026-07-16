@@ -167,10 +167,12 @@ describe("ReceiptBuilderForm — the DCSIM checkbox survives a failed submit", (
   });
 
   it("keeps a typed quantity after the server rejects", async () => {
-    // qtyAuth/qtyIssued are uncontrolled (defaultValue), and React's reset fires
-    // on ANY settled action — so a rejected submit may silently snap a typed
-    // quantity back to the default. The operator fixes the real error, resubmits,
-    // and the receipt is filed for the wrong count.
+    // qtyAuth/qtyIssued are controlled via the lifted `qtyEdits` state, and
+    // React's reset fires on ANY settled action — so a rejected submit may
+    // silently snap a typed quantity back to the default if that state weren't
+    // kept in sync. This verifies a typed qty survives a rejected submit: the
+    // operator fixes the real error, resubmits, and the receipt is filed for
+    // the count they actually typed.
     const user = userEvent.setup();
     renderForm();
 

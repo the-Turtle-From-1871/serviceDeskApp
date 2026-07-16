@@ -252,7 +252,24 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, co
     window.history.replaceState(null, "", `?items=${items.map((i) => i.itemId).join(",")}`);
   }, [items]);
 
-  const removeItem = (itemId: string) => setItems((prev) => prev.filter((i) => i.itemId !== itemId));
+  const removeItem = (itemId: string) => {
+    const removed = items.find((i) => i.itemId === itemId);
+    setItems((prev) => prev.filter((i) => i.itemId !== itemId));
+    // Drop the qty override for a make/model no longer on the receipt, so
+    // removing every item of a type and re-scanning it starts from the live
+    // count, not a stale edit. Folded here from a useEffect (which tripped
+    // react-hooks/set-state-in-effect); removeItem is the only path that
+    // shrinks the list, so this covers every case the effect did.
+    if (removed && !items.some((i) => i.itemId !== itemId && i.make === removed.make && i.model === removed.model)) {
+      const key = lineKey(removed);
+      setQtyEdits((prev) => {
+        if (!(key in prev)) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
+  };
 
   const [scanning, setScanning] = useState(false);
   const [toast, setToast] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
@@ -348,18 +365,6 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, co
     qtyEdits[lineKey(ln)]?.[field] ?? String(ln.defaultQty);
   const setQty = (ln: { make: string; model: string }, field: "auth" | "issued", v: string) =>
     setQtyEdits((prev) => ({ ...prev, [lineKey(ln)]: { ...prev[lineKey(ln)], [field]: v } }));
-
-  // Drop overrides for a make/model no longer on the receipt. Without this,
-  // removing every item of a type and then re-scanning it resurrects the old
-  // edited count — the same wrong-count-on-a-custody-document class as defect
-  // #1. Identity-guarded so it can't loop.
-  useEffect(() => {
-    const keys = new Set(lines.map(lineKey));
-    setQtyEdits((prev) => {
-      const kept = Object.entries(prev).filter(([k]) => keys.has(k));
-      return kept.length === Object.keys(prev).length ? prev : Object.fromEntries(kept);
-    });
-  }, [lines]);
 
   const [senderIsDcsim, setSenderIsDcsim] = useState(senderPrefill?.isDcsim ?? false);
   const [receiverIsDcsim, setReceiverIsDcsim] = useState(false);

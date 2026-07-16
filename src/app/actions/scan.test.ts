@@ -81,6 +81,18 @@ describe("lookupScannedItem", () => {
     expect(getItem).not.toHaveBeenCalled();
   });
 
+  // requireUser does real DB/auth work and can throw something that is NOT an
+  // AuthError (DB down, auth misconfig) — that must map to FAILED like any
+  // other unexpected error, not escape as an unhandled rejection.
+  it("maps a non-AuthError from requireUser to FAILED", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    requireUser.mockRejectedValue(new Error("db is on fire"));
+    expect(await lookupScannedItem("i1")).toEqual({ ok: false, code: "FAILED" });
+    expect(getItem).not.toHaveBeenCalled();
+    expect(err).toHaveBeenCalled();
+    err.mockRestore();
+  });
+
   it("returns FAILED and logs on an unexpected error", async () => {
     const err = vi.spyOn(console, "error").mockImplementation(() => {});
     getItem.mockRejectedValue(new Error("db is on fire"));

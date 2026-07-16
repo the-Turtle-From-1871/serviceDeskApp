@@ -15,7 +15,8 @@ export async function lookupScannedItem(itemId: string): Promise<ScanLookup> {
     await requireUser();
   } catch (e) {
     if (e instanceof AuthError) return { ok: false, code: "UNAUTHORIZED" };
-    throw e;
+    console.error("[lookupScannedItem] auth check failed:", e);
+    return { ok: false, code: "FAILED" };
   }
 
   const id = itemId.trim();
