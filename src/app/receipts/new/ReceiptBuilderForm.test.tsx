@@ -8,8 +8,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-// Adds toBeDisabled() etc. — needed by the "last item can't be removed" test below.
-import "@testing-library/jest-dom/vitest";
 
 const createReceiptAction = vi.fn();
 vi.mock("@/app/actions/receipts", () => ({
@@ -205,7 +203,7 @@ describe("ReceiptBuilderForm — the item list is the form's own state", () => {
   // notFound() on reload (receipts/new/page.tsx:15).
   it("will not let the last item be removed", () => {
     renderForm();
-    expect(screen.getByRole("button", { name: /Remove Dell L5420, serial SN1/i })).toBeDisabled();
+    expect((screen.getByRole("button", { name: /Remove Dell L5420, serial SN1/i }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   // Keeps the URL recoverable after an iOS tab eviction. replaceState, not
