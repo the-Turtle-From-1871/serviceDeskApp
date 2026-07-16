@@ -220,3 +220,44 @@ describe("ReceiptBuilderForm — the item list is the form's own state", () => {
     spy.mockRestore();
   });
 });
+
+describe("ReceiptBuilderForm — quantities track the item count", () => {
+  const auth = () => screen.getByLabelText("Quantity authorized, Dell L5420") as HTMLInputElement;
+  const issued = () => screen.getByLabelText("Quantity issued, Dell L5420") as HTMLInputElement;
+
+  const TWO_SAME = [
+    { itemId: "i1", make: "Dell", model: "L5420", serialNumber: "SN1", holderName: null },
+    { itemId: "i2", make: "Dell", model: "L5420", serialNumber: "SN2", holderName: null },
+  ];
+
+  // The defect: QtyInput used to seed its state once from defaultQty. With a
+  // growable list that leaves the line holding two serials while Issued still
+  // reads 1 — a custody document filed for the wrong count.
+  it("shows the item count for an untouched line", () => {
+    renderForm(undefined, TWO_SAME);
+    expect(auth().value).toBe("2");
+    expect(issued().value).toBe("2");
+  });
+
+  it("drops to the new count when an item is removed", async () => {
+    const user = userEvent.setup();
+    renderForm(undefined, TWO_SAME);
+    expect(issued().value).toBe("2");
+
+    await user.click(screen.getByRole("button", { name: /Remove Dell L5420, serial SN2/i }));
+    expect(issued().value).toBe("1");
+  });
+
+  // An explicitly typed quantity is the operator's, and outranks the count.
+  it("leaves an edited quantity alone when the list changes", async () => {
+    const user = userEvent.setup();
+    renderForm(undefined, TWO_SAME);
+
+    await user.clear(auth());
+    await user.type(auth(), "5");
+    await user.click(screen.getByRole("button", { name: /Remove Dell L5420, serial SN2/i }));
+
+    expect(auth().value).toBe("5");
+    expect(issued().value).toBe("1"); // untouched, so it still tracks
+  });
+});

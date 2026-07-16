@@ -132,16 +132,19 @@ function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, 
   );
 }
 
-// Controlled, not `defaultValue`, so React's post-action form reset can't touch
-// it. Uncontrolled, a submit that failed validation snapped a typed quantity
-// back to the default — the operator fixes the real error, resubmits, and the
-// receipt is filed for the wrong count. Same reasoning as the lifted party
-// fields above. Verified by ReceiptBuilderForm.test.tsx.
-// `label` is announced via aria-label: the column's <th> orients a sighted user,
-// but it gives the input itself no accessible name, so a screen reader would
-// otherwise read a bare number box. Matches ServiceControls' aria-labels below.
-function QtyInput({ name, defaultQty, label }: { name: string; defaultQty: number; label: string }) {
-  const [qty, setQty] = useState(String(defaultQty));
+// Controlled by the FORM, not by itself. Two reasons, both load-bearing:
+//
+// 1. React resets the form after any settled action, including a failed one. An
+//    uncontrolled qty snapped a typed value back to its default, so the
+//    operator fixed the real error, resubmitted, and filed the wrong count.
+//    (Verified by ReceiptBuilderForm.test.tsx.)
+// 2. The value must TRACK the line's item count while untouched. Seeding state
+//    from defaultQty froze it at mount — fine when the list could not change,
+//    wrong the moment a scan can grow a line.
+//
+// `label` is announced via aria-label: the column's <th> orients a sighted user
+// but gives the input no accessible name.
+function QtyInput({ name, value, onChange, label }: { name: string; value: string; onChange: (v: string) => void; label: string }) {
   return (
     <input
       className="input"
@@ -150,8 +153,8 @@ function QtyInput({ name, defaultQty, label }: { name: string; defaultQty: numbe
       min={1}
       name={name}
       aria-label={label}
-      value={qty}
-      onChange={(e) => setQty(e.target.value)}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
       required
     />
   );
@@ -246,6 +249,30 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, co
   }, [items]);
 
   const removeItem = (itemId: string) => setItems((prev) => prev.filter((i) => i.itemId !== itemId));
+
+  // Keyed by line (make+model), matching how groupItemsIntoLines groups. An
+  // ABSENT entry means "untouched" and renders the live item count; a present
+  // one is the operator's explicit value and wins from then on. Storing only
+  // overrides is what makes tracking-until-edited fall out for free.
+  const [qtyEdits, setQtyEdits] = useState<Record<string, { auth?: string; issued?: string }>>({});
+  const lineKey = (ln: { make: string; model: string }) => `${ln.make} ${ln.model}`;
+  const qtyValue = (ln: { make: string; model: string; defaultQty: number }, field: "auth" | "issued") =>
+    qtyEdits[lineKey(ln)]?.[field] ?? String(ln.defaultQty);
+  const setQty = (ln: { make: string; model: string }, field: "auth" | "issued", v: string) =>
+    setQtyEdits((prev) => ({ ...prev, [lineKey(ln)]: { ...prev[lineKey(ln)], [field]: v } }));
+
+  // Drop overrides for a make/model no longer on the receipt. Without this,
+  // removing every item of a type and then re-scanning it resurrects the old
+  // edited count — the same wrong-count-on-a-custody-document class as defect
+  // #1. Identity-guarded so it can't loop.
+  useEffect(() => {
+    const keys = new Set(lines.map(lineKey));
+    setQtyEdits((prev) => {
+      const kept = Object.entries(prev).filter(([k]) => keys.has(k));
+      return kept.length === Object.keys(prev).length ? prev : Object.fromEntries(kept);
+    });
+  }, [lines]);
+
   const [senderIsDcsim, setSenderIsDcsim] = useState(senderPrefill?.isDcsim ?? false);
   const [receiverIsDcsim, setReceiverIsDcsim] = useState(false);
   const [senderName, setSenderName] = useState(senderPrefill?.name ?? "");
@@ -315,10 +342,10 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, co
                               Splitting them per row would emit duplicate
                               `line[i][qtyAuth]` fields and change what the form submits. */}
                           <td rowSpan={ln.itemIds.length} data-label={ln.itemIds.length > 1 ? `Qty authorized (all ${ln.itemIds.length} serials)` : "Qty authorized"}>
-                            <QtyInput name={`line[${i}][qtyAuth]`} defaultQty={ln.defaultQty} label={`Quantity authorized, ${ln.make} ${ln.model}`} />
+                            <QtyInput name={`line[${i}][qtyAuth]`} value={qtyValue(ln, "auth")} onChange={(v) => setQty(ln, "auth", v)} label={`Quantity authorized, ${ln.make} ${ln.model}`} />
                           </td>
                           <td rowSpan={ln.itemIds.length} data-label={ln.itemIds.length > 1 ? `Qty issued (all ${ln.itemIds.length} serials)` : "Qty issued"}>
-                            <QtyInput name={`line[${i}][qtyIssued]`} defaultQty={ln.defaultQty} label={`Quantity issued, ${ln.make} ${ln.model}`} />
+                            <QtyInput name={`line[${i}][qtyIssued]`} value={qtyValue(ln, "issued")} onChange={(v) => setQty(ln, "issued", v)} label={`Quantity issued, ${ln.make} ${ln.model}`} />
                           </td>
                         </>
                       )}
