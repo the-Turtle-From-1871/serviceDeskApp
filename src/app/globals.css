@@ -449,6 +449,18 @@ input[type="file"].input {
 .textarea::placeholder {
   color: var(--text-subtle);
 }
+/* iOS Safari zooms the viewport when a focused input's font-size is < 16px.
+   Bump to 16px on touch devices so tapping a field never zooms. Keyed on
+   `pointer: coarse` (touch), NOT a width breakpoint: a phone in landscape
+   exceeds the 720px mobile breakpoint but still zooms, so a max-width rule
+   would miss it. Desktop (fine pointer) keeps 14px and never zooms. */
+@media (pointer: coarse) {
+  .input,
+  .select,
+  .textarea {
+    font-size: 16px;
+  }
+}
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
