@@ -429,6 +429,22 @@ h3 {
   padding: 10px 12px;
   resize: vertical;
 }
+/* Custom dropdown chevron. The native `<select>` arrow can't be positioned and
+   renders inconsistently across browsers (it was sitting too far right). Reset
+   the native control and draw our own chevron at a fixed 12px from the right
+   edge, matching the field's 12px horizontal padding; padding-right is widened
+   so the selected text never runs under it. Color is --text-muted (#5c665a),
+   inlined because a data-URI SVG can't read a CSS var (app is light-theme only).
+   Placed after the base rule so its `background` shorthand doesn't reset this. */
+.select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none' stroke='%235c665a' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 14px;
+}
 /* The native file-picker button pins to the top of the fixed-height input box.
    Use height:auto + symmetric vertical padding so equal space above/below the
    button centers it (robust across browsers, not reliant on flex alone). */
