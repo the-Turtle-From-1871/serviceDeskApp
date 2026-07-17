@@ -57,9 +57,18 @@ export function ServiceControls({ itemId, request }: Props) {
               <button type="submit" className="btn btn-secondary btn-sm">Mark Completed</button>
             </form>
           ) : (
-            <form action={reopenServiceAction}>
+            <form action={reopenServiceAction} className="row" style={{ gap: 6, alignItems: "center" }}>
               <input type="hidden" name="id" value={request.id} />
               <input type="hidden" name="itemId" value={itemId} />
+              <input
+                className="input"
+                style={{ width: "auto", minWidth: 150 }}
+                name="overrideDays"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                placeholder="New SLA days (optional)"
+                aria-label="New SLA days on reopen (optional)"
+              />
               <button type="submit" className="btn btn-secondary btn-sm">Reopen</button>
             </form>
           )}

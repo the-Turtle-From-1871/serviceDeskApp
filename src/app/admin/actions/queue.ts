@@ -11,17 +11,20 @@ import {
 import { getCurrentOpenTransferId } from "@/modules/transfers/transfers.service";
 import { ServiceQueueError } from "@/modules/service-queue/service-queue.errors";
 
+// A blank/absent override means "use the type default" (undefined), not 0 —
+// z.coerce.number() would otherwise turn "" into 0 and fail .positive().
+const overrideDaysField = z
+  .preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().positive().max(3650).optional())
+  .optional();
+
 const idSchema = z.object({ id: z.string().min(1) });
 const setSchema = z.object({
   itemId: z.string().min(1),
   serviceType: z.enum(["REIMAGE", "REPAIR", "OTHER"]),
   note: z.string().optional(),
-  // A blank/absent override means "use the type default" (undefined), not 0 —
-  // z.coerce.number() would otherwise turn "" into 0 and fail .positive().
-  overrideDays: z
-    .preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().positive().max(3650).optional())
-    .optional(),
+  overrideDays: overrideDaysField,
 });
+const reopenSchema = z.object({ id: z.string().min(1), overrideDays: overrideDaysField });
 
 function revalidateItem(itemId: string) {
   revalidatePath("/admin/queue");
@@ -76,14 +79,18 @@ export async function completeServiceAction(formData: FormData): Promise<void> {
   if (itemId) revalidatePath(`/i/${itemId}`);
 }
 
-// Reopen a completed item back into the queue (from the item page).
+// Reopen a completed item back into the queue (from the item page). Restarts the
+// SLA clock; an optional override days sets a custom new deadline.
 export async function reopenServiceAction(formData: FormData): Promise<void> {
   await requireAdmin();
-  const parsed = idSchema.safeParse({ id: String(formData.get("id") ?? "") });
+  const parsed = reopenSchema.safeParse({
+    id: String(formData.get("id") ?? ""),
+    overrideDays: String(formData.get("overrideDays") ?? ""),
+  });
   if (!parsed.success) return;
   const itemId = String(formData.get("itemId") ?? "");
   try {
-    await reopenServiceItem(parsed.data.id);
+    await reopenServiceItem(parsed.data.id, parsed.data.overrideDays);
   } catch (e) {
     if (!(e instanceof ServiceQueueError)) console.error("[reopenServiceAction] unexpected error:", e);
   }

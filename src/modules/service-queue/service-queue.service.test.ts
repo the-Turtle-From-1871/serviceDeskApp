@@ -102,12 +102,31 @@ describe("completeServiceItem", () => {
 });
 
 describe("reopenServiceItem", () => {
-  it("COMPLETED -> PENDING", async () => {
-    vi.mocked(__tx.serviceQueueItem.findUnique).mockResolvedValueOnce({ id: "sq1", status: "COMPLETED" });
+  it("COMPLETED -> PENDING, restarting the SLA clock and clearing the alert", async () => {
+    vi.mocked(__tx.serviceQueueItem.findUnique).mockResolvedValueOnce({ id: "sq1", status: "COMPLETED", serviceType: "REPAIR" });
     vi.mocked(__tx.serviceQueueItem.update).mockResolvedValueOnce({ id: "sq1", status: "PENDING" });
     const r = await reopenServiceItem("sq1");
-    expect(__tx.serviceQueueItem.update).toHaveBeenCalledWith({ where: { id: "sq1" }, data: { status: "PENDING" } });
+    const arg = vi.mocked(__tx.serviceQueueItem.update).mock.calls[0][0];
+    expect(arg.where).toEqual({ id: "sq1" });
+    expect(arg.data.status).toBe("PENDING");
+    expect(arg.data.dueAt).toBeInstanceOf(Date);
+    expect(arg.data.overdueAlertedAt).toBeNull();
     expect(r.status).toBe("PENDING");
+  });
+
+  it("honors an override days on reopen (custom new deadline)", async () => {
+    const before = Date.now();
+    vi.mocked(__tx.serviceQueueItem.findUnique).mockResolvedValueOnce({ id: "sq1", status: "COMPLETED", serviceType: "REPAIR" });
+    vi.mocked(__tx.serviceQueueItem.update).mockResolvedValueOnce({ id: "sq1", status: "PENDING" });
+    await reopenServiceItem("sq1", 1);
+    const arg = vi.mocked(__tx.serviceQueueItem.update).mock.calls[0][0];
+    const days = Math.round((arg.data.dueAt.getTime() - before) / (24 * 60 * 60 * 1000));
+    expect(days).toBe(1);
+  });
+
+  it("throws INVALID_STATUS when the item is not completed", async () => {
+    vi.mocked(__tx.serviceQueueItem.findUnique).mockResolvedValueOnce({ id: "sq1", status: "PENDING", serviceType: "REPAIR" });
+    await expect(reopenServiceItem("sq1")).rejects.toMatchObject({ code: "INVALID_STATUS" });
   });
 });
 

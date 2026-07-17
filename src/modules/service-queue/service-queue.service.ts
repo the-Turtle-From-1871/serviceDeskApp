@@ -56,9 +56,22 @@ export function completeServiceItem(id: string): Promise<ServiceQueueItem> {
   return transition(id, canComplete, "COMPLETED");
 }
 
-// COMPLETED -> PENDING (reopen from the item detail page). Guarded.
-export function reopenServiceItem(id: string): Promise<ServiceQueueItem> {
-  return transition(id, canReopen, "PENDING");
+// COMPLETED -> PENDING (reopen from the item detail page). Restarts the SLA
+// clock: recomputes dueAt from now (the service type's default, or an optional
+// per-reopen override) and clears overdueAlertedAt so a fresh lapse can alert
+// again — reopening means "service this again," not "undo the completion."
+// Guarded; never resurrects a missing or non-COMPLETED row.
+export function reopenServiceItem(id: string, overrideDays?: number | null): Promise<ServiceQueueItem> {
+  return prisma.$transaction(async (tx) => {
+    const current = await tx.serviceQueueItem.findUnique({ where: { id } });
+    if (!current) throw new ServiceQueueError("NOT_FOUND");
+    if (!canReopen(current.status)) throw new ServiceQueueError("INVALID_STATUS");
+    const dueAt = computeServiceDueAt(current.serviceType, new Date(), overrideDays);
+    return tx.serviceQueueItem.update({
+      where: { id },
+      data: { status: "PENDING", dueAt, overdueAlertedAt: null },
+    });
+  });
 }
 
 function transition(

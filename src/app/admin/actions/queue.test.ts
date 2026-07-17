@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const requireAdmin = vi.fn();
 const upsertServiceRequest = vi.fn();
+const reopenServiceItem = vi.fn();
 const getCurrentOpenTransferId = vi.fn();
 const revalidatePath = vi.fn();
 
@@ -10,14 +11,14 @@ vi.mock("@/modules/service-queue/service-queue.service", () => ({
   upsertServiceRequest: (i: unknown) => upsertServiceRequest(i),
   clearServiceRequest: vi.fn(),
   completeServiceItem: vi.fn(),
-  reopenServiceItem: vi.fn(),
+  reopenServiceItem: (id: string, days?: unknown) => reopenServiceItem(id, days),
 }));
 vi.mock("@/modules/transfers/transfers.service", () => ({
   getCurrentOpenTransferId: (itemId: string) => getCurrentOpenTransferId(itemId),
 }));
 vi.mock("next/cache", () => ({ revalidatePath: (p: string) => revalidatePath(p) }));
 
-import { setServiceAction } from "./queue";
+import { setServiceAction, reopenServiceAction } from "./queue";
 
 const ADMIN = { id: "admin-1", role: "ADMIN" as const, name: "Admin", email: "a@x.mil" };
 
@@ -32,6 +33,7 @@ beforeEach(() => {
   requireAdmin.mockResolvedValue(ADMIN);
   getCurrentOpenTransferId.mockResolvedValue(null);
   upsertServiceRequest.mockResolvedValue({ id: "sq1" });
+  reopenServiceItem.mockResolvedValue({ id: "sq1", status: "PENDING" });
 });
 
 describe("setServiceAction overrideDays coercion", () => {
@@ -60,5 +62,26 @@ describe("setServiceAction overrideDays coercion", () => {
     expect(res).toEqual({ ok: true });
     expect(upsertServiceRequest).toHaveBeenCalledTimes(1);
     expect(upsertServiceRequest.mock.calls[0][0].overrideDays).toBe(5);
+  });
+});
+
+describe("reopenServiceAction overrideDays coercion", () => {
+  it("reopens with a blank overrideDays, threading undefined (type-default clock)", async () => {
+    await reopenServiceAction(fd({ id: "sq1", itemId: "i1", overrideDays: "" }));
+    expect(reopenServiceItem).toHaveBeenCalledTimes(1);
+    expect(reopenServiceItem.mock.calls[0][0]).toBe("sq1");
+    expect(reopenServiceItem.mock.calls[0][1]).toBeUndefined();
+  });
+
+  it("reopens with an absent overrideDays, threading undefined", async () => {
+    await reopenServiceAction(fd({ id: "sq1", itemId: "i1" }));
+    expect(reopenServiceItem).toHaveBeenCalledTimes(1);
+    expect(reopenServiceItem.mock.calls[0][1]).toBeUndefined();
+  });
+
+  it("threads a numeric override (custom new deadline) through as a number", async () => {
+    await reopenServiceAction(fd({ id: "sq1", itemId: "i1", overrideDays: "10" }));
+    expect(reopenServiceItem).toHaveBeenCalledTimes(1);
+    expect(reopenServiceItem.mock.calls[0][1]).toBe(10);
   });
 });
