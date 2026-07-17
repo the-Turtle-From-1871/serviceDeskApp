@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { completeServiceAction } from "@/app/admin/actions/queue";
 import { makeStore, usePersistedPref } from "@/components/persisted-pref";
+import { DueBadge } from "@/components/DueBadge";
 import {
   QUEUE_COLUMNS,
   sortQueueRows,
@@ -125,6 +126,7 @@ export function ServiceQueueTable({ rows }: { rows: QueueRowVM[] }) {
                   {!isHidden("deviceName") && <td data-label="Device Name">{r.deviceName ? r.deviceName : <span className="subtle">—</span>}</td>}
                   {!isHidden("homeUnit") && <td data-label="Unit">{r.homeUnit ? r.homeUnit : <span className="subtle">—</span>}</td>}
                   {!isHidden("serviceType") && <td data-label="Service Type">{r.serviceType}</td>}
+                  {!isHidden("due") && <td data-label="Due"><DueBadge dueAt={r.dueAt} /></td>}
                   <td data-label="">
                     <div className="actions actions--end">
                       <Link href={`/i/${r.itemId}`} className="btn btn-ghost btn-sm">View</Link>
