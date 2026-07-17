@@ -27,4 +27,8 @@ describe("dueState", () => {
   it("is 'ontrack' beyond the due-soon window", () => {
     expect(dueState(day(10), NOW)).toEqual({ state: "ontrack", days: 10 });
   });
+  it("is 'soon' when due in less than a day (days rounds to 0)", () => {
+    const halfDay = new Date(NOW.getTime() + 12 * 60 * 60 * 1000);
+    expect(dueState(halfDay, NOW)).toEqual({ state: "soon", days: 0 });
+  });
 });
