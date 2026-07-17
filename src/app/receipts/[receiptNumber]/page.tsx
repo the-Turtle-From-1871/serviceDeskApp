@@ -7,6 +7,8 @@ import { formatDateTimeHST } from "@/lib/datetime";
 import { SiteHeader } from "@/components/SiteHeader";
 import { getCurrentUser } from "@/lib/session";
 import { NotifyPickupButton } from "./NotifyPickupButton";
+import { DueBadge } from "@/components/DueBadge";
+import { ReceiptDueAtControls } from "./ReceiptDueAtControls";
 
 export default async function ReceiptPage({ params }: { params: Promise<{ receiptNumber: string }> }) {
   const { receiptNumber } = await params;
@@ -77,6 +79,15 @@ export default async function ReceiptPage({ params }: { params: Promise<{ receip
           <div><strong>To:</strong> {formatParty({ isDcsim: t.receiverIsDcsim, name: t.receiverName, rank: t.receiverRank, unit: t.receiverUnit })}</div>
           <div><strong>Date:</strong> {formatDateTimeHST(t.createdAt)}</div>
           <div><strong>Status:</strong> {t.status}</div>
+          <div>
+            <strong>Return by:</strong>{" "}
+            {t.dueAt ? (
+              <>{formatDateTimeHST(t.dueAt)} <DueBadge dueAt={t.dueAt.toISOString()} /></>
+            ) : (
+              <span className="subtle">No timer</span>
+            )}
+          </div>
+          {isAdmin && !closed && <ReceiptDueAtControls receiptNumber={t.receiptNumber} />}
         </div>
 
         {/* One row for every action, so a hidden button just reflows instead of

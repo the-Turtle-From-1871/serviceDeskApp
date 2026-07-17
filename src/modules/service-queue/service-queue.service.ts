@@ -2,6 +2,7 @@ import type { Prisma, ServiceQueueItem, ServiceType } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { canComplete, canReopen } from "./service-queue.status";
 import { ServiceQueueError } from "./service-queue.errors";
+import { computeServiceDueAt } from "./sla";
 
 // Trimmed fields the queue list and item card render — never pull unrelated PII.
 const queueItemSelect = { serialNumber: true, deviceName: true, homeUnit: true } satisfies Prisma.ItemSelect;
@@ -16,7 +17,13 @@ export type ItemServiceRequest = ServiceQueueItem & {
   transfer: Prisma.TransferGetPayload<{ select: typeof queueTransferSelect }> | null;
 };
 
-type UpsertInput = { itemId: string; serviceType: ServiceType; note?: string | null; transferId?: string | null };
+type UpsertInput = {
+  itemId: string;
+  serviceType: ServiceType;
+  note?: string | null;
+  transferId?: string | null;
+  overrideDays?: number | null;
+};
 
 // Normalize the note: trimmed value or null. OTHER requires a non-empty note.
 function normalizeNote(serviceType: ServiceType, note: string | null | undefined): string | null {
@@ -31,10 +38,11 @@ function normalizeNote(serviceType: ServiceType, note: string | null | undefined
 export async function upsertServiceRequest(input: UpsertInput): Promise<ServiceQueueItem> {
   const serviceNote = normalizeNote(input.serviceType, input.note);
   const transferId = input.transferId ?? null;
+  const dueAt = computeServiceDueAt(input.serviceType, new Date(), input.overrideDays);
   return prisma.serviceQueueItem.upsert({
     where: { itemId: input.itemId },
-    create: { itemId: input.itemId, serviceType: input.serviceType, serviceNote, transferId, status: "PENDING" },
-    update: { serviceType: input.serviceType, serviceNote, transferId, status: "PENDING" },
+    create: { itemId: input.itemId, serviceType: input.serviceType, serviceNote, transferId, status: "PENDING", dueAt, overdueAlertedAt: null },
+    update: { serviceType: input.serviceType, serviceNote, transferId, status: "PENDING", dueAt, overdueAlertedAt: null },
   });
 }
 

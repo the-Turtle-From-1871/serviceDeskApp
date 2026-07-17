@@ -103,5 +103,18 @@ describe("createTransfer (multi-item)", () => {
     expect(m4Line.qtyAuth).toBe(1);
     expect(m4Line.qtyIssued).toBe(1);
   });
+
+  it("stamps dueAt on the created transfer when provided", async () => {
+    const due = new Date("2026-08-16T00:00:00.000Z");
+    await createTransfer({ itemIds: ["i1", "i2", "i3"], lines, sender, receiver, receiverSignature: sig, dueAt: due });
+    const data = vi.mocked(__tx.transfer.create).mock.calls[0][0].data;
+    expect(data.dueAt).toBe(due);
+  });
+
+  it("leaves dueAt null when omitted", async () => {
+    await createTransfer({ itemIds: ["i1", "i2", "i3"], lines, sender, receiver, receiverSignature: sig });
+    const data = vi.mocked(__tx.transfer.create).mock.calls[0][0].data;
+    expect(data.dueAt ?? null).toBeNull();
+  });
 });
 

@@ -18,7 +18,7 @@ describe("parseServiceMap", () => {
     ]);
     const m = parseServiceMap(f);
     expect([...m.keys()]).toEqual(["i1"]);
-    expect(m.get("i1")).toEqual({ serviceType: "REIMAGE", note: null });
+    expect(m.get("i1")).toEqual({ serviceType: "REIMAGE", note: null, overrideDays: null });
   });
 
   it("captures the trimmed note for OTHER and null otherwise", () => {
@@ -31,8 +31,8 @@ describe("parseServiceMap", () => {
       ["service[i2][note]", "ignored for non-OTHER"],
     ]);
     const m = parseServiceMap(f);
-    expect(m.get("i1")).toEqual({ serviceType: "OTHER", note: "cracked screen" });
-    expect(m.get("i2")).toEqual({ serviceType: "REPAIR", note: null });
+    expect(m.get("i1")).toEqual({ serviceType: "OTHER", note: "cracked screen", overrideDays: null });
+    expect(m.get("i2")).toEqual({ serviceType: "REPAIR", note: null, overrideDays: null });
   });
 
   it("returns an empty map when nothing is flagged", () => {
@@ -46,6 +46,32 @@ describe("parseServiceMap", () => {
       ["service[i1][note]", "   "],
     ]);
     const m = parseServiceMap(f);
-    expect(m.get("i1")).toEqual({ serviceType: "OTHER", note: null });
+    expect(m.get("i1")).toEqual({ serviceType: "OTHER", note: null, overrideDays: null });
+  });
+
+  it("captures a per-item override days value", () => {
+    const fd = new FormData();
+    fd.set("service[i1][needs]", "on");
+    fd.set("service[i1][type]", "REPAIR");
+    fd.set("service[i1][days]", "2");
+    const sel = parseServiceMap(fd).get("i1");
+    expect(sel?.overrideDays).toBe(2);
+  });
+
+  it("leaves overrideDays null when the days field is absent or blank", () => {
+    const fd = new FormData();
+    fd.set("service[i1][needs]", "on");
+    fd.set("service[i1][type]", "REIMAGE");
+    const sel = parseServiceMap(fd).get("i1");
+    expect(sel?.overrideDays ?? null).toBeNull();
+  });
+
+  it("leaves overrideDays null when the days field is explicitly blank", () => {
+    const fd = new FormData();
+    fd.set("service[i1][needs]", "on");
+    fd.set("service[i1][type]", "REIMAGE");
+    fd.set("service[i1][days]", "");
+    const sel = parseServiceMap(fd).get("i1");
+    expect(sel?.overrideDays).toBeNull();
   });
 });

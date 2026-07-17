@@ -12,6 +12,7 @@ import { upsertServiceRequest } from "@/modules/service-queue/service-queue.serv
 import { parseServiceMap } from "@/modules/service-queue/service-form";
 import { parseReceiptForm } from "./receipts.parse";
 import { getOwnedSignature } from "@/modules/signatures/signatures.service";
+import { computeDueAt } from "@/modules/timers/due";
 
 export async function createReceiptAction(_prev: unknown, formData: FormData) {
   const user = await requireUser();
@@ -71,7 +72,8 @@ export async function createReceiptAction(_prev: unknown, formData: FormData) {
 
   let receiptNumber: string;
   try {
-    const t = await createTransfer({ ...parsed.data, createdByUserId: user.id });
+    const dueAt = parsed.data.returnDays ? computeDueAt(new Date(), parsed.data.returnDays) : null;
+    const t = await createTransfer({ ...parsed.data, createdByUserId: user.id, dueAt });
     receiptNumber = t.receiptNumber;
 
     // [Service Queue] For each item flagged "Needs service?" on the form, create
@@ -80,7 +82,7 @@ export async function createReceiptAction(_prev: unknown, formData: FormData) {
     // so a queue hiccup here must not fail the already-created receipt.
     for (const [itemId, sel] of serviceMap) {
       try {
-        await upsertServiceRequest({ itemId, serviceType: sel.serviceType, note: sel.note, transferId: t.id });
+        await upsertServiceRequest({ itemId, serviceType: sel.serviceType, note: sel.note, overrideDays: sel.overrideDays, transferId: t.id });
       } catch (err) {
         console.error(`[createReceiptAction] service enqueue failed for item ${itemId}:`, err);
       }

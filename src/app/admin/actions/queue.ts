@@ -16,6 +16,11 @@ const setSchema = z.object({
   itemId: z.string().min(1),
   serviceType: z.enum(["REIMAGE", "REPAIR", "OTHER"]),
   note: z.string().optional(),
+  // A blank/absent override means "use the type default" (undefined), not 0 —
+  // z.coerce.number() would otherwise turn "" into 0 and fail .positive().
+  overrideDays: z
+    .preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().positive().max(3650).optional())
+    .optional(),
 });
 
 function revalidateItem(itemId: string) {

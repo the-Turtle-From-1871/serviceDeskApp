@@ -144,6 +144,13 @@ model Transfer {
   closedAt   DateTime?
   purgeAfter DateTime?
 
+  // Return timer: optional deadline for the borrower to bring items back. Null =
+  // no timer. `overdueAlertedAt` is stamped when the single overdue email fires,
+  // so the cron sweep never emails the same lapsed receipt twice; editing the
+  // deadline to a new future date clears it so the fresh deadline can alert.
+  dueAt            DateTime?
+  overdueAlertedAt DateTime?
+
   returns ReturnTransaction[] @relation("TransferReturns")
 
   // [Ingest & Routing Queue] Back-reference for the service queue. Every ingested
@@ -151,6 +158,7 @@ model Transfer {
   queueItems ServiceQueueItem[] @relation("TransferQueueItems")
 
   @@index([purgeAfter])
+  @@index([dueAt])
 }
 
 model TransferLine {
@@ -244,8 +252,15 @@ model ServiceQueueItem {
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
 
+  // Completion SLA timer. dueAt defaults from the service type (see sla.ts) when
+  // the item is flagged, overridable per item. Null = no timer. overdueAlertedAt
+  // mirrors Transfer's — one alert per lapse, reset when the item is re-flagged.
+  dueAt            DateTime?
+  overdueAlertedAt DateTime?
+
   @@index([status])
   @@index([transferId])
+  @@index([dueAt])
 }
 
 // History of edits to an Item's loggable fields. One row per save that actually

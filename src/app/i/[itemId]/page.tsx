@@ -19,6 +19,7 @@ import { listSignatures } from "@/modules/signatures/signatures.service";
 import { auditState, auditStateDisplay } from "@/modules/audit/audit.status";
 import { AuditLight } from "@/components/AuditLight";
 import { AuditControls } from "./AuditControls";
+import { DueBadge } from "@/components/DueBadge";
 
 export default async function PublicItemPage({ params }: { params: Promise<{ itemId: string }> }) {
   const { itemId } = await params;
@@ -113,6 +114,8 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
                 <dd>Needs service</dd>
                 <dt>Service type</dt>
                 <dd>{serviceTypeLabel(service.serviceType, service.serviceNote)}</dd>
+                <dt>Due</dt>
+                <dd><DueBadge dueAt={service.dueAt ? service.dueAt.toISOString() : null} /></dd>
                 <dt>Hand receipt</dt>
                 <dd>
                   {service.transfer

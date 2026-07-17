@@ -29,6 +29,17 @@ export function ServiceControls({ itemId, request }: Props) {
           {type === "OTHER" && (
             <input className="input" style={{ minWidth: 200 }} name="note" placeholder="Describe the service needed" aria-label="Describe the service needed" defaultValue={request?.serviceNote ?? ""} required />
           )}
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="subtle" style={{ fontSize: 12 }}>SLA override (days)</span>
+            <input
+              className="input"
+              style={{ width: "auto", minWidth: 140 }}
+              name="overrideDays"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              placeholder="SLA days (optional)"
+            />
+          </label>
           <button className="btn btn-primary" disabled={pending} type="submit">
             {pending ? "Saving…" : request ? "Update service" : "Flag for service"}
           </button>

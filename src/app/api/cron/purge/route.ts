@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { purgeExpiredTransfers } from "@/modules/transfers/purge.service";
 import { purgeDeactivatedUsers } from "@/modules/users/account-purge.service";
+import { sendOverdueTransferAlerts } from "@/modules/transfers/timer-alert.service";
+import { sendOverdueServiceAlerts } from "@/modules/service-queue/timer-alert.service";
 
 // Prisma + node crypto require the Node.js runtime (not edge). Never cache: this
 // mutates the database and must run fresh on every scheduled invocation.
@@ -32,14 +34,17 @@ async function handle(req: NextRequest) {
 
   const now = new Date();
   try {
-    const [transfers, users] = await Promise.all([
+    const [transfers, users, transferAlerts, serviceAlerts] = await Promise.all([
       purgeExpiredTransfers(now),
       purgeDeactivatedUsers(now),
+      sendOverdueTransferAlerts(now),
+      sendOverdueServiceAlerts(now),
     ]);
     return NextResponse.json({
       ok: true,
       transfers: { deletedCount: transfers.deletedCount },
       users: { deletedCount: users.deletedCount, skippedCount: users.skipped.length },
+      alerts: { overdueTransfers: transferAlerts.alertedCount, overdueService: serviceAlerts.alertedCount },
     });
   } catch (e) {
     console.error("[cron/purge] purge sweep failed:", e);

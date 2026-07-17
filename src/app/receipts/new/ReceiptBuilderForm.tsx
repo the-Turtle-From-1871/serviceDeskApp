@@ -173,6 +173,9 @@ function ServiceControls({ itemId }: { itemId: string }) {
   // Lifted (rather than left uncontrolled on the conditionally-rendered input)
   // so a typed note survives unchecking/rechecking "Needs service?".
   const [note, setNote] = useState("");
+  // Optional per-serial SLA override, in days from when the receipt is filed.
+  // Blank leaves parseServiceMap to fall back to the type default (sla.ts).
+  const [days, setDays] = useState("");
   // One horizontal row, not a stack-sm column: the checkbox, the type, and the
   // note sit inline so an item occupies a single table row on a desktop. `.row`
   // still wraps, so a narrow screen stacks them as before.
@@ -201,6 +204,17 @@ function ServiceControls({ itemId }: { itemId: string }) {
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
+          <input
+            className="input"
+            style={{ width: "auto", flex: "0 1 160px", minWidth: 140 }}
+            name={`service[${itemId}][days]`}
+            inputMode="numeric"
+            pattern="[0-9]*"
+            placeholder="SLA days (default by type)"
+            aria-label="SLA override days"
+            value={days}
+            onChange={(e) => setDays(e.target.value.replace(/[^0-9]/g, ""))}
+          />
           {type === "OTHER" && (
             // width:auto overrides the global `.input { width: 100% }`, which
             // would otherwise claim a whole flex line and push the type select
@@ -365,6 +379,10 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, co
     qtyEdits[lineKey(ln)]?.[field] ?? String(ln.defaultQty);
   const setQty = (ln: { make: string; model: string }, field: "auth" | "issued", v: string) =>
     setQtyEdits((prev) => ({ ...prev, [lineKey(ln)]: { ...prev[lineKey(ln)], [field]: v } }));
+
+  // Optional return timer, in days from when the receipt is filed. Blank = no
+  // timer. Posted as `returnDays`, parsed by receiptSchema.
+  const [returnDays, setReturnDays] = useState("");
 
   const [senderIsDcsim, setSenderIsDcsim] = useState(senderPrefill?.isDcsim ?? false);
   const [receiverIsDcsim, setReceiverIsDcsim] = useState(false);
@@ -534,6 +552,34 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, co
           whoever the receipt says last held them. */}
       <PartyFields role="sender" prefill={senderPrefill} isDcsim={senderIsDcsim} onIsDcsimChange={setSenderIsDcsim} name={senderName} onNameChange={setSenderName} contacts={contacts} />
       <PartyFields role="receiver" isDcsim={receiverIsDcsim} onIsDcsimChange={onReceiverDcsimChange} hideName={hideReceiverName} name={receiverName} onNameChange={setReceiverName} contacts={contacts} />
+      {/* Return timer (optional): blank = no timer. Presets set the days field. */}
+      <fieldset className="card stack-sm">
+        <legend className="card__title">Return by (optional)</legend>
+        <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {[7, 30, 90].map((d) => (
+            <button
+              key={d}
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setReturnDays(String(d))}
+            >
+              {d}d
+            </button>
+          ))}
+          <input
+            className="input"
+            style={{ width: "auto", minWidth: 140 }}
+            name="returnDays"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            placeholder="custom days"
+            aria-label="Return by, days from now"
+            value={returnDays}
+            onChange={(e) => setReturnDays(e.target.value.replace(/[^0-9]/g, ""))}
+          />
+        </div>
+        <span className="subtle" style={{ fontSize: 12 }}>Leave blank for no return timer.</span>
+      </fieldset>
       <fieldset className="card stack-sm">
         <legend className="card__title">Recipient signature{receiverIsDcsim ? " (DCSIM)" : ""}</legend>
         {sigCleared && (

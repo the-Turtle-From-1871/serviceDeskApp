@@ -54,6 +54,24 @@ describe("upsertServiceRequest", () => {
     const arg = vi.mocked(prisma.serviceQueueItem.upsert).mock.calls[0][0];
     expect(arg.create.serviceNote).toBe("dead battery");
   });
+
+  it("stamps dueAt from the type default and resets overdueAlertedAt on update", async () => {
+    await upsertServiceRequest({ itemId: "i1", serviceType: "REPAIR", transferId: "t1" });
+    const arg = vi.mocked(prisma.serviceQueueItem.upsert).mock.calls[0][0];
+    expect(arg.create.dueAt).toBeInstanceOf(Date);
+    expect(arg.update.dueAt).toBeInstanceOf(Date);
+    expect(arg.update.overdueAlertedAt).toBeNull();
+    expect(arg.create.overdueAlertedAt ?? null).toBeNull();
+  });
+
+  it("honors an override days value for dueAt", async () => {
+    const before = Date.now();
+    await upsertServiceRequest({ itemId: "i1", serviceType: "REPAIR", overrideDays: 1 });
+    const arg = vi.mocked(prisma.serviceQueueItem.upsert).mock.calls[0][0];
+    const dueAt = arg.create.dueAt as Date;
+    const days = Math.round((dueAt.getTime() - before) / (24 * 60 * 60 * 1000));
+    expect(days).toBe(1);
+  });
 });
 
 describe("clearServiceRequest", () => {

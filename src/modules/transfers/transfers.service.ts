@@ -13,12 +13,13 @@ type CreateInput = {
   receiver: PartyInput;
   receiverSignature: string;
   createdByUserId?: string;
+  dueAt?: Date | null;
 };
 
 const qtyKey = (l: { make: string; model: string }) => `${l.make} ${l.model}`;
 
 export async function createTransfer(input: CreateInput): Promise<Transfer> {
-  const { itemIds, lines: lineQtys, sender, receiver, receiverSignature, createdByUserId } = input;
+  const { itemIds, lines: lineQtys, sender, receiver, receiverSignature, createdByUserId, dueAt } = input;
   return prisma.$transaction(async (tx) => {
     const items = await tx.item.findMany({ where: { id: { in: itemIds } } });
     if (items.length !== new Set(itemIds).size) throw new TransferError("ITEM_NOT_FOUND");
@@ -60,6 +61,7 @@ export async function createTransfer(input: CreateInput): Promise<Transfer> {
         receiverEmail: receiver.email ?? null,
         receiverSignature,
         createdByUserId: createdByUserId ?? null,
+        dueAt: dueAt ?? null,
         status: "OPEN",
         lines: {
           create: grouped.map((g) => {
@@ -154,4 +156,10 @@ export async function getLastReceiver(itemId: string): Promise<PartyInput | null
 export async function getCurrentOpenTransferId(itemId: string): Promise<string | null> {
   const holder = await getHoldingTransfer(itemId);
   return holder?.id ?? null;
+}
+
+// Set or clear a receipt's return deadline. Resets overdueAlertedAt so a fresh
+// deadline can alert again. Caller must verify the receipt is OPEN first.
+export async function setTransferDueAt(id: string, dueAt: Date | null): Promise<void> {
+  await prisma.transfer.update({ where: { id }, data: { dueAt, overdueAlertedAt: null } });
 }

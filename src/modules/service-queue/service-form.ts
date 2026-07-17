@@ -1,6 +1,6 @@
 import type { ServiceType } from "@prisma/client";
 
-export type ServiceSelection = { serviceType: ServiceType; note: string | null };
+export type ServiceSelection = { serviceType: ServiceType; note: string | null; overrideDays: number | null };
 
 export const SERVICE_TYPE_OPTIONS: { value: ServiceType; label: string }[] = [
   { value: "REIMAGE", label: "Reimage" },
@@ -9,15 +9,15 @@ export const SERVICE_TYPE_OPTIONS: { value: ServiceType; label: string }[] = [
 ];
 
 const VALID_TYPES = new Set<string>(SERVICE_TYPE_OPTIONS.map((o) => o.value));
-// Matches service[<itemId>][needs|type|note]. itemId is a cuid (no brackets).
-const FIELD_RE = /^service\[([^\]]+)\]\[(needs|type|note)\]$/;
+// Matches service[<itemId>][needs|type|note|days]. itemId is a cuid (no brackets).
+const FIELD_RE = /^service\[([^\]]+)\]\[(needs|type|note|days)\]$/;
 
 // Pure extraction of the per-item "Needs service?" selections from a receipt
 // form. Only rows whose `needs` is on AND whose `type` is a known ServiceType
 // are returned. For OTHER the trimmed note is carried; otherwise note is null.
 // Note validity (OTHER requires a note) is enforced later by upsertServiceRequest.
 export function parseServiceMap(fd: FormData): Map<string, ServiceSelection> {
-  const rows = new Map<string, { needs: boolean; type?: string; note?: string }>();
+  const rows = new Map<string, { needs: boolean; type?: string; note?: string; days?: string }>();
   for (const [key, value] of fd.entries()) {
     const m = FIELD_RE.exec(key);
     if (!m) continue;
@@ -25,6 +25,7 @@ export function parseServiceMap(fd: FormData): Map<string, ServiceSelection> {
     const row = rows.get(itemId) ?? { needs: false };
     if (field === "needs") row.needs = value === "on" || value === "true";
     else if (field === "type") row.type = String(value);
+    else if (field === "days") row.days = String(value);
     else row.note = String(value);
     rows.set(itemId, row);
   }
@@ -34,7 +35,9 @@ export function parseServiceMap(fd: FormData): Map<string, ServiceSelection> {
     if (!row.needs || !row.type || !VALID_TYPES.has(row.type)) continue;
     const serviceType = row.type as ServiceType;
     const note = serviceType === "OTHER" ? (row.note ?? "").trim() || null : null;
-    result.set(itemId, { serviceType, note });
+    const n = Number.parseInt((row.days ?? "").trim(), 10);
+    const overrideDays = Number.isInteger(n) && n > 0 ? n : null;
+    result.set(itemId, { serviceType, note, overrideDays });
   }
   return result;
 }
