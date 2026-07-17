@@ -65,4 +65,13 @@ describe("parseServiceMap", () => {
     const sel = parseServiceMap(fd).get("i1");
     expect(sel?.overrideDays ?? null).toBeNull();
   });
+
+  it("leaves overrideDays null when the days field is explicitly blank", () => {
+    const fd = new FormData();
+    fd.set("service[i1][needs]", "on");
+    fd.set("service[i1][type]", "REIMAGE");
+    fd.set("service[i1][days]", "");
+    const sel = parseServiceMap(fd).get("i1");
+    expect(sel?.overrideDays).toBeNull();
+  });
 });
