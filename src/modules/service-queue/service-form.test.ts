@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseServiceMap } from "./service-form";
+import { parseServiceMap, parseOverrideDays } from "./service-form";
 
 function fd(entries: [string, string][]): FormData {
   const f = new FormData();
@@ -93,5 +93,29 @@ describe("parseServiceMap", () => {
     fd.set("service[i1][days]", "3650");
     const sel = parseServiceMap(fd).get("i1");
     expect(sel?.overrideDays).toBe(3650);
+  });
+
+  it("rejects non-integer / garbage day values (no parseInt truncation)", () => {
+    for (const bad of ["12.9", "12abc", "0", "-5"]) {
+      const fd = new FormData();
+      fd.set("service[i1][needs]", "on");
+      fd.set("service[i1][type]", "REPAIR");
+      fd.set("service[i1][days]", bad);
+      expect(parseServiceMap(fd).get("i1")?.overrideDays).toBeNull();
+    }
+  });
+});
+
+describe("parseOverrideDays", () => {
+  it("returns a whole 1..3650 day count", () => {
+    expect(parseOverrideDays("5")).toBe(5);
+    expect(parseOverrideDays("1")).toBe(1);
+    expect(parseOverrideDays("3650")).toBe(3650);
+    expect(parseOverrideDays(" 7 ")).toBe(7); // trimmed
+  });
+  it("returns undefined (→ type default) for blank, malformed, or out-of-range", () => {
+    for (const bad of ["", "   ", "0", "3651", "99999999", "12.9", "12abc", "-5", "abc", null, undefined]) {
+      expect(parseOverrideDays(bad)).toBeUndefined();
+    }
   });
 });

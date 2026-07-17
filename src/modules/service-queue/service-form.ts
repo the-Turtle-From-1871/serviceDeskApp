@@ -8,6 +8,20 @@ export const SERVICE_TYPE_OPTIONS: { value: ServiceType; label: string }[] = [
   { value: "OTHER", label: "Other" },
 ];
 
+// Parse an optional per-item SLA override — the builder `service[<id>][days]`
+// field or the item-page `overrideDays` field. Returns a whole 1..3650 day
+// count, or undefined for anything blank / non-integer / out-of-range, so the
+// caller falls back to the service type's default SLA. Deliberately graceful
+// (never throws, never yields 0) so one bad value can't block a receipt build,
+// a flag, or a reopen — every entry point clamps to the default identically.
+// Bound mirrors returnDays (transfers.schema) and setReceiptDueAtAction.
+export function parseOverrideDays(raw: unknown): number | undefined {
+  const s = String(raw ?? "").trim();
+  if (!/^\d+$/.test(s)) return undefined; // blank, decimals ("12.9"), or garbage ("12abc") → default
+  const n = Number(s);
+  return n >= 1 && n <= 3650 ? n : undefined; // 0 or out-of-range → default
+}
+
 const VALID_TYPES = new Set<string>(SERVICE_TYPE_OPTIONS.map((o) => o.value));
 // Matches service[<itemId>][needs|type|note|days]. itemId is a cuid (no brackets).
 const FIELD_RE = /^service\[([^\]]+)\]\[(needs|type|note|days)\]$/;
@@ -35,12 +49,7 @@ export function parseServiceMap(fd: FormData): Map<string, ServiceSelection> {
     if (!row.needs || !row.type || !VALID_TYPES.has(row.type)) continue;
     const serviceType = row.type as ServiceType;
     const note = serviceType === "OTHER" ? (row.note ?? "").trim() || null : null;
-    // Bound 1..3650 to match returnDays / queue setSchema. An out-of-range value
-    // falls back to the type default (null) rather than reaching computeServiceDueAt
-    // with an absurd day count that would yield an Invalid Date — which the
-    // best-effort enqueue in createReceiptAction would then silently drop.
-    const n = Number.parseInt((row.days ?? "").trim(), 10);
-    const overrideDays = Number.isInteger(n) && n > 0 && n <= 3650 ? n : null;
+    const overrideDays = parseOverrideDays(row.days) ?? null;
     result.set(itemId, { serviceType, note, overrideDays });
   }
   return result;

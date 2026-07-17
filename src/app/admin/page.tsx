@@ -1,8 +1,39 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireAdmin, AuthError } from "@/lib/authz";
-import { getTimerDashboard } from "./dashboard/dashboard.service";
+import { getTimerDashboard, type TransferTimerRow, type ServiceTimerRow } from "./dashboard/dashboard.service";
 import { DueBadge } from "@/components/DueBadge";
+
+type TimerRow = { key: string; href: string; label: string; note: string; dueAt: string };
+
+const toReceiptRow = (t: TransferTimerRow): TimerRow => ({
+  key: t.receiptNumber,
+  href: `/receipts/${t.receiptNumber}`,
+  label: t.receiptNumber,
+  note: t.itemSummary,
+  dueAt: t.dueAt,
+});
+
+const toServiceRow = (s: ServiceTimerRow): TimerRow => ({
+  key: s.itemId,
+  href: `/i/${s.itemId}`,
+  label: `SN ${s.serialNumber}`,
+  note: s.serviceType,
+  dueAt: s.dueAt,
+});
+
+function TimerList({ rows, empty, nowMs }: { rows: TimerRow[]; empty: string; nowMs: number }) {
+  if (rows.length === 0) return <p className="subtle">{empty}</p>;
+  return (
+    <ul>
+      {rows.map((r) => (
+        <li key={r.key}>
+          <Link href={r.href}>{r.label}</Link> — {r.note} <DueBadge dueAt={r.dueAt} now={nowMs} />
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 export default async function AdminHome() {
   try {
@@ -20,52 +51,16 @@ export default async function AdminHome() {
 
       <section className="card stack-sm">
         <h2>Hand receipts — overdue ({overdueTransfers.length})</h2>
-        {overdueTransfers.length === 0 ? <p className="subtle">Nothing overdue.</p> : (
-          <ul>
-            {overdueTransfers.map((t) => (
-              <li key={t.receiptNumber}>
-                <Link href={`/receipts/${t.receiptNumber}`}>{t.receiptNumber}</Link> — {t.itemSummary}{" "}
-                <DueBadge dueAt={t.dueAt} now={nowMs} />
-              </li>
-            ))}
-          </ul>
-        )}
+        <TimerList rows={overdueTransfers.map(toReceiptRow)} empty="Nothing overdue." nowMs={nowMs} />
         <h3 className="subtle">Due soon ({soonTransfers.length})</h3>
-        {soonTransfers.length === 0 ? <p className="subtle">Nothing due soon.</p> : (
-          <ul>
-            {soonTransfers.map((t) => (
-              <li key={t.receiptNumber}>
-                <Link href={`/receipts/${t.receiptNumber}`}>{t.receiptNumber}</Link> — {t.itemSummary}{" "}
-                <DueBadge dueAt={t.dueAt} now={nowMs} />
-              </li>
-            ))}
-          </ul>
-        )}
+        <TimerList rows={soonTransfers.map(toReceiptRow)} empty="Nothing due soon." nowMs={nowMs} />
       </section>
 
       <section className="card stack-sm">
         <h2>Service items — overdue ({overdueService.length})</h2>
-        {overdueService.length === 0 ? <p className="subtle">Nothing overdue.</p> : (
-          <ul>
-            {overdueService.map((s) => (
-              <li key={s.itemId}>
-                <Link href={`/i/${s.itemId}`}>SN {s.serialNumber}</Link> — {s.serviceType}{" "}
-                <DueBadge dueAt={s.dueAt} now={nowMs} />
-              </li>
-            ))}
-          </ul>
-        )}
+        <TimerList rows={overdueService.map(toServiceRow)} empty="Nothing overdue." nowMs={nowMs} />
         <h3 className="subtle">Due soon ({soonService.length})</h3>
-        {soonService.length === 0 ? <p className="subtle">Nothing due soon.</p> : (
-          <ul>
-            {soonService.map((s) => (
-              <li key={s.itemId}>
-                <Link href={`/i/${s.itemId}`}>SN {s.serialNumber}</Link> — {s.serviceType}{" "}
-                <DueBadge dueAt={s.dueAt} now={nowMs} />
-              </li>
-            ))}
-          </ul>
-        )}
+        <TimerList rows={soonService.map(toServiceRow)} empty="Nothing due soon." nowMs={nowMs} />
         <p><Link href="/admin/queue">Open the full service queue →</Link></p>
       </section>
     </div>

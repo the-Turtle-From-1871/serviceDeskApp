@@ -63,6 +63,15 @@ describe("setServiceAction overrideDays coercion", () => {
     expect(upsertServiceRequest).toHaveBeenCalledTimes(1);
     expect(upsertServiceRequest.mock.calls[0][0].overrideDays).toBe(5);
   });
+
+  it("succeeds (no error) with an out-of-range override, falling back to the default", async () => {
+    const res = await setServiceAction(
+      undefined,
+      fd({ itemId: "i1", serviceType: "REPAIR", overrideDays: "5000" }),
+    );
+    expect(res).toEqual({ ok: true });
+    expect(upsertServiceRequest.mock.calls[0][0].overrideDays).toBeUndefined();
+  });
 });
 
 describe("reopenServiceAction overrideDays coercion", () => {
@@ -83,5 +92,14 @@ describe("reopenServiceAction overrideDays coercion", () => {
     await reopenServiceAction(fd({ id: "sq1", itemId: "i1", overrideDays: "10" }));
     expect(reopenServiceItem).toHaveBeenCalledTimes(1);
     expect(reopenServiceItem.mock.calls[0][1]).toBe(10);
+  });
+
+  it("still reopens (never silently no-ops) when the override is 0 or out of range", async () => {
+    for (const bad of ["0", "99999999"]) {
+      reopenServiceItem.mockClear();
+      await reopenServiceAction(fd({ id: "sq1", itemId: "i1", overrideDays: bad }));
+      expect(reopenServiceItem).toHaveBeenCalledTimes(1); // reopen proceeds
+      expect(reopenServiceItem.mock.calls[0][1]).toBeUndefined(); // with the type-default clock
+    }
   });
 });

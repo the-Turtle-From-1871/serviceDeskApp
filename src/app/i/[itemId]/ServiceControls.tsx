@@ -38,6 +38,7 @@ export function ServiceControls({ itemId, request }: Props) {
               inputMode="numeric"
               pattern="[0-9]*"
               placeholder="SLA days (optional)"
+              title="Optional whole number 1–3650. Blank uses the default SLA."
             />
           </label>
           <button className="btn btn-primary" disabled={pending} type="submit">
@@ -68,6 +69,7 @@ export function ServiceControls({ itemId, request }: Props) {
                 pattern="[0-9]*"
                 placeholder="New SLA days (optional)"
                 aria-label="New SLA days on reopen (optional)"
+                title="Optional whole number 1–3650. Blank uses the default SLA."
               />
               <button type="submit" className="btn btn-secondary btn-sm">Reopen</button>
             </form>

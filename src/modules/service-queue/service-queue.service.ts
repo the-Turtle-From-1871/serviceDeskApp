@@ -62,28 +62,27 @@ export function completeServiceItem(id: string): Promise<ServiceQueueItem> {
 // again — reopening means "service this again," not "undo the completion."
 // Guarded; never resurrects a missing or non-COMPLETED row.
 export function reopenServiceItem(id: string, overrideDays?: number | null): Promise<ServiceQueueItem> {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.serviceQueueItem.findUnique({ where: { id } });
-    if (!current) throw new ServiceQueueError("NOT_FOUND");
-    if (!canReopen(current.status)) throw new ServiceQueueError("INVALID_STATUS");
-    const dueAt = computeServiceDueAt(current.serviceType, new Date(), overrideDays);
-    return tx.serviceQueueItem.update({
-      where: { id },
-      data: { status: "PENDING", dueAt, overdueAlertedAt: null },
-    });
-  });
+  return transition(id, canReopen, "PENDING", (current) => ({
+    dueAt: computeServiceDueAt(current.serviceType, new Date(), overrideDays),
+    overdueAlertedAt: null,
+  }));
 }
 
+// Guarded status transition in one transaction. `extra` optionally contributes
+// additional update fields derived from the current row (e.g. reopen recomputing
+// the SLA deadline) — so callers share the NOT_FOUND / INVALID_STATUS guards
+// rather than re-implementing the findUnique+guard+update scaffold.
 function transition(
   id: string,
   guard: (s: ServiceQueueItem["status"]) => boolean,
   next: ServiceQueueItem["status"],
+  extra?: (current: ServiceQueueItem) => Prisma.ServiceQueueItemUpdateInput,
 ): Promise<ServiceQueueItem> {
   return prisma.$transaction(async (tx) => {
     const current = await tx.serviceQueueItem.findUnique({ where: { id } });
     if (!current) throw new ServiceQueueError("NOT_FOUND");
     if (!guard(current.status)) throw new ServiceQueueError("INVALID_STATUS");
-    return tx.serviceQueueItem.update({ where: { id }, data: { status: next } });
+    return tx.serviceQueueItem.update({ where: { id }, data: { status: next, ...extra?.(current) } });
   });
 }
 

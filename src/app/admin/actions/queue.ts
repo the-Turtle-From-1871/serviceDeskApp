@@ -10,21 +10,14 @@ import {
 } from "@/modules/service-queue/service-queue.service";
 import { getCurrentOpenTransferId } from "@/modules/transfers/transfers.service";
 import { ServiceQueueError } from "@/modules/service-queue/service-queue.errors";
-
-// A blank/absent override means "use the type default" (undefined), not 0 —
-// z.coerce.number() would otherwise turn "" into 0 and fail .positive().
-const overrideDaysField = z
-  .preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().positive().max(3650).optional())
-  .optional();
+import { parseOverrideDays } from "@/modules/service-queue/service-form";
 
 const idSchema = z.object({ id: z.string().min(1) });
 const setSchema = z.object({
   itemId: z.string().min(1),
   serviceType: z.enum(["REIMAGE", "REPAIR", "OTHER"]),
   note: z.string().optional(),
-  overrideDays: overrideDaysField,
 });
-const reopenSchema = z.object({ id: z.string().min(1), overrideDays: overrideDaysField });
 
 function revalidateItem(itemId: string) {
   revalidatePath("/admin/queue");
@@ -39,7 +32,8 @@ export async function setServiceAction(_prev: unknown, formData: FormData): Prom
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
   try {
     const transferId = await getCurrentOpenTransferId(parsed.data.itemId);
-    await upsertServiceRequest({ ...parsed.data, transferId });
+    const overrideDays = parseOverrideDays(formData.get("overrideDays"));
+    await upsertServiceRequest({ ...parsed.data, overrideDays, transferId });
   } catch (e) {
     if (e instanceof ServiceQueueError && e.code === "NOTE_REQUIRED") {
       return { error: "Describe the service needed for 'Other'." };
@@ -80,17 +74,17 @@ export async function completeServiceAction(formData: FormData): Promise<void> {
 }
 
 // Reopen a completed item back into the queue (from the item page). Restarts the
-// SLA clock; an optional override days sets a custom new deadline.
+// SLA clock; an optional override days sets a custom new deadline. A blank or
+// malformed override falls back to the type default (parseOverrideDays) so the
+// reopen always proceeds — it never silently no-ops on a bad days value.
 export async function reopenServiceAction(formData: FormData): Promise<void> {
   await requireAdmin();
-  const parsed = reopenSchema.safeParse({
-    id: String(formData.get("id") ?? ""),
-    overrideDays: String(formData.get("overrideDays") ?? ""),
-  });
+  const parsed = idSchema.safeParse({ id: String(formData.get("id") ?? "") });
   if (!parsed.success) return;
   const itemId = String(formData.get("itemId") ?? "");
+  const overrideDays = parseOverrideDays(formData.get("overrideDays"));
   try {
-    await reopenServiceItem(parsed.data.id, parsed.data.overrideDays);
+    await reopenServiceItem(parsed.data.id, overrideDays);
   } catch (e) {
     if (!(e instanceof ServiceQueueError)) console.error("[reopenServiceAction] unexpected error:", e);
   }
