@@ -21,6 +21,9 @@ item as audited; the date and their signature are logged permanently.
 - On the item page, an admin technician can mark the item as audited. The audit
   **date** and the technician's **signature** are logged there.
 - A **full history** of audit events is retained (not just the latest).
+- When an item is **overdue** (and only overdue — not never-audited), the item
+  detail page shows a prominent amber banner near the top. Never-audited and
+  compliant items show only the dot.
 
 ## Decisions (from brainstorming)
 
@@ -33,6 +36,7 @@ item as audited; the date and their signature are logged permanently.
 | Who sees the light | **All logged-in users** (matches the Service card). |
 | Who can mark audited | **Admins only** (`requireAdmin`). |
 | Audit period | **1 calendar year** from the last audit date. |
+| Overdue banner | **Overdue only** — amber banner on the item detail page; never-audited stays a quiet dot. |
 
 ## Data model
 
@@ -122,6 +126,10 @@ client cannot forge a signer name, inject an image, or use another admin's
 signature. This matches the returns flow.
 
 ## UI — item detail page (`src/app/i/[itemId]/page.tsx`)
+
+An **overdue banner** near the top of the page (after the title row), shown only
+when the item is **overdue** — an amber `.alert-warning` callout, e.g. "This item
+is overdue for its annual audit." Never-audited and compliant items show no banner.
 
 A new **Audit card**, gated on `loggedIn` like the Service card:
 

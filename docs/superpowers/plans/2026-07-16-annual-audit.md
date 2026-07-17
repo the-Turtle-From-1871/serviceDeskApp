@@ -602,6 +602,15 @@ Append after the `.badge-override` rule (reuses the existing `--green` / `--ambe
 .audit-dot--compliant { background: var(--green); }
 .audit-dot--overdue { background: var(--amber); }
 .audit-dot--never { background: var(--slate); }
+
+.alert-warning {
+  background: var(--amber-soft);
+  border: 1px solid var(--amber-border);
+  color: var(--amber);
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+}
 ```
 
 - [ ] **Step 3: Type-check the new component**
@@ -811,7 +820,19 @@ After `const isAdmin = user?.role === "ADMIN";`, add (signatures need `user.id`,
   const auditLightState = item.status === "RETIRED" ? null : auditState(audits[0]?.createdAt ?? null, now);
 ```
 
-- [ ] **Step 3: Add the Audit card**
+- [ ] **Step 3: Add the overdue banner**
+
+In `src/app/i/[itemId]/page.tsx`, add this block immediately after the title `<div className="row">…<StatusBadge /></div>` block (near the top of `<main>`, before the "Create hand receipt" block). It shows only for overdue items — `auditLightState` is `"overdue"` only for an ACTIVE item past its 1-year mark (retired is `null`, never-audited is `"never"`, compliant is `"compliant"`):
+
+```tsx
+        {auditLightState === "overdue" && (
+          <div role="alert" className="alert-warning">
+            This item is overdue for its annual audit.
+          </div>
+        )}
+```
+
+- [ ] **Step 4: Add the Audit card**
 
 In `src/app/i/[itemId]/page.tsx`, add this block immediately after the Service card's closing `)}` (the `{loggedIn && (...)}` block ending ~line 120), before the QR card:
 
@@ -850,21 +871,22 @@ In `src/app/i/[itemId]/page.tsx`, add this block immediately after the Service c
         )}
 ```
 
-- [ ] **Step 4: Type-check**
+- [ ] **Step 5: Type-check**
 
 Run: `npx tsc --noEmit`
 Expected: no new errors.
 
-- [ ] **Step 5: Verify end-to-end in a real browser**
+- [ ] **Step 6: Verify end-to-end in a real browser**
 
 Run `npm run dev`. As an admin with at least one saved signature (create one at `/account` if needed):
-1. Open an active item at `/i/<itemId>`. Confirm the Audit card shows a gray dot + "Never audited".
+1. Open an active item at `/i/<itemId>`. Confirm the Audit card shows a gray dot + "Never audited", and **no** overdue banner appears (never-audited is not overdue).
 2. Pick a signature, click "Mark as audited". Confirm success, the light turns green, the status line shows the date + signer, and the audit history lists the entry with the signature thumbnail.
 3. Reload `/items` — the item's audit light is now green.
 4. As a non-admin, confirm the Audit card shows the light + status but no mark-audited control.
-5. Retire the item; confirm `/items` shows a dash and the detail card shows "Not applicable (retired)" with no control.
+5. Retire the item; confirm `/items` shows a dash and the detail card shows "Not applicable (retired)" with no control and no banner.
+6. (Overdue banner) To see the amber banner, backdate an audit row to >1 year ago via a DB client (e.g. `UPDATE "ItemAudit" SET "createdAt" = NOW() - INTERVAL '2 years' WHERE "itemId" = '<itemId>';`), reload the active item page, and confirm the amber "overdue for its annual audit" banner shows near the top and the light is yellow.
 
-- [ ] **Step 6: Run linters and the audit test files**
+- [ ] **Step 7: Run linters and the audit test files**
 
 Run:
 ```bash
@@ -873,7 +895,7 @@ npx vitest run src/modules/audit src/app/admin/actions/audit.test.ts
 ```
 Expected: lint clean; all audit tests pass.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add "src/app/i/[itemId]/AuditControls.tsx" "src/app/i/[itemId]/page.tsx"
@@ -884,6 +906,6 @@ git commit -m "feat(audit): add audit card, mark-audited control, and history to
 
 ## Self-Review Notes
 
-- **Spec coverage:** status field on both views (Tasks 6, 7), green/yellow lights + distinct never state (Tasks 2, 5), yellow after 1 year (Task 2), admin mark-audited with date + signature logged (Tasks 3, 4, 7), full history (Tasks 1, 3, 7), retired-item exclusion (Tasks 4, 6, 7), all-logged-in visibility vs admin-only marking (Task 7). All covered.
+- **Spec coverage:** status field on both views (Tasks 6, 7), green/yellow lights + distinct never state (Tasks 2, 5), yellow after 1 year (Task 2), admin mark-audited with date + signature logged (Tasks 3, 4, 7), full history (Tasks 1, 3, 7), retired-item exclusion (Tasks 4, 6, 7), all-logged-in visibility vs admin-only marking (Task 7), overdue-only detail-page banner (Task 7 Step 3 + `.alert-warning` in Task 5). All covered.
 - **Type consistency:** `auditState`/`AuditState`/`auditStateDisplay` (Task 2) are consumed unchanged in Tasks 5–7; `RecordAuditInput`/`recordAudit`/`getAuditsForItem`/`getLatestAuditMap` (Task 3) match their uses in Tasks 4, 6, 7; the column key `"auditState"` matches the `ItemRow.auditState` property so `sortRows` sorts correctly.
 - **Retired sentinel:** `ItemRow.auditState` is `AuditState | null`; `null` (retired) renders a dash and sorts last — a single rule used identically by the list and the detail card.
