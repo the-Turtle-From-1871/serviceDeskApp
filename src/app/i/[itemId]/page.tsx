@@ -14,11 +14,16 @@ import { ServiceControls } from "./ServiceControls";
 import prisma from "@/lib/prisma";
 import { listUnits } from "@/modules/items/units.service";
 import { ItemDetailsCard } from "./ItemDetailsCard";
+import { getAuditsForItem } from "@/modules/audit/audit.service";
+import { listSignatures } from "@/modules/signatures/signatures.service";
+import { auditState, auditStateDisplay } from "@/modules/audit/audit.status";
+import { AuditLight } from "@/components/AuditLight";
+import { AuditControls } from "./AuditControls";
 
 export default async function PublicItemPage({ params }: { params: Promise<{ itemId: string }> }) {
   const { itemId } = await params;
   // All fetches depend only on itemId (known up front), so run them together.
-  const [item, user, receipts, currentHolder, qr, service, units, lastEdit] = await Promise.all([
+  const [item, user, receipts, currentHolder, qr, service, units, lastEdit, audits] = await Promise.all([
     getItemWithCreator(itemId),
     getCurrentUser(),
     listReceiptsForItem(itemId),
@@ -31,10 +36,14 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
     getServiceRequestForItem(itemId),
     listUnits(),
     prisma.itemEdit.findFirst({ where: { itemId }, orderBy: { createdAt: "desc" } }),
+    getAuditsForItem(itemId),
   ]);
   if (!item) notFound();
   const loggedIn = !!user && user.isActive;
   const isAdmin = user?.role === "ADMIN";
+  const signatures = isAdmin && item.status === "ACTIVE" ? await listSignatures(user!.id) : [];
+  const now = new Date();
+  const auditLightState = item.status === "RETIRED" ? null : auditState(audits[0]?.createdAt ?? null, now);
   return (
     <>
       <SiteHeader />
@@ -47,6 +56,12 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
           <span className="spacer" />
           <StatusBadge status={item.status} />
         </div>
+
+        {auditLightState === "overdue" && (
+          <div role="alert" className="alert-warning">
+            This item is overdue for its annual audit.
+          </div>
+        )}
 
         {/* Gated on ACTIVE as well as auth: the builder filters retired items out
             on load (receipts/new/page.tsx:17), so offering the button for one
@@ -115,6 +130,39 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
                 itemId={item.id}
                 request={service ? { id: service.id, serviceType: service.serviceType, serviceNote: service.serviceNote, status: service.status } : null}
               />
+            )}
+          </div>
+        )}
+
+        {loggedIn && (
+          <div className="card">
+            <div className="card__title">Audit</div>
+            <div className="row" style={{ gap: 8, alignItems: "center" }}>
+              <AuditLight state={auditLightState} />
+              <span>
+                {item.status === "RETIRED"
+                  ? "Not applicable (retired)"
+                  : audits.length === 0
+                  ? "Never audited"
+                  : `${auditStateDisplay(auditState(audits[0].createdAt, now)).label} · last audited ${formatDateTimeHST(audits[0].createdAt)} by ${audits[0].signerName}`}
+              </span>
+            </div>
+
+            {isAdmin && item.status === "ACTIVE" && <AuditControls itemId={item.id} signatures={signatures} />}
+
+            {audits.length > 0 && (
+              <div className="stack-sm">
+                <div className="subtle" style={{ fontSize: 12 }}>Audit history</div>
+                <ul className="stack-sm">
+                  {audits.map((a) => (
+                    <li key={a.id} className="row" style={{ gap: 8, alignItems: "center" }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={a.signatureImage} alt={`Signature of ${a.signerName}`} className="sig-preview" />
+                      <span>{a.signerName} · {formatDateTimeHST(a.createdAt)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
           </div>
         )}
