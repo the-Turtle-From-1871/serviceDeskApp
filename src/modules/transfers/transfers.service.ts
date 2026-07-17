@@ -157,3 +157,9 @@ export async function getCurrentOpenTransferId(itemId: string): Promise<string |
   const holder = await getHoldingTransfer(itemId);
   return holder?.id ?? null;
 }
+
+// Set or clear a receipt's return deadline. Resets overdueAlertedAt so a fresh
+// deadline can alert again. Caller must verify the receipt is OPEN first.
+export async function setTransferDueAt(id: string, dueAt: Date | null): Promise<void> {
+  await prisma.transfer.update({ where: { id }, data: { dueAt, overdueAlertedAt: null } });
+}
