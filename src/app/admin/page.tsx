@@ -31,14 +31,16 @@ export default async function AdminHome() {
           </ul>
         )}
         <h3 className="subtle">Due soon ({soonTransfers.length})</h3>
-        <ul>
-          {soonTransfers.map((t) => (
-            <li key={t.receiptNumber}>
-              <Link href={`/receipts/${t.receiptNumber}`}>{t.receiptNumber}</Link> — {t.itemSummary}{" "}
-              <DueBadge dueAt={t.dueAt} now={nowMs} />
-            </li>
-          ))}
-        </ul>
+        {soonTransfers.length === 0 ? <p className="subtle">Nothing due soon.</p> : (
+          <ul>
+            {soonTransfers.map((t) => (
+              <li key={t.receiptNumber}>
+                <Link href={`/receipts/${t.receiptNumber}`}>{t.receiptNumber}</Link> — {t.itemSummary}{" "}
+                <DueBadge dueAt={t.dueAt} now={nowMs} />
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="card stack-sm">
@@ -54,14 +56,16 @@ export default async function AdminHome() {
           </ul>
         )}
         <h3 className="subtle">Due soon ({soonService.length})</h3>
-        <ul>
-          {soonService.map((s) => (
-            <li key={s.itemId}>
-              <Link href={`/i/${s.itemId}`}>SN {s.serialNumber}</Link> — {s.serviceType}{" "}
-              <DueBadge dueAt={s.dueAt} now={nowMs} />
-            </li>
-          ))}
-        </ul>
+        {soonService.length === 0 ? <p className="subtle">Nothing due soon.</p> : (
+          <ul>
+            {soonService.map((s) => (
+              <li key={s.itemId}>
+                <Link href={`/i/${s.itemId}`}>SN {s.serialNumber}</Link> — {s.serviceType}{" "}
+                <DueBadge dueAt={s.dueAt} now={nowMs} />
+              </li>
+            ))}
+          </ul>
+        )}
         <p><Link href="/admin/queue">Open the full service queue →</Link></p>
       </section>
     </div>
