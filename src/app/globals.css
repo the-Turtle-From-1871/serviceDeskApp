@@ -38,6 +38,10 @@
   --green: #2f6b3a;
   --green-soft: #eef5ec;
   --green-border: #b9d3b6;
+  /* Brighter than --green on purpose: used only for the audit-light dot,
+     where it must read as distinct from --slate at a glance rather than
+     match the darker ink tone used for success text/badges. */
+  --green-bright: #4caf50;
   --slate: #4d564b;
   --slate-soft: #eef1ea;
   --slate-border: #d2d9cb;
@@ -816,7 +820,7 @@ input[type="file"].input {
   border-radius: 50%;
   vertical-align: middle;
 }
-.audit-dot--compliant { background: var(--green); }
+.audit-dot--compliant { background: var(--green-bright); }
 .audit-dot--overdue { background: var(--amber); }
 .audit-dot--never { background: var(--slate); }
 
