@@ -41,6 +41,7 @@ model User {
   returnsProcessed ReturnTransaction[]  @relation("ReturnsProcessed")
   passwordResets   PasswordResetToken[] @relation("PasswordResets")
   itemEdits        ItemEdit[]           @relation("ItemEdits")
+  itemAudits       ItemAudit[]          @relation("ItemAudits")
   signatures       Signature[]          @relation("UserSignatures")
   createdContacts  Contact[]            @relation("CreatedContacts")
 }
@@ -88,6 +89,7 @@ model Item {
 
   serviceQueueItem ServiceQueueItem?
   edits            ItemEdit[]
+  audits           ItemAudit[]
 }
 
 model Unit {
@@ -310,4 +312,23 @@ model Contact {
   updatedAt DateTime @updatedAt
 
   @@index([lastName, firstName])
+}
+
+// History of possession audits for an item. One row per audit event; an item's
+// audit status is derived from the newest row (see modules/audit/audit.status.ts).
+// Nullable auditor + denormalized name/signature snapshots so history survives
+// deletion of the acting account or the source Signature (mirrors ItemEdit /
+// ReturnTransaction).
+model ItemAudit {
+  id             String   @id @default(cuid())
+  item           Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  itemId         String
+  auditedBy      User?    @relation("ItemAudits", fields: [auditedById], references: [id], onDelete: SetNull)
+  auditedById    String?
+  auditedByName  String
+  signerName     String
+  signatureImage String
+  createdAt      DateTime @default(now())
+
+  @@index([itemId, createdAt])
 }

@@ -1,8 +1,9 @@
 import { sortRows, parseSortPref as parseSortPrefGeneric, parseHiddenCols as parseHiddenColsGeneric, type SortDir, type SortPref as GenericSortPref } from "@/components/column-view";
+import type { AuditState } from "@/modules/audit/audit.status";
 
 export type { SortDir };
 
-export type SortField = "deviceName" | "make" | "model" | "serialNumber" | "status";
+export type SortField = "deviceName" | "make" | "model" | "serialNumber" | "status" | "auditState";
 
 export type ItemRow = {
   id: string;
@@ -11,6 +12,7 @@ export type ItemRow = {
   model: string;
   serialNumber: string;
   status: "ACTIVE" | "RETIRED";
+  auditState: AuditState | null;
 };
 
 export type SortPref = GenericSortPref<SortField>;
@@ -21,6 +23,7 @@ export const ITEM_COLUMNS: { key: SortField; label: string }[] = [
   { key: "model", label: "Model" },
   { key: "serialNumber", label: "Serial" },
   { key: "status", label: "Status" },
+  { key: "auditState", label: "Audit" },
 ];
 
 const SORT_FIELDS = new Set<string>(ITEM_COLUMNS.map((c) => c.key));
