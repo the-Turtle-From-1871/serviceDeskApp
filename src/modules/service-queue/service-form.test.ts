@@ -74,4 +74,24 @@ describe("parseServiceMap", () => {
     const sel = parseServiceMap(fd).get("i1");
     expect(sel?.overrideDays).toBeNull();
   });
+
+  it("falls back to null (type default) when days exceeds the 1..3650 bound", () => {
+    const fd = new FormData();
+    fd.set("service[i1][needs]", "on");
+    fd.set("service[i1][type]", "REPAIR");
+    fd.set("service[i1][days]", "99999999");
+    const sel = parseServiceMap(fd).get("i1");
+    // Out-of-range must not reach computeServiceDueAt (would be an Invalid Date
+    // the best-effort enqueue silently drops) — it falls back to the default SLA.
+    expect(sel?.overrideDays).toBeNull();
+  });
+
+  it("accepts the 3650 upper bound", () => {
+    const fd = new FormData();
+    fd.set("service[i1][needs]", "on");
+    fd.set("service[i1][type]", "REPAIR");
+    fd.set("service[i1][days]", "3650");
+    const sel = parseServiceMap(fd).get("i1");
+    expect(sel?.overrideDays).toBe(3650);
+  });
 });

@@ -35,8 +35,12 @@ export function parseServiceMap(fd: FormData): Map<string, ServiceSelection> {
     if (!row.needs || !row.type || !VALID_TYPES.has(row.type)) continue;
     const serviceType = row.type as ServiceType;
     const note = serviceType === "OTHER" ? (row.note ?? "").trim() || null : null;
+    // Bound 1..3650 to match returnDays / queue setSchema. An out-of-range value
+    // falls back to the type default (null) rather than reaching computeServiceDueAt
+    // with an absurd day count that would yield an Invalid Date — which the
+    // best-effort enqueue in createReceiptAction would then silently drop.
     const n = Number.parseInt((row.days ?? "").trim(), 10);
-    const overrideDays = Number.isInteger(n) && n > 0 ? n : null;
+    const overrideDays = Number.isInteger(n) && n > 0 && n <= 3650 ? n : null;
     result.set(itemId, { serviceType, note, overrideDays });
   }
   return result;
