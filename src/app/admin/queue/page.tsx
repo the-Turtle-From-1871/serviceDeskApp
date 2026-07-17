@@ -22,6 +22,7 @@ export default async function AdminQueuePage() {
     homeUnit: r.item.homeUnit,
     serviceTypeRaw: r.serviceType,
     serviceType: serviceTypeLabel(r.serviceType, r.serviceNote),
+    dueAt: r.dueAt ? r.dueAt.toISOString() : null,
   }));
 
   return (

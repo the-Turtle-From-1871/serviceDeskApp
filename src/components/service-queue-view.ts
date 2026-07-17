@@ -8,7 +8,7 @@ import {
 
 export type { SortDir };
 
-export type QueueSortField = "serialNumber" | "deviceName" | "homeUnit" | "serviceType";
+export type QueueSortField = "serialNumber" | "deviceName" | "homeUnit" | "serviceType" | "due";
 
 export type QueueRowVM = {
   id: string;
@@ -18,6 +18,7 @@ export type QueueRowVM = {
   homeUnit: string | null;
   serviceType: string; // display label
   serviceTypeRaw: "REIMAGE" | "REPAIR" | "OTHER"; // for filtering
+  dueAt: string | null; // ISO; null = no timer
 };
 
 export type QueueSortPref = SortPref<QueueSortField>;
@@ -28,11 +29,22 @@ export const QUEUE_COLUMNS: { key: QueueSortField; label: string }[] = [
   { key: "deviceName", label: "Device Name" },
   { key: "homeUnit", label: "Unit" },
   { key: "serviceType", label: "Service Type" },
+  { key: "due", label: "Due" },
 ];
 
 const SORT_FIELDS = new Set<string>(QUEUE_COLUMNS.map((c) => c.key));
 
 export function sortQueueRows(rows: QueueRowVM[], field: QueueSortField | null, dir: SortDir): QueueRowVM[] {
+  if (field === "due") {
+    const sign = dir === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      // Nulls (no timer) always sort last regardless of direction.
+      if (a.dueAt === null && b.dueAt === null) return 0;
+      if (a.dueAt === null) return 1;
+      if (b.dueAt === null) return -1;
+      return sign * (Date.parse(a.dueAt) - Date.parse(b.dueAt));
+    });
+  }
   return sortRows(rows, field, dir);
 }
 

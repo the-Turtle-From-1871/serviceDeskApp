@@ -9,9 +9,9 @@ import {
 } from "./service-queue-view";
 
 const rows: QueueRowVM[] = [
-  { id: "1", itemId: "i1", serialNumber: "B2", deviceName: "Laptop-9", homeUnit: "A Co", serviceType: "Reimage", serviceTypeRaw: "REIMAGE" },
-  { id: "2", itemId: "i2", serialNumber: "A1", deviceName: null, homeUnit: "B Co", serviceType: "cracked screen", serviceTypeRaw: "OTHER" },
-  { id: "3", itemId: "i3", serialNumber: "C3", deviceName: "Tablet-1", homeUnit: null, serviceType: "Repair", serviceTypeRaw: "REPAIR" },
+  { id: "1", itemId: "i1", serialNumber: "B2", deviceName: "Laptop-9", homeUnit: "A Co", serviceType: "Reimage", serviceTypeRaw: "REIMAGE", dueAt: null },
+  { id: "2", itemId: "i2", serialNumber: "A1", deviceName: null, homeUnit: "B Co", serviceType: "cracked screen", serviceTypeRaw: "OTHER", dueAt: null },
+  { id: "3", itemId: "i3", serialNumber: "C3", deviceName: "Tablet-1", homeUnit: null, serviceType: "Repair", serviceTypeRaw: "REPAIR", dueAt: null },
 ];
 
 describe("sortQueueRows", () => {
@@ -28,6 +28,18 @@ describe("sortQueueRows", () => {
 
   it("returns a copy in original order when field is null", () => {
     expect(sortQueueRows(rows, null, "asc").map((r) => r.id)).toEqual(["1", "2", "3"]);
+  });
+});
+
+describe("sortQueueRows by due", () => {
+  const mk = (id: string, dueAt: string | null) => ({
+    id, itemId: id, serialNumber: id, deviceName: null, homeUnit: null,
+    serviceType: "Repair", serviceTypeRaw: "REPAIR" as const, dueAt,
+  });
+  it("orders soonest/overdue first and nulls last (asc)", () => {
+    const rows = [mk("a", null), mk("b", "2026-07-20T00:00:00.000Z"), mk("c", "2026-07-10T00:00:00.000Z")];
+    const out = sortQueueRows(rows, "due", "asc").map((r) => r.id);
+    expect(out).toEqual(["c", "b", "a"]);
   });
 });
 

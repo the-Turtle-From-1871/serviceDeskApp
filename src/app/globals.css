@@ -824,6 +824,35 @@ input[type="file"].input {
 .audit-dot--overdue { background: var(--amber); }
 .audit-dot--never { background: var(--slate); }
 
+/* Due/overdue pill for service-queue and timer displays (queue table,
+   dashboard, receipt/item pages). Same shape as .badge but its own class
+   since it has no leading dot. */
+.due-badge {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.due-badge--overdue {
+  color: var(--danger);
+  background: var(--red-soft);
+  border-color: var(--red-border);
+}
+.due-badge--soon {
+  color: var(--amber);
+  background: var(--amber-soft);
+  border-color: var(--amber-border);
+}
+.due-badge--ontrack {
+  color: var(--green);
+  background: var(--green-soft);
+  border-color: var(--green-border);
+}
+
 .alert-warning {
   background: var(--amber-soft);
   border: 1px solid var(--amber-border);
