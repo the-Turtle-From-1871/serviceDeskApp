@@ -3,12 +3,16 @@ import { requireUser } from "@/lib/authz";
 import { listItems } from "@/modules/items/items.service";
 import { SiteHeader } from "@/components/SiteHeader";
 import { ItemSelectTable } from "@/components/ItemSelectTable";
+import { getLatestAuditMap } from "@/modules/audit/audit.service";
+import { auditState } from "@/modules/audit/audit.status";
 
 export default async function ItemsListPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   const user = await requireUser();
   const isAdmin = user.role === "ADMIN";
   const { q } = await searchParams;
   const items = await listItems({ search: q });
+  const auditMap = await getLatestAuditMap(items.map((i) => i.id));
+  const now = new Date();
 
   return (
     <>
@@ -35,7 +39,15 @@ export default async function ItemsListPage({ searchParams }: { searchParams: Pr
           <div className="card empty">No items match your search.</div>
         ) : (
           <ItemSelectTable
-            items={items.map((it) => ({ id: it.id, deviceName: it.deviceName, make: it.make, model: it.model, serialNumber: it.serialNumber, status: it.status }))}
+            items={items.map((it) => ({
+              id: it.id,
+              deviceName: it.deviceName,
+              make: it.make,
+              model: it.model,
+              serialNumber: it.serialNumber,
+              status: it.status,
+              auditState: it.status === "RETIRED" ? null : auditState(auditMap.get(it.id) ?? null, now),
+            }))}
             isAdmin={isAdmin}
           />
         )}

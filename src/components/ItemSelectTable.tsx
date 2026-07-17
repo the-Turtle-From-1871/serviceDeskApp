@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/StatusBadge";
+import { AuditLight } from "@/components/AuditLight";
 import { toggleItemStatusAction } from "@/app/admin/actions/items";
 import { MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW } from "@/modules/transfers/receipt-lines";
 import {
@@ -157,6 +158,7 @@ export function ItemSelectTable({ items, isAdmin }: { items: ItemRow[]; isAdmin:
                 {!isHidden("model") && <td data-label="Model">{it.model}</td>}
                 {!isHidden("serialNumber") && <td className="mono" data-label="Serial">{it.serialNumber}</td>}
                 {!isHidden("status") && <td data-label="Status"><StatusBadge status={it.status} /></td>}
+                {!isHidden("auditState") && <td data-label="Audit"><AuditLight state={it.auditState} /></td>}
                 <td data-label="">
                   <div className="actions actions--end">
                     <Link href={`/i/${it.id}`} className="btn btn-ghost btn-sm">View</Link>
