@@ -15,10 +15,11 @@ describe("navItemsFor", () => {
       { label: "Account", href: "/account" },
     ]);
   });
-  it("admin: Search, Items, New item, Queue, Users, Audit, Account", () => {
+  it("admin: Search, Items, Dashboard, New item, Queue, Users, Audit, Account", () => {
     expect(navItemsFor({ loggedIn: true, isAdmin: true })).toEqual([
       { label: "Search", href: "/" },
       { label: "Items", href: "/items" },
+      { label: "Dashboard", href: "/admin" },
       { label: "New item", href: "/admin/items/new" },
       { label: "Queue", href: "/admin/queue" },
       { label: "Users", href: "/admin/users" },
@@ -38,5 +39,12 @@ describe("isActive", () => {
     expect(isActive("/items", "/items/abc/transfer")).toBe(true);
     expect(isActive("/items", "/admin/items/new")).toBe(false);
     expect(isActive("/admin/users", "/admin/audit")).toBe(false);
+  });
+  it("admin dashboard matches only exactly, not the other admin routes", () => {
+    expect(isActive("/admin", "/admin")).toBe(true);
+    expect(isActive("/admin", "/admin/queue")).toBe(false);
+    expect(isActive("/admin", "/admin/users")).toBe(false);
+    // and the subtree links still activate on their own pages
+    expect(isActive("/admin/queue", "/admin/queue")).toBe(true);
   });
 });

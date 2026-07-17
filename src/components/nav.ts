@@ -6,6 +6,7 @@ export function navItemsFor({ loggedIn, isAdmin }: { loggedIn: boolean; isAdmin:
   const items: NavItem[] = [search, { label: "Items", href: "/items" }];
   if (isAdmin) {
     items.push(
+      { label: "Dashboard", href: "/admin" },
       { label: "New item", href: "/admin/items/new" },
       { label: "Queue", href: "/admin/queue" },
       { label: "Users", href: "/admin/users" },
@@ -16,8 +17,11 @@ export function navItemsFor({ loggedIn, isAdmin }: { loggedIn: boolean; isAdmin:
   return items;
 }
 
-// Home ("/") matches only exactly; every other item matches its subtree.
+// Home ("/") and the admin dashboard ("/admin") match only exactly; every other
+// item matches its subtree. "/admin" needs the exact-match rule because it is a
+// prefix of the other admin routes (/admin/queue, /admin/users, …) — subtree
+// matching would light the Dashboard link up on every admin page.
 export function isActive(href: string, pathname: string): boolean {
-  if (href === "/") return pathname === "/";
+  if (href === "/" || href === "/admin") return pathname === href;
   return pathname === href || pathname.startsWith(href + "/");
 }
