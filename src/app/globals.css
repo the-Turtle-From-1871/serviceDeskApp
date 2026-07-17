@@ -809,6 +809,25 @@ input[type="file"].input {
   background: var(--red-soft);
   border-color: var(--red-border);
 }
+.audit-dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+.audit-dot--compliant { background: var(--green); }
+.audit-dot--overdue { background: var(--amber); }
+.audit-dot--never { background: var(--slate); }
+
+.alert-warning {
+  background: var(--amber-soft);
+  border: 1px solid var(--amber-border);
+  color: var(--amber);
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+}
 
 /* ---------- Definition list (item details) ---------- */
 .dl {
