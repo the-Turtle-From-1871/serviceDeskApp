@@ -35,5 +35,5 @@ export async function getTimerDashboard(now: Date = new Date()) {
     (dueState(s.dueAt, now).state === "overdue" ? overdueService : soonService).push(row);
   }
 
-  return { overdueTransfers, soonTransfers, overdueService, soonService };
+  return { overdueTransfers, soonTransfers, overdueService, soonService, nowMs: now.getTime() };
 }
