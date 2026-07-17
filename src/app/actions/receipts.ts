@@ -82,7 +82,7 @@ export async function createReceiptAction(_prev: unknown, formData: FormData) {
     // so a queue hiccup here must not fail the already-created receipt.
     for (const [itemId, sel] of serviceMap) {
       try {
-        await upsertServiceRequest({ itemId, serviceType: sel.serviceType, note: sel.note, transferId: t.id });
+        await upsertServiceRequest({ itemId, serviceType: sel.serviceType, note: sel.note, overrideDays: sel.overrideDays, transferId: t.id });
       } catch (err) {
         console.error(`[createReceiptAction] service enqueue failed for item ${itemId}:`, err);
       }
