@@ -24,5 +24,5 @@ export function parseReceiptForm(fd: FormData) {
       qtyIssued: s(fd, `line[${i}][qtyIssued]`),
     });
   }
-  return { itemIds, lines, sender: party(fd, "sender"), receiver: party(fd, "receiver"), receiverSignature: String(fd.get("receiverSignature") ?? "") };
+  return { itemIds, lines, sender: party(fd, "sender"), receiver: party(fd, "receiver"), receiverSignature: String(fd.get("receiverSignature") ?? ""), returnDays: s(fd, "returnDays") };
 }

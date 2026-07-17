@@ -60,6 +60,15 @@ export const receiptSchema = z
       .string()
       .startsWith(SIGNATURE_PREFIX, "Recipient signature is required")
       .max(MAX_SIGNATURE_BYTES, "Signature is too large"),
+    // Raw form value is always a string (possibly "" when the field is absent),
+    // so strip "" to undefined before coercion — z.coerce.number() would
+    // otherwise turn "" into 0 and fail .positive() instead of being skipped
+    // as optional. The inner .optional() lets the preprocessed `undefined`
+    // through; the outer one is what z.object needs (per the note above) to
+    // infer the object key itself as optional.
+    returnDays: z
+      .preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().positive().max(3650).optional())
+      .optional(),
   })
   .superRefine((t, ctx) => {
     if (t.sender.isDcsim && t.receiver.isDcsim) {
