@@ -985,6 +985,7 @@ input[type="file"].input {
 
 @media print {
   .app-header,
+  .site-footer,
   .no-print {
     display: none !important;
   }

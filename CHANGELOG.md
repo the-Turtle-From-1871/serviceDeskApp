@@ -25,8 +25,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Print QR from the item page.** The individual item view page (`/i/<id>`) now
   shows a **Print QR** button (logged-in users) that opens the browser print
   dialog with a clean, self-identifying QR label — QR image, make/model, serial,
-  and item URL — while the header and all other page sections drop out of the
-  printout. The QR itself remains publicly viewable as before; only the print
+  and item URL — while the header, footer, and all other page sections drop out
+  of the printout. The QR itself remains publicly viewable as before; only the print
   button is gated to signed-in users.
 
 ### Changed
