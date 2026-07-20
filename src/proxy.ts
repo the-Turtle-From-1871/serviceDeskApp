@@ -8,7 +8,7 @@
 export { auth as proxy } from "@/auth";
 
 export const config = {
-  // Public: home (receipt search), login, register, privacy, terms, receipt pages,
+  // Public: home (receipt search), login, privacy, terms, receipt pages,
   // item pages, auth API, the cron endpoint (self-guarded by CRON_SECRET, no user
   // session), static assets. Everything else (incl. /items and /admin/*) requires
   // auth. The `|$` branch in the negative lookahead excludes the bare `/` root path
@@ -20,5 +20,5 @@ export const config = {
   // the session cookie riding along on that fetch, block CDN caching of a 1MB binary,
   // and re-run the proxy on every scanner open. Not sensitive, so serving it public
   // is correct (mirrors _next/static, which ships the app's JS the same way).
-  matcher: ["/((?!api/auth|api/cron|login|register|forgot-password|reset-password|privacy|terms|receipts/|i/|_next/static|_next/image|favicon.ico|wasm/|$).*)"],
+  matcher: ["/((?!api/auth|api/cron|login|forgot-password|reset-password|privacy|terms|receipts/|i/|_next/static|_next/image|favicon.ico|wasm/|$).*)"],
 };

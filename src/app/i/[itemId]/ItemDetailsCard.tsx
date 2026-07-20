@@ -62,25 +62,32 @@ export function ItemDetailsCard({ item, isAdmin, units, dateLogged, loggedBy, ha
         <form action={action} className="stack-sm">
           <input type="hidden" name="id" value={item.id} />
           <div className="form-grid">
-            <div className="field">
-              <label className="label" htmlFor="ed-deviceName">Device Name<span className="req"> *</span></label>
-              <input id="ed-deviceName" className="input" name="deviceName" defaultValue={item.deviceName ?? ""} required />
-            </div>
-            <div className="field">
-              <label className="label" htmlFor="ed-homeUnit">Home unit</label>
-              <input
-                id="ed-homeUnit"
-                className="input"
-                name="homeUnit"
-                list="ed-units"
-                autoComplete="off"
-                placeholder="Search units…"
-                defaultValue={item.homeUnit ?? ""}
-              />
-              <datalist id="ed-units">
-                {units.map((u) => <option key={u.abbreviation} value={u.fullName}>{u.abbreviation}</option>)}
-              </datalist>
-            </div>
+            {/* deviceName + homeUnit are ADMIN-only. A standard USER edits only the
+                current holder email and position, so these inputs are not rendered
+                for them — and updateItemDetailsAction re-enforces this server-side. */}
+            {isAdmin && (
+              <>
+                <div className="field">
+                  <label className="label" htmlFor="ed-deviceName">Device Name<span className="req"> *</span></label>
+                  <input id="ed-deviceName" className="input" name="deviceName" defaultValue={item.deviceName ?? ""} required />
+                </div>
+                <div className="field">
+                  <label className="label" htmlFor="ed-homeUnit">Home unit</label>
+                  <input
+                    id="ed-homeUnit"
+                    className="input"
+                    name="homeUnit"
+                    list="ed-units"
+                    autoComplete="off"
+                    placeholder="Search units…"
+                    defaultValue={item.homeUnit ?? ""}
+                  />
+                  <datalist id="ed-units">
+                    {units.map((u) => <option key={u.abbreviation} value={u.fullName}>{u.abbreviation}</option>)}
+                  </datalist>
+                </div>
+              </>
+            )}
             <div className="field">
               <label className="label" htmlFor="ed-currentUserEmail">Current user email</label>
               <input id="ed-currentUserEmail" className="input" type="email" name="currentUserEmail" defaultValue={item.currentUserEmail ?? ""} placeholder="e.g. jane.doe@unit.mil" />

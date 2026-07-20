@@ -15,10 +15,23 @@ describe("planImport", () => {
     expect(toCreate[0]).toMatchObject({ make: "M4", model: "Carbine", serialNumber: "S1" });
   });
 
-  it("skips a row whose serial already exists in the DB", () => {
-    const { toCreate, skipped } = planImport([mk(1, { serialNumber: "A1" })], new Set(["A1"]), UNITS);
+  it("skips a row whose serial already exists in the DB (case-insensitive; existing set is lowercased)", () => {
+    // Incoming "A1" matches the lowercased existing "a1" — proves the citext-aligned
+    // case-insensitive dedup.
+    const { toCreate, skipped } = planImport([mk(1, { serialNumber: "A1" })], new Set(["a1"]), UNITS);
     expect(toCreate).toHaveLength(0);
     expect(skipped).toEqual([{ row: 1, serialNumber: "A1", reason: "already exists" }]);
+  });
+
+  it("treats serials differing only in case as the same device within a file", () => {
+    const { toCreate, skipped } = planImport(
+      [mk(1, { serialNumber: "AbC123" }), mk(2, { serialNumber: "abc123" })],
+      new Set(),
+      UNITS,
+    );
+    expect(toCreate).toHaveLength(1);
+    expect(toCreate[0].serialNumber).toBe("AbC123"); // first wins, original casing preserved
+    expect(skipped).toEqual([{ row: 2, serialNumber: "abc123", reason: "duplicate in file" }]);
   });
 
   it("keeps the first and skips later duplicates within the file", () => {

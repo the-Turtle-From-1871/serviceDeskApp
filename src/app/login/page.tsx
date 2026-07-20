@@ -31,7 +31,6 @@ export default function LoginPage() {
           <button disabled={pending} type="submit" className="btn btn-primary btn-block">
             {pending ? "Signing in…" : "Sign in"}
           </button>
-          <p className="subtle">No account? <Link href="/register">Create one</Link></p>
         </form>
       </div>
     </div>

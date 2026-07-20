@@ -8,42 +8,76 @@ import { toggleItemStatusAction } from "@/app/admin/actions/items";
 import { MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW } from "@/modules/transfers/receipt-lines";
 import {
   ITEM_COLUMNS,
-  sortItemRows,
-  parseSortPref,
   parseHiddenCols,
   selectableIds,
   selectAllState,
   type ItemRow,
   type SortField,
-  type SortPref,
 } from "@/components/items-view";
 import { makeStore, usePersistedPref } from "@/components/persisted-pref";
 
 export type { ItemRow };
 
-const SORT_KEY = "items:sort";
 const HIDDEN_KEY = "items:hiddenCols";
-const DEFAULT_SORT: SortPref = { field: null, dir: "asc" };
 const DEFAULT_HIDDEN: SortField[] = [];
-
-const sortStore = makeStore(SORT_KEY, parseSortPref);
 const hiddenStore = makeStore(HIDDEN_KEY, parseHiddenCols);
 
-export function ItemSelectTable({ items, isAdmin }: { items: ItemRow[]; isAdmin: boolean }) {
+// auditState is a derived (non-column) value, so it can't be an ORDER BY — offer
+// only the server-sortable columns in the Sort control.
+const SORTABLE_COLUMNS = ITEM_COLUMNS.filter((c) => c.key !== "auditState");
+
+export function ItemSelectTable({
+  items,
+  isAdmin,
+  q,
+  sort,
+  dir,
+  page,
+  totalPages,
+}: {
+  items: ItemRow[];
+  isAdmin: boolean;
+  q: string;
+  sort: string | null;
+  dir: "asc" | "desc";
+  page: number;
+  totalPages: number;
+}) {
   const router = useRouter();
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const toggle = (id: string) => setSelected((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
-  const allState = useMemo(() => selectAllState(items, selected), [items, selected]);
+  // Selection is a Map (id -> row), not a Set of ids, so it survives paging: the
+  // receipt-group validation below needs each selected item's make/model, and an
+  // item selected on page 1 is no longer in `items` once you page forward. You can
+  // only ever select a row you can see, so its details are captured at select time.
+  const [selected, setSelected] = useState<Map<string, ItemRow>>(new Map());
+  const selectedIds = useMemo(() => new Set(selected.keys()), [selected]);
+  const toggle = (row: ItemRow) =>
+    setSelected((prev) => {
+      const n = new Map(prev);
+      if (n.has(row.id)) n.delete(row.id);
+      else n.set(row.id, row);
+      return n;
+    });
+
+  const allState = useMemo(() => selectAllState(items, selectedIds), [items, selectedIds]);
   const selectableCount = useMemo(() => selectableIds(items).length, [items]);
-  const toggleAll = () => setSelected(allState === "all" ? new Set() : new Set(selectableIds(items)));
+  // "Select all" acts on the CURRENT page's selectable rows, leaving off-page
+  // selections untouched.
+  const toggleAll = () =>
+    setSelected((prev) => {
+      const n = new Map(prev);
+      const pageActive = items.filter((it) => it.status === "ACTIVE");
+      const allOnPage = pageActive.length > 0 && pageActive.every((it) => n.has(it.id));
+      if (allOnPage) for (const it of pageActive) n.delete(it.id);
+      else for (const it of pageActive) n.set(it.id, it);
+      return n;
+    });
 
-  // View preferences persisted to localStorage (survive reloads + navigation).
-  const [sort, setSort] = usePersistedPref(sortStore, DEFAULT_SORT);
+  // View preferences (column visibility) persist to localStorage. Sort + paging are
+  // URL-driven (server-side), so they are NOT stored here.
   const [hidden, setHidden] = usePersistedPref(hiddenStore, DEFAULT_HIDDEN);
-
-  const sorted = useMemo(() => sortItemRows(items, sort.field, sort.dir), [items, sort]);
   const isHidden = (key: SortField) => hidden.includes(key);
+  const visibleCols = ITEM_COLUMNS.filter((c) => !isHidden(c.key));
 
   const toggleCol = (key: SortField) => {
     const next = new Set(hidden);
@@ -54,27 +88,42 @@ export function ItemSelectTable({ items, isAdmin }: { items: ItemRow[]; isAdmin:
     setHidden([...next]);
   };
 
-  const groupCount = useMemo(() => {
-    const keys = new Set<string>();
-    for (const it of items) if (selected.has(it.id)) keys.add(`${it.make} ${it.model}`);
-    return keys.size;
-  }, [selected, items]);
+  // Group validation runs over ALL selected items (every page), from the Map values.
+  const groupCount = useMemo(
+    () => new Set([...selected.values()].map((it) => `${it.make} ${it.model}`)).size,
+    [selected],
+  );
   const tooMany = groupCount > MAX_RECEIPT_ROWS;
-
   const maxGroupSize = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const it of items) if (selected.has(it.id)) counts.set(`${it.make} ${it.model}`, (counts.get(`${it.make} ${it.model}`) ?? 0) + 1);
+    for (const it of selected.values()) {
+      const key = `${it.make} ${it.model}`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
     let max = 0;
     for (const n of counts.values()) if (n > max) max = n;
     return max;
-  }, [selected, items]);
+  }, [selected]);
   const tooManyPerRow = maxGroupSize > MAX_ITEMS_PER_ROW;
 
-  const create = () => { if (selected.size && !tooMany && !tooManyPerRow) router.push(`/receipts/new?items=${[...selected].join(",")}`); };
+  const selectedKeys = () => [...selected.keys()].join(",");
+  const create = () => { if (selected.size && !tooMany && !tooManyPerRow) router.push(`/receipts/new?items=${selectedKeys()}`); };
+  const printQr = () => { if (selected.size) window.open(`/admin/items/qr-sheet/pdf?items=${selectedKeys()}&preview=1`, "_blank", "noopener"); };
 
-  const printQr = () => { if (selected.size) window.open(`/admin/items/qr-sheet/pdf?items=${[...selected].join(",")}&preview=1`, "_blank", "noopener"); };
-
-  const visibleCols = ITEM_COLUMNS.filter((c) => !isHidden(c.key));
+  // Build a /items URL preserving the current query, overriding only what changes.
+  // Changing the sort resets to page 1; paging keeps the sort.
+  const hrefFor = (over: { sort?: string | null; dir?: "asc" | "desc"; page?: number }) => {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    const nextSort = over.sort !== undefined ? over.sort : sort;
+    const nextDir = over.dir ?? dir;
+    const nextPage = over.page ?? page;
+    if (nextSort) { params.set("sort", nextSort); params.set("dir", nextDir); }
+    if (nextPage > 1) params.set("page", String(nextPage));
+    const s = params.toString();
+    return s ? `/items?${s}` : "/items";
+  };
+  const navigate = (over: { sort?: string | null; dir?: "asc" | "desc"; page?: number }) => router.push(hrefFor(over));
 
   return (
     <>
@@ -83,21 +132,21 @@ export function ItemSelectTable({ items, isAdmin }: { items: ItemRow[]; isAdmin:
           <span className="subtle" style={{ fontSize: 12 }}>Sort by</span>
           <select
             className="select toolbar__control"
-            value={sort.field ?? ""}
-            onChange={(e) => setSort({ ...sort, field: (e.target.value || null) as SortField | null })}
+            value={sort ?? ""}
+            onChange={(e) => navigate({ sort: e.target.value || null, page: 1 })}
           >
             <option value="">Default (newest)</option>
-            {ITEM_COLUMNS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+            {SORTABLE_COLUMNS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
           </select>
         </label>
         <button
           type="button"
           className="btn btn-secondary"
-          disabled={!sort.field}
-          onClick={() => setSort({ ...sort, dir: sort.dir === "asc" ? "desc" : "asc" })}
-          aria-label={sort.dir === "asc" ? "Ascending" : "Descending"}
+          disabled={!sort}
+          onClick={() => navigate({ dir: dir === "asc" ? "desc" : "asc", page: 1 })}
+          aria-label={dir === "asc" ? "Ascending" : "Descending"}
         >
-          {sort.dir === "asc" ? "Asc ▲" : "Desc ▼"}
+          {dir === "asc" ? "Asc ▲" : "Desc ▼"}
         </button>
         {isAdmin && (
           <button
@@ -139,20 +188,20 @@ export function ItemSelectTable({ items, isAdmin }: { items: ItemRow[]; isAdmin:
                   // React has no `indeterminate` prop — it is a DOM-only property.
                   ref={(el) => { if (el) el.indeterminate = allState === "some"; }}
                   onChange={toggleAll}
-                  aria-label={allState === "all" ? "Deselect all items" : "Select all items"}
+                  aria-label={allState === "all" ? "Deselect all items on this page" : "Select all items on this page"}
                   title={selectableCount === 0 ? "No selectable items" : undefined}
                 />
               </th>
               {visibleCols.map((c) => (
-                <th key={c.key}>{c.label}{sort.field === c.key ? (sort.dir === "asc" ? " ▲" : " ▼") : ""}</th>
+                <th key={c.key}>{c.label}{sort === c.key ? (dir === "asc" ? " ▲" : " ▼") : ""}</th>
               ))}
               <th style={{ textAlign: "right" }}>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {sorted.map((it) => (
+            {items.map((it) => (
               <tr key={it.id}>
-                <td data-label="Select">{it.status === "ACTIVE" && <input type="checkbox" checked={selected.has(it.id)} onChange={() => toggle(it.id)} aria-label={`Select ${it.deviceName ?? ""} ${it.make} ${it.model} ${it.serialNumber}`} />}</td>
+                <td data-label="Select">{it.status === "ACTIVE" && <input type="checkbox" checked={selected.has(it.id)} onChange={() => toggle(it)} aria-label={`Select ${it.deviceName ?? ""} ${it.make} ${it.model} ${it.serialNumber}`} />}</td>
                 {!isHidden("deviceName") && <td data-label="Device Name">{it.deviceName ? it.deviceName : <span className="subtle">—</span>}</td>}
                 {!isHidden("make") && <td data-label="Make">{it.make}</td>}
                 {!isHidden("model") && <td data-label="Model">{it.model}</td>}
@@ -178,6 +227,15 @@ export function ItemSelectTable({ items, isAdmin }: { items: ItemRow[]; isAdmin:
           </tbody>
         </table>
       </div>
+
+      {totalPages > 1 && (
+        <div className="row" style={{ justifyContent: "center", gap: 12, alignItems: "center" }}>
+          <button type="button" className="btn btn-secondary btn-sm" disabled={page <= 1} onClick={() => navigate({ page: page - 1 })}>← Prev</button>
+          <span className="subtle">Page {page} of {totalPages}</span>
+          <button type="button" className="btn btn-secondary btn-sm" disabled={page >= totalPages} onClick={() => navigate({ page: page + 1 })}>Next →</button>
+        </div>
+      )}
+
       {selected.size > 0 && (
         <div className="card row" style={{ position: "sticky", bottom: 0, justifyContent: "space-between" }}>
           <span>{selected.size} selected · {groupCount} row{groupCount === 1 ? "" : "s"}</span>

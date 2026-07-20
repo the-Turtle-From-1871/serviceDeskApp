@@ -21,10 +21,17 @@
 
 ## Security Guardrails (Non-Negotiable)
 
-### 1. Broken Access Control & IDOR
-- Every Server Action and Route Handler MUST check authentication first:
-  `const session = await auth(); if (!session) throw new Error("Unauthorized");`
-- Never trust input IDs blindly. Always filter Prisma queries using the verified backend `session.user.id` to ensure ownership.
+### 1. Authorization — Shared Technician Account (role-based, NOT ownership)
+- Authorization is **role-based** (`ADMIN` / `USER`); inventory, receipts, and the queue are **shared org-wide**. Do NOT add `session.user.id` ownership filters to item/receipt/queue queries — gate on role.
+- Every Server Action and Route Handler MUST start with `requireUser()` or `requireAdmin()` from `@/lib/authz` — never bare `auth()`. These re-read `role` + `isActive` from the DB per request, so demotion/deactivation take effect immediately.
+- `requireAdmin()` for all privileged capabilities: returns, user management, named signatures, service-queue mutations, receipt timers, audits. A standard `USER` may read shared inventory, create receipts, and edit ONLY an item's current-holder email + current position (`userItemDetailsSchema`); `deviceName`/`homeUnit`/`notes` and the service/admin queues are admin-only. `updateItemDetailsAction` picks the schema by role, so the field restriction is enforced server-side, not just hidden in the UI.
+- Never gate a capability on "the user happens to own no rows" — a demoted admin keeps their rows. Check the **ROLE**.
+- Resolve identity, names, and signature blobs **server-side from the DB scoped to the acting user**; never trust client-posted names, ids, roles, or signatures.
+- Public-by-design endpoints (login, home search, receipt + item lookup) are a reviewed exception and must stay read-only and PII-minimal — never widen them without explicit review.
+- There is NO public self-registration — it was removed. Accounts are provisioned ONLY by an admin (`createUserAction` / `createUser`); do not re-add a public `/register` flow without an explicit decision. (`registerSchema` is retained unused for a possible future re-implementation.)
+- Route handlers with no session (cron) authenticate via a constant-time `CRON_SECRET` compare and fail closed.
+
+> **ACCEPTED REQUIREMENT — public, enumerable receipts AND items.** Logged-out recipients MUST be able to **search, view, and download** hand receipts by `receiptNumber`/serial, AND to **search the inventory and open any item page** (`/i/<id>`, home serial search). The team has explicitly accepted the resulting tradeoff: receipts are enumerable (sequential `HR-000001…` numbers) and the public receipt page + PDF route expose party PII and signature images with no auth; item pages/search expose the full device catalog (serials, home unit, current holder, receipt history) with no auth. This is **intended — do NOT "fix" it**: do not gate `/receipts/*`, `/receipts/*/pdf`, `/i/*`, or the public search behind auth, and do not make receipt identifiers unguessable, when re-auditing. It CAN be hardened later **if the team asks** (e.g. unguessable receipt tokens, auth-gating routes, or hiding signatures/holder from the public web pages) — treat that as a deliberate feature change requiring an explicit request, not a security bug to auto-remediate.
 
 ### 2. Injection Flaws (SQLi & XSS)
 - Use standard Prisma methods (`prisma.user.findMany`) for automatic query parameterization.
@@ -42,6 +49,20 @@
 ### 5. Error Handling
 - Catch exceptions gracefully in Server Actions. Return generic messages to the client (e.g., `"Something went wrong"`) and log detailed stack traces strictly on the server.
 
+### 6. Supabase Row Level Security (RLS)
+- RLS is **NOT** the authorization boundary. The app reaches Postgres **only through Prisma** on a privileged role that **bypasses RLS** — all authz lives in the app layer (see #1). Never assume the DB scopes rows for you.
+- Every table is `RLS enabled, no policy` = deny-all for the `anon`/`authenticated` PostgREST roles. The Supabase Data API / anon key must stay **unused**. Do not add a Supabase JS client or the anon key to the app.
+- New tables inherit RLS-enabled via the `rls_auto_enable` event trigger. **Never disable RLS on a table** (that exposes it to the public anon key) and **never add a permissive policy** without explicit review.
+- Never `GRANT EXECUTE` on a `public` function to `anon`/`authenticated`.
+
+
+## Data Fetching & N+1 Prevention (Non-Negotiable)
+- **Never query inside a loop/`.map`.** No `Promise.all(ids.map(id => prisma...))`. Batch with `findMany({ where: { id: { in: ids } } })`, fetch relations with `include`/`select`, and aggregate per-key with `groupBy` (see `getLatestAuditMap`).
+- **Bound every list.** Server Components/queries that back a list MUST paginate (`take` + keyset/cursor) — never `findMany` an unbounded table (Items is 1,200+ and growing). Do not ship the whole table to a Client Component. The `/items` list is the reference: `listItems` is server-side **paginated + sorted** (URL-driven `?page/sort/dir`), and `ItemSelectTable` holds only the current page. `auditState` is derived (not an `Item` column), so it is **display-only — never a server `ORDER BY`**.
+- **`select` only the columns the view renders.** Never pull signature blobs or PII into list/search/type-ahead queries.
+- **Index every hot `where`/`orderBy` column.** `contains` + `mode:"insensitive"` compiles to `ILIKE '%q%'` and needs a **pg_trgm GIN** index (a B-tree won't help); prefer `startsWith` (B-tree) when UX allows, and debounce server-side type-aheads.
+- **Memoize deterministic work.** QR data URLs are cached across requests (and deploys) via `unstable_cache` in `qr.ts`, keyed on the resolved URL — they are immutable, so never re-encode per request. Use React `cache()` only for per-request dedupe.
+- **`Item.serialNumber` is `@unique @db.Citext`** — case-insensitive identity, like `User.email`. Don't assume case-sensitive serial distinctness. The CSV import dedups case-insensitively and leans on the DB constraint (`createMany({ skipDuplicates: true })`) as the race-safe backstop.
 
 ## Backend Architecture & Feature Constraints
 

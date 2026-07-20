@@ -12,13 +12,13 @@ receipt PDF.
 
 ## Features
 
-- **Item registry** — make, model, serial number, asset tag, home location, notes; ACTIVE/RETIRED status.
+- **Item registry** — make, model, serial number (**unique, case-insensitive**), device name, home unit, current-holder email/position, notes; ACTIVE/RETIRED status. The list is **server-paginated and sortable**.
 - **QR codes** — each item has a public read-only page (`/i/[itemId]`); QR is printable and downloadable as a PDF.
 - **Signed custody chain** — holder initiates a transfer, recipient draws a signature to accept; custody moves only on signature.
 - **Admin console** — create/edit/retire items, manage users (create, set role, activate/deactivate), force-reassign (override), full audit log.
 - **DA Form 2062 hand receipt** — every completed transfer exports a filled, flattened DA 2062 PDF with a vertical recipient signature + date in the quantity column and a custody-record page.
-- **Accounts** — users self-register (standard `USER`); admins can also provision accounts. Rank is captured separately from name.
-- **Roles** — `ADMIN` and `USER`, enforced server-side; deactivations/role changes take effect on the next request.
+- **Accounts** — **admin-provisioned only** (no public self-registration). Rank is captured separately from name. Self-serve password reset is available (`/forgot-password`).
+- **Roles** — `ADMIN` and `USER`, enforced server-side; deactivations/role changes take effect on the next request. A `USER` may create receipts and edit only an item's current-holder email/position — all other item fields and the service/admin queues are admin-only.
 - **HST everywhere** — all timestamps display in Hawaii Standard Time (stored as UTC).
 
 ## Tech stack
@@ -108,8 +108,9 @@ docs/                  # architecture + design notes
 
 ## Auth & roles (summary)
 
-Email + password. Users can **self-register** (as standard `USER` via
-`/register`); admins can also provision accounts and assign roles. Sessions are
+Email + password. Accounts are **provisioned by an admin** (no public
+self-registration); admins assign roles. Self-serve **password reset** is
+available (`/forgot-password` → emailed single-use token). Sessions are
 JWT (no DB session table). Authorization is enforced in `requireUser` /
 `requireAdmin`, which re-read `role`/`isActive` from the DB each request, so
 deactivations and role changes take effect immediately. See
@@ -130,5 +131,5 @@ requirement — are in [`DEPLOY.md`](./DEPLOY.md).
 
 ## Known gaps / roadmap
 
-- No self-serve password reset yet; an admin "reset password" action is a natural next step.
-- FROM/TO on the DA 2062 use a user's name only (no rank/unit fields on profiles yet).
+- Public receipt/item pages are **enumerable by design** (a team requirement) — see the accepted-requirement note in `CLAUDE.md`.
+- Trigram search index (`pg_trgm`) is deferred until the catalog is large enough to need it; serial/receipt search is a scan today.

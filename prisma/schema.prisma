@@ -69,7 +69,9 @@ model Item {
   id            String         @id @default(cuid())
   make          String
   model         String
-  serialNumber  String
+  // A device's identity. citext + unique: case-insensitive, so the same physical
+  // device can't be logged twice (incl. "ABC123" vs "abc123"). Mirrors User.email.
+  serialNumber  String         @unique @db.Citext
   homeUnit      String?
   deviceName    String?
   notes         String?
@@ -90,6 +92,9 @@ model Item {
   serviceQueueItem ServiceQueueItem?
   edits            ItemEdit[]
   audits           ItemAudit[]
+
+  // The /items list sorts by createdAt desc on every load (unbounded today).
+  @@index([createdAt])
 }
 
 model Unit {
@@ -159,6 +164,11 @@ model Transfer {
 
   @@index([purgeAfter])
   @@index([dueAt])
+  // Audit log, receipt-number search, and per-item receipt lists all sort by
+  // createdAt desc.
+  @@index([createdAt])
+  // Dashboard timer sweep filters status='OPEN' AND dueAt <= horizon.
+  @@index([status, dueAt])
 }
 
 model TransferLine {

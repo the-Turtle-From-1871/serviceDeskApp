@@ -46,9 +46,9 @@ test("getItem returns the item by id", async () => {
 test("listItems search matches serial number", async () => {
   await createItem({ make: "Dell", model: "A", serialNumber: "ABC123", ...base }, adminId);
   await createItem({ make: "HP", model: "B", serialNumber: "ZZZ999", ...base }, adminId);
-  const results = await listItems({ search: "ABC" });
-  expect(results).toHaveLength(1);
-  expect(results[0].serialNumber).toBe("ABC123");
+  const { items } = await listItems({ search: "ABC" });
+  expect(items).toHaveLength(1);
+  expect(items[0].serialNumber).toBe("ABC123");
 });
 
 test("retireItem sets status RETIRED", async () => {

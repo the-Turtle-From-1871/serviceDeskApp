@@ -31,21 +31,59 @@ export function getItemWithCreator(id: string) {
   });
 }
 
-export function listItems(opts: { search?: string } = {}) {
+// Server-sortable columns only. `auditState` (shown in the table) is derived from
+// ItemAudit rows, not an Item column, so it cannot be an ORDER BY — the UI omits
+// it from the sort options.
+const ITEM_SORT_COLUMNS = new Set(["deviceName", "make", "model", "serialNumber", "status"]);
+
+export const ITEMS_PAGE_SIZE = 50;
+
+export type ItemsPage = {
+  items: Item[];
+  total: number;
+  page: number;
+  pageSize: number;
+  sort: string | null;
+  dir: "asc" | "desc";
+};
+
+// Paginated, sorted item list. Bounds the fetch and the RSC payload (the table was
+// previously unbounded — every row shipped to the client on each load). Sort and
+// paging are server-side so they act over the whole result set, not just one page.
+export async function listItems(opts: {
+  search?: string;
+  sort?: string | null;
+  dir?: string | null;
+  page?: number;
+  pageSize?: number;
+} = {}): Promise<ItemsPage> {
+  const pageSize = opts.pageSize && opts.pageSize > 0 ? Math.floor(opts.pageSize) : ITEMS_PAGE_SIZE;
   const search = opts.search?.trim();
-  return prisma.item.findMany({
-    where: search
-      ? {
-          OR: [
-            { deviceName: { contains: search, mode: "insensitive" } },
-            { make: { contains: search, mode: "insensitive" } },
-            { model: { contains: search, mode: "insensitive" } },
-            { serialNumber: { contains: search, mode: "insensitive" } },
-          ],
-        }
-      : undefined,
-    orderBy: { createdAt: "desc" },
-  });
+  const where: Prisma.ItemWhereInput | undefined = search
+    ? {
+        OR: [
+          { deviceName: { contains: search, mode: "insensitive" } },
+          { make: { contains: search, mode: "insensitive" } },
+          { model: { contains: search, mode: "insensitive" } },
+          { serialNumber: { contains: search, mode: "insensitive" } },
+        ],
+      }
+    : undefined;
+
+  const sort = opts.sort && ITEM_SORT_COLUMNS.has(opts.sort) ? opts.sort : null;
+  const dir: "asc" | "desc" = opts.dir === "asc" ? "asc" : "desc";
+  // Secondary key by id so rows with equal sort values keep a stable order across
+  // pages (otherwise the same row can appear on two pages or none).
+  const orderBy: Prisma.ItemOrderByWithRelationInput[] = sort
+    ? [{ [sort]: dir } as Prisma.ItemOrderByWithRelationInput, { id: "asc" }]
+    : [{ createdAt: "desc" }, { id: "asc" }];
+
+  const total = await prisma.item.count({ where });
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(Math.max(1, Math.floor(opts.page ?? 1)), totalPages);
+  const items = await prisma.item.findMany({ where, orderBy, skip: (page - 1) * pageSize, take: pageSize });
+
+  return { items, total, page, pageSize, sort, dir };
 }
 
 export type ItemEditor = { id: string; name: string };
@@ -111,7 +149,9 @@ export async function analyzeImport(text: string): Promise<{
   if (error) return { counts: { toImport: 0, skipped: 0, autoDetected: 0 }, skipped: [], unresolved: [], error };
 
   const existing = new Set(
-    (await prisma.item.findMany({ select: { serialNumber: true } })).map((i) => i.serialNumber)
+    // Lowercased to match the DB's case-insensitive (citext) unique on serialNumber,
+    // so planImport dedups "ABC123" and "abc123" as the same device.
+    (await prisma.item.findMany({ select: { serialNumber: true } })).map((i) => i.serialNumber.toLowerCase())
   );
   const units = await loadUnitMap();
   const { toCreate, skipped, unresolved, detected } = planImport(rows, existing, units);
@@ -137,23 +177,39 @@ export async function commitImport(
   await learnUnits(resolutions);
 
   const existing = new Set(
-    (await prisma.item.findMany({ select: { serialNumber: true } })).map((i) => i.serialNumber)
+    // Lowercased to match the DB's case-insensitive (citext) unique on serialNumber,
+    // so planImport dedups "ABC123" and "abc123" as the same device.
+    (await prisma.item.findMany({ select: { serialNumber: true } })).map((i) => i.serialNumber.toLowerCase())
   );
   const units = await loadUnitMap();
   const { toCreate, skipped, detected } = planImport(rows, existing, units);
 
-  await prisma.$transaction([
-    prisma.item.createMany({ data: toCreate.map((d) => ({ ...d, createdById })) }),
-    prisma.importBatch.create({
+  const added = await prisma.$transaction(async (tx) => {
+    const created = await tx.item.createMany({
+      data: toCreate.map((d) => ({ ...d, createdById })),
+      // The DB unique(serialNumber, citext) is the real dedup: skip — rather than
+      // throw on — any serial a concurrent import inserted between our read of
+      // `existing` above and this write. Fixes the read-then-write race.
+      skipDuplicates: true,
+    });
+    await tx.importBatch.create({
       data: {
         createdById,
         filename,
-        addedCount: toCreate.length,
+        addedCount: created.count,
         skippedCount: skipped.length,
         skipped: skipped as unknown as Prisma.InputJsonValue,
       },
-    }),
-  ]);
+    });
+    return created.count;
+  });
 
-  return { added: toCreate.length, skipped, detected };
+  // added < toCreate.length means the DB skipped rows the in-app planner didn't
+  // catch (a concurrent import or a casing variant) — rare; surface it rather
+  // than silently under-reporting.
+  if (added < toCreate.length) {
+    console.warn(`[commitImport] ${toCreate.length - added} row(s) skipped by the DB serialNumber unique constraint (concurrent import or casing variant).`);
+  }
+
+  return { added, skipped, detected };
 }
