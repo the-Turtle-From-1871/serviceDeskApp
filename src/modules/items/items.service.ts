@@ -16,6 +16,12 @@ export function getItem(id: string) {
   return prisma.item.findUnique({ where: { id } });
 }
 
+// Just the fields needed to render a QR label — avoids pulling admin-only
+// columns (e.g. `notes`) on the logged-in QR-PDF route under the public /i path.
+export function getItemQrFields(id: string) {
+  return prisma.item.findUnique({ where: { id }, select: { id: true, serialNumber: true } });
+}
+
 export async function getItemsByIds(ids: string[]): Promise<Item[]> {
   if (ids.length === 0) return [];
   const found = await prisma.item.findMany({ where: { id: { in: ids } } });
