@@ -134,4 +134,4 @@ requirement — are in [`DEPLOY.md`](./DEPLOY.md).
 - Public receipt/item pages are **enumerable by design** (a team requirement) — see the accepted-requirement note in `CLAUDE.md`.
 - Trigram search index (`pg_trgm`) is deferred until the catalog is large enough to need it; serial/receipt search is a scan today.
 - Signature images are stored inline in Postgres — moving them to object storage (to cut DB growth + client payload) is deferred until storage pressures the free-plan cap.
-- Shared-admin accountability: actions on the shared admin account are attributed to that account plus the picked signer's name, not the individual human — revisit if per-person accountability becomes a requirement.
+- Accountability: each technician is provisioned their **own** admin account (logins are not shared). Every return/audit records the acting account plus the picked signer's name, so individual accounts are what keep "who acted" unambiguous.
