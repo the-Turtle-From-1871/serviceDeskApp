@@ -19,11 +19,12 @@
 - Run Integration Tests: `npx vitest run integration`
 - Run E2E Tests: `npx playwright test`
 
-## Documentation — Keep the Changelog Current (Non-Negotiable)
-- Every **user-facing** change (any `feat:` or `fix:` that alters behavior, UI, data, or an endpoint) MUST add a `CHANGELOG.md` entry **before committing** — in the same commit as the code.
-- Add entries under **today's date** (`## YYYY-MM-DD`, newest section at the top), grouped by **Added / Changed / Fixed / Removed / Security** per [Keep a Changelog](https://keepachangelog.com/). Describe the behavior change for a reader, not the diff.
-- Skip only pure-internal commits with no user-facing effect: `docs:`, `test:`, `chore:`, and mechanical `refactor:` with no behavior change.
-- Note any migration or ops step (new table, seed, cron, env var) under a **Notes** subsection, as existing entries do.
+## Documentation — Keep Docs Current as You Change Code (Non-Negotiable)
+- **Docs are part of the change, not a follow-up.** Any commit that alters behavior, UI, data, an endpoint, a command, an env var, or an architectural rule MUST update the affected documentation **in the same commit as the code** — never "later", never a separate PR. A change that ships without its doc update is incomplete.
+- **Keep this file (and `AGENTS.md`/`README.md`) truthful.** When a change contradicts, extends, or retires something written here — a security rule, a data-fetching constraint, a feature-constraint section, a listed command — edit the relevant section in the same commit so the guide never describes code that no longer exists. Do not leave stale instructions for the next reader.
+- **CHANGELOG.md — every user-facing change.** Any `feat:` or `fix:` that alters behavior, UI, data, or an endpoint MUST add a `CHANGELOG.md` entry before committing, under **today's date** (`## YYYY-MM-DD`, newest section at the top), grouped by **Added / Changed / Fixed / Removed / Security** per [Keep a Changelog](https://keepachangelog.com/). Describe the behavior change for a reader, not the diff.
+- **Note ops/migration steps.** Any new table, seed, cron, or env var goes under a **Notes** subsection of the changelog entry, as existing entries do — plus its own config/README location if one exists.
+- **What to skip.** Only pure-internal commits with no user-facing effect and no rule change: `docs:`, `test:`, `chore:`, and mechanical `refactor:` that alters no behavior. When unsure whether a change is user-facing, document it.
 
 ### 1. Authorization — Shared Technician Account (role-based, NOT ownership)
 - Authorization is **role-based** (`ADMIN` / `USER`); inventory, receipts, and the queue are **shared org-wide**. Do NOT add `session.user.id` ownership filters to item/receipt/queue queries — gate on role.
