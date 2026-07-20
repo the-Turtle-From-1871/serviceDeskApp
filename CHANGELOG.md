@@ -24,6 +24,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   front, before upload (the analyze→confirm flow uploads the file twice).
 
 ### Changed
+- **Live search on `/items`.** The items search box now filters as you type —
+  no more "Search" button/Enter-to-submit. Input is debounced ~300ms and
+  navigates the existing server-paginated URL (`?q/sort/dir`), resetting to
+  page 1 on every new query; `sort`/`dir` are preserved. The list itself is
+  still fetched server-side per page (unchanged) — only the trigger for a
+  search changed, mirroring the live search bar already used on the home page.
 - **`/items` at scale.** The items list is server-side **paginated + sorted**
   (URL-driven `?page/sort/dir`); only the current page reaches the client. Hot
   `where`/`orderBy` columns are indexed.

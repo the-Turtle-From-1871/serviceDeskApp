@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/authz";
 import { listItems } from "@/modules/items/items.service";
 import { SiteHeader } from "@/components/SiteHeader";
 import { ItemSelectTable } from "@/components/ItemSelectTable";
+import { ItemsSearchInput } from "./ItemsSearchInput";
 import { getLatestAuditMap } from "@/modules/audit/audit.service";
 import { auditState } from "@/modules/audit/audit.status";
 
@@ -45,10 +46,7 @@ export default async function ItemsListPage({
           {isAdmin && <Link href="/admin/items/import" className="btn btn-secondary">Import CSV</Link>}
         </div>
 
-        <form className="row" style={{ gap: 8 }}>
-          <input className="input" name="q" defaultValue={q ?? ""} placeholder="Search device name, make, model, or serial number" style={{ maxWidth: 360 }} />
-          <button className="btn btn-secondary">Search</button>
-        </form>
+        <ItemsSearchInput q={q ?? ""} sort={result.sort} dir={result.dir} />
 
         {result.items.length === 0 ? (
           <div className="card empty">No items match your search.</div>
