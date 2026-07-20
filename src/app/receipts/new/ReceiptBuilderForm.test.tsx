@@ -13,6 +13,11 @@ const createReceiptAction = vi.fn();
 vi.mock("@/app/actions/receipts", () => ({
   createReceiptAction: (prev: unknown, fd: FormData) => createReceiptAction(prev, fd),
 }));
+// The contact combobox now fetches suggestions server-side; stub the action so
+// this jsdom test never pulls in its prisma import (and gets no live matches).
+vi.mock("@/app/actions/contacts", () => ({
+  searchContactsAction: vi.fn(async () => []),
+}));
 // jsdom has no canvas. These stand-ins mirror the real components' report paths
 // (SignaturePad.tsx:21,28 and TechnicianSignatureField.tsx:50-51) so a test can
 // drive signing without one — and reflect the value into the hidden input so a
@@ -102,7 +107,6 @@ function renderForm(
       initialItems={initialItems}
       senderPrefill={senderPrefill}
       signatures={[]}
-      contacts={[]}
     />
   );
 }

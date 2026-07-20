@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, expect, test } from "vitest";
 import prisma from "@/lib/prisma";
 import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
-import { listContacts, createContact, updateContact, deleteContact } from "./contacts.service";
+import { listContacts, searchContacts, createContact, updateContact, deleteContact } from "./contacts.service";
 import { ContactError } from "./contacts.errors";
 
 let adminId: string;
@@ -45,6 +45,29 @@ test("listContacts orders by last name, then first name", async () => {
   await createContact({ firstName: "Amy", lastName: "Smith", email: "a@u.mil" }, adminId);
   expect((await listContacts()).map((c) => `${c.lastName},${c.firstName}`))
     .toEqual(["Alvarez,Zoe", "Smith,Amy", "Smith,Bob"]);
+});
+
+test("searchContacts matches a single token across name/email/unit, and excludes rank", async () => {
+  await createContact({ firstName: "Jane", lastName: "Doe", email: "jane.doe@unit.mil", rank: "SGT", unit: "A Co" }, adminId);
+  await createContact({ firstName: "Bob", lastName: "Smith", email: "bob@unit.mil", unit: "B Co" }, adminId);
+  expect((await searchContacts("jane")).map((c) => c.email)).toEqual(["jane.doe@unit.mil"]);
+  expect((await searchContacts("smith")).map((c) => c.email)).toEqual(["bob@unit.mil"]);
+  expect((await searchContacts("jane.doe@")).map((c) => c.email)).toEqual(["jane.doe@unit.mil"]);
+  expect(await searchContacts("SGT")).toEqual([]); // rank is deliberately not searched
+});
+
+test("searchContacts matches a full name in either token order (token-AND)", async () => {
+  await createContact({ firstName: "Jane", lastName: "Doe", email: "jd@unit.mil" }, adminId);
+  expect((await searchContacts("jane doe")).map((c) => c.email)).toEqual(["jd@unit.mil"]);
+  expect((await searchContacts("doe jane")).map((c) => c.email)).toEqual(["jd@unit.mil"]);
+});
+
+test("searchContacts returns [] for a blank query and caps results at 8", async () => {
+  expect(await searchContacts("   ")).toEqual([]);
+  for (let i = 0; i < 12; i++) {
+    await createContact({ firstName: `First${i}`, lastName: "Sametoken", email: `c${i}@u.mil` }, adminId);
+  }
+  expect((await searchContacts("sametoken")).length).toBe(8);
 });
 
 test("updateContact changes the stored fields", async () => {
