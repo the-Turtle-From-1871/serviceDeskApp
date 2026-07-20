@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-vi.mock("@/lib/prisma", () => ({ default: { item: { findMany: vi.fn(async () => []), findUnique: vi.fn(async () => null) } } }));
+vi.mock("@/lib/prisma", () => ({ default: { item: { findMany: vi.fn(async () => []), findUnique: vi.fn(async () => null), count: vi.fn(async () => 0) } } }));
 import prisma from "@/lib/prisma";
 import { searchItemsBySerial, getItemWithCreator, listItems } from "./items.service";
 
@@ -33,6 +33,26 @@ describe("listItems", () => {
     vi.clearAllMocks();
     await listItems();
     expect(whereOf()).toBeUndefined();
+  });
+
+  it("paginates with skip/take and a stable default order (createdAt desc, id asc)", async () => {
+    vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
+    await listItems({ page: 3, pageSize: 10 });
+    const arg = vi.mocked(prisma.item.findMany).mock.calls[0][0]!;
+    expect(arg.take).toBe(10);
+    expect(arg.skip).toBe(20); // (page 3 - 1) * 10
+    expect(arg.orderBy).toEqual([{ createdAt: "desc" }, { id: "asc" }]);
+  });
+
+  it("sorts by a server-sortable column but ignores a derived one (auditState)", async () => {
+    vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
+    await listItems({ sort: "make", dir: "asc" });
+    expect(vi.mocked(prisma.item.findMany).mock.calls[0][0]!.orderBy).toEqual([{ make: "asc" }, { id: "asc" }]);
+
+    vi.clearAllMocks();
+    vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
+    await listItems({ sort: "auditState", dir: "asc" });
+    expect(vi.mocked(prisma.item.findMany).mock.calls[0][0]!.orderBy).toEqual([{ createdAt: "desc" }, { id: "asc" }]);
   });
 });
 

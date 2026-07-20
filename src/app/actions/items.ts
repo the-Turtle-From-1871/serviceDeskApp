@@ -2,18 +2,22 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/authz";
 import { updateItemFields } from "@/modules/items/items.service";
-import { itemDetailsSchema } from "@/modules/items/items.schema";
+import { itemDetailsSchema, userItemDetailsSchema } from "@/modules/items/items.schema";
 import { ItemError } from "@/modules/items/items.errors";
 
-// Any ACTIVE authenticated user may edit an item's details — inventory is shared
-// org-wide, so there is deliberately no ownership filter. Every change is
-// recorded as an ItemEdit by updateItemFields.
+// Inventory is shared org-wide, so there is deliberately no per-user ownership
+// filter — access is gated on ROLE. An ADMIN may edit every item field; a
+// standard USER may change only the current holder email and current position.
+// The role picks the schema, and z.object() strips the rest, so a USER's crafted
+// POST cannot alter deviceName/homeUnit even though the form hides those inputs.
+// Every change is recorded as an ItemEdit by updateItemFields.
 export async function updateItemDetailsAction(_prev: unknown, formData: FormData) {
   const user = await requireUser();
   const id = String(formData.get("id") ?? "").trim();
   if (!id) return { error: "Missing item." };
 
-  const parsed = itemDetailsSchema.safeParse(Object.fromEntries(formData));
+  const schema = user.role === "ADMIN" ? itemDetailsSchema : userItemDetailsSchema;
+  const parsed = schema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }

@@ -11,6 +11,7 @@ export type UnresolvedRow = { row: number; deviceName: string; segments: string[
 // `unresolved` (they still import, with an empty homeUnit).
 export function planImport(
   rows: RawRow[],
+  // Must be LOWERCASED by the caller — dedup is case-insensitive (citext).
   existingSerials: Set<string>,
   unitsByAbbrev: Map<string, string>,
 ): { toCreate: NewItemInput[]; skipped: SkippedRow[]; unresolved: UnresolvedRow[]; detected: number } {
@@ -34,15 +35,20 @@ export function planImport(
       continue;
     }
     const sn = parsed.data.serialNumber;
-    if (existingSerials.has(sn)) {
+    // Dedup case-insensitively to match the DB's citext unique on serialNumber:
+    // "ABC123" and "abc123" are the same device. The stored value keeps its
+    // original casing; only the comparison is normalized. `existingSerials` is
+    // passed in already lowercased by the caller.
+    const snKey = sn.toLowerCase();
+    if (existingSerials.has(snKey)) {
       skipped.push({ row: r.row, serialNumber: sn, reason: "already exists" });
       continue;
     }
-    if (seen.has(sn)) {
+    if (seen.has(snKey)) {
       skipped.push({ row: r.row, serialNumber: sn, reason: "duplicate in file" });
       continue;
     }
-    seen.add(sn);
+    seen.add(snKey);
 
     if (!parsed.data.homeUnit) {
       const full = detectHomeUnit(parsed.data.deviceName, unitsByAbbrev);

@@ -23,7 +23,7 @@ proxy edge-portable even though our app runs it on Node.
 
 ## Data model
 
-Three core models (`prisma/schema.prisma`):
+The core models (`prisma/schema.prisma`) are `User`, `Item`, and `Transfer`, described below; the supporting models are summarized after them.
 
 ### User
 `id, rank?, name, email (unique), unit?, contactNumber?, passwordHash, role (ADMIN|USER), isActive, timestamps`
@@ -31,28 +31,47 @@ Three core models (`prisma/schema.prisma`):
 - Accounts are **admin-provisioned only** — self-registration has been removed. `User` rows are operator/staff logins for the kiosk, not a record of every party who ever appears on a receipt.
 
 ### Item
-`id, make, model, serialNumber, homeUnit?, notes?, status (ACTIVE|RETIRED), createdById, timestamps`
-- No `currentHolderId`: the app is a single-device kiosk, not a custody-tracking system. "Who holds it now" is derived by reading the most recent `Transfer` for the item (`getLastReceiver`), used only to pre-fill the sender on `/new`.
+`id, make, model, serialNumber (unique, citext), deviceName?, homeUnit?, currentUserEmail?, currentPosition?, notes?, status (ACTIVE|RETIRED), createdById, timestamps`
+- `serialNumber` is **`@unique @db.Citext`** — a device's case-insensitive identity (like `User.email`), so it can't be logged twice even with different casing; the CSV import dedups case-insensitively and relies on the DB constraint (`skipDuplicates`).
+- No `currentHolderId`: "who holds it now" is derived by reading the most recent `Transfer` for the item (`getLastReceiver`). A standard `USER` may edit only `currentUserEmail` + `currentPosition` (`userItemDetailsSchema`); every other field is admin-only.
+- The `/items` list is **server-side paginated + sorted** (`listItems`); only the current page reaches the client.
 
 ### Transfer (the hand-receipt record)
-`id, receiptNumber (unique, "HR-…"), itemId, itemSummary, senderIsDcsim, senderName, senderRank?, senderUnit?, senderContact?, senderEmail?, receiverIsDcsim, receiverName, receiverRank?, receiverUnit?, receiverContact?, receiverEmail?, receiverSignature, createdByUserId?, status (COMPLETED|VOID), createdAt`
+`id, receiptNumber (unique, "HR-…"), itemSummary, lines (TransferLine → TransferItem, multi-item), senderIsDcsim, senderName, senderRank?, senderUnit?, senderContact?, senderEmail?, receiverIsDcsim, receiverName, receiverRank?, receiverUnit?, receiverContact?, receiverEmail?, receiverSignature, createdByUserId?, status (OPEN|CLOSED), createdAt, closedAt?, purgeAfter?, dueAt?/overdueAlertedAt? (return timer)`
 - Both parties are **typed snapshots on the row**, not FKs to `User` — a `Transfer` fully describes who gave/received an item even if no account for them ever existed.
 - Either party may be flagged `*IsDcsim`: a DCSIM party only needs a name (no rank/unit/contact/email). A non-DCSIM party must supply rank, name, unit, contact, and email — all of which print on the DA 2062.
-- `receiverSignature` is required on every row; there is no sender signature and no pending/in-flight state — a `Transfer` is created already `COMPLETED` in one kiosk operation.
+- **Multi-item:** items are grouped into `TransferLine`s (per make/model), each holding `TransferItem`s (per serial). `receiverSignature` is required on every row.
+- **Lifecycle:** a `Transfer` is created `OPEN`. A **full return** closes it (`CLOSED`, then immutable) and stamps `purgeAfter = closedAt + 90 days` — a cron worker hard-deletes receipts past that deadline. **Partial returns** leave it `OPEN` for the remaining items. Returns are recorded as `ReturnTransaction` rows (`modules/returns`); an optional `dueAt` return timer drives overdue email alerts.
 
-## Kiosk flow (single device, no custody tracking)
+> **Note — receipt enumeration was investigated, not shipped.** A `publicToken` (unguessable receipt URL) was prototyped to stop anonymous enumeration of receipts, then **reverted**: public, enumerable receipts + item pages are an **accepted team requirement** (see `CLAUDE.md`). The public receipt page/PDF stay reachable by the sequential `HR-…` number by design. Do not re-add token-gating or auth without a new decision.
+
+### Supporting models
+
+Beyond the three above:
+
+- **`TransferLine` / `TransferItem`** — a receipt's items, grouped by make/model (line) down to each serial (item). `TransferItem.returnedAt` is the per-item handback marker.
+- **`ReturnTransaction`** — one row per return event (`PARTIAL`|`FULL`) with the processing tech's name + signature snapshot and the JSON of returned serials.
+- **`ServiceQueueItem`** — the per-item service-queue entry (unique `itemId`; `PENDING`|`COMPLETED`).
+- **`ItemAudit` / `ItemEdit`** — annual-audit events and the field-level edit history for an item (nullable actor + denormalized name, so history survives account deletion).
+- **`Signature`** — a named signature owned by an `ADMIN` (printed as the signer on the DA 2062); non-admins use the single `User.signatureImage`.
+- **`Contact`** — a shared, org-wide address book for receipt autofill (any signed-in user reads; admins write).
+- **`Unit`** — maps a unit abbreviation to its full name; feeds CSV home-unit auto-detection.
+- **`ImportBatch`** — an audit record of each CSV import (counts + skipped rows).
+- **`PasswordResetToken`** — single-use, hashed, expiring self-serve reset tokens.
+
+## Creating a receipt (kiosk flow)
 
 An authenticated operator (the shared DCSIM/admin account, or an admin-created
-regular user) works the flow at `/new` entirely on one device:
+regular user) works the flow at `/receipts/new` entirely on one device:
 
 1. Pick or create the `Item`, then type in **both** parties' details. The
    sender is pre-filled from the last-known receiver of that item (falling
    back to the logged-in non-admin operator, else empty). Either side can be
    toggled DCSIM, which collapses that party's fields to just a name.
-2. The **recipient** signs on-screen (`SignaturePad`) — there is no sender
-   signature step and nothing is left "pending"; the whole exchange is
-   recorded in one transaction as a `COMPLETED` `Transfer` with a fresh
-   `HR-…` receipt number.
+2. The **recipient** signs on-screen (`SignaturePad`) to accept custody — there
+   is no separate sender-signature step. The exchange is recorded in one
+   transaction as an `OPEN` `Transfer` with a fresh `HR-…` receipt number; it
+   later moves to `CLOSED` when every item on it is returned (see Lifecycle).
 3. A DA Form 2062 hand receipt is generated immediately
    (`modules/receipts/hand-receipt.ts`), showing both parties, the recipient's
    signature, and a QR code pointing at `receiptUrl` = `/receipts/<receiptNumber>`.
@@ -61,11 +80,52 @@ regular user) works the flow at `/new` entirely on one device:
    via a pluggable `EmailSender` (`lib/email`): Resend over `fetch` when
    `RESEND_API_KEY`/`EMAIL_FROM` are set, otherwise a logging stub
    (`[email:stub]`) so nothing breaks in dev. Send failures are logged and
-   swallowed — they never roll back the completed transfer.
+   swallowed — they never roll back the created receipt.
 
 No login is required to **find** a receipt afterward: `/` is a public search
 (by item serial number or receipt number) that links to `/receipts/<rn>`
 (view) and `/receipts/<rn>/pdf` (download), both public routes.
+
+## Receipt lifecycle & returns
+
+A receipt is not one-shot — it has a lifecycle driven by returns
+(`modules/returns`, `modules/transfers/lifecycle.ts`):
+
+- **`OPEN` → `CLOSED`.** A receipt is created `OPEN`. Equipment comes back through the **return** flow (`processReturnAction`, **admin-only**): the operator selects the serials being returned and signs. A **full** return (every held item back) flips the receipt to `CLOSED`; a **partial** return records the handback but leaves the receipt `OPEN` for the rest.
+- **Immutable once closed.** `assertTransferOpen` guards every mutation — a `CLOSED` receipt (status `CLOSED` *or* a `closedAt` stamp) can never be reopened, edited, or returned against again.
+- **Concurrency-safe.** `processReturn` runs one transaction that `SELECT … FOR UPDATE`s the `Transfer` row, then a compare-and-swap `updateMany` scoped to `returnedAt IS NULL` (asserting the affected count) — so two concurrent returns can't double-return an item or both decline to close.
+- **Record + PDF.** Each return is a `ReturnTransaction` (kind, the tech's name/signature snapshot, returned serials). The DA 2062 renders one quantity/signature column (A–F) per partial return (`modules/receipts/render.ts`); the closing full return shows as the `CLOSED` watermark + "accepted by" attestation.
+
+## Item-level service queue
+
+Items needing work are tracked per-item (`ServiceQueueItem`, unique `itemId`; `modules/service-queue`):
+
+- **Flagging.** An item is flagged "needs service" either per-serial on the receipt builder or from the item detail page, with a **service type** — `REIMAGE`, `REPAIR`, or `OTHER` (free-text `serviceNote`). The entry may carry the `transferId` it was flagged on.
+- **State.** `PENDING` entries appear on `/admin/queue`; marking one done sets it `COMPLETED` (retained and reversible — reopenable to `PENDING` from the item page). All queue mutations are **admin-only**.
+- **SLA timer.** Each entry gets a completion deadline (`dueAt`) defaulting by type — **REIMAGE 3d, REPAIR 7d, OTHER 5d** from when flagged (`sla.ts`), overridable per item.
+
+## Timers & overdue alerts
+
+Two independent deadlines, both built on `modules/timers/due.ts`:
+
+- **Return timer** — an optional `Transfer.dueAt` for bringing items back.
+- **Service SLA** — the `ServiceQueueItem.dueAt` above.
+
+`dueState` classifies a deadline as `ontrack` / `soon` (within `DUE_SOON_DAYS` = 3) / `overdue`. The **admin dashboard** (`/admin`, `getTimerDashboard`) lists overdue + due-soon receipts and service items. A nightly sweep emails a **single** overdue alert per lapsed deadline to `ADMIN_INBOX_EMAIL`; `overdueAlertedAt` marks it sent so the same lapse is never emailed twice (editing the deadline forward clears it, re-arming a fresh alert).
+
+## Retention & purge
+
+- **Receipts:** closing a receipt stamps `purgeAfter = closedAt + 90 days` (`PURGE_WINDOW_DAYS`). The worker permanently deletes receipts past that deadline.
+- **Accounts:** deactivating an account stamps `deactivatedAt`; accounts inactive **3+ months** are hard-deleted — but only when referentially safe. `Item.createdById` and `ImportBatch.createdById` are `ON DELETE RESTRICT`, so a user who logged items or ran an import is **skipped** (their history is preserved); `Transfer` / `ReturnTransaction` / `ItemEdit` FKs are `ON DELETE SET NULL` and detach, keeping a denormalized name snapshot for the record.
+
+## Item audits & edit history
+
+- **Audit status** (`modules/audit`) — items are audited annually (`AUDIT_PERIOD_YEARS` = 1). The item page shows a light derived from the newest `ItemAudit`: `compliant` / `overdue` / `never`. Recording an audit (admin) snapshots the auditing tech's name + signature.
+- **Edit history** — every change to an item's loggable fields writes one `ItemEdit` (the field-level diff + editor name), surfaced on the item page and the admin audit log.
+
+## Background worker (cron)
+
+`GET|POST /api/cron/purge` runs nightly maintenance in one hit, authenticated by a constant-time `CRON_SECRET` bearer check (no user session; **fails closed**): it purges expired receipts, purges eligible deactivated accounts, and sends the overdue return + service alerts. It runs from **GitHub Actions** (Vercel Hobby cron was unreliable) — see `.github/workflows/`.
 
 ## Authentication & authorization
 

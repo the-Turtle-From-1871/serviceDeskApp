@@ -33,3 +33,15 @@ export const itemDetailsSchema = z.object({
 });
 
 export type ItemDetailsInput = z.infer<typeof itemDetailsSchema>;
+
+// Fields a non-admin USER may edit from the item detail card: only who currently
+// holds the device and where it is. deviceName/homeUnit/notes stay ADMIN-only
+// (itemDetailsSchema). Because z.object() strips unknown keys, parsing a USER's
+// submission through this schema discards any deviceName/homeUnit a crafted POST
+// tries to smuggle in — the server, not the UI, is the authority.
+export const userItemDetailsSchema = z.object({
+  currentUserEmail: clearable,
+  currentPosition: clearable,
+});
+
+export type UserItemDetailsInput = z.infer<typeof userItemDetailsSchema>;
