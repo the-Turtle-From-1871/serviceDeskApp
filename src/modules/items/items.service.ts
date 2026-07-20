@@ -129,14 +129,23 @@ export function retireItem(id: string): Promise<Item> {
   return setItemStatus(id, "RETIRED");
 }
 
-export function searchItemsBySerial(q: string): Promise<Item[]> {
+export type SerialSearchHit = { id: string; make: string; model: string; serialNumber: string; status: ItemStatus };
+
+export function searchItemsBySerial(q: string): Promise<SerialSearchHit[]> {
   const s = q.trim();
   if (!s) return Promise.resolve([]);
-  return prisma.item.findMany({
-    where: { serialNumber: { contains: s, mode: "insensitive" } },
-    orderBy: { createdAt: "desc" },
-    take: 50, // bound the public result set (a 1-char query would otherwise scan all items)
-  });
+  // Raw with an explicit `"serialNumber"::text ILIKE` so the pg_trgm GIN index
+  // (Item_serialNumber_trgm_idx) is used — a bare citext ILIKE uses citext's own
+  // operator and falls back to a seq scan. The pattern is a bound PARAMETER (no
+  // string-concatenation into the SQL, so no injection); LIKE metacharacters in the
+  // term are escaped so they match literally. take 50 bounds the public result set.
+  const term = s.replace(/[\\%_]/g, (m) => "\\" + m);
+  return prisma.$queryRaw<SerialSearchHit[]>`
+    SELECT "id", "make", "model", "serialNumber"::text AS "serialNumber", "status"::text AS "status"
+    FROM "Item"
+    WHERE "serialNumber"::text ILIKE ${`%${term}%`}
+    ORDER BY "createdAt" DESC
+    LIMIT 50`;
 }
 
 export async function analyzeImport(text: string): Promise<{
