@@ -181,7 +181,7 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
                 ignores window.print(); a PDF opens in the native viewer for
                 Share -> Print / Save on mobile, and prints on desktop. */}
             {loggedIn && (
-              <a className="btn btn-secondary no-print" href={`/i/${item.id}/qr/pdf`} target="_blank" rel="noopener">
+              <a className="btn btn-primary no-print" href={`/i/${item.id}/qr/pdf`} target="_blank" rel="noopener">
                 Print QR
               </a>
             )}
