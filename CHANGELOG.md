@@ -22,12 +22,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   failures render a graceful boundary instead of a broken page.
 - **CSV import size guard.** The item-import form now rejects files over 5 MB up
   front, before upload (the analyze→confirm flow uploads the file twice).
-- **Print QR from the item page.** The individual item view page (`/i/<id>`) now
-  shows a **Print QR** button (logged-in users) that opens the browser print
-  dialog with a clean, self-identifying QR label — QR image, make/model, serial,
-  and item URL — while the header, footer, and all other page sections drop out
-  of the printout. The QR itself remains publicly viewable as before; only the print
-  button is gated to signed-in users.
+- **Print QR from the item page.** The individual item view page (`/i/<id>`)
+  shows a **Print QR** button (logged-in users) that opens a printable QR-label
+  **PDF** in the **same format as the items-list multi-select QR sheet** (QR code
+  with the serial beneath), served from `/i/<id>/qr/pdf`. It uses a PDF rather
+  than `window.print()` so it works on mobile too — iOS/WKWebView ignores
+  `window.print()`, whereas a PDF opens in the native viewer (Share → Print /
+  Save to Files) and prints on desktop. The QR itself stays publicly viewable;
+  only the button (and the PDF route) are gated to signed-in users.
 
 ### Changed
 - **Live search on `/items`.** The items search box now filters as you type —

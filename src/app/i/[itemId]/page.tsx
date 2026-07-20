@@ -14,7 +14,6 @@ import { ServiceControls } from "./ServiceControls";
 import prisma from "@/lib/prisma";
 import { listUnits } from "@/modules/items/units.service";
 import { ItemDetailsCard } from "./ItemDetailsCard";
-import { PrintQrButton } from "./PrintQrButton";
 import { getAuditsForItem } from "@/modules/audit/audit.service";
 import { listSignatures } from "@/modules/signatures/signatures.service";
 import { auditState, auditStateDisplay } from "@/modules/audit/audit.status";
@@ -49,7 +48,7 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
   return (
     <>
       <SiteHeader />
-      <main className="container container-mid stack qr-print-host">
+      <main className="container container-mid stack">
         <div className="row">
           <div>
             <h1 className="page-title">{item.make} {item.model}</h1>
@@ -172,18 +171,20 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
         )}
 
         {qr && (
-          <div className="card stack-sm qr-print-area" style={{ textAlign: "center" }}>
-            {/* Print-only identifier: on screen the page <h1> already names the
-                item, so this is hidden (.qr-print-label) and shown only in the
-                printout, making the printed label self-identifying. */}
-            <p className="qr-print-label">
-              <strong>{item.make} {item.model}</strong> — Serial {item.serialNumber}
-            </p>
+          <div className="card stack-sm" style={{ textAlign: "center" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={qr} alt={`QR code for ${item.make} ${item.model}`} width={220} height={220} style={{ margin: "0 auto" }} />
             <p className="subtle">Scan to view this item</p>
             <p className="qr-url">{itemUrl(item.id)}</p>
-            {loggedIn && <PrintQrButton />}
+            {/* Opens a printable QR-label PDF (same format as the items-list QR
+                sheet). A PDF — not window.print() — because iOS/WKWebView silently
+                ignores window.print(); a PDF opens in the native viewer for
+                Share -> Print / Save on mobile, and prints on desktop. */}
+            {loggedIn && (
+              <a className="btn btn-secondary no-print" href={`/i/${item.id}/qr/pdf`} target="_blank" rel="noopener">
+                Print QR
+              </a>
+            )}
           </div>
         )}
 
