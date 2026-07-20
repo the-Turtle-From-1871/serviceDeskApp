@@ -95,6 +95,9 @@ model Item {
 
   // The /items list sorts by createdAt desc on every load (unbounded today).
   @@index([createdAt])
+  // Trigram GIN for the public, per-keystroke serial search (searchItemsBySerial),
+  // which is `ILIKE '%q%'` — a leading wildcard a B-tree can't serve. Needs pg_trgm.
+  @@index([serialNumber(ops: raw("gin_trgm_ops"))], type: Gin, map: "Item_serialNumber_trgm_idx")
 }
 
 model Unit {
@@ -169,6 +172,9 @@ model Transfer {
   @@index([createdAt])
   // Dashboard timer sweep filters status='OPEN' AND dueAt <= horizon.
   @@index([status, dueAt])
+  // Trigram GIN for the public, per-keystroke receipt-number search
+  // (searchReceiptsByNumber), `ILIKE '%q%'`. Needs pg_trgm.
+  @@index([receiptNumber(ops: raw("gin_trgm_ops"))], type: Gin, map: "Transfer_receiptNumber_trgm_idx")
 }
 
 model TransferLine {
