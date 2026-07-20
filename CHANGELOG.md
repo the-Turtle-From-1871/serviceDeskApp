@@ -3,6 +3,97 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-07-20
+
+### Security
+- **Supabase RLS / anon-key hardening.** Reinforced the deny-all posture for the
+  `anon`/`authenticated` PostgREST roles (every table `RLS enabled, no policy`,
+  new tables auto-enabled via the `rls_auto_enable` event trigger). The Data API
+  and anon key stay unused — all authorization remains in the app layer over
+  Prisma's privileged role.
+- **Hardened auth surface.** Tightened the authenticated/authorized boundary on
+  the auth flow; public-by-design endpoints (login, home search, receipt + item
+  lookup) stay read-only and PII-minimal.
+- **Item integrity.** Stronger server-side validation and integrity checks on
+  item writes.
+
+### Added
+- **App Router error boundaries.** `error.tsx` / not-found handling so runtime
+  failures render a graceful boundary instead of a broken page.
+
+### Changed
+- **`/items` at scale.** The items list is server-side **paginated + sorted**
+  (URL-driven `?page/sort/dir`); only the current page reaches the client. Hot
+  `where`/`orderBy` columns are indexed.
+
+## 2026-07-17
+
+### Added
+- **Hand-receipt return timers.** An admin can set (or clear) a return deadline
+  on a hand receipt via a return-by days input; the deadline is editable after
+  the fact from the receipt timer UI.
+- **Service-desk SLA timers.** Per-service-type SLA defaults compute a service
+  item's due date, with a per-item override on the builder (bounded 1..3650
+  days). Reopening a service item restarts the SLA clock.
+- **Admin dashboard.** New dashboard surfacing overdue and due-soon hand
+  receipts and service items, reachable from a **Dashboard** link in the nav.
+- **Overdue-alert sweeps.** Daily cron route runs overdue-alert sweeps for both
+  hand receipts and service items (`dueAt` / `overdueAlertedAt` columns on
+  `Transfer` and `ServiceQueueItem`).
+- **Due column** on the service queue, with a sortable `DueBadge`.
+
+### Fixed
+- Audit light: lightened the green state so it's distinct from the grey dot.
+
+## 2026-07-16
+
+### Added
+- **Annual audit feature.** Per-item audit status with an audit light on the
+  items list and item page, an admin **Mark audited** control, and an audit
+  history (`ItemAudit` table). Audit state is derived (display-only), never a
+  server `ORDER BY`.
+- **Scan-to-build.** A camera sheet decodes a QR code (self-hosted wasm) and
+  adds the scanned item to an open hand receipt; the item id is parsed by path
+  and resolved server-side. Changing the item list invalidates any signature.
+- **Start a hand receipt from the item page.**
+
+### Changed
+- Relabeled the item **Current user** field to **Current user email** and
+  renamed the underlying `currentUser` field to `currentUserEmail` for clarity.
+
+### Fixed
+- Excluded `/wasm/` from the auth proxy so the decode binary is publicly
+  fetchable.
+- Mobile: docked "Scan to add" at the bottom of the items section instead of
+  floating; stopped iOS zooming when a text field is focused; custom dropdown
+  chevron so the arrow isn't stranded.
+
+### Removed
+- Dead Vercel cron config (the 90-day purge runs from GitHub Actions).
+
+## 2026-07-15
+
+### Added
+- **Shared contact book.** Admin-managed contact book (on the Users page) with a
+  `ContactCombobox` type-ahead over name, email, and unit. The receipt builder
+  autofills both the **recipient** and the **sender** from the book.
+- **DCSIM recipient signature picker.** When the recipient is DCSIM, a saved
+  named signature can be picked; the pick is resolved server-side.
+- **Component tests** (`test:ui`, opt-in jsdom), which surfaced and fixed two
+  production bugs.
+
+### Changed
+- **Reworked the mobile layer** and retired the starter palette.
+- `PhoneInput` gained an optional controlled mode.
+
+### Fixed
+- Signatures: cleared stale ink, stopped losing names, and closed a privilege
+  gap; a signature no longer names a holder for an already-returned item.
+- Contacts: `Escape` drops the highlight (not just the list); the combobox no
+  longer eats a deliberate Enter submit; the phone field clears between
+  contacts; `deleteContactAction` no longer leaks raw errors in dev.
+- Corrected the DCSIM-toggle change reporting and gated it on role.
+
 ## 2026-07-14
 
 ### Added
@@ -23,6 +114,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   checkbox and never count toward a selection.
 - **Device-name search.** The items list search now matches device name in
   addition to make, model, and serial number.
+- **Item-level service queue.** Items are flagged "Needs service?" per serial on
+  the receipt builder or from the item detail page, each carrying a service type
+  (Reimage / Repair / Other + `serviceNote`). The `/admin/queue` view lists one
+  entry per item with search, service-type filter, sort, and toggleable columns.
+  "Mark Completed" is reversible (`COMPLETED` is retained, reopenable to
+  `PENDING`).
+- **Editable item details + edit history.** Inline edit on the item details card
+  with a unit picker; a `USER` may edit only current-holder email + position,
+  admins edit the full set. Every change writes an `ItemEdit` diff atomically,
+  shown as an edit-history section.
+- **Named signatures.** Admin-only create/delete of owner-scoped named
+  signatures, and a picker to choose the signing technician on a return.
 
 ### Changed
 - **Item import is now a two-phase flow:** upload → *analyze* (reports what will
@@ -30,12 +133,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   resolve unknowns → *confirm* (writes items in a single transaction). Nothing
   is saved until you confirm; unresolved device names still import, just with a
   blank home unit.
+- **`User.email` is now case-insensitive** (`citext`).
 
 ### Fixed
 - QR code page: a long item URL now wraps onto its own line on narrow screens
   instead of overflowing.
+- Stopped admin-only item notes leaking to non-admins via RSC props.
+- Gave the service-note input an accessible name.
 
 ### Notes
 - Database: adds migration `20260714184046_add_unit_table`. In production the
   `Unit` table was created and seeded via `prisma/manual/2026-07-14_add_unit_table_prod.sql`
   (idempotent) rather than `db:seed`, to avoid touching the admin account.
+- Additional migrations in this window add the `ServiceQueueItem`, `ItemEdit`,
+  `Signature`, and `ItemAudit` tables and the `dueAt`/`overdueAlertedAt` timer
+  columns on `Transfer` and `ServiceQueueItem`.

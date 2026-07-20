@@ -19,7 +19,11 @@
 - Run Integration Tests: `npx vitest run integration`
 - Run E2E Tests: `npx playwright test`
 
-## Security Guardrails (Non-Negotiable)
+## Documentation — Keep the Changelog Current (Non-Negotiable)
+- Every **user-facing** change (any `feat:` or `fix:` that alters behavior, UI, data, or an endpoint) MUST add a `CHANGELOG.md` entry **before committing** — in the same commit as the code.
+- Add entries under **today's date** (`## YYYY-MM-DD`, newest section at the top), grouped by **Added / Changed / Fixed / Removed / Security** per [Keep a Changelog](https://keepachangelog.com/). Describe the behavior change for a reader, not the diff.
+- Skip only pure-internal commits with no user-facing effect: `docs:`, `test:`, `chore:`, and mechanical `refactor:` with no behavior change.
+- Note any migration or ops step (new table, seed, cron, env var) under a **Notes** subsection, as existing entries do.
 
 ### 1. Authorization — Shared Technician Account (role-based, NOT ownership)
 - Authorization is **role-based** (`ADMIN` / `USER`); inventory, receipts, and the queue are **shared org-wide**. Do NOT add `session.user.id` ownership filters to item/receipt/queue queries — gate on role.
