@@ -4,6 +4,9 @@ import Link from "next/link";
 import { analyzeImportAction, commitImportAction } from "@/app/admin/actions/items";
 
 const TEMPLATE = "make,model,serialNumber,deviceName,homeUnit,notes\n";
+// A CSV of items is small; anything larger is almost certainly a mistake — and the
+// two-step analyze→commit flow uploads the file twice, so bound it up front.
+const MAX_CSV_BYTES = 5 * 1024 * 1024; // 5 MB
 
 type Skipped = { row: number; serialNumber: string; reason: string };
 type Unresolved = { row: number; deviceName: string; segments: string[] };
@@ -151,7 +154,17 @@ export function ImportItemsForm() {
             type="file"
             accept=".csv"
             required
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            onChange={(e) => {
+              const f = e.target.files?.[0] ?? null;
+              if (f && f.size > MAX_CSV_BYTES) {
+                setError(`That file is too large (max ${MAX_CSV_BYTES / 1024 / 1024} MB). Split it into smaller files.`);
+                setFile(null);
+                e.target.value = "";
+                return;
+              }
+              setError(null);
+              setFile(f);
+            }}
           />
           <p className="subtle">Columns: make, model, serialNumber, deviceName, homeUnit, notes. First row must be the header. homeUnit is optional — if blank, it&apos;s auto-detected from the device name.</p>
         </div>

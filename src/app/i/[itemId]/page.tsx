@@ -93,7 +93,7 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
               notes: isAdmin ? item.notes : null,
             }}
             isAdmin={isAdmin}
-            units={units}
+            units={isAdmin ? units : []}
             dateLogged={formatDateTimeHST(item.createdAt)}
             loggedBy={item.createdBy ? formatParty({ isDcsim: false, name: item.createdBy.name, rank: item.createdBy.rank, unit: null }) : "—"}
             handReceiptHolder={
