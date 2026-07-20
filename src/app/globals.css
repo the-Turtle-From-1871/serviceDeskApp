@@ -980,8 +980,12 @@ input[type="file"].input {
   word-break: break-all;
 }
 
+/* Print-only identifier line on the item QR card (see @media print below). */
+.qr-print-label { display: none; }
+
 @media print {
   .app-header,
+  .site-footer,
   .no-print {
     display: none !important;
   }
@@ -992,6 +996,11 @@ input[type="file"].input {
   .qr-card img {
     box-shadow: none;
   }
+  /* Item view page: print ONLY the QR card. Scoped to .qr-print-host so the
+     admin QR print page (which has no .qr-print-host) is unaffected. */
+  .qr-print-host > *:not(.qr-print-area) { display: none !important; }
+  .qr-print-area { border: none; box-shadow: none; }
+  .qr-print-label { display: block; }
 }
 
 /* ---------- Mobile: tables restack into cards, tighter spacing ----------
