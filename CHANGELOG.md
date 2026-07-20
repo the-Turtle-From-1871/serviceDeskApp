@@ -20,11 +20,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 - **App Router error boundaries.** `error.tsx` / not-found handling so runtime
   failures render a graceful boundary instead of a broken page.
+- **CSV import size guard.** The item-import form now rejects files over 5 MB up
+  front, before upload (the analyze→confirm flow uploads the file twice).
 
 ### Changed
 - **`/items` at scale.** The items list is server-side **paginated + sorted**
   (URL-driven `?page/sort/dir`); only the current page reaches the client. Hot
   `where`/`orderBy` columns are indexed.
+- **Server-side contact type-ahead in the receipt builder.** The builder no
+  longer ships the whole contact book to the browser; it now type-aheads against
+  the server (`searchContactsAction`, token-AND over name/email/unit, debounced +
+  race-guarded), so only the handful of rendered matches reach the client.
+- **Faster public search.** The public serial-number and receipt-number searches
+  are backed by **pg_trgm GIN indexes**, turning the per-keystroke `ILIKE '%…%'`
+  full-table scans into index scans — same (case-insensitive) results, just
+  faster.
+- **Leaner item page.** Non-admin and anonymous item-page viewers no longer
+  receive the ~96-row unit list; only admins, who alone can edit the home unit,
+  need it.
+
+### Notes
+- Database: adds the pg_trgm trigram **GIN indexes** on `Transfer.receiptNumber`
+  and `Item.serialNumber` (applied to dev/test/prod). The citext `serialNumber`
+  search casts `"serialNumber"::text ILIKE …` in a parameterized `$queryRaw` so
+  it actually uses the trigram index.
 
 ## 2026-07-17
 
