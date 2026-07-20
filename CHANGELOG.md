@@ -53,6 +53,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   receive the ~96-row unit list; only admins, who alone can edit the home unit,
   need it.
 
+### Removed
+- **Per-row "QR" link on the items list.** Removed the admin per-row **QR**
+  shortcut (to `/admin/items/<id>/qr`) from each row's actions on `/items`; the
+  QR is still available from the item page (`/i/<id>`) and the multi-select
+  **Print QR codes** sheet.
+
 ### Notes
 - Database: adds the pg_trgm trigram **GIN indexes** on `Transfer.receiptNumber`
   and `Item.serialNumber` (applied to dev/test/prod). The citext `serialNumber`

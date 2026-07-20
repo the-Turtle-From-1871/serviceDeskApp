@@ -211,7 +211,6 @@ export function ItemSelectTable({
                 <td data-label="">
                   <div className="actions actions--end">
                     <Link href={`/i/${it.id}`} className="btn btn-ghost btn-sm">View</Link>
-                    {isAdmin && <Link href={`/admin/items/${it.id}/qr`} className="btn btn-ghost btn-sm">QR</Link>}
                     {isAdmin && <Link href={`/admin/items/${it.id}/edit`} className="btn btn-ghost btn-sm">Edit</Link>}
                     {isAdmin && (
                       <form action={toggleItemStatusAction}>
