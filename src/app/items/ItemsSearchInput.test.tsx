@@ -78,6 +78,54 @@ describe("ItemsSearchInput", () => {
     vi.useRealTimers();
   });
 
+  it("mounting on a deep URL (page/sort/dir) does not navigate away, dropping page", async () => {
+    // Reproduces the mount-time bug: the debounce effect used to run on
+    // initial mount too and always omitted `page`, so a hard refresh of
+    // e.g. /items?sort=make&dir=asc&page=3 would silently bounce the user
+    // back to page 1 after 300ms with zero interaction.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(<ItemsSearchInput q="" sort="make" dir="asc" />);
+
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(replace).not.toHaveBeenCalled();
+
+    vi.useRealTimers();
+  });
+
+  it("mounting with a non-empty q already in the URL does not navigate", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(<ItemsSearchInput q="foo" sort={null} dir="desc" />);
+
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(replace).not.toHaveBeenCalled();
+
+    vi.useRealTimers();
+  });
+
+  it("uses the latest sort/dir, not a stale closure, if they change while the debounce is pending", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ delay: null });
+    const { rerender } = render(<ItemsSearchInput q="" sort="serialNumber" dir="asc" />);
+
+    const input = screen.getByRole("textbox", { name: /search/i });
+    await user.type(input, "abc");
+
+    // Sort changes (e.g. user clicked a column header) while the debounce
+    // timer armed by typing is still pending.
+    rerender(<ItemsSearchInput q="" sort="make" dir="desc" />);
+
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(replace).toHaveBeenCalledTimes(1);
+    const [url] = replace.mock.calls[0];
+    expect(url).toMatch(/(^|[?&])sort=make(&|$)/);
+    expect(url).toMatch(/(^|[?&])dir=desc(&|$)/);
+
+    vi.useRealTimers();
+  });
+
   it("pressing Enter does not trigger a full-page form submit", async () => {
     const submitHandler = vi.fn((e: Event) => e.preventDefault());
     window.addEventListener("submit", submitHandler);

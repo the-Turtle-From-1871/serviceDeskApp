@@ -20,20 +20,32 @@ export function ItemsSearchInput({
   const router = useRouter();
   const [query, setQuery] = useState(q);
   const [isPending, startTransition] = useTransition();
-  // Ignore an out-of-order debounce firing after a newer keystroke already
-  // scheduled its own (mirrors HomeSearch's reqId guard).
-  const reqId = useRef(0);
+  // Read the latest sort/dir via refs (synced every render, via an effect —
+  // mutating a ref directly during render is disallowed) so the debounce
+  // timer never fires with a stale closure if sort/dir change while a
+  // keystroke's timer is still pending.
+  const sortRef = useRef(sort);
+  const dirRef = useRef(dir);
+  useEffect(() => {
+    sortRef.current = sort;
+    dirRef.current = dir;
+  });
 
   useEffect(() => {
-    const id = ++reqId.current;
+    // If the URL already reflects this query (e.g. on mount, or any other
+    // render where `query` didn't actually change relative to the URL),
+    // there's nothing to navigate — bail before scheduling anything. This is
+    // what stops a mount-time fire from dropping `page` off a deep link like
+    // /items?page=2.
+    if (query.trim() === q.trim()) return;
+
     const timer = setTimeout(() => {
-      if (id !== reqId.current) return; // superseded by a later keystroke
       const params = new URLSearchParams();
       const trimmed = query.trim();
       if (trimmed) params.set("q", trimmed);
-      if (sort) {
-        params.set("sort", sort);
-        params.set("dir", dir);
+      if (sortRef.current) {
+        params.set("sort", sortRef.current);
+        params.set("dir", dirRef.current);
       }
       // Changing the query resets to page 1 (omitted = page 1): a narrower
       // result set could otherwise strand the user on a now-empty page.
@@ -44,8 +56,7 @@ export function ItemsSearchInput({
       });
     }, 300);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- sort/dir/router are stable per render cycle; only `query` should re-trigger the debounce
-  }, [query]);
+  }, [query, q, router]);
 
   return (
     <form className="row" style={{ gap: 8 }} onSubmit={(e) => e.preventDefault()}>
