@@ -193,7 +193,7 @@ export function ItemSelectTable({
                 />
               </th>
               {visibleCols.map((c) => (
-                <th key={c.key}>{c.label}{sort === c.key ? (dir === "asc" ? " ▲" : " ▼") : ""}</th>
+                <th key={c.key} style={c.key === "auditState" ? { textAlign: "center" } : undefined}>{c.label}{sort === c.key ? (dir === "asc" ? " ▲" : " ▼") : ""}</th>
               ))}
               <th style={{ textAlign: "right" }}>Actions</th>
             </tr>
@@ -207,7 +207,7 @@ export function ItemSelectTable({
                 {!isHidden("model") && <td data-label="Model">{it.model}</td>}
                 {!isHidden("serialNumber") && <td className="mono" data-label="Serial">{it.serialNumber}</td>}
                 {!isHidden("status") && <td data-label="Status"><StatusBadge status={it.status} /></td>}
-                {!isHidden("auditState") && <td data-label="Audit"><AuditLight state={it.auditState} /></td>}
+                {!isHidden("auditState") && <td data-label="Audit" style={{ textAlign: "center" }}><AuditLight state={it.auditState} /></td>}
                 <td data-label="">
                   <div className="actions actions--end">
                     <Link href={`/i/${it.id}`} className="btn btn-ghost btn-sm">View</Link>
