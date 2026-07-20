@@ -1,5 +1,5 @@
 import { requireUser, AuthError } from "@/lib/authz";
-import { getItem } from "@/modules/items/items.service";
+import { getItemQrFields } from "@/modules/items/items.service";
 import { buildItemsQrSheetPdf } from "@/modules/items/qr-sheet";
 
 // Printable QR label for a single item, in the SAME format as the items-list
@@ -16,7 +16,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ itemId:
     throw e;
   }
   const { itemId } = await params;
-  const item = await getItem(itemId);
+  const item = await getItemQrFields(itemId);
   if (!item) return new Response("Not found", { status: 404 });
 
   const bytes = await buildItemsQrSheetPdf([{ id: item.id, serialNumber: item.serialNumber }]);

@@ -58,6 +58,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   shortcut (to `/admin/items/<id>/qr`) from each row's actions on `/items`; the
   QR is still available from the item page (`/i/<id>`) and the multi-select
   **Print QR codes** sheet.
+- **Admin single-item QR page.** Removed the now-orphaned `/admin/items/<id>/qr`
+  page and its `/admin/items/<id>/qr/pdf` label route (nothing linked to them
+  after the per-row shortcut was dropped). The item-page **Print QR** button
+  (`/i/<id>/qr/pdf`, sheet-format label) supersedes them.
 
 ### Notes
 - Database: adds the pg_trgm trigram **GIN indexes** on `Transfer.receiptNumber`
