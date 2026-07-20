@@ -54,7 +54,7 @@ Beyond the three above:
 - **`ServiceQueueItem`** — the per-item service-queue entry (unique `itemId`; `PENDING`|`COMPLETED`).
 - **`ItemAudit` / `ItemEdit`** — annual-audit events and the field-level edit history for an item (nullable actor + denormalized name, so history survives account deletion).
 - **`Signature`** — a named signature owned by an `ADMIN` (printed as the signer on the DA 2062); non-admins use the single `User.signatureImage`.
-- **`Contact`** — a shared, org-wide address book for receipt autofill (any signed-in user reads; admins write).
+- **`Contact`** — a shared, org-wide address book for receipt autofill. The builder queries it through a **server-side type-ahead** (`searchContactsAction`, token-AND over name/email/unit) so the full book (outside people's PII) never ships to the client; admins manage the book. Any signed-in user can search; only admins write.
 - **`Unit`** — maps a unit abbreviation to its full name; feeds CSV home-unit auto-detection.
 - **`ImportBatch`** — an audit record of each CSV import (counts + skipped rows).
 - **`PasswordResetToken`** — single-use, hashed, expiring self-serve reset tokens.

@@ -7,6 +7,7 @@ import {
   type NewContactInput,
   type UpdateContactInput,
 } from "./contacts.schema";
+import type { ContactOption } from "./contact-match";
 import { ContactError } from "./contacts.errors";
 
 // The book is shared org-wide: reads are unscoped by design. Write authorization
@@ -14,6 +15,34 @@ import { ContactError } from "./contacts.errors";
 
 export function listContacts(): Promise<Contact[]> {
   return prisma.contact.findMany({ orderBy: [{ lastName: "asc" }, { firstName: "asc" }] });
+}
+
+const CONTACT_SEARCH_LIMIT = 8;
+
+// Server-side type-ahead for the receipt builder, so the whole book (PII) no
+// longer ships to the client. Token-AND across name/email/unit — every
+// whitespace-separated token must match some field — so "jane doe" and "doe jane"
+// both hit, and a single token narrows as you type. Rank is deliberately excluded
+// (low cardinality would bury the real match), mirroring the old client matcher.
+export async function searchContacts(query: string): Promise<ContactOption[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const tokens = q.split(/\s+/).filter(Boolean).slice(0, 5);
+  return prisma.contact.findMany({
+    where: {
+      AND: tokens.map((t) => ({
+        OR: [
+          { firstName: { contains: t, mode: "insensitive" } },
+          { lastName: { contains: t, mode: "insensitive" } },
+          { email: { contains: t, mode: "insensitive" } },
+          { unit: { contains: t, mode: "insensitive" } },
+        ],
+      })),
+    },
+    orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+    take: CONTACT_SEARCH_LIMIT,
+    select: { id: true, rank: true, firstName: true, lastName: true, unit: true, contactNumber: true, email: true },
+  });
 }
 
 // P2002 = unique violation on `email` — a contact already owns that inbox.

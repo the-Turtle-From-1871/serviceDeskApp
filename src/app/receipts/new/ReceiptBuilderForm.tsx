@@ -20,7 +20,7 @@ import { beep } from "@/lib/beep";
 // with the item because groupItemsIntoLines only carries ids and serials.
 export type BuilderItem = LineItem & { holderName: string | null };
 
-function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, onNameChange, contacts }: {
+function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, onNameChange }: {
   role: "sender" | "receiver";
   prefill?: Prefill;
   isDcsim: boolean;
@@ -28,10 +28,6 @@ function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, 
   hideName?: boolean;
   name: string;
   onNameChange: (v: string) => void;
-  // The contact book. Passed to both parties: a sender is an outside person too
-  // whenever equipment is being handed back, and they are exactly who the book
-  // holds. Optional so a caller can still render a party without the book.
-  contacts?: ContactOption[];
 }) {
   const cap = role === "sender" ? "Sender" : "Recipient";
 
@@ -67,7 +63,7 @@ function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, 
   // handing it back. A DCSIM party is our own technician (account + saved-
   // signature picker), and the four fields below aren't even rendered for them,
   // so the book never applies there.
-  const showCombobox = contacts !== undefined && !isDcsim;
+  const showCombobox = !isDcsim;
 
   // React resets the form after the action settles — including when it settles
   // to an error — and a reset restores every control to its defaultChecked /
@@ -108,7 +104,6 @@ function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, 
             <ContactCombobox
               id={`${role}-name`}
               name={`${role}Name`}
-              contacts={contacts}
               value={name}
               onValueChange={onNameChange}
               onPick={onPick}
@@ -236,11 +231,10 @@ function ServiceControls({ itemId }: { itemId: string }) {
   );
 }
 
-export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, contacts }: {
+export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures }: {
   initialItems: BuilderItem[];
   senderPrefill?: Prefill;
   signatures: PickableSignature[];
-  contacts: ContactOption[];
 }) {
   const [state, action, pending] = useActionState(createReceiptAction, undefined);
   // The item list is now the form's own state, seeded from the URL. It must NOT
@@ -550,8 +544,8 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, co
           items) still seeds the fields on load — a pick just overrides it, which is
           what you want when the items are coming back from someone other than
           whoever the receipt says last held them. */}
-      <PartyFields role="sender" prefill={senderPrefill} isDcsim={senderIsDcsim} onIsDcsimChange={setSenderIsDcsim} name={senderName} onNameChange={setSenderName} contacts={contacts} />
-      <PartyFields role="receiver" isDcsim={receiverIsDcsim} onIsDcsimChange={onReceiverDcsimChange} hideName={hideReceiverName} name={receiverName} onNameChange={setReceiverName} contacts={contacts} />
+      <PartyFields role="sender" prefill={senderPrefill} isDcsim={senderIsDcsim} onIsDcsimChange={setSenderIsDcsim} name={senderName} onNameChange={setSenderName} />
+      <PartyFields role="receiver" isDcsim={receiverIsDcsim} onIsDcsimChange={onReceiverDcsimChange} hideName={hideReceiverName} name={receiverName} onNameChange={setReceiverName} />
       {/* Return timer (optional): blank = no timer. Presets set the days field. */}
       <fieldset className="card stack-sm">
         <legend className="card__title">Return by (optional)</legend>

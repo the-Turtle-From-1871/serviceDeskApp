@@ -1,25 +1,24 @@
 "use client";
-import { useId, useMemo, useState } from "react";
-import { matchContacts, type ContactOption } from "@/modules/contacts/contact-match";
+import { useEffect, useId, useRef, useState } from "react";
+import { searchContactsAction } from "@/app/actions/contacts";
+import type { ContactOption } from "@/modules/contacts/contact-match";
 
 // A type-ahead over the contact book that also IS the name field — the posted
 // `name` input is the combobox input itself, so a receipt can still be filled by
 // typing a recipient who isn't in the book.
 //
-// The whole book arrives with the page (see receipts/new/page.tsx), so filtering
-// is synchronous and local: no fetch per keystroke, and therefore no debounce,
-// no request race guard, and no stale-response handling to get wrong.
+// Matches are fetched server-side (searchContactsAction) as the user types, so
+// the whole book (PII) never ships to the client. That means a debounce + a
+// request race guard (ignore out-of-order responses), mirroring HomeSearch.
 export function ContactCombobox({
   id,
   name,
-  contacts,
   value,
   onValueChange,
   onPick,
 }: {
   id?: string;
   name: string;
-  contacts: ContactOption[];
   value: string;
   onValueChange: (v: string) => void;
   onPick: (c: ContactOption) => void;
@@ -29,9 +28,27 @@ export function ContactCombobox({
   // hovered an option yet. Distinct from index 0, so a first Enter press while
   // merely typing doesn't get mistaken for "a suggestion is highlighted".
   const [active, setActive] = useState<number | null>(null);
+  const [matches, setMatches] = useState<ContactOption[]>([]);
+  const reqId = useRef(0);
   const listId = useId();
 
-  const matches = useMemo(() => matchContacts(contacts, value), [contacts, value]);
+  // Debounced server search. Keyed on the current input; a race guard drops
+  // out-of-order responses so an earlier query can't overwrite a later one.
+  useEffect(() => {
+    const q = value.trim();
+    if (!q) { setMatches([]); return; }
+    const id = ++reqId.current;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await searchContactsAction(q);
+        if (id === reqId.current) setMatches(res);
+      } catch {
+        if (id === reqId.current) setMatches([]);
+      }
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [value]);
+
   const show = open && matches.length > 0;
   // Clamp: `matches` can shrink under a stale `active` between renders.
   const activeIndex = active === null ? null : Math.min(active, Math.max(matches.length - 1, 0));
