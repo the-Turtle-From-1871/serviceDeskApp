@@ -75,5 +75,41 @@ describe("createTransfer seal round-trip (real DB)", () => {
     const tampered = await getTransferByReceiptNumber(created.receiptNumber);
     const tamperedManifest = manifestFromTransfer(tampered!)!;
     expect(verifyCryptographicSeal(tamperedManifest, tampered!.cryptoSignature!)).toBe(false);
+
+    // Sender coverage (Fix B): the seal must also protect the sender party, not
+    // just the receiver. Tamper senderName directly on the persisted row.
+    await prisma.transfer.update({ where: { id: row!.id }, data: { senderName: "Evil Corp" } });
+    const senderTampered = await getTransferByReceiptNumber(created.receiptNumber);
+    const senderTamperedManifest = manifestFromTransfer(senderTampered!)!;
+    expect(verifyCryptographicSeal(senderTamperedManifest, senderTampered!.cryptoSignature!)).toBe(false);
+  });
+
+  it("still verifies after the acting technician's account is deleted (Fix A: sealedByUserId snapshot resists createdByUserId's ON DELETE SET NULL)", async () => {
+    const c = await newItem("SN-REAL-DEL-1");
+
+    const created = await createTransfer({
+      itemIds: [c.id],
+      lines: [{ make: "Dell", model: "5540", qtyAuth: 1, qtyIssued: 1 }],
+      sender: { isDcsim: true, name: "Desk" },
+      receiver: { isDcsim: false, name: "Jane", rank: "SGT", unit: "A Co", contact: "808", email: "jane@u.mil" },
+      receiverSignature: SIG,
+      createdByUserId: adminId,
+    });
+
+    const before = await getTransferByReceiptNumber(created.receiptNumber);
+    expect(before).not.toBeNull();
+    expect(before!.sealedByUserId).toBe(adminId);
+    expect(verifyCryptographicSeal(manifestFromTransfer(before!)!, before!.cryptoSignature!)).toBe(true);
+
+    // Simulate the acting technician's account being deleted: the FK is
+    // ON DELETE SET NULL, so createdByUserId goes null on the receipt row.
+    await prisma.transfer.update({ where: { id: before!.id }, data: { createdByUserId: null } });
+
+    const after = await getTransferByReceiptNumber(created.receiptNumber);
+    expect(after!.createdByUserId).toBeNull();
+    // sealedByUserId is untouched — the seal binds THIS field, not createdByUserId.
+    expect(after!.sealedByUserId).toBe(adminId);
+    const afterManifest = manifestFromTransfer(after!)!;
+    expect(verifyCryptographicSeal(afterManifest, after!.cryptoSignature!)).toBe(true);
   });
 });

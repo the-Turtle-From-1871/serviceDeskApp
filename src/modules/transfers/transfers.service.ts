@@ -50,6 +50,10 @@ export async function createTransfer(input: CreateInput): Promise<Transfer> {
       receiptNumber,
       actingUserId: createdByUserId ?? null,
       sealedAt,
+      sender: {
+        isDcsim: sender.isDcsim, name: sender.name, rank: sender.rank ?? null,
+        unit: sender.unit ?? null, contact: sender.contact ?? null, email: sender.email ?? null,
+      },
       receiver: {
         isDcsim: receiver.isDcsim, name: receiver.name, rank: receiver.rank ?? null,
         unit: receiver.unit ?? null, contact: receiver.contact ?? null, email: receiver.email ?? null,
@@ -77,6 +81,7 @@ export async function createTransfer(input: CreateInput): Promise<Transfer> {
         receiverEmail: receiver.email ?? null,
         receiverSignature,
         createdByUserId: createdByUserId ?? null,
+        sealedByUserId: createdByUserId ?? null,
         sealedAt,
         cryptoSignature,
         dueAt: dueAt ?? null,

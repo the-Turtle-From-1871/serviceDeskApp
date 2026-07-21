@@ -7,6 +7,7 @@ const base: ManifestInput = {
   receiptNumber: "HR-000123",
   actingUserId: "user-1",
   sealedAt: when,
+  sender: { isDcsim: true, name: "Desk", rank: null, unit: null, contact: null, email: null },
   receiver: { isDcsim: false, name: "Jane", rank: "SGT", unit: "A Co", contact: "808", email: "j@u.mil" },
   receiverSignature: "data:image/png;base64,AAAA",
   items: [
@@ -27,8 +28,11 @@ describe("manifestFromTransfer", () => {
     const row = {
       receiptNumber: "HR-000123",
       createdByUserId: "user-1",
+      sealedByUserId: "user-1",
       sealedAt: when,
       cryptoSignature: "sig",
+      senderIsDcsim: true, senderName: "Desk", senderRank: null,
+      senderUnit: null, senderContact: null, senderEmail: null,
       receiverIsDcsim: false, receiverName: "Jane", receiverRank: "SGT",
       receiverUnit: "A Co", receiverContact: "808", receiverEmail: "j@u.mil",
       receiverSignature: "data:image/png;base64,AAAA",

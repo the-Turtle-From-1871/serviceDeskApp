@@ -137,11 +137,14 @@ describe("createTransfer sealing", () => {
     const data = vi.mocked(__tx.transfer.create).mock.calls[0][0].data;
     expect(data.sealedAt).toBeInstanceOf(Date);
     expect(data.cryptoSignature).toBeTypeOf("string");
+    expect(data.sealedByUserId).toBe("u1");
 
     // The stored seal verifies against the manifest rebuilt from what was written.
     const manifest = manifestFromTransfer({
-      receiptNumber: data.receiptNumber, createdByUserId: "u1", sealedAt: data.sealedAt,
+      receiptNumber: data.receiptNumber, createdByUserId: "u1", sealedByUserId: "u1", sealedAt: data.sealedAt,
       cryptoSignature: data.cryptoSignature,
+      senderIsDcsim: sender.isDcsim, senderName: sender.name, senderRank: sender.rank ?? null,
+      senderUnit: sender.unit ?? null, senderContact: sender.contact ?? null, senderEmail: sender.email ?? null,
       receiverIsDcsim: receiver.isDcsim, receiverName: receiver.name, receiverRank: receiver.rank ?? null,
       receiverUnit: receiver.unit ?? null, receiverContact: receiver.contact ?? null, receiverEmail: receiver.email ?? null,
       receiverSignature: sig,

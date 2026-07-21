@@ -5,6 +5,7 @@ export type ManifestInput = {
   receiptNumber: string;
   actingUserId: string | null;
   sealedAt: Date;
+  sender: { isDcsim: boolean; name: string; rank: string | null; unit: string | null; contact: string | null; email: string | null };
   receiver: { isDcsim: boolean; name: string; rank: string | null; unit: string | null; contact: string | null; email: string | null };
   receiverSignature: string;
   items: { serialNumber: string; make: string; model: string }[];
@@ -19,6 +20,7 @@ export function buildHandoffManifest(input: ManifestInput) {
     receiptNumber: input.receiptNumber,
     actingUserId: input.actingUserId,
     sealedAt: input.sealedAt.toISOString(),
+    sender: { ...input.sender },
     receiver: { ...input.receiver },
     receiverSignature: input.receiverSignature,
     // Code-unit (not locale) comparison: the sorted order is baked into the
@@ -37,8 +39,16 @@ export function manifestFromTransfer(t: ReceiptWithLines) {
   if (!t.sealedAt) return null;
   return buildHandoffManifest({
     receiptNumber: t.receiptNumber,
-    actingUserId: t.createdByUserId ?? null,
+    actingUserId: t.sealedByUserId ?? null,   // was: t.createdByUserId ?? null
     sealedAt: t.sealedAt,
+    sender: {
+      isDcsim: t.senderIsDcsim,
+      name: t.senderName,
+      rank: t.senderRank ?? null,
+      unit: t.senderUnit ?? null,
+      contact: t.senderContact ?? null,
+      email: t.senderEmail ?? null,
+    },
     receiver: {
       isDcsim: t.receiverIsDcsim,
       name: t.receiverName,

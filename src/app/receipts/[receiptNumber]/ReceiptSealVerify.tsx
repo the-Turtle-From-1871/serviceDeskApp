@@ -24,7 +24,15 @@ export function ReceiptSealVerify({ receiptNumber }: { receiptNumber: string }) 
         type="button"
         className="btn btn-secondary btn-sm"
         disabled={pending}
-        onClick={() => start(async () => setResult(await verifyReceiptSealAction(receiptNumber)))}
+        onClick={() =>
+          start(async () => {
+            try {
+              setResult(await verifyReceiptSealAction(receiptNumber));
+            } catch {
+              setResult({ status: "CANNOT_VERIFY" });
+            }
+          })
+        }
       >
         {pending ? "Verifying…" : "Verify seal"}
       </button>

@@ -20,8 +20,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 - **Cryptographically sealed asset handoff.** Every hand receipt is now sealed at
   creation with an Ed25519 signature over a canonical manifest of the handoff
-  (receipt number, items, recipient details + signature, acting technician, and a
-  server timestamp), stored on the receipt. Admins get a **Verify seal** button on
+  (receipt number, items, **both parties** — sender and recipient details +
+  recipient signature — the acting technician (bound via an immutable
+  `sealedByUserId` snapshot, not the nullable `createdByUserId` FK, so deleting
+  the technician's account can't break the seal), and a server timestamp),
+  stored on the receipt. Admins get a **Verify seal** button on
   the receipt page that re-derives the manifest and reports **Valid / Tampered /
   Unsealed / Can't-verify / Not-found** — making after-the-fact edits to a receipt
   detectable (non-repudiation). Sealing is best-effort: if the signing key isn't
@@ -84,7 +87,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   is derived from the private key at runtime, so there is no `SIGNING_PUBLIC_KEY`
   var; keep the public key only if you later want offline/external verification.
   Migration `20260720210000_transfer_crypto_seal` adds the `cryptoSignature` and
-  `sealedAt` columns (nullable, additive — no backfill).
+  `sealedAt` columns (nullable, additive — no backfill). Migration
+  `20260721120000_transfer_sealed_by_user_id` adds `sealedByUserId` (nullable,
+  additive — no backfill), an immutable snapshot of the acting technician's user
+  id at seal time; the seal signs over this column instead of the SET-NULL
+  `createdByUserId` FK.
 
 ## 2026-07-17
 

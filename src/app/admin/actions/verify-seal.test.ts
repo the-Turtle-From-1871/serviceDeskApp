@@ -22,7 +22,9 @@ function setKey() {
 }
 function sealedRow() {
   const row: Record<string, unknown> = {
-    receiptNumber: "HR-000123", createdByUserId: "u1", sealedAt: new Date("2026-07-20T18:04:11.482Z"),
+    receiptNumber: "HR-000123", createdByUserId: "u1", sealedByUserId: "u1", sealedAt: new Date("2026-07-20T18:04:11.482Z"),
+    senderIsDcsim: false, senderName: "Desk", senderRank: null, senderUnit: null,
+    senderContact: null, senderEmail: null,
     receiverIsDcsim: false, receiverName: "Jane", receiverRank: "SGT", receiverUnit: "A Co",
     receiverContact: "808", receiverEmail: "j@u.mil", receiverSignature: "data:image/png;base64,AAAA",
     lines: [{ make: "M4", model: "Carbine", items: [{ serialNumber: "A1" }] }],
