@@ -77,4 +77,10 @@ describe("verifyReceiptSealAction", () => {
     vi.mocked(requireAdmin).mockRejectedValueOnce(new Error("FORBIDDEN"));
     await expect(verifyReceiptSealAction("HR-000123")).rejects.toThrow();
   });
+
+  it("resolves CANNOT_VERIFY (not a rejection) when the receipt read throws", async () => {
+    setKey();
+    vi.mocked(getTransferByReceiptNumber).mockRejectedValueOnce(new Error("db down"));
+    await expect(verifyReceiptSealAction("HR-000123")).resolves.toEqual({ status: "CANNOT_VERIFY" });
+  });
 });

@@ -11,15 +11,15 @@ export type SealStatus = "VALID" | "TAMPERED" | "UNSEALED" | "CANNOT_VERIFY" | "
 // role/isActive per request, so a demoted admin can't verify.
 export async function verifyReceiptSealAction(receiptNumber: string): Promise<{ status: SealStatus; sealedAt?: string }> {
   await requireAdmin();
-  const t = await getTransferByReceiptNumber(receiptNumber);
-  // Existence isn't guaranteed at click time: the 90-day purge (or another admin)
-  // can hard-delete a CLOSED receipt while the tab sits open. Report that
-  // distinctly rather than mislabeling a deleted receipt as merely "unsealed".
-  if (!t) return { status: "NOT_FOUND" };
-  if (!t.cryptoSignature || !t.sealedAt) return { status: "UNSEALED" };
-  const manifest = manifestFromTransfer(t); // non-null: sealedAt is present
   try {
-    const ok = verifyCryptographicSeal(manifest as object, t.cryptoSignature);
+    const t = await getTransferByReceiptNumber(receiptNumber);
+    // Existence isn't guaranteed at click time: the 90-day purge (or another admin)
+    // can hard-delete a CLOSED receipt while the tab sits open. Report that
+    // distinctly rather than mislabeling a deleted receipt as merely "unsealed".
+    if (!t) return { status: "NOT_FOUND" };
+    if (!t.cryptoSignature || !t.sealedAt) return { status: "UNSEALED" };
+    const manifest = manifestFromTransfer(t)!; // non-null: sealedAt is present
+    const ok = verifyCryptographicSeal(manifest, t.cryptoSignature);
     return { status: ok ? "VALID" : "TAMPERED", sealedAt: t.sealedAt.toISOString() };
   } catch (e) {
     if (e instanceof CryptoKeyUnavailableError) return { status: "CANNOT_VERIFY" };
