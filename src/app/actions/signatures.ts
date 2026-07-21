@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/authz";
-import { createSignature, deleteSignature } from "@/modules/signatures/signatures.service";
+import { createSignature, deleteSignature, getOwnedSignature } from "@/modules/signatures/signatures.service";
 import { newSignatureSchema } from "@/modules/signatures/signatures.schema";
 import { SignatureError } from "@/modules/signatures/signatures.errors";
 
@@ -28,6 +28,16 @@ export async function createSignatureAction(_prev: unknown, formData: FormData) 
   }
   revalidatePath("/account");
   return { ok: true as const };
+}
+
+// Reveal ONE of the acting admin's own saved-signature images on demand — the
+// account list ships only names. Scoped to the owner via getOwnedSignature, so an
+// admin can't fetch another admin's ink by guessing an id. Returns the image data
+// URL, or null for a bogus/foreign id.
+export async function revealOwnSignatureAction(signatureId: string): Promise<string | null> {
+  const admin = await requireAdmin();
+  const owned = await getOwnedSignature(signatureId, admin.id);
+  return owned?.image ?? null;
 }
 
 export async function deleteSignatureAction(formData: FormData): Promise<void> {

@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## 2026-07-21
 
 ### Changed
+- **Account-page saved signatures are hidden by default.** On the account page,
+  each saved signature now shows its name with a **Show signature** / **Hide
+  signature** toggle instead of the inline image. The image blobs are no longer
+  shipped to the page; clicking Show fetches just that one image via an
+  owner-scoped action (an admin can only reveal their own). The signature
+  *pickers* (item audit, return, receipt builder) are unchanged. The reveal logic
+  is now a shared `SignatureReveal` component used here and by the item-page audit
+  history, and the toggle button stays put where the Show button was.
 - **Item-page audit signatures can be hidden again after revealing.** A revealed
   auditor signature now shows a **Hide signature** button next to it; hiding then
   re-showing is instant (the fetched image is cached, no second request).

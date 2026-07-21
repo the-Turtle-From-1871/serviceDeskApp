@@ -4,7 +4,7 @@ import prisma from "@/lib/prisma";
 import { SiteHeader } from "@/components/SiteHeader";
 import { ChangePasswordForm } from "./ChangePasswordForm";
 import { SignatureSettings } from "./SignatureSettings";
-import { listSignatures } from "@/modules/signatures/signatures.service";
+import { listSignatureNames } from "@/modules/signatures/signatures.service";
 import { SignatureManager } from "./SignatureManager";
 
 export default async function AccountPage() {
@@ -19,7 +19,7 @@ export default async function AccountPage() {
   // Admins use named signatures; everyone else keeps the single saved signature.
   const [me, signatures] = await Promise.all([
     isAdmin ? Promise.resolve(null) : prisma.user.findUnique({ where: { id: user.id }, select: { signatureImage: true } }),
-    isAdmin ? listSignatures(user.id) : Promise.resolve([]),
+    isAdmin ? listSignatureNames(user.id) : Promise.resolve([]),
   ]);
 
   return (

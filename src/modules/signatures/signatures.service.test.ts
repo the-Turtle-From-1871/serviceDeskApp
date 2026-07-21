@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, expect, test } from "vitest";
 import prisma from "@/lib/prisma";
 import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
-import { listSignatures, createSignature, deleteSignature, getOwnedSignature } from "./signatures.service";
+import { listSignatures, listSignatureNames, createSignature, deleteSignature, getOwnedSignature } from "./signatures.service";
 import { SignatureError } from "./signatures.errors";
 
 const PNG = "data:image/png;base64,AAAA";
@@ -42,6 +42,15 @@ test("listSignatures returns only the owner's, ordered by name", async () => {
   await createSignature(otherId, { name: "CPL Other", image: PNG });
   const list = await listSignatures(adminId);
   expect(list.map((s) => s.name)).toEqual(["PFC Alpha", "SSG Zulu"]);
+});
+
+test("listSignatureNames returns id+name only (no image blob), owner-scoped and ordered", async () => {
+  await createSignature(adminId, { name: "SSG Zulu", image: PNG });
+  await createSignature(adminId, { name: "PFC Alpha", image: PNG });
+  await createSignature(otherId, { name: "CPL Other", image: PNG });
+  const list = await listSignatureNames(adminId);
+  expect(list.map((s) => s.name)).toEqual(["PFC Alpha", "SSG Zulu"]);
+  expect(list[0]).not.toHaveProperty("image");
 });
 
 test("deleteSignature removes the owner's signature", async () => {

@@ -1,9 +1,12 @@
 "use client";
 import { useActionState, useState } from "react";
-import { createSignatureAction, deleteSignatureAction } from "@/app/actions/signatures";
+import { createSignatureAction, deleteSignatureAction, revealOwnSignatureAction } from "@/app/actions/signatures";
 import { SignaturePad } from "@/components/SignaturePad";
+import { SignatureReveal } from "@/components/SignatureReveal";
 
-export type SavedSignature = { id: string; name: string; image: string };
+// No `image`: saved-signature blobs are not shipped to the client; each is
+// revealed on demand via revealOwnSignatureAction (owner-scoped).
+export type SavedSignature = { id: string; name: string };
 
 export function SignatureManager({ signatures }: { signatures: SavedSignature[] }) {
   const [state, action, pending] = useActionState(createSignatureAction, undefined);
@@ -38,12 +41,9 @@ export function SignatureManager({ signatures }: { signatures: SavedSignature[] 
       ) : (
         <ul className="stack-sm">
           {signatures.map((s) => (
-            <li key={s.id} className="row">
-              <div>
-                <div><strong>{s.name}</strong></div>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={s.image} alt={`Signature for ${s.name}`} className="sig-preview" />
-              </div>
+            <li key={s.id} className="row" style={{ gap: 8, alignItems: "center" }}>
+              <strong>{s.name}</strong>
+              <SignatureReveal load={() => revealOwnSignatureAction(s.id)} alt={`Signature for ${s.name}`} />
               <span className="spacer" />
               <form action={deleteSignatureAction}>
                 <input type="hidden" name="id" value={s.id} />

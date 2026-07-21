@@ -16,6 +16,17 @@ export function listSignatures(userId: string): Promise<{ id: string; name: stri
   });
 }
 
+// Names only (no image blob) for the account-page management list, which reveals
+// each signature on demand rather than shipping every image to the client.
+// Scoped by userId like every other read here.
+export function listSignatureNames(userId: string): Promise<{ id: string; name: string }[]> {
+  return prisma.signature.findMany({
+    where: { userId },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+  });
+}
+
 export async function createSignature(userId: string, input: NewSignatureInput): Promise<Signature> {
   const data = newSignatureSchema.parse(input);
   try {
