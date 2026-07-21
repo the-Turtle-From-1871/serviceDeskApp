@@ -160,10 +160,12 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
                 <ul className="stack-sm">
                   {audits.map((a) => (
                     <li key={a.id} className="row" style={{ gap: 8, alignItems: "center" }}>
-                      {/* Signature hidden by default and fetched on demand — the
-                          blob is never shipped in this page's payload. */}
-                      <AuditSignatureReveal auditId={a.id} signerName={a.signerName} />
                       <span>{a.signerName} · {formatDateTimeHST(a.createdAt)}</span>
+                      {/* Signature reveal sits on the RIGHT of the name/date and is
+                          right-justified in the column (spacer = margin-left:auto).
+                          Blob is hidden by default and fetched on demand. */}
+                      <span className="spacer" />
+                      <AuditSignatureReveal auditId={a.id} signerName={a.signerName} />
                     </li>
                   ))}
                 </ul>
