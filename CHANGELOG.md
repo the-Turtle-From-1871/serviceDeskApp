@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## 2026-07-21
 
 ### Changed
+- **Item-page audit signatures can be hidden again after revealing.** A revealed
+  auditor signature now shows a **Hide signature** button next to it; hiding then
+  re-showing is instant (the fetched image is cached, no second request).
 - **Item-page audit history: the "Show signature" control moved to the right.** On
   an item's audit history rows, the reveal button (and, once revealed, the
   signature) now sits to the right of the auditor's name and date, right-justified
