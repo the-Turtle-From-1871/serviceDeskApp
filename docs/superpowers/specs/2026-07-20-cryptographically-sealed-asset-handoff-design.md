@@ -225,10 +225,14 @@ may be null under best-effort. `createReceiptAction` is unchanged.
 "use server";
 // verifyReceiptSealAction(receiptNumber): admin-only integrity check.
 export async function verifyReceiptSealAction(receiptNumber: string):
-  Promise<{ status: "VALID" | "TAMPERED" | "UNSEALED" | "CANNOT_VERIFY"; sealedAt?: string }> {
+  Promise<{ status: "VALID" | "TAMPERED" | "UNSEALED" | "CANNOT_VERIFY" | "NOT_FOUND"; sealedAt?: string }> {
   await requireAdmin();                                   // privileged; re-reads role/isActive
   const t = await getTransferByReceiptNumber(receiptNumber);
-  if (!t) return { status: "UNSEALED" };                  // nothing to verify (also 404-ish)
+  // Existence is NOT guaranteed at click time even though the admin opened this
+  // from a live receipt page: the 90-day purge worker (or another admin) can
+  // hard-delete a CLOSED receipt while the tab sits open. Report that distinctly
+  // rather than mislabeling a deleted receipt as merely "unsealed".
+  if (!t) return { status: "NOT_FOUND" };
   if (!t.cryptoSignature || !t.sealedAt) return { status: "UNSEALED" };
   const manifest = manifestFromTransfer(t);               // non-null here (sealedAt present)
   try {
@@ -250,6 +254,9 @@ Status meanings surfaced to the admin:
   while the key was unset). Neutral, not an error.
 - **CANNOT_VERIFY** — server has no `SIGNING_PRIVATE_KEY` configured, so no key to
   derive a verifier from. Ops/config issue, not a receipt problem.
+- **NOT_FOUND** — the receipt no longer exists (e.g. purged, or deleted from
+  another session while this tab was open). Distinct from UNSEALED so a deleted
+  receipt is never mislabeled as "unsealed". The UI should prompt a refresh.
 
 ### 4.6 Verification UI (receipt detail page)
 
@@ -261,8 +268,8 @@ pattern:
 - New client component `ReceiptSealVerify` (sibling of `ReceiptDueAtControls`):
   a **"Verify seal"** button that calls `verifyReceiptSealAction(receiptNumber)`
   and renders the returned status as a badge (VALID = green, TAMPERED = red,
-  UNSEALED = subtle/grey, CANNOT_VERIFY = warning), with the `sealedAt` timestamp
-  on success.
+  UNSEALED = subtle/grey, CANNOT_VERIFY = warning, NOT_FOUND = warning + "refresh
+  the page"), with the `sealedAt` timestamp on success.
 - Rendered only when `isAdmin` (UI convenience; the action re-checks
   `requireAdmin()` as the authoritative gate — the page itself is public and
   logged-out/USER visitors simply never see the control).
@@ -323,7 +330,8 @@ key presence never leaks between tests.
 ### Action — `src/app/actions/receipts.test.ts` (or sibling)
 - `verifyReceiptSealAction` rejects non-admin / logged-out (`requireAdmin`).
 - Returns VALID for an intact sealed receipt, TAMPERED after a DB mutation,
-  UNSEALED for a null-signature row, CANNOT_VERIFY with the key unset.
+  UNSEALED for a null-signature row, CANNOT_VERIFY with the key unset, and
+  NOT_FOUND for an unknown/deleted receiptNumber.
 
 ## 6. Documentation (same commit as code)
 
