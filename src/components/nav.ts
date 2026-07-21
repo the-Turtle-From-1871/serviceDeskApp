@@ -5,23 +5,22 @@ export function navItemsFor({ loggedIn, isAdmin }: { loggedIn: boolean; isAdmin:
   if (!loggedIn) return [search, { label: "Staff sign in", href: "/login" }];
   const items: NavItem[] = [search, { label: "Items", href: "/items" }];
   if (isAdmin) {
-    items.push(
-      { label: "Dashboard", href: "/admin" },
-      { label: "New item", href: "/admin/items/new" },
-      { label: "Queue", href: "/admin/queue" },
-      { label: "Users", href: "/admin/users" },
-      { label: "Audit", href: "/admin/audit" },
-    );
+    // The admin sub-sections (Queue, Users, Audit) and the New-item action live
+    // UNDER the Dashboard hub (/admin) rather than as separate header links, so
+    // the header stays short. See the "Manage" section in admin/page.tsx.
+    items.push({ label: "Dashboard", href: "/admin" });
   }
   items.push({ label: "Account", href: "/account" });
   return items;
 }
 
-// Home ("/") and the admin dashboard ("/admin") match only exactly; every other
-// item matches its subtree. "/admin" needs the exact-match rule because it is a
-// prefix of the other admin routes (/admin/queue, /admin/users, …) — subtree
-// matching would light the Dashboard link up on every admin page.
+// Home ("/") matches only exactly; every other item matches its subtree. The
+// admin Dashboard ("/admin") is now the hub for the whole admin area, so it
+// SUBTREE-matches: it stays highlighted on /admin/queue, /admin/users, etc.
+// (Previously it matched exactly, to avoid competing with the separate admin
+// sub-links that used to sit alongside it in the header; those have moved into
+// the Dashboard page, so there is nothing left to compete with.)
 export function isActive(href: string, pathname: string): boolean {
-  if (href === "/" || href === "/admin") return pathname === href;
+  if (href === "/") return pathname === href;
   return pathname === href || pathname.startsWith(href + "/");
 }

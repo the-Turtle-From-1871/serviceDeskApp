@@ -63,6 +63,20 @@ export default async function AdminHome() {
         <TimerList rows={soonService.map(toServiceRow)} empty="Nothing due soon." nowMs={nowMs} />
         <p><Link href="/admin/queue">Open the full service queue →</Link></p>
       </section>
+
+      {/* Admin hub: the sub-sections (Queue, Users, Audit) and the New-item
+          action are reached from here rather than from separate header links,
+          keeping the top nav short. Routes are unchanged and still directly
+          reachable by URL. */}
+      <section className="card stack-sm">
+        <h2>Manage</h2>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <Link className="btn btn-secondary" href="/admin/queue">Service queue</Link>
+          <Link className="btn btn-secondary" href="/admin/users">Users</Link>
+          <Link className="btn btn-secondary" href="/admin/audit">Audit</Link>
+          <Link className="btn btn-primary" href="/admin/items/new">+ New item</Link>
+        </div>
+      </section>
     </div>
   );
 }

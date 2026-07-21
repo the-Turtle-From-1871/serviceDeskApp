@@ -15,15 +15,14 @@ describe("navItemsFor", () => {
       { label: "Account", href: "/account" },
     ]);
   });
-  it("admin: Search, Items, Dashboard, New item, Queue, Users, Audit, Account", () => {
+  // Queue, Users, Audit, and New item moved OFF the header and under the
+  // Dashboard hub (/admin) — see admin/page.tsx. The admin header is now just
+  // Search, Items, Dashboard, Account.
+  it("admin: Search, Items, Dashboard, Account", () => {
     expect(navItemsFor({ loggedIn: true, isAdmin: true })).toEqual([
       { label: "Search", href: "/" },
       { label: "Items", href: "/items" },
       { label: "Dashboard", href: "/admin" },
-      { label: "New item", href: "/admin/items/new" },
-      { label: "Queue", href: "/admin/queue" },
-      { label: "Users", href: "/admin/users" },
-      { label: "Audit", href: "/admin/audit" },
       { label: "Account", href: "/account" },
     ]);
   });
@@ -40,11 +39,15 @@ describe("isActive", () => {
     expect(isActive("/items", "/admin/items/new")).toBe(false);
     expect(isActive("/admin/users", "/admin/audit")).toBe(false);
   });
-  it("admin dashboard matches only exactly, not the other admin routes", () => {
+  // Now that Queue/Users/Audit/New item live under the Dashboard hub, "/admin"
+  // matches its whole subtree so Dashboard stays highlighted across the admin
+  // area (it no longer competes with separate sub-links in the header).
+  it("admin dashboard matches its whole subtree", () => {
     expect(isActive("/admin", "/admin")).toBe(true);
-    expect(isActive("/admin", "/admin/queue")).toBe(false);
-    expect(isActive("/admin", "/admin/users")).toBe(false);
-    // and the subtree links still activate on their own pages
-    expect(isActive("/admin/queue", "/admin/queue")).toBe(true);
+    expect(isActive("/admin", "/admin/queue")).toBe(true);
+    expect(isActive("/admin", "/admin/users")).toBe(true);
+    expect(isActive("/admin", "/admin/items/new")).toBe(true);
+    // but not non-admin pages
+    expect(isActive("/admin", "/items")).toBe(false);
   });
 });
