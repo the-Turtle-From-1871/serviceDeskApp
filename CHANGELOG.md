@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## 2026-07-21
 
 ### Changed
+- **Item-page audit history: the "Show signature" control moved to the right.** On
+  an item's audit history rows, the reveal button (and, once revealed, the
+  signature) now sits to the right of the auditor's name and date, right-justified
+  in the column, instead of on the left.
 - **The `/items` list can now sort by audit status.** "Audit" is a new option in
   the Sort control. Most-urgent-first orders **Overdue → Due soon → OK → Never
   audited** (never-audited rows always trail the dated ones); click again to
