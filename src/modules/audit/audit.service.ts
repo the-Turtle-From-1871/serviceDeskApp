@@ -10,8 +10,15 @@ export type RecordAuditInput = {
 };
 
 // Record one audit event. The item's status is derived from the newest row.
+// Also maintains the denormalized Item.lastAuditedAt (the /items audit-status
+// sort key): audits are only ever added, newest-wins, so the new row is always
+// the latest. Done in one transaction so the column can't drift from the log.
 export function recordAudit(input: RecordAuditInput): Promise<ItemAudit> {
-  return prisma.itemAudit.create({ data: input });
+  return prisma.$transaction(async (tx) => {
+    const audit = await tx.itemAudit.create({ data: input });
+    await tx.item.update({ where: { id: input.itemId }, data: { lastAuditedAt: audit.createdAt } });
+    return audit;
+  });
 }
 
 // One row of the detail-page audit history log. The signature IMAGE is
@@ -39,16 +46,6 @@ export async function getAuditSignature(auditId: string): Promise<string | null>
   return row?.signatureImage ?? null;
 }
 
-// Newest audit date per item, for the list view. One grouped query; skips items
-// with no audit (they stay absent from the map and render as "never").
-export async function getLatestAuditMap(itemIds: string[]): Promise<Map<string, Date>> {
-  if (itemIds.length === 0) return new Map();
-  const rows = await prisma.itemAudit.groupBy({
-    by: ["itemId"],
-    where: { itemId: { in: itemIds } },
-    _max: { createdAt: true },
-  });
-  const map = new Map<string, Date>();
-  for (const r of rows) if (r._max.createdAt) map.set(r.itemId, r._max.createdAt);
-  return map;
-}
+// (Removed getLatestAuditMap: the /items list now reads the denormalized
+// Item.lastAuditedAt column directly for both the audit-status badge and the
+// sort, so the separate per-page groupBy is no longer needed.)

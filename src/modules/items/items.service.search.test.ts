@@ -44,14 +44,32 @@ describe("listItems", () => {
     expect(arg.orderBy).toEqual([{ createdAt: "desc" }, { id: "asc" }]);
   });
 
-  it("sorts by a server-sortable column but ignores a derived one (auditState)", async () => {
+  it("sorts by a server-sortable column, mapping straight to the like-named column", async () => {
     vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
     await listItems({ sort: "make", dir: "asc" });
     expect(vi.mocked(prisma.item.findMany).mock.calls[0][0]!.orderBy).toEqual([{ make: "asc" }, { id: "asc" }]);
+  });
 
-    vi.clearAllMocks();
-    vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
+  it("maps the derived auditState sort to lastAuditedAt, nulls last, in both directions", async () => {
+    vi.mocked(prisma.item.count).mockResolvedValue(100);
+
     await listItems({ sort: "auditState", dir: "asc" });
+    expect(vi.mocked(prisma.item.findMany).mock.calls[0][0]!.orderBy).toEqual([
+      { lastAuditedAt: { sort: "asc", nulls: "last" } },
+      { id: "asc" },
+    ]);
+
+    vi.mocked(prisma.item.findMany).mockClear();
+    await listItems({ sort: "auditState", dir: "desc" });
+    expect(vi.mocked(prisma.item.findMany).mock.calls[0][0]!.orderBy).toEqual([
+      { lastAuditedAt: { sort: "desc", nulls: "last" } },
+      { id: "asc" },
+    ]);
+  });
+
+  it("ignores an unknown sort key, falling back to the default order", async () => {
+    vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
+    await listItems({ sort: "bogus", dir: "asc" });
     expect(vi.mocked(prisma.item.findMany).mock.calls[0][0]!.orderBy).toEqual([{ createdAt: "desc" }, { id: "asc" }]);
   });
 });

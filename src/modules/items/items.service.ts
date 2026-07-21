@@ -37,10 +37,11 @@ export function getItemWithCreator(id: string) {
   });
 }
 
-// Server-sortable columns only. `auditState` (shown in the table) is derived from
-// ItemAudit rows, not an Item column, so it cannot be an ORDER BY — the UI omits
-// it from the sort options.
-const ITEM_SORT_COLUMNS = new Set(["deviceName", "make", "model", "serialNumber", "status"]);
+// Server-sortable sort keys. `auditState` (the derived, time-dependent badge)
+// is NOT itself an ORDER BY — it maps to the denormalized `lastAuditedAt` column
+// (see the orderBy below), which sorts items by audit recency = audit-status
+// severity. The rest map straight to their like-named Item columns.
+const ITEM_SORT_COLUMNS = new Set(["deviceName", "make", "model", "serialNumber", "status", "auditState"]);
 
 export const ITEMS_PAGE_SIZE = 50;
 
@@ -79,10 +80,15 @@ export async function listItems(opts: {
   const sort = opts.sort && ITEM_SORT_COLUMNS.has(opts.sort) ? opts.sort : null;
   const dir: "asc" | "desc" = opts.dir === "asc" ? "asc" : "desc";
   // Secondary key by id so rows with equal sort values keep a stable order across
-  // pages (otherwise the same row can appear on two pages or none).
-  const orderBy: Prisma.ItemOrderByWithRelationInput[] = sort
-    ? [{ [sort]: dir } as Prisma.ItemOrderByWithRelationInput, { id: "asc" }]
-    : [{ createdAt: "desc" }, { id: "asc" }];
+  // pages (otherwise the same row can appear on two pages or none). The
+  // audit-status sort rides the denormalized `lastAuditedAt` column; never-audited
+  // rows (null) always trail the dated ones, in both directions.
+  const primaryOrder: Prisma.ItemOrderByWithRelationInput = !sort
+    ? { createdAt: "desc" }
+    : sort === "auditState"
+    ? { lastAuditedAt: { sort: dir, nulls: "last" } }
+    : ({ [sort]: dir } as Prisma.ItemOrderByWithRelationInput);
+  const orderBy: Prisma.ItemOrderByWithRelationInput[] = [primaryOrder, { id: "asc" }];
 
   const total = await prisma.item.count({ where });
   const totalPages = Math.max(1, Math.ceil(total / pageSize));

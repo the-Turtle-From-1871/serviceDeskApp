@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## 2026-07-21
 
 ### Changed
+- **The `/items` list can now sort by audit status.** "Audit" is a new option in
+  the Sort control. Most-urgent-first orders **Overdue → Due soon → OK → Never
+  audited** (never-audited rows always trail the dated ones); click again to
+  reverse. The sort is server-side over the whole inventory, riding a new
+  denormalized `Item.lastAuditedAt` column (the derived audit *state* isn't
+  stored, so it can't be an `ORDER BY` directly); the audit badge reads the same
+  column, so sort and display always agree.
 - **Audit signatures on the item page are hidden by default.** In the Audit
   history on an item's page (`/i/<id>`, already staff-only), each auditor's
   signature is now behind a **Show signature** button instead of shown inline —

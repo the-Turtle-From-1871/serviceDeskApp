@@ -22,9 +22,10 @@ const HIDDEN_KEY = "items:hiddenCols";
 const DEFAULT_HIDDEN: SortField[] = [];
 const hiddenStore = makeStore(HIDDEN_KEY, parseHiddenCols);
 
-// auditState is a derived (non-column) value, so it can't be an ORDER BY — offer
-// only the server-sortable columns in the Sort control.
-const SORTABLE_COLUMNS = ITEM_COLUMNS.filter((c) => c.key !== "auditState");
+// Every column is server-sortable. `auditState` (the derived badge) sorts via the
+// denormalized Item.lastAuditedAt column server-side (see listItems), so it's
+// offered in the Sort control like the rest.
+const SORTABLE_COLUMNS = ITEM_COLUMNS;
 
 export function ItemSelectTable({
   items,
