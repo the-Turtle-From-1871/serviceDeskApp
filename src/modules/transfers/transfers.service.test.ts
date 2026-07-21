@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const items = [
   { id: "i1", make: "M4", model: "Carbine", serialNumber: "A1", status: "ACTIVE" },
@@ -115,6 +115,51 @@ describe("createTransfer (multi-item)", () => {
     await createTransfer({ itemIds: ["i1", "i2", "i3"], lines, sender, receiver, receiverSignature: sig });
     const data = vi.mocked(__tx.transfer.create).mock.calls[0][0].data;
     expect(data.dueAt ?? null).toBeNull();
+  });
+});
+
+import { generateKeyPairSync } from "node:crypto";
+import { verifyCryptographicSeal } from "@/lib/crypto";
+import { manifestFromTransfer } from "./seal";
+
+describe("createTransfer sealing", () => {
+  const savedKey = process.env.SIGNING_PRIVATE_KEY;
+  afterEach(() => {
+    if (savedKey === undefined) delete process.env.SIGNING_PRIVATE_KEY;
+    else process.env.SIGNING_PRIVATE_KEY = savedKey;
+  });
+
+  it("stores a verifiable cryptoSignature + sealedAt when the key is set", async () => {
+    const { privateKey } = generateKeyPairSync("ed25519");
+    process.env.SIGNING_PRIVATE_KEY = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+
+    await createTransfer({ itemIds: ["i1", "i2", "i3"], lines, sender, receiver, receiverSignature: sig, createdByUserId: "u1" });
+    const data = vi.mocked(__tx.transfer.create).mock.calls[0][0].data;
+    expect(data.sealedAt).toBeInstanceOf(Date);
+    expect(data.cryptoSignature).toBeTypeOf("string");
+
+    // The stored seal verifies against the manifest rebuilt from what was written.
+    const manifest = manifestFromTransfer({
+      receiptNumber: data.receiptNumber, createdByUserId: "u1", sealedAt: data.sealedAt,
+      cryptoSignature: data.cryptoSignature,
+      receiverIsDcsim: receiver.isDcsim, receiverName: receiver.name, receiverRank: receiver.rank ?? null,
+      receiverUnit: receiver.unit ?? null, receiverContact: receiver.contact ?? null, receiverEmail: receiver.email ?? null,
+      receiverSignature: sig,
+      lines: [
+        { make: "M4", model: "Carbine", items: [{ serialNumber: "A1" }, { serialNumber: "A2" }] },
+        { make: "AN/PVS", model: "14", items: [{ serialNumber: "B7" }] },
+      ],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any)!;
+    expect(verifyCryptographicSeal(manifest, data.cryptoSignature)).toBe(true);
+  });
+
+  it("stores a null cryptoSignature (still sealedAt) when the key is unset", async () => {
+    delete process.env.SIGNING_PRIVATE_KEY;
+    await createTransfer({ itemIds: ["i1", "i2", "i3"], lines, sender, receiver, receiverSignature: sig });
+    const data = vi.mocked(__tx.transfer.create).mock.calls[0][0].data;
+    expect(data.sealedAt).toBeInstanceOf(Date);
+    expect(data.cryptoSignature).toBeNull();
   });
 });
 
