@@ -21,7 +21,13 @@ export function buildHandoffManifest(input: ManifestInput) {
     sealedAt: input.sealedAt.toISOString(),
     receiver: { ...input.receiver },
     receiverSignature: input.receiverSignature,
-    items: [...input.items].sort((a, b) => a.serialNumber.localeCompare(b.serialNumber)),
+    // Code-unit (not locale) comparison: the sorted order is baked into the
+    // signature at sign time and re-derived (possibly much later, on a
+    // different Node/ICU build) at verify time. localeCompare's collation can
+    // change across ICU versions, which would reorder non-ASCII serials and
+    // produce a false TAMPERED. `<`/`>` on strings is a stable UTF-16
+    // code-unit comparison, so the order re-derives identically forever.
+    items: [...input.items].sort((a, b) => (a.serialNumber < b.serialNumber ? -1 : a.serialNumber > b.serialNumber ? 1 : 0)),
   };
 }
 

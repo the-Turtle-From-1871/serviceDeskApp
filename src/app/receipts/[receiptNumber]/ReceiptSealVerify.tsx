@@ -10,7 +10,7 @@ const LABELS: Record<SealStatus, string> = {
   VALID: "Seal valid — the receipt is intact.",
   TAMPERED: "SEAL INVALID — a sealed field was altered.",
   UNSEALED: "No seal on this receipt.",
-  CANNOT_VERIFY: "Can't verify — signing key not configured.",
+  CANNOT_VERIFY: "Can't verify right now — try again, or check the server signing-key configuration.",
   NOT_FOUND: "Receipt no longer exists — refresh the page.",
 };
 
