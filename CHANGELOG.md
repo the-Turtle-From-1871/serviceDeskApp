@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## 2026-07-21
 
 ### Changed
+- **Audit signatures on the item page are hidden by default.** In the Audit
+  history on an item's page (`/i/<id>`, already staff-only), each auditor's
+  signature is now behind a **Show signature** button instead of shown inline —
+  the auditor's name and date stay visible. The signature image is no longer
+  shipped in the page payload at all; clicking Show fetches just that one image
+  via a staff-gated action (`requireUser`). Any signed-in staff member can
+  reveal it. The admin audit page and receipt signatures are unchanged.
 - **Admin navigation consolidated into the Dashboard.** The admin header dropped
   from eight items to four (`Search · Items · Dashboard · Account`): the
   **Queue**, **Users**, and **Audit** sections and the **New item** action moved
