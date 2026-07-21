@@ -9,6 +9,7 @@ import { getCurrentUser } from "@/lib/session";
 import { NotifyPickupButton } from "./NotifyPickupButton";
 import { DueBadge } from "@/components/DueBadge";
 import { ReceiptDueAtControls } from "./ReceiptDueAtControls";
+import { ReceiptSealVerify } from "./ReceiptSealVerify";
 
 export default async function ReceiptPage({ params }: { params: Promise<{ receiptNumber: string }> }) {
   const { receiptNumber } = await params;
@@ -88,6 +89,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ receip
             )}
           </div>
           {isAdmin && !closed && <ReceiptDueAtControls receiptNumber={t.receiptNumber} />}
+          {isAdmin && <ReceiptSealVerify receiptNumber={t.receiptNumber} />}
         </div>
 
         {/* One row for every action, so a hidden button just reflows instead of
