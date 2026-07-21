@@ -3,6 +3,8 @@ import prisma from "@/lib/prisma";
 import { TransferError } from "./transfers.errors";
 import type { PartyInput, LineQtyInput } from "./transfers.schema";
 import { groupItemsIntoLines, buildItemSummary, MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW } from "./receipt-lines";
+import { buildHandoffManifest } from "./seal";
+import { generateCryptographicSeal } from "@/lib/crypto";
 
 export type ReceiptWithLines = Transfer & { lines: (TransferLine & { items: TransferItem[] })[] };
 
@@ -43,6 +45,24 @@ export async function createTransfer(input: CreateInput): Promise<Transfer> {
     const rows = await tx.$queryRaw<{ n: bigint }[]>`SELECT nextval('receipt_number_seq') AS n`;
     const receiptNumber = `HR-${String(rows[0].n).padStart(6, "0")}`;
 
+    const sealedAt = new Date();
+    const manifest = buildHandoffManifest({
+      receiptNumber,
+      actingUserId: createdByUserId ?? null,
+      sealedAt,
+      sender: {
+        isDcsim: sender.isDcsim, name: sender.name, rank: sender.rank ?? null,
+        unit: sender.unit ?? null, contact: sender.contact ?? null, email: sender.email ?? null,
+      },
+      receiver: {
+        isDcsim: receiver.isDcsim, name: receiver.name, rank: receiver.rank ?? null,
+        unit: receiver.unit ?? null, contact: receiver.contact ?? null, email: receiver.email ?? null,
+      },
+      receiverSignature,
+      items: grouped.flatMap((g) => g.itemIds.map((id, i) => ({ serialNumber: g.serials[i], make: g.make, model: g.model }))),
+    });
+    const cryptoSignature = generateCryptographicSeal(manifest);
+
     return tx.transfer.create({
       data: {
         receiptNumber,
@@ -61,6 +81,9 @@ export async function createTransfer(input: CreateInput): Promise<Transfer> {
         receiverEmail: receiver.email ?? null,
         receiverSignature,
         createdByUserId: createdByUserId ?? null,
+        sealedByUserId: createdByUserId ?? null,
+        sealedAt,
+        cryptoSignature,
         dueAt: dueAt ?? null,
         status: "OPEN",
         lines: {

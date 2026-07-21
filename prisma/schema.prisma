@@ -140,6 +140,23 @@ model Transfer {
 
   receiverSignature String
 
+  // Ed25519 signature (base64) over the canonical handoff manifest, produced at
+  // creation. Null when unsealed: pre-existing rows, or best-effort failures when
+  // SIGNING_PRIVATE_KEY is absent/invalid. Verified via verifyReceiptSealAction.
+  cryptoSignature String?
+
+  // The exact server timestamp fed into the signed manifest. Persisted (not
+  // reusing createdAt, whose DB default stamps a hair later) so the signed bytes
+  // can be reproduced for verification. timestamp(3) round-trips toISOString().
+  sealedAt DateTime?
+
+  // Immutable snapshot of the acting technician's user id at seal time. Plain
+  // text, NOT a User relation: the createdByUser FK is ON DELETE SET NULL, so
+  // signing over that nullable value makes an intact receipt verify as TAMPERED
+  // once the technician's account is deleted. The seal binds THIS field;
+  // createdByUserId stays the live (nullable) relation for display/joins.
+  sealedByUserId String?
+
   createdByUser   User?   @relation("CreatedTransfers", fields: [createdByUserId], references: [id])
   createdByUserId String?
 
