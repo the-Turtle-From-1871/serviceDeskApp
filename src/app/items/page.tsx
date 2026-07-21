@@ -4,7 +4,6 @@ import { listItems } from "@/modules/items/items.service";
 import { SiteHeader } from "@/components/SiteHeader";
 import { ItemSelectTable } from "@/components/ItemSelectTable";
 import { ItemsSearchInput } from "./ItemsSearchInput";
-import { getLatestAuditMap } from "@/modules/audit/audit.service";
 import { auditState } from "@/modules/audit/audit.status";
 
 export default async function ItemsListPage({
@@ -18,15 +17,14 @@ export default async function ItemsListPage({
   const q = sp.q;
 
   // Server-side paginate + sort: only the current page is fetched and serialized to
-  // the client (the list was previously unbounded). getLatestAuditMap now runs over
-  // one page of ids, not the whole table.
+  // the client (the list was previously unbounded). The audit-status badge and the
+  // audit-status sort both read the denormalized Item.lastAuditedAt column.
   const result = await listItems({
     search: q,
     sort: sp.sort ?? null,
     dir: sp.dir ?? null,
     page: sp.page ? Number.parseInt(sp.page, 10) : 1,
   });
-  const auditMap = await getLatestAuditMap(result.items.map((i) => i.id));
   const now = new Date();
   const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
 
@@ -59,7 +57,7 @@ export default async function ItemsListPage({
               model: it.model,
               serialNumber: it.serialNumber,
               status: it.status,
-              auditState: it.status === "RETIRED" ? null : auditState(auditMap.get(it.id) ?? null, now),
+              auditState: it.status === "RETIRED" ? null : auditState(it.lastAuditedAt, now),
             }))}
             isAdmin={isAdmin}
             q={q ?? ""}

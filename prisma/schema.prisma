@@ -88,6 +88,11 @@ model Item {
   transferItems TransferItem[]
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
+  // Denormalized MAX(ItemAudit.createdAt), maintained by recordAudit. Lets the
+  // /items list ORDER BY audit recency (= audit-status severity) server-side:
+  // auditState itself is derived/time-dependent and not stored, so it can't be an
+  // ORDER BY, but this column can. Null = never audited (sorts last, both dirs).
+  lastAuditedAt DateTime?
 
   serviceQueueItem ServiceQueueItem?
   edits            ItemEdit[]
@@ -95,6 +100,8 @@ model Item {
 
   // The /items list sorts by createdAt desc on every load (unbounded today).
   @@index([createdAt])
+  // Audit-status sort on /items: ORDER BY lastAuditedAt (nulls last).
+  @@index([lastAuditedAt])
   // Trigram GIN for the public, per-keystroke serial search (searchItemsBySerial),
   // which is `ILIKE '%q%'` — a leading wildcard a B-tree can't serve. Needs pg_trgm.
   @@index([serialNumber(ops: raw("gin_trgm_ops"))], type: Gin, map: "Item_serialNumber_trgm_idx")
