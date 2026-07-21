@@ -3,6 +3,18 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-07-21
+
+### Changed
+- **"Needs service?" is now DCSIM-recipient only.** On the hand-receipt builder,
+  the per-item "Needs service?" control (the whole Service column) appears only
+  when the recipient's "This side is DCSIM" box is checked — the service queue is
+  for equipment coming in to the desk, not kit issued to an outside customer.
+  Uncheck it and the column disappears (any in-progress selections are dropped).
+  Enforced server-side too: `createReceiptAction` ignores any `service[...]`
+  selections for a non-DCSIM recipient, so they can't be submitted out of band.
+  Flagging service from the item detail page is unchanged.
+
 ## 2026-07-20
 
 ### Security

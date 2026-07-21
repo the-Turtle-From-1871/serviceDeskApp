@@ -474,7 +474,13 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures }: 
         )}
         <div className="table-wrap">
           <table className="table">
-            <thead><tr><th>#</th><th>Item</th><th>Serial</th><th>Service</th><th>Auth</th><th>Issued</th><th></th></tr></thead>
+            {/* The "Service" column (per-item "Needs service?") is only offered
+                when the RECIPIENT is DCSIM — the queue is for kit coming in to
+                the desk, not equipment issued to an outside customer. Header and
+                cells share the same `receiverIsDcsim` gate so the column appears
+                and disappears as one unit; createReceiptAction drops any service
+                selections for a non-DCSIM recipient too, so this isn't UI-only. */}
+            <thead><tr><th>#</th><th>Item</th><th>Serial</th>{receiverIsDcsim && <th>Service</th>}<th>Auth</th><th>Issued</th><th></th></tr></thead>
             <tbody>
               {lines.map((ln, i) => (
                 <Fragment key={`${ln.make} ${ln.model}`}>
@@ -503,7 +509,7 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures }: 
                         {ln.serials[k]}
                         {holderWarning(itemId) && <span className="subtle">{holderWarning(itemId)}</span>}
                       </td>
-                      <td className="is-stacked" data-label="Service"><ServiceControls itemId={itemId} /></td>
+                      {receiverIsDcsim && <td className="is-stacked" data-label="Service"><ServiceControls itemId={itemId} /></td>}
                       {k === 0 && (
                         <>
                           {/* rowSpan stays. The quantities are per LINE, not per serial —

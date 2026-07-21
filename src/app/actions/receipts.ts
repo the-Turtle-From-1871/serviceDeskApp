@@ -54,9 +54,15 @@ export async function createReceiptAction(_prev: unknown, formData: FormData) {
   // [Service Queue] Parse per-item "Needs service?" selections and constrain
   // them to items actually on this receipt (ignore any stray itemIds that
   // showed up in the service[...] form keys but weren't submitted as items).
+  //
+  // Gated on a DCSIM recipient: "Needs service?" is only offered on the builder
+  // when the recipient is DCSIM (the queue is for kit coming in to the desk).
+  // The UI hides it for a non-DCSIM recipient; dropping the selections here too
+  // means a crafted POST can't enqueue service against an outside recipient.
   const receiptItemIds = new Set(parsed.data.itemIds);
   const serviceMap = new Map(
-    [...parseServiceMap(formData)].filter(([itemId]) => receiptItemIds.has(itemId)),
+    (parsed.data.receiver.isDcsim ? [...parseServiceMap(formData)] : [])
+      .filter(([itemId]) => receiptItemIds.has(itemId)),
   );
 
   // Validate up front — OTHER requires a non-empty note — so a bad selection

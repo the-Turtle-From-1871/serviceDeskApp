@@ -335,6 +335,7 @@ describe("ReceiptBuilderForm — service flags survive a sibling's removal", () 
   it("keeps the surviving item's flag when the first item of its line is removed", async () => {
     const user = userEvent.setup();
     renderForm(undefined, TWO_SAME);
+    await user.click(dcsimBox("Recipient")); // service flags only render for a DCSIM recipient
 
     const flags = () => screen.getAllByRole("checkbox", { name: /Needs service/i });
     expect(flags()).toHaveLength(2);
@@ -351,17 +352,39 @@ describe("ReceiptBuilderForm — service flags survive a sibling's removal", () 
   it("posts the flag under the surviving item's id", async () => {
     const user = userEvent.setup();
     renderForm(undefined, TWO_SAME);
+    await user.click(dcsimBox("Recipient")); // service flags only render for a DCSIM recipient
 
     await user.click(screen.getAllByRole("checkbox", { name: /Needs service/i })[1]);
     await user.click(screen.getByRole("button", { name: /Remove Dell L5420, serial SN1/i }));
     await fillParty(user, "Sender");
-    await fillParty(user, "Recipient");
+    // A DCSIM recipient has a single "DCSIM technician name" field (no rank/unit/
+    // contact/email) and signs via TechnicianSignatureField, not fillParty.
+    await user.type(party("Recipient").getByLabelText("DCSIM technician name"), "SGT Tech");
+    await user.click(screen.getByRole("button", { name: "dcsim-draw" }));
     await user.click(screen.getByRole("button", { name: /Create hand receipt/i }));
     await waitFor(() => expect(createReceiptAction).toHaveBeenCalled());
 
     const posted = createReceiptAction.mock.calls[0][1] as FormData;
     expect(posted.get("service[i2][needs]")).toBe("on");
     expect(posted.get("service[i1][needs]")).toBeNull();
+  });
+});
+
+describe("ReceiptBuilderForm — 'Needs service?' is DCSIM-recipient only", () => {
+  it("hides the Service column until the recipient is DCSIM, and again when unchecked", async () => {
+    const user = userEvent.setup();
+    renderForm(); // single item; recipient defaults to non-DCSIM
+
+    expect(screen.queryByRole("columnheader", { name: "Service" })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: /Needs service/i })).toBeNull();
+
+    await user.click(dcsimBox("Recipient"));
+    expect(screen.getByRole("columnheader", { name: "Service" })).toBeDefined();
+    expect(screen.getByRole("checkbox", { name: /Needs service/i })).toBeDefined();
+
+    await user.click(dcsimBox("Recipient")); // back off — column disappears again
+    expect(screen.queryByRole("columnheader", { name: "Service" })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: /Needs service/i })).toBeNull();
   });
 });
 

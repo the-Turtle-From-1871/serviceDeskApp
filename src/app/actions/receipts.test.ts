@@ -175,3 +175,43 @@ describe("createReceiptAction — DCSIM recipient signature", () => {
     }));
   });
 });
+
+describe("createReceiptAction — 'Needs service?' is DCSIM-recipient only", () => {
+  it("enqueues a per-item service request when the recipient is DCSIM", async () => {
+    const fd = makeFormData({
+      receiverIsDcsim: "on",
+      receiverName: "DCSIM Tech",
+      receiverSignature: DRAWN_SIG,
+      "service[item-1][needs]": "on",
+      "service[item-1][type]": "REIMAGE",
+    });
+
+    const res = await createReceiptAction(undefined, fd);
+
+    expect(res).toEqual({ receiptNumber: "HR-000001" });
+    expect(upsertServiceRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ itemId: "item-1", serviceType: "REIMAGE" }),
+    );
+  });
+
+  it("drops service selections when the recipient is NOT DCSIM, still creating the receipt", async () => {
+    // Simulates a crafted POST: service[...] fields present on a non-DCSIM
+    // receipt (the builder never renders them). The receipt is still created,
+    // but nothing is enqueued.
+    const fd = makeFormData({
+      receiverName: "Jane Doe",
+      receiverRank: "SGT",
+      receiverUnit: "B Co",
+      receiverContact: "808",
+      receiverEmail: "jd@u.mil",
+      receiverSignature: DRAWN_SIG,
+      "service[item-1][needs]": "on",
+      "service[item-1][type]": "REIMAGE",
+    });
+
+    const res = await createReceiptAction(undefined, fd);
+
+    expect(res).toEqual({ receiptNumber: "HR-000001" });
+    expect(upsertServiceRequest).not.toHaveBeenCalled();
+  });
+});
