@@ -18,6 +18,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   item writes.
 
 ### Added
+- **Cryptographically sealed asset handoff.** Every hand receipt is now sealed at
+  creation with an Ed25519 signature over a canonical manifest of the handoff
+  (receipt number, items, recipient details + signature, acting technician, and a
+  server timestamp), stored on the receipt. Admins get a **Verify seal** button on
+  the receipt page that re-derives the manifest and reports **Valid / Tampered /
+  Unsealed / Can't-verify / Not-found** — making after-the-fact edits to a receipt
+  detectable (non-repudiation). Sealing is best-effort: if the signing key isn't
+  configured, receipts are still created, just unsealed.
 - **App Router error boundaries.** `error.tsx` / not-found handling so runtime
   failures render a graceful boundary instead of a broken page.
 - **CSV import size guard.** The item-import form now rejects files over 5 MB up
@@ -68,6 +76,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   and `Item.serialNumber` (applied to dev/test/prod). The citext `serialNumber`
   search casts `"serialNumber"::text ILIKE …` in a parameterized `$queryRaw` so
   it actually uses the trigram index.
+- New env var **`SIGNING_PRIVATE_KEY`** (Ed25519 PKCS#8 PEM) signs receipt seals.
+  Generate a keypair:
+  `node -e "const {generateKeyPairSync}=require('crypto');const {privateKey,publicKey}=generateKeyPairSync('ed25519');console.log(privateKey.export({type:'pkcs8',format:'pem'}));console.log(publicKey.export({type:'spki',format:'pem'}))"`
+  Set the private key in `.env.local` (one line, `\n`-escaped) for dev and in Vercel
+  (multi-line, as-is) for prod — use separate keys. The public key for verification
+  is derived from the private key at runtime, so there is no `SIGNING_PUBLIC_KEY`
+  var; keep the public key only if you later want offline/external verification.
+  Migration `20260720210000_transfer_crypto_seal` adds the `cryptoSignature` and
+  `sealedAt` columns (nullable, additive — no backfill).
 
 ## 2026-07-17
 
