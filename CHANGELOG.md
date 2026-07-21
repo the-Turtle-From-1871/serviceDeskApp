@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## 2026-07-21
 
 ### Changed
+- **Admin navigation consolidated into the Dashboard.** The admin header dropped
+  from eight items to four (`Search · Items · Dashboard · Account`): the
+  **Queue**, **Users**, and **Audit** sections and the **New item** action moved
+  off the top nav into a **Manage** section on the Admin dashboard, which now
+  serves as the admin hub. Those routes are unchanged and still directly
+  reachable; the "Dashboard" link now stays highlighted across the whole admin
+  area. USER and logged-out navigation are unchanged.
 - **"Needs service?" is now DCSIM-recipient only.** On the hand-receipt builder,
   the per-item "Needs service?" control (the whole Service column) appears only
   when the recipient's "This side is DCSIM" box is checked — the service queue is
