@@ -14,12 +14,29 @@ export function recordAudit(input: RecordAuditInput): Promise<ItemAudit> {
   return prisma.itemAudit.create({ data: input });
 }
 
-// All audits for an item, newest first, for the detail-page history log.
-export function getAuditsForItem(itemId: string): Promise<ItemAudit[]> {
+// One row of the detail-page audit history log. The signature IMAGE is
+// deliberately absent — it's a large blob fetched on demand (getAuditSignature)
+// so it isn't shipped to every viewer of the item page.
+export type AuditLogRow = { id: string; signerName: string; createdAt: Date };
+
+// All audits for an item, newest first, for the detail-page history log. Selects
+// only the columns the log renders (no signature blob — see getAuditSignature).
+export function getAuditsForItem(itemId: string): Promise<AuditLogRow[]> {
   return prisma.itemAudit.findMany({
     where: { itemId },
     orderBy: { createdAt: "desc" },
+    select: { id: true, signerName: true, createdAt: true },
   });
+}
+
+// One audit's signature image, fetched on demand so the detail-page history log
+// doesn't ship every signature blob to every viewer. Null if the audit is gone.
+export async function getAuditSignature(auditId: string): Promise<string | null> {
+  const row = await prisma.itemAudit.findUnique({
+    where: { id: auditId },
+    select: { signatureImage: true },
+  });
+  return row?.signatureImage ?? null;
 }
 
 // Newest audit date per item, for the list view. One grouped query; skips items

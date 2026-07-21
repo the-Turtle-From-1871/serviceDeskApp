@@ -19,6 +19,7 @@ import { listSignatures } from "@/modules/signatures/signatures.service";
 import { auditState, auditStateDisplay } from "@/modules/audit/audit.status";
 import { AuditLight } from "@/components/AuditLight";
 import { AuditControls } from "./AuditControls";
+import { AuditSignatureReveal } from "./AuditSignatureReveal";
 import { DueBadge } from "@/components/DueBadge";
 
 export default async function PublicItemPage({ params }: { params: Promise<{ itemId: string }> }) {
@@ -159,8 +160,9 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
                 <ul className="stack-sm">
                   {audits.map((a) => (
                     <li key={a.id} className="row" style={{ gap: 8, alignItems: "center" }}>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={a.signatureImage} alt={`Signature of ${a.signerName}`} className="sig-preview" />
+                      {/* Signature hidden by default and fetched on demand — the
+                          blob is never shipped in this page's payload. */}
+                      <AuditSignatureReveal auditId={a.id} signerName={a.signerName} />
                       <span>{a.signerName} · {formatDateTimeHST(a.createdAt)}</span>
                     </li>
                   ))}
