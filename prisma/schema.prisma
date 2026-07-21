@@ -140,6 +140,16 @@ model Transfer {
 
   receiverSignature String
 
+  // Ed25519 signature (base64) over the canonical handoff manifest, produced at
+  // creation. Null when unsealed: pre-existing rows, or best-effort failures when
+  // SIGNING_PRIVATE_KEY is absent/invalid. Verified via verifyReceiptSealAction.
+  cryptoSignature String?
+
+  // The exact server timestamp fed into the signed manifest. Persisted (not
+  // reusing createdAt, whose DB default stamps a hair later) so the signed bytes
+  // can be reproduced for verification. timestamp(3) round-trips toISOString().
+  sealedAt DateTime?
+
   createdByUser   User?   @relation("CreatedTransfers", fields: [createdByUserId], references: [id])
   createdByUserId String?
 
