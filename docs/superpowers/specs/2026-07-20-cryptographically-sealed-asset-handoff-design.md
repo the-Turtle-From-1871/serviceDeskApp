@@ -9,31 +9,42 @@
 Give each completed hand receipt a tamper-evident, cryptographically verifiable
 seal so that "who handed off what, to whom, signed by which recipient, recorded
 by which technician, at what instant" cannot later be altered in the database
-without detection. This delivers **non-repudiation** for asset handoffs.
+without detection — and give admins an in-app way to **verify** that seal on
+demand. Together this delivers **non-repudiation** for asset handoffs.
 
 A seal is an **Ed25519 digital signature** over a canonical manifest of the
 handoff, produced server-side at the moment the receipt (and its recipient
-signature) is created, and stored on the `Transfer` record.
+signature) is created, and stored on the `Transfer` record. Verification
+recomputes the same canonical manifest from the persisted row and checks the
+signature.
 
 ## 2. Scope
 
 ### In scope
 - New nullable columns on `Transfer`: `cryptoSignature`, `sealedAt`.
-- New server-only utility `src/lib/crypto.ts` that produces the seal.
+- New server-only utility `src/lib/crypto.ts`: canonicalize + **sign** + **verify**.
+- New server-only domain module `src/modules/transfers/seal.ts`: the single
+  shared manifest builder used by both signing and verifying.
 - Wiring the seal into `createTransfer` (the one place a receipt + recipient
   signature is persisted).
+- **Admin-only in-app verification:** a server action + a "Verify seal" control
+  on the receipt detail page returning Valid / Tampered / Unsealed / Can't-verify.
 - Environment variable `SIGNING_PRIVATE_KEY` (Ed25519 PKCS#8 PEM).
-- Tests (unit + integration).
+- Tests (unit + integration + action).
 - Documentation: `CHANGELOG.md`, `README.md`, `.env.example`.
 
 ### Out of scope (documented follow-ups)
-- **Verification endpoint / UI.** The seal is generated and stored now; a
-  route/CLI that re-derives the manifest and calls `crypto.verify(...)` against
-  a `SIGNING_PUBLIC_KEY` is a separate change. The public key is noted in the
-  README so ops can retain it, but the app does not read it yet.
 - **Sealing returns or audits.** `ReturnTransaction` and `ItemAudit` also carry
-  signatures; sealing them can reuse `crypto.ts` later. Not part of this change.
-- **Key rotation / multiple key versions.** Single active key for now.
+  signatures; sealing them can reuse `crypto.ts` + a sibling manifest builder
+  later. Not part of this change.
+- **Key rotation / multiple key versions.** Single active key for now; the seal
+  format has no key-id. Rotation is a later change.
+- **Offline / external verification tooling.** In-app admin verification is
+  included; a standalone CLI an outside auditor runs with only the public key is
+  a follow-up. (The public key can be derived from the private key or exported
+  from it, so nothing here blocks that later.)
+- **Exposing the seal on public surfaces.** `cryptoSignature` / `sealedAt` are
+  never added to public/list/search selects.
 
 ## 3. Background — how a receipt is actually created
 
@@ -42,32 +53,28 @@ the hand receipt. It is created in one shot:
 
 `createReceiptAction` (`src/app/actions/receipts.ts`, gated by `requireUser()`)
 → `createTransfer` (`src/modules/transfers/transfers.service.ts:21`), which runs
-a single `prisma.$transaction` that:
-
-1. loads + validates the items,
-2. groups them into lines server-side,
-3. draws the next `receiptNumber` from a sequence,
-4. `tx.transfer.create({...})` with `receiverSignature` and
-   `createdByUserId` inline, `status: "OPEN"`.
+a single `prisma.$transaction` that loads + validates items, groups them into
+lines server-side, draws the next `receiptNumber` from a sequence, and
+`tx.transfer.create({...})` with `receiverSignature` and `createdByUserId`
+inline, `status: "OPEN"`.
 
 `status` starts `OPEN`; `CLOSED` happens later on full **return**, not on
 signing. So "where the recipient signature is saved" = **receipt creation**, and
 that is where the seal is generated.
 
-### Authorization (unchanged)
-Receipt creation is gated by `requireUser()`, and per CLAUDE.md rule #1 a
-standard `USER` (not only `ADMIN`) may create receipts. The seal is generated
-for **every** receipt regardless of role; the acting account is already captured
-as `createdByUserId: user.id` and is bound into the signed manifest. We do **not**
-switch this to `requireAdmin()` — that would break the documented USER
-capability.
+### Authorization (unchanged for creation)
+Receipt creation stays gated by `requireUser()`; per CLAUDE.md rule #1 a standard
+`USER` (not only `ADMIN`) may create receipts. The seal is generated for **every**
+receipt regardless of role; the acting account is captured as
+`createdByUserId: user.id` and bound into the signed manifest. **Verification**,
+by contrast, is a privileged audit action and is gated by `requireAdmin()`.
 
 ### Relation (unchanged)
 `Transfer.createdByUser` / `createdByUserId` already links the acting technician
 and stays **nullable**, matching the codebase pattern (`ItemEdit`,
-`ReturnTransaction`, `Contact`) where history survives the acting account being
-deleted. We do **not** make it "strict"/non-null; non-repudiation comes from the
-signed `actingUserId` inside the manifest, not the FK's nullability.
+`ReturnTransaction`, `Contact`) where history survives account deletion. We do
+**not** make it non-null; non-repudiation comes from the signed `actingUserId`
+inside the manifest, not the FK's nullability.
 
 ## 4. Design
 
@@ -76,31 +83,30 @@ signed `actingUserId` inside the manifest, not the FK's nullability.
 ```prisma
 // Ed25519 signature (base64) over the canonical handoff manifest, produced at
 // creation. Null when unsealed: pre-existing rows, or best-effort failures when
-// SIGNING_PRIVATE_KEY is absent/invalid. Verified later against SIGNING_PUBLIC_KEY.
+// SIGNING_PRIVATE_KEY is absent/invalid. Verified via verifyReceiptSealAction.
 cryptoSignature String?
 
 // The exact server timestamp fed into the signed manifest. Persisted (rather
 // than reusing createdAt, which the DB default stamps a hair later) so the
-// signed bytes can be reproduced for verification.
+// signed bytes can be reproduced for verification. Prisma DateTime => timestamp(3),
+// millisecond precision, which round-trips through toISOString() exactly.
 sealedAt DateTime?
 ```
 
 Both nullable → the migration is a plain additive `ALTER TABLE ... ADD COLUMN`,
-no backfill, safe on the 1,200+ row `Transfer` table. No index needed (neither
-column is filtered or sorted on).
+no backfill, safe on the 1,200+ row `Transfer` table. No index (neither column
+is filtered or sorted on).
 
-### 4.2 `src/lib/crypto.ts` (server-only)
+### 4.2 `src/lib/crypto.ts` (server-only, generic — knows nothing about transfers)
 
 ```ts
 import "server-only";
-import { sign } from "node:crypto";
+import { sign, verify, createPublicKey } from "node:crypto";
 
-/**
- * Deterministic JSON: recursively sort object keys so the signed byte string is
- * reproducible for verification. Arrays keep their order (item order is
- * server-derived and stable). Primitives use JSON.stringify for correct escaping.
- */
-function canonicalize(value: unknown): string {
+/** Deterministic JSON: recursively sort object keys so the signed byte string is
+ *  reproducible. Arrays keep their order — CALLERS must pre-sort arrays whose
+ *  element order isn't already deterministic (see seal.ts item sort). */
+export function canonicalize(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalize).join(",")}]`;
   if (value && typeof value === "object") {
     const keys = Object.keys(value as Record<string, unknown>).sort();
@@ -111,181 +117,261 @@ function canonicalize(value: unknown): string {
   return JSON.stringify(value);
 }
 
-/**
- * Produce an Ed25519 seal (base64) over the canonical manifest, signed with
- * SIGNING_PRIVATE_KEY (Ed25519 PKCS#8 PEM). Best-effort: returns null and logs
- * server-side if the key is absent or signing throws, so sealing never blocks a
- * handoff. Ed25519 hashes internally — there is no separate SHA-256 step and the
- * algorithm arg to sign() is null.
- */
+function privateKeyPem(): string | null {
+  return process.env.SIGNING_PRIVATE_KEY?.replace(/\\n/g, "\n") ?? null;
+}
+
+/** Ed25519 seal (base64) over the canonical manifest. Best-effort: returns null
+ *  + logs if the key is absent or signing throws, so sealing never blocks a
+ *  handoff. Ed25519 hashes internally — algorithm arg is null, no separate SHA-256. */
 export function generateCryptographicSeal(manifestData: object): string | null {
-  const pem = process.env.SIGNING_PRIVATE_KEY?.replace(/\\n/g, "\n");
-  if (!pem) {
-    console.error("[crypto] SIGNING_PRIVATE_KEY is not set; receipt will be stored unsealed.");
-    return null;
-  }
+  const pem = privateKeyPem();
+  if (!pem) { console.error("[crypto] SIGNING_PRIVATE_KEY unset; storing receipt unsealed."); return null; }
   try {
-    const canonical = canonicalize(manifestData);
-    return sign(null, Buffer.from(canonical, "utf8"), pem).toString("base64");
-  } catch (err) {
-    console.error("[crypto] failed to generate seal; storing receipt unsealed:", err);
-    return null;
+    return sign(null, Buffer.from(canonicalize(manifestData), "utf8"), pem).toString("base64");
+  } catch (err) { console.error("[crypto] seal generation failed; storing unsealed:", err); return null; }
+}
+
+/** Verify a base64 Ed25519 seal against the canonical manifest. Public key is
+ *  DERIVED from SIGNING_PRIVATE_KEY (createPublicKey) — no separate env var.
+ *  Throws CryptoKeyUnavailableError when no key is configured (caller maps that
+ *  to "can't verify"); returns false for a genuine signature mismatch (tamper). */
+export class CryptoKeyUnavailableError extends Error {}
+export function verifyCryptographicSeal(manifestData: object, signatureBase64: string): boolean {
+  const pem = privateKeyPem();
+  if (!pem) throw new CryptoKeyUnavailableError("SIGNING_PRIVATE_KEY unset");
+  const publicKey = createPublicKey(pem); // Ed25519 public half of the pair
+  return verify(null, Buffer.from(canonicalize(manifestData), "utf8"), publicKey, Buffer.from(signatureBase64, "base64"));
+}
+```
+
+Notes: `import "server-only"` satisfies CLAUDE.md rule #4; vitest aliases
+`server-only` to an empty module so tests import it fine. The `.replace` handles
+single-line `.env` PEMs and is a no-op on Vercel's real newlines. Distinguishing
+a thrown `CryptoKeyUnavailableError` (misconfig) from a `false` return (tamper)
+is what lets the UI say "can't verify" vs "TAMPERED".
+
+### 4.3 `src/modules/transfers/seal.ts` (server-only) — the ONE manifest builder
+
+This is the load-bearing anti-drift piece: signing and verifying MUST build
+byte-identical manifests, so both go through here.
+
+```ts
+import "server-only";
+
+export type ManifestInput = {
+  receiptNumber: string;
+  actingUserId: string | null;
+  sealedAt: Date;
+  receiver: { isDcsim: boolean; name: string; rank: string | null; unit: string | null; contact: string | null; email: string | null };
+  receiverSignature: string;
+  items: { serialNumber: string; make: string; model: string }[];
+};
+
+/** Normalized, order-stable manifest. Items are sorted by serialNumber (unique
+ *  per receipt => total order) so the array is deterministic regardless of DB
+ *  row order. canonicalize() then sorts object keys. */
+export function buildHandoffManifest(input: ManifestInput) {
+  return {
+    receiptNumber: input.receiptNumber,
+    actingUserId: input.actingUserId,
+    sealedAt: input.sealedAt.toISOString(),
+    receiver: { ...input.receiver },
+    receiverSignature: input.receiverSignature,
+    items: [...input.items].sort((a, b) => a.serialNumber.localeCompare(b.serialNumber)),
+  };
+}
+
+/** Reconstruct the manifest from a persisted receipt (Transfer + lines + items).
+ *  Field mapping MUST mirror what createTransfer passed in. Returns null if the
+ *  row was never sealed (no sealedAt). */
+export function manifestFromTransfer(t: ReceiptWithLines) {
+  if (!t.sealedAt) return null;
+  return buildHandoffManifest({
+    receiptNumber: t.receiptNumber,
+    actingUserId: t.createdByUserId ?? null,
+    sealedAt: t.sealedAt,
+    receiver: { isDcsim: t.receiverIsDcsim, name: t.receiverName, rank: t.receiverRank ?? null, unit: t.receiverUnit ?? null, contact: t.receiverContact ?? null, email: t.receiverEmail ?? null },
+    receiverSignature: t.receiverSignature,
+    items: t.lines.flatMap((ln) => ln.items.map((it) => ({ serialNumber: it.serialNumber, make: ln.make, model: ln.model }))),
+  });
+}
+```
+
+### 4.4 Wiring into `createTransfer` (sign)
+
+Inside the existing `$transaction`, right before `tx.transfer.create`, assemble
+the manifest input from the same in-memory data already used to build the rows:
+
+```ts
+const sealedAt = new Date();
+const manifest = buildHandoffManifest({
+  receiptNumber, actingUserId: createdByUserId ?? null, sealedAt,
+  receiver: { isDcsim: receiver.isDcsim, name: receiver.name, rank: receiver.rank ?? null, unit: receiver.unit ?? null, contact: receiver.contact ?? null, email: receiver.email ?? null },
+  receiverSignature,
+  items: grouped.flatMap((g) => g.itemIds.map((id, i) => ({ serialNumber: g.serials[i], make: g.make, model: g.model }))),
+});
+const cryptoSignature = generateCryptographicSeal(manifest);
+```
+
+Then add `sealedAt` and `cryptoSignature` to the `data` of
+`tx.transfer.create({...})`. No new query, no loop, no N+1 — pure in-memory work
+inside the txn that already runs. `sealedAt` is always stamped; `cryptoSignature`
+may be null under best-effort. `createReceiptAction` is unchanged.
+
+### 4.5 Verification action (`src/app/actions/receipts.ts` or a sibling)
+
+```ts
+"use server";
+// verifyReceiptSealAction(receiptNumber): admin-only integrity check.
+export async function verifyReceiptSealAction(receiptNumber: string):
+  Promise<{ status: "VALID" | "TAMPERED" | "UNSEALED" | "CANNOT_VERIFY"; sealedAt?: string }> {
+  await requireAdmin();                                   // privileged; re-reads role/isActive
+  const t = await getTransferByReceiptNumber(receiptNumber);
+  if (!t) return { status: "UNSEALED" };                  // nothing to verify (also 404-ish)
+  if (!t.cryptoSignature || !t.sealedAt) return { status: "UNSEALED" };
+  const manifest = manifestFromTransfer(t);               // non-null here (sealedAt present)
+  try {
+    const ok = verifyCryptographicSeal(manifest!, t.cryptoSignature);
+    return { status: ok ? "VALID" : "TAMPERED", sealedAt: t.sealedAt.toISOString() };
+  } catch (e) {
+    if (e instanceof CryptoKeyUnavailableError) return { status: "CANNOT_VERIFY" };
+    console.error("[verifyReceiptSealAction] verify failed:", e);
+    return { status: "CANNOT_VERIFY" };
   }
 }
 ```
 
-Notes:
-- `import "server-only"` satisfies CLAUDE.md rule #4 (blocks client bundling).
-  The vitest config aliases `server-only` to an empty module, so tests import it
-  fine.
-- `.replace(/\\n/g, "\n")` un-escapes single-line `.env` PEMs; a no-op on
-  already-multiline values (Vercel).
-- Returns `string | null` — the best-effort contract end to end. The caller
-  stores whatever it returns.
+Status meanings surfaced to the admin:
+- **VALID** — seal matches; the sealed fields are intact.
+- **TAMPERED** — signature present but does not match the current row; a sealed
+  field was altered in the DB. (Loud, red.)
+- **UNSEALED** — no seal on this receipt (predates the feature, or was created
+  while the key was unset). Neutral, not an error.
+- **CANNOT_VERIFY** — server has no `SIGNING_PRIVATE_KEY` configured, so no key to
+  derive a verifier from. Ops/config issue, not a receipt problem.
 
-### 4.3 The manifest (what gets signed)
+### 4.6 Verification UI (receipt detail page)
 
-Built inside `createTransfer` once all fields are known. Every field is
-server-derived — nothing trusts client-posted identity/signatures (signer name +
-blob are already resolved server-side upstream in `createReceiptAction`;
-`actingUserId` comes from the session):
+The receipt page (`src/app/receipts/[receiptNumber]/page.tsx`) already computes
+`isAdmin` from the session and renders admin-only controls
+(`ReceiptDueAtControls`, "Process return") — the seal control follows that exact
+pattern:
 
-```ts
-const manifest = {
-  receiptNumber,                     // server sequence, e.g. "HR-000123"
-  actingUserId: createdByUserId ?? null,
-  sealedAt: sealedAt.toISOString(),  // server timestamp, also persisted
-  receiver: {
-    isDcsim: receiver.isDcsim,
-    name: receiver.name,
-    rank: receiver.rank ?? null,
-    unit: receiver.unit ?? null,
-    contact: receiver.contact ?? null,
-    email: receiver.email ?? null,
-  },
-  receiverSignature,                 // the recipient's PNG data URL
-  items: grouped.flatMap((g) =>
-    g.itemIds.map((id, i) => ({ serialNumber: g.serials[i], make: g.make, model: g.model })),
-  ),
-};
-```
+- New client component `ReceiptSealVerify` (sibling of `ReceiptDueAtControls`):
+  a **"Verify seal"** button that calls `verifyReceiptSealAction(receiptNumber)`
+  and renders the returned status as a badge (VALID = green, TAMPERED = red,
+  UNSEALED = subtle/grey, CANNOT_VERIFY = warning), with the `sealedAt` timestamp
+  on success.
+- Rendered only when `isAdmin` (UI convenience; the action re-checks
+  `requireAdmin()` as the authoritative gate — the page itself is public and
+  logged-out/USER visitors simply never see the control).
+- **Placement:** receipt detail page only in this change. The same
+  action + component can later be dropped onto the admin item view; that reuse is
+  a follow-up, not part of this scope.
 
-### 4.4 Wiring into `createTransfer`
+### 4.7 Failure behavior (confirmed decisions)
 
-Inside the existing `$transaction`, right before `tx.transfer.create`:
+- **Signing:** missing/invalid key or error → receipt still saves,
+  `cryptoSignature` null, logged server-side. Best-effort; never blocks a handoff.
+- **Verifying:** missing key → `CANNOT_VERIFY` (not an exception to the user);
+  signature mismatch → `TAMPERED`. Verification never mutates anything.
 
-```ts
-const sealedAt = new Date();
-const cryptoSignature = generateCryptographicSeal(manifest);
-```
-
-Then add both to the `data` of `tx.transfer.create({ data: { ... } })`:
-
-```ts
-sealedAt,
-cryptoSignature,           // string | null
-```
-
-No new query, no loop, no N+1 — it is pure in-memory work inside the txn that
-already runs. `sealedAt` is always stamped; `cryptoSignature` may be null under
-best-effort. `createReceiptAction` is unchanged.
-
-### 4.5 Failure behavior (confirmed decisions)
-
-- **Missing/invalid key or signing error →** receipt still saves,
-  `cryptoSignature` stays null, error logged server-side. Sealing never blocks a
-  technician handing off equipment. (Client sees no crypto-specific error;
-  matches CLAUDE.md rule #5.)
-- **Auth →** `requireUser()`, unchanged; seal generated for USER and ADMIN alike.
-
-### 4.6 Key management
+### 4.8 Key management
 
 - `SIGNING_PRIVATE_KEY` — Ed25519 **private** key, PKCS#8 PEM. Generate with:
   ```
   node -e "const {generateKeyPairSync}=require('crypto');const {privateKey,publicKey}=generateKeyPairSync('ed25519');console.log(privateKey.export({type:'pkcs8',format:'pem'}));console.log(publicKey.export({type:'spki',format:'pem'}))"
   ```
 - **Dev:** one-line, `\n`-escaped, double-quoted value in `.env.local` (gitignored).
-- **Prod (Vercel):** paste the multi-line PEM directly into the env var. Use a
-  **separate** key from dev; never commit either.
-- The matching **public** key is retained by ops for future verification
-  (`SIGNING_PUBLIC_KEY`); the app does not read it in this change.
+- **Prod (Vercel):** paste the multi-line PEM directly (BEGIN/END lines included).
+  Use a **separate** key from dev; never commit either.
+- **No `SIGNING_PUBLIC_KEY` env var** — in-app verification derives the public key
+  from the private key at runtime (`createPublicKey`), so the pair can never
+  drift. The exported public key is retained by ops only for future offline audit.
 
-## 5. Verification (future, out of scope)
-
-Given a stored `Transfer` row, rebuild the identical manifest from persisted
-fields (`receiptNumber`, `receiver*`, `receiverSignature`, `createdByUserId`,
-`sealedAt`, and the item serials/make/model from `TransferItem`), canonicalize
-it the same way, and run
-`crypto.verify(null, bytes, SIGNING_PUBLIC_KEY, Buffer.from(cryptoSignature, "base64"))`.
-Any DB alteration to the sealed fields flips the result to false — that is the
-tamper-evidence. This is exactly why `sealedAt` is persisted.
-
-## 6. Testing
+## 5. Testing
 
 Test DB is shared and serial (`fileParallelism: false`); env loads from
-`.env.test`. Tests must **not** depend on a key being present in `.env.test` —
-they manage `process.env.SIGNING_PRIVATE_KEY` themselves. Because the util reads
-the env var at call time (not module load), set/unset per test works.
+`.env.test`. Tests manage `process.env.SIGNING_PRIVATE_KEY` themselves (the util
+reads it at call time, so per-test set/unset works) and restore it afterward so
+key presence never leaks between tests.
 
 ### Unit — `src/lib/crypto.test.ts`
-- Generate an ephemeral Ed25519 keypair in-test; set `SIGNING_PRIVATE_KEY`.
-  Assert `generateCryptographicSeal({...})` returns a base64 string that
-  `crypto.verify(null, canonicalBytes, publicKey, sig)` accepts.
-- Canonicalization is order-independent: two objects with the same entries in
-  different key orders produce the **same** seal.
-- Tamper: changing any manifest field produces a signature that fails verify.
-- Missing key → returns `null` (no throw). Restore env after each test.
+- Ephemeral Ed25519 keypair in-test → `generateCryptographicSeal` output verifies
+  via `verifyCryptographicSeal` (round-trip true).
+- Canonicalization order-independence: same entries, different key order → same seal.
+- Tamper: mutate any manifest field → `verifyCryptographicSeal` returns false.
+- Missing key: `generateCryptographicSeal` → null; `verifyCryptographicSeal` →
+  throws `CryptoKeyUnavailableError`.
+
+### Unit — `src/modules/transfers/seal.test.ts`
+- `buildHandoffManifest` sorts items by serialNumber → same seal regardless of
+  input item order.
+- `manifestFromTransfer` on a sealed row reproduces the exact manifest
+  `buildHandoffManifest` produced at creation (feed one into the other, assert seal equality).
 
 ### Integration — extend `src/modules/transfers/transfers.service.test.ts`
-- With an ephemeral `SIGNING_PRIVATE_KEY` set: `createTransfer(...)` stores a
-  non-null `cryptoSignature` and a `sealedAt`; re-deriving the manifest from the
-  persisted row verifies true against the ephemeral public key.
-- With `SIGNING_PRIVATE_KEY` unset: `createTransfer(...)` still succeeds, the
-  receipt exists, `cryptoSignature` is null, `sealedAt` is set.
-- Save/restore `process.env.SIGNING_PRIVATE_KEY` around these cases so key
-  presence never leaks between tests.
+- With an ephemeral key set: `createTransfer(...)` stores non-null
+  `cryptoSignature` + `sealedAt`; `manifestFromTransfer(persistedRow)` verifies
+  **true**.
+- Tamper end-to-end: after creation, `prisma.transfer.update` a sealed field
+  (e.g. `receiverName`) → verify returns **false** (→ TAMPERED).
+- No key at creation: `createTransfer(...)` still succeeds, `cryptoSignature`
+  null, `sealedAt` set.
 
-## 7. Documentation (same commit as code)
+### Action — `src/app/actions/receipts.test.ts` (or sibling)
+- `verifyReceiptSealAction` rejects non-admin / logged-out (`requireAdmin`).
+- Returns VALID for an intact sealed receipt, TAMPERED after a DB mutation,
+  UNSEALED for a null-signature row, CANNOT_VERIFY with the key unset.
 
-- **`CHANGELOG.md`** — under `## 2026-07-20`, an **Added** entry describing the
-  cryptographic non-repudiation seal on hand receipts, plus a **Notes**
-  subsection introducing the `SIGNING_PRIVATE_KEY` env var (Ed25519 PKCS#8 PEM,
-  generation command, optional/best-effort, prod-on-Vercel guidance).
-- **`README.md`** — add `SIGNING_PRIVATE_KEY` to the Environment-variables table
-  with a one-line purpose; note the seal is best-effort and the public key is
-  retained for future verification.
-- **`.env.example`** — add a commented, empty `SIGNING_PRIVATE_KEY=` entry with a
-  one-line generation hint (no real key).
+## 6. Documentation (same commit as code)
 
-## 8. Migration / ops notes
+- **`CHANGELOG.md`** — under `## 2026-07-20`: an **Added** entry for the seal +
+  admin verification workflow, and a **Notes** subsection for the
+  `SIGNING_PRIVATE_KEY` env var (Ed25519 PKCS#8 PEM, generation command,
+  best-effort/optional, prod-on-Vercel guidance, public key derived not stored).
+- **`README.md`** — add `SIGNING_PRIVATE_KEY` to the Environment-variables table;
+  note the seal is best-effort and verification is admin-only and derives the
+  public key from the private key (no separate var).
+- **`.env.example`** — commented, empty `SIGNING_PRIVATE_KEY=` with a one-line
+  generation hint (no real key). No `SIGNING_PUBLIC_KEY` entry.
+
+## 7. Migration / ops notes
 
 - Two nullable additive columns → author via
   `prisma migrate diff --from-config-datasource --to-schema ... --script` then
-  `prisma migrate deploy` (per repo constraint: `prisma migrate dev` cannot run
-  in this shell). No backfill; safe online `ADD COLUMN`.
-- Prod apply follows the existing manual-apply path (Supabase MCP + a
-  `_prisma_migrations` row with the CRLF sha256), same as prior migrations.
-- **Ops action:** set `SIGNING_PRIVATE_KEY` in Vercel before/at deploy. If unset,
-  receipts are created **unsealed** (by design) until it is provided.
+  `prisma migrate deploy` (repo constraint: `prisma migrate dev` can't run in this
+  shell). No backfill; safe online `ADD COLUMN`.
+- Prod apply follows the existing manual path (Supabase MCP + a `_prisma_migrations`
+  row with the CRLF sha256), same as prior migrations.
+- **Ops action:** set `SIGNING_PRIVATE_KEY` in Vercel. If unset, receipts are
+  created **unsealed** and verification reports **CANNOT_VERIFY** (both by design)
+  until it is provided.
 
-## 9. Security considerations
+## 8. Security considerations
 
-- Private key only ever server-side (`server-only` util, env var); never bundled,
+- Private key only ever server-side (`server-only` utils, env var); never bundled,
   never logged (errors log a message, not the key).
 - Seal covers recipient PII, the signature image, acting user, receipt number,
   and timestamp — the fields that matter for repudiation disputes.
-- Does not change the accepted public-by-design exposure of receipts/items
-  (CLAUDE.md); the seal is additional metadata, and `cryptoSignature` /
-  `sealedAt` should **not** be added to any public select unless a verification
-  feature deliberately exposes them.
-- Best-effort sealing means absence of a seal is **not** proof of tampering (it
-  may just predate the key); verification treats null as "unsealed", not "forged".
+- Verification is `requireAdmin()`-gated and read-only; it exposes only a status
+  (+ sealedAt), never re-derives PII to the client. `cryptoSignature` / `sealedAt`
+  stay out of every public/list/search select.
+- Does not change the accepted public-by-design exposure of receipts/items; the
+  seal is additive integrity metadata.
+- Best-effort sealing means absence of a seal is **not** proof of tampering (may
+  predate the key). UNSEALED and TAMPERED are distinct statuses precisely so an
+  admin never confuses "never sealed" with "sealed then altered".
 
-## 10. Resolved decisions
+## 9. Resolved decisions
 
 - Ed25519 (not RSA-SHA256): modern, small keys, no padding pitfalls.
 - Best-effort sealing (not hard-fail).
-- `requireUser()` retained (not `requireAdmin()`).
+- `requireUser()` retained for creation; `requireAdmin()` for verification.
 - `createdByUser` stays nullable (not "strict").
-- Add `sealedAt` for verifiability (accepted extension beyond the single
+- `sealedAt` column added for verifiability (accepted extension beyond the single
   requested `cryptoSignature` field).
+- **Verification in scope:** admin-only, in-app, on the receipt detail page;
+  public key derived from the private key at runtime (no `SIGNING_PUBLIC_KEY`).
+- Single shared manifest builder (`seal.ts`) for sign + verify to prevent drift.
