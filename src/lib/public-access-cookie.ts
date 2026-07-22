@@ -1,4 +1,6 @@
-// EDGE-SAFE. Imported by src/proxy.ts (edge runtime) AND by Node server actions.
+// Zero imports; uses only Web Crypto globals (crypto.subtle, btoa, TextEncoder),
+// so it is safe to import from anywhere — the src/proxy.ts proxy (Node runtime
+// in Next 16) and Node server actions alike.
 // Web Crypto only — do NOT import bcrypt, Prisma, node:crypto, or server-only here.
 
 export const UNLOCK_MAX_AGE_SECONDS = 7 * 24 * 60 * 60; // 7 days
