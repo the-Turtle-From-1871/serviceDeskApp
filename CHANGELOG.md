@@ -10,6 +10,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Security
 - The previously open public surface (`/`, `/i/*`, `/receipts/*`, receipt PDFs, and the home search) is now behind the PIN when enabled, reducing casual PII enumeration. Enforcement is merged into the existing `src/proxy.ts` (Node runtime); it is a non-authz gate and does not alter existing role-based authorization or the proxy's pre-existing login gate for `/items`/`/admin/*`.
+- **Hardened the `?next=` redirect target on `/unlock` against open redirect.** `sanitizeNext` now also rejects raw control characters (tab, newline, CR, etc.) and embedded backslashes, closing a case where `?next=/%09/evil.com` could be browser-normalized into a protocol-relative `//evil.com` redirect after unlocking. Percent-encoded text (e.g. a literal `%09`) is unaffected — only raw control bytes are rejected.
+
+### Fixed
+- **PIN-unlock no longer crashes on a database error.** If the PIN check (`verifyPin`) throws (e.g. a transient DB error), `unlockAction` now returns a generic `"Something went wrong. Please try again."` message instead of an uncaught Server Action exception; the error is logged server-side for diagnosis.
+
+### Changed
+- **Proxy skips the unlock-cookie HMAC check when it can't affect the outcome.** On the public PII routes, the PIN-gate proxy now only verifies the signed unlock cookie when the gate is enabled *and* the visitor isn't already logged in — the same cases where `shouldAllowPublic` already allows access unconditionally. No behavior change, fewer crypto calls per request.
 
 ### Notes
 - **New table:** `PublicAccessSetting` (single row, bcrypt-hashed PIN). Migration `20260721170000_public_access_setting`. Apply with `prisma migrate deploy` locally; apply to prod via the Supabase MCP.
