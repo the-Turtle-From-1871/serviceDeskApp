@@ -10,9 +10,10 @@
 
 ## Global Constraints
 
-- **This is NOT the Next.js you know** (AGENTS.md): the `middleware` convention is **deprecated → renamed to `proxy`**. The file is `src/proxy.ts`, exports `proxy(request)` + `config` with `matcher`. Read `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md` before editing it.
-- **Edge safety:** `src/proxy.ts` and `src/lib/public-access-cookie.ts` run on the **edge runtime** — they must NOT import `bcryptjs`, Prisma, `node:crypto`, `server-only`, or `@/lib/public-access`. Use Web Crypto (`crypto.subtle`, `btoa`, `TextEncoder`) only.
-- **The proxy is NOT an authz boundary.** Do not move any `requireUser`/`requireAdmin` logic into it. All existing per-route authz stays exactly where it is. The proxy only gates the public PII surface behind the PIN.
+- **This is NOT the Next.js you know** (AGENTS.md): the `middleware` convention is **deprecated → renamed to `proxy`**. The file is `src/proxy.ts`, exports `proxy` + `config` with `matcher`. Read `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md` before editing it.
+- **`src/proxy.ts` ALREADY EXISTS and MUST be merged, not overwritten.** It is `export { auth as proxy } from "@/auth"` — the app's existing session-auth boundary (auth-gates `/items`, `/admin/*`, `/account`, … via a negative-lookahead matcher that excludes the public routes + login/privacy/terms/assets). Task 5 folds the PIN gate into this same file. Overwriting it would delete the auth boundary — a severe regression.
+- **Runtime:** Next 16 `proxy` runs on the **Node.js runtime** (the `runtime` option is not configurable and throws if set; edge is not available). So `src/proxy.ts` may freely import Node modules — this is why the existing `export { auth as proxy }` (which transitively pulls in Prisma/`pg`) bundles fine. `src/lib/public-access-cookie.ts` still uses only Web Crypto (`crypto.subtle`, `btoa`, `TextEncoder`) and imports nothing — a deliberate portability choice (also usable from Node), NOT a hard runtime requirement. Tasks 1–4 need no change.
+- **The proxy is NOT an authz boundary.** Do not move any `requireUser`/`requireAdmin` logic into it. All existing per-route authz stays exactly where it is. The proxy only (a) keeps the existing coarse login gate and (b) gates the public PII surface behind the PIN.
 - **Every Server Action starts with `requireUser()`/`requireAdmin()`** except the intentionally public `unlockAction` (which gates on the PIN itself).
 - **Secrets:** reuse `process.env.AUTH_SECRET` for cookie signing (already present). Never hardcode. Prod detection: `process.env.NODE_ENV === "production"`.
 - **Docs ship with the code** (CLAUDE.md non-negotiable): CLAUDE.md, CHANGELOG.md, README.md, `.env.example` are updated in this plan (Task 6), committed with the feature.
@@ -36,12 +37,12 @@
 - `src/app/admin/actions/public-access.ts` — `setPublicAccessPinAction`. (Task 4)
 - `src/app/admin/actions/public-access.test.ts` — unit tests. (Task 4)
 - `src/app/admin/PublicAccessPinForm.tsx` — client form for admin. (Task 4)
-- `src/proxy.ts` — the gate. (Task 5)
 - `prisma/migrations/20260721170000_public_access_setting/migration.sql` — DDL. (Task 1)
 
 **Modify:**
 - `prisma/schema.prisma` — add `PublicAccessSetting` model + `User` back-relation. (Task 1)
 - `src/app/admin/page.tsx` — add the "Public access PIN" section. (Task 4)
+- `src/proxy.ts` — **merge** the PIN gate into the app's existing proxy (do NOT overwrite it). (Task 5)
 - `CLAUDE.md`, `CHANGELOG.md`, `README.md`, `.env.example` — docs. (Task 6)
 
 ---
@@ -902,24 +903,29 @@ git commit -m "feat: add admin Public access PIN management"
 ## Task 5: The `proxy` gate + end-to-end verification
 
 **Files:**
-- Create: `src/proxy.ts`
+- Modify: `src/proxy.ts` (the app's existing proxy — MERGE, do not overwrite)
 
 **Interfaces:**
-- Consumes: `shouldAllowPublic`, `verifyUnlockValue`, `unlockCookieName`, `sanitizeNext` (Task 2); `getToken` (`next-auth/jwt`); `NextResponse`, `NextRequest` (`next/server`).
-- Produces: `proxy(request)` + `config` (Next.js reads these by convention; nothing imports them).
+- Consumes: `shouldAllowPublic`, `verifyUnlockValue`, `unlockCookieName`, `sanitizeNext` (Task 2); `auth` (`@/auth`, the existing Auth.js instance); `NextResponse` (`next/server`).
+- Produces: `proxy` (the `auth()`-wrapped handler) + `config.matcher` (Next.js reads these by convention; nothing imports them).
 
-- [ ] **Step 1: Read the Next 16 proxy doc**
+- [ ] **Step 1: Read the existing proxy AND the Next 16 proxy doc**
 
-Run: `sed -n '1,60p' node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md`
-Confirm: file is `proxy.ts` at project root or `src/`, exports `proxy` + `config.matcher`, runs on the edge runtime.
+Run: `cat src/proxy.ts` and `sed -n '1,60p;210,240p' node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md`
 
-- [ ] **Step 2: Write the proxy**
+Confirm and internalize:
+- The current `src/proxy.ts` is `export { auth as proxy } from "@/auth"` with a matcher that auth-gates everything EXCEPT a negative-lookahead exclusion list: `api/auth`, `api/cron`, `login`, `forgot-password`, `reset-password`, `privacy`, `terms`, `receipts/`, `i/`, `_next/static`, `_next/image`, `favicon.ico`, `wasm/`, and `$` (bare root). Those excluded paths are the app's public + asset surface.
+- Next 16 `proxy` runs on the **Node.js runtime**; the `runtime` option is not configurable (throws if set). So Node imports (Prisma via `@/auth`) are fine.
 
-Create `src/proxy.ts`:
+You are MERGING the PIN gate into this file — keeping the existing login-gate behavior for the currently-gated routes, and adding the PIN gate for the public routes.
+
+- [ ] **Step 2: Rewrite `src/proxy.ts` as the merged gate**
+
+Replace the entire contents of `src/proxy.ts` with:
 
 ```ts
-import { NextResponse, type NextRequest } from "next/server";
-import { getToken } from "next-auth/jwt";
+import { auth } from "@/auth";
+import { NextResponse } from "next/server";
 import {
   shouldAllowPublic,
   verifyUnlockValue,
@@ -927,45 +933,70 @@ import {
   sanitizeNext,
 } from "@/lib/public-access-cookie";
 
-// PUBLIC PIN GATE (NOT an authz boundary). Gates the unauthenticated PII surface
-// behind the shared 8-digit PIN. Real authz stays per-route (requireUser/
-// requireAdmin) — see CLAUDE.md. Edge runtime: DB/bcrypt are unavailable here,
-// so logged-in detection uses getToken (decodes the JWT, no DB) and the unlock
-// cookie is self-verifying (HMAC over AUTH_SECRET).
-export const config = { matcher: ["/", "/i/:path*", "/receipts/:path*"] };
+// This proxy carries TWO gates in one file (Next 16 allows a single proxy
+// export). Next 16 `proxy` (renamed from `middleware`) runs on the Node.js
+// runtime, so `@/auth` (which pulls in Prisma/pg) bundles fine.
+//
+//  1. Public PII surface (`/`, `/i/*`, `/receipts/*`): the shared 8-digit PIN
+//     gate, active only when PUBLIC_ACCESS_PIN_ENABLED is on. A logged-in user
+//     OR a valid unlock cookie passes; otherwise redirect to /unlock. This is
+//     NOT an authz boundary — real authz stays per-route (requireUser/
+//     requireAdmin).
+//  2. Every other matched route (`/items`, `/admin/*`, `/account`, …): the
+//     app's pre-existing coarse login gate — a session is required, else
+//     redirect to /login. `auth()` populates `req.auth` (null if the session
+//     is absent or was revoked), preserving the prior behavior.
+//
+// The matcher excludes `/unlock` (else a logged-out visitor would be bounced
+// off the PIN page itself) plus the other public/asset paths. It now RUNS on
+// `/`, `/i/*`, `/receipts/*` (previously excluded) so the PIN gate can see them.
+export const proxy = auth(async (req) => {
+  const { pathname, search } = req.nextUrl;
+  const loggedIn = !!req.auth;
 
-export async function proxy(request: NextRequest) {
-  // Global on/off (rollout + emergency kill-switch). Off === today's open access.
-  const flagEnabled = process.env.PUBLIC_ACCESS_PIN_ENABLED === "true";
-  if (!flagEnabled) return NextResponse.next();
+  const isPublicPii =
+    pathname === "/" ||
+    pathname.startsWith("/i/") ||
+    pathname.startsWith("/receipts/");
 
-  const secret = process.env.AUTH_SECRET ?? "";
-  const secure = process.env.NODE_ENV === "production";
-
-  // Logged-in staff bypass. getToken only decodes the session JWT (no DB read,
-  // no jwt-callback freshness check) — a stale token at worst skips a PIN to
-  // reach already-public pages, which is not an authz decision.
-  const token = await getToken({ req: request, secret, secureCookie: secure });
-  const loggedIn = !!token;
-
-  const cookieValue = request.cookies.get(unlockCookieName(secure))?.value;
-  const unlockValid = await verifyUnlockValue(cookieValue, secret, Date.now());
-
-  if (shouldAllowPublic({ flagEnabled, loggedIn, unlockValid })) {
-    return NextResponse.next();
+  if (isPublicPii) {
+    const flagEnabled = process.env.PUBLIC_ACCESS_PIN_ENABLED === "true";
+    const secret = process.env.AUTH_SECRET ?? "";
+    const secure = process.env.NODE_ENV === "production";
+    const cookieValue = req.cookies.get(unlockCookieName(secure))?.value;
+    const unlockValid = await verifyUnlockValue(cookieValue, secret, Date.now());
+    if (shouldAllowPublic({ flagEnabled, loggedIn, unlockValid })) {
+      return NextResponse.next();
+    }
+    const url = new URL("/unlock", req.url);
+    url.searchParams.set("next", sanitizeNext(pathname + search));
+    return NextResponse.redirect(url);
   }
 
-  const nextParam = sanitizeNext(request.nextUrl.pathname + request.nextUrl.search);
-  const url = new URL("/unlock", request.url);
-  url.searchParams.set("next", nextParam);
-  return NextResponse.redirect(url);
-}
+  // Existing coarse login gate for all other matched routes.
+  if (!loggedIn) {
+    return NextResponse.redirect(new URL("/login", req.url));
+  }
+  return NextResponse.next();
+});
+
+export const config = {
+  // Same negative-lookahead as before, with three changes: `receipts/`, `i/`,
+  // and the bare-root `$` are REMOVED (so the proxy now runs on the public PII
+  // routes to PIN-gate them), and `unlock` is ADDED (so the PIN page stays
+  // reachable). `wasm/` etc. stay excluded — see the prior comment history.
+  matcher: ["/((?!api/auth|api/cron|login|forgot-password|reset-password|privacy|terms|unlock|_next/static|_next/image|favicon.ico|wasm/).*)"],
+};
 ```
 
-- [ ] **Step 3: Confirm the whole suite + types + lint pass**
+Note: `privacy` and `terms` stay excluded (public, no PII — they should not require a PIN). The authed sub-routes under `/receipts/*` and `/i/*` (`/receipts/new`, `/receipts/<n>/return`, `/i/<id>/qr/pdf`) already self-guard with `requireUser`; routing them through the PIN gate does not change that (logged-in staff bypass; logged-out users hit /unlock then still need /login).
 
-Run: `npx tsc --noEmit && npm run lint && npm test`
-Expected: type-check clean, lint clean, all Vitest tests pass. (Run the suite solo — it shares one test DB.)
+- [ ] **Step 3: Confirm types + lint + the whole suite**
+
+Run these SEPARATELY (do NOT `&&`-chain — tsc has a pre-existing non-clean baseline):
+- `npx tsc --noEmit` — confirm no NEW errors reference `src/proxy.ts` (the ~22 pre-existing errors in unrelated `.test.ts` files are expected).
+- `npm run lint` — expect clean.
+- `npm test` — the full Vitest suite, run SOLO (shared test DB). Report the pass/total; all prior-passing tests plus the PIN tests should pass.
 
 - [ ] **Step 4: End-to-end verification in a real browser (verify skill)**
 
@@ -973,14 +1004,18 @@ Use the `verify` skill to build/run the app and drive it. Set `PUBLIC_ACCESS_PIN
 
 | Check | Expected |
 |---|---|
-| Logged-out visitor opens `/` | redirected to `/unlock?next=%2F` |
+| **PIN gate (flag on):** logged-out visitor opens `/` | redirected to `/unlock?next=%2F` |
 | Logged-out visitor opens `/i/<id>` | redirected to `/unlock?next=%2Fi%2F<id>` |
 | Logged-out visitor opens `/receipts/<num>` and `/receipts/<num>/pdf` | both redirect to `/unlock` |
+| Logged-out visitor opens `/unlock` directly | loads the PIN page (NOT a redirect loop) |
 | Enter the correct PIN on `/unlock?next=/i/<id>` | lands on `/i/<id>`, item visible; `pub_unlock` cookie set |
 | Wrong PIN | "Incorrect PIN.", no cookie, still on `/unlock` |
 | After unlock, revisit `/receipts/<num>` | loads directly (cookie honored) |
 | Logged-in staff open `/`, `/i/<id>`, `/receipts/<num>` | never see `/unlock` |
-| Set `PUBLIC_ACCESS_PIN_ENABLED=false`, restart | public pages load with no PIN (today's behavior) |
+| **Existing auth boundary preserved:** logged-out visitor opens `/items` and `/admin` | redirected to `/login` (NOT `/unlock`) |
+| Logged-in staff open `/items` and `/admin` | load normally |
+| `/privacy` and `/terms` (logged-out) | load normally (no PIN, no login) |
+| **Flag off:** set `PUBLIC_ACCESS_PIN_ENABLED=false`, restart | public pages load with no PIN; `/items`/`/admin` still redirect to `/login` (today's behavior) |
 | `/unlock` page layout | inspect in the real browser (jsdom has no layout engine) |
 
 Record the result. If any row fails, fix before committing.
@@ -989,7 +1024,7 @@ Record the result. If any row fails, fix before committing.
 
 ```bash
 git add src/proxy.ts
-git commit -m "feat: gate public routes behind the PIN via src/proxy.ts"
+git commit -m "feat: merge public PIN gate into the proxy"
 ```
 
 ---
@@ -1006,7 +1041,7 @@ In `CLAUDE.md`, edit the `> **ACCEPTED REQUIREMENT — public, enumerable receip
 
 ```markdown
 >
-> **UPDATE (2026-07-21): the public surface is now behind an 8-digit PIN gate for logged-out users** (`src/proxy.ts`, controlled by `PUBLIC_ACCESS_PIN_ENABLED`). This does NOT change the enumerability tradeoff above — it adds a shared-PIN wall in front of `/`, `/i/*`, and `/receipts/*`. The proxy is a **non-authz gate** (it checks the PIN cookie / a logged-in session), and is a deliberate exception to "no middleware / enforce authz in the server function" — that rule still governs all real authz (`requireUser`/`requireAdmin`), which stays per-route. Logged-in users bypass the gate; the PIN is admin-settable from `/admin`.
+> **UPDATE (2026-07-22): the public surface is now behind an 8-digit PIN gate for logged-out users** (`src/proxy.ts`, controlled by `PUBLIC_ACCESS_PIN_ENABLED`). This does NOT change the enumerability tradeoff above — it adds a shared-PIN wall in front of `/`, `/i/*`, and `/receipts/*`. The gate is merged into the existing `src/proxy.ts` (which already coarse-login-gates `/items`, `/admin/*`, etc.); the PIN branch is a **non-authz gate** (it checks the PIN cookie / a logged-in session). Real authz still lives per-route (`requireUser`/`requireAdmin`) and re-reads role/isActive from the DB — the proxy never becomes the authz boundary. Logged-in users bypass the PIN; the PIN is admin-settable from `/admin`.
 ```
 
 - [ ] **Step 2: Add the CHANGELOG entry**
@@ -1014,13 +1049,13 @@ In `CLAUDE.md`, edit the `> **ACCEPTED REQUIREMENT — public, enumerable receip
 In `CHANGELOG.md`, add a new top section (newest first):
 
 ```markdown
-## 2026-07-21
+## 2026-07-22
 
 ### Added
 - Public-access PIN gate: logged-out visitors must enter a shared 8-digit PIN to search inventory or view item / hand-receipt pages. Admins set and rotate the PIN from the admin dashboard; a successful unlock is remembered for 7 days. Logged-in staff are unaffected.
 
 ### Security
-- The previously open public surface (`/`, `/i/*`, `/receipts/*`, receipt PDFs, and the home search) is now behind the PIN when enabled, reducing casual PII enumeration. Enforcement is a new edge `proxy` (`src/proxy.ts`); it is a non-authz gate and does not alter existing role-based authorization.
+- The previously open public surface (`/`, `/i/*`, `/receipts/*`, receipt PDFs, and the home search) is now behind the PIN when enabled, reducing casual PII enumeration. Enforcement is merged into the existing `src/proxy.ts` (Node runtime); it is a non-authz gate and does not alter existing role-based authorization or the proxy's pre-existing login gate for `/items`/`/admin/*`.
 
 ### Notes
 - **New table:** `PublicAccessSetting` (single row, bcrypt-hashed PIN). Migration `20260721170000_public_access_setting`. Apply with `prisma migrate deploy` locally; apply to prod via the Supabase MCP.
@@ -1060,7 +1095,7 @@ metadata:
   type: project
 ---
 
-Shipped 2026-07-21. Logged-out visitors hit an 8-digit PIN wall (`/unlock`) before `/`, `/i/*`, `/receipts/*`. Enforced by `src/proxy.ts` (Next 16 `proxy`, the app's first — a non-authz gate; real authz stays per-route). Logged-in staff bypass via `getToken`. PIN is bcrypt-hashed in `PublicAccessSetting` (single row), admin-set at `/admin`. Unlock cookie is HMAC-signed with `AUTH_SECRET`, 7-day TTL; rotation is not retroactive. Turn on with `PUBLIC_ACCESS_PIN_ENABLED=true` (also the kill-switch). This is the deliberate "harden later if the team asks" path from the CLAUDE.md accepted-requirement note. See [[open-followups]].
+Shipped 2026-07-22. Logged-out visitors hit an 8-digit PIN wall (`/unlock`) before `/`, `/i/*`, `/receipts/*`. Merged into the EXISTING `src/proxy.ts` (Next 16 `proxy`, Node runtime) — which already coarse-login-gates `/items`/`/admin/*` via `export {auth as proxy}`; the PIN branch is a non-authz gate, real authz stays per-route. Logged-in staff bypass (via `req.auth` from the `auth()` wrapper). PIN is bcrypt-hashed in `PublicAccessSetting` (single row), admin-set at `/admin`. Unlock cookie is HMAC-signed with `AUTH_SECRET`, 7-day TTL; rotation is not retroactive. Turn on with `PUBLIC_ACCESS_PIN_ENABLED=true` (also the kill-switch). The proxy matcher had `i/`,`receipts/`,`$` removed + `unlock` added. This is the deliberate "harden later if the team asks" path from the CLAUDE.md accepted-requirement note. See [[open-followups]].
 ```
 
 Add a line to `MEMORY.md` under the index:
