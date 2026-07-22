@@ -35,15 +35,16 @@ model User {
   // already-deactivated users have null here and are treated as not-yet-eligible.
   deactivatedAt     DateTime?
 
-  createdItems     Item[]               @relation("CreatedItems")
-  createdTransfers Transfer[]           @relation("CreatedTransfers")
-  importBatches    ImportBatch[]        @relation("ImportBatches")
-  returnsProcessed ReturnTransaction[]  @relation("ReturnsProcessed")
-  passwordResets   PasswordResetToken[] @relation("PasswordResets")
-  itemEdits        ItemEdit[]           @relation("ItemEdits")
-  itemAudits       ItemAudit[]          @relation("ItemAudits")
-  signatures       Signature[]          @relation("UserSignatures")
-  createdContacts  Contact[]            @relation("CreatedContacts")
+  createdItems        Item[]                @relation("CreatedItems")
+  createdTransfers    Transfer[]            @relation("CreatedTransfers")
+  importBatches       ImportBatch[]         @relation("ImportBatches")
+  returnsProcessed    ReturnTransaction[]   @relation("ReturnsProcessed")
+  passwordResets      PasswordResetToken[]  @relation("PasswordResets")
+  itemEdits           ItemEdit[]            @relation("ItemEdits")
+  itemAudits          ItemAudit[]           @relation("ItemAudits")
+  signatures          Signature[]           @relation("UserSignatures")
+  createdContacts     Contact[]             @relation("CreatedContacts")
+  publicAccessUpdates PublicAccessSetting[] @relation("PinUpdates")
 }
 
 // Self-service password reset. Only the SHA-256 hash of the emailed token is
@@ -66,33 +67,33 @@ enum ItemStatus {
 }
 
 model Item {
-  id            String         @id @default(cuid())
-  make          String
-  model         String
+  id               String         @id @default(cuid())
+  make             String
+  model            String
   // A device's identity. citext + unique: case-insensitive, so the same physical
   // device can't be logged twice (incl. "ABC123" vs "abc123"). Mirrors User.email.
-  serialNumber  String         @unique @db.Citext
-  homeUnit      String?
-  deviceName    String?
-  notes         String?
+  serialNumber     String         @unique @db.Citext
+  homeUnit         String?
+  deviceName       String?
+  notes            String?
   // The email of the person actually using the device. Distinct from the
   // hand-receipt holder (derived from the latest OPEN Transfer), which stays the
   // signed custody record and is never edited here. @map keeps the physical
   // column name ("currentUser") so renaming the field for clarity needs no
   // migration — the DB column is unchanged.
-  currentUserEmail String?       @map("currentUser")
-  currentPosition String?
-  status        ItemStatus     @default(ACTIVE)
-  createdBy     User           @relation("CreatedItems", fields: [createdById], references: [id])
-  createdById   String
-  transferItems TransferItem[]
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  currentUserEmail String?        @map("currentUser")
+  currentPosition  String?
+  status           ItemStatus     @default(ACTIVE)
+  createdBy        User           @relation("CreatedItems", fields: [createdById], references: [id])
+  createdById      String
+  transferItems    TransferItem[]
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
   // Denormalized MAX(ItemAudit.createdAt), maintained by recordAudit. Lets the
   // /items list ORDER BY audit recency (= audit-status severity) server-side:
   // auditState itself is derived/time-dependent and not stored, so it can't be an
   // ORDER BY, but this column can. Null = never audited (sorts last, both dirs).
-  lastAuditedAt DateTime?
+  lastAuditedAt    DateTime?
 
   serviceQueueItem ServiceQueueItem?
   edits            ItemEdit[]
@@ -331,7 +332,7 @@ model Signature {
   user      User     @relation("UserSignatures", fields: [userId], references: [id], onDelete: Cascade)
   userId    String
   name      String
-  image     String   // PNG data URL
+  image     String // PNG data URL
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -343,20 +344,20 @@ model Signature {
 // reads it for autofill; only admins write to it). Distinct from User: these are
 // outside people who receive equipment and have no login account.
 model Contact {
-  id String @id @default(cuid())
-  rank String?
+  id            String  @id @default(cuid())
+  rank          String?
   // Split (rather than a single free-text `name` like User.name) so ordering by
   // last name is a plain indexed DB sort. Parsing a surname out of one column
   // misfiles "Van Der Berg" and "Doe Jr.". Transfer.receiverName stays a single
   // String; autofill composes "First Last" when filling it.
-  firstName String
-  lastName  String
+  firstName     String
+  lastName      String
   unit          String?
   contactNumber String?
   // citext + unique: one inbox, one contact. Mirrors User.email — the app
   // lowercases on write, so a mixed-case row would otherwise be unfindable by
   // lookups and would not collide with its lowercase twin.
-  email String @unique @db.Citext
+  email         String  @unique @db.Citext
 
   // Nullable + SetNull (mirrors ItemEdit.editedBy): the shared book must survive
   // deletion of the account that happened to add a row.
@@ -386,4 +387,20 @@ model ItemAudit {
   createdAt      DateTime @default(now())
 
   @@index([itemId, createdAt])
+}
+
+// Single-row org config for the public-access PIN gate. `id` is pinned to
+// "singleton" so there is exactly one row (upserted). Stores only the bcrypt
+// hash of the 8-digit PIN — never the PIN. `updatedBy` is nullable + SetNull so
+// the row survives deletion of the admin who last set it (mirrors ItemEdit).
+// New tables inherit RLS-enabled/deny-all via the rls_auto_enable trigger; the
+// app reaches this only through Prisma (see CLAUDE.md §6).
+model PublicAccessSetting {
+  id          String   @id @default("singleton")
+  pinHash     String
+  updatedAt   DateTime @updatedAt
+  updatedBy   User?    @relation("PinUpdates", fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedById String?
+
+  @@index([updatedById])
 }

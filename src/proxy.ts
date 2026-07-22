@@ -1,24 +1,63 @@
-// NOTE: Next.js 16 renamed the `middleware.ts` file convention to `proxy.ts`
-// (the `middleware` export is renamed to `proxy`). Proxy always runs on the
-// Node.js runtime in Next 16 -- the `runtime` option cannot be configured and
-// edge is not supported here -- so `@/auth`'s Credentials provider (which
-// transitively imports `@/lib/prisma` -> the `pg` driver adapter, a Node-only
-// module) bundles cleanly with no edge-runtime split needed.
-// See node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md
-export { auth as proxy } from "@/auth";
+import { auth } from "@/auth";
+import { NextResponse } from "next/server";
+import {
+  shouldAllowPublic,
+  verifyUnlockValue,
+  unlockCookieName,
+  sanitizeNext,
+} from "@/lib/public-access-cookie";
+
+// This proxy carries TWO gates in one file (Next 16 allows a single proxy
+// export). Next 16 `proxy` (renamed from `middleware`) runs on the Node.js
+// runtime, so `@/auth` (which pulls in Prisma/pg) bundles fine.
+//
+//  1. Public PII surface (`/`, `/i/*`, `/receipts/*`): the shared 8-digit PIN
+//     gate, active only when PUBLIC_ACCESS_PIN_ENABLED is on. A logged-in user
+//     OR a valid unlock cookie passes; otherwise redirect to /unlock. This is
+//     NOT an authz boundary — real authz stays per-route (requireUser/
+//     requireAdmin).
+//  2. Every other matched route (`/items`, `/admin/*`, `/account`, …): the
+//     app's pre-existing coarse login gate — a session is required, else
+//     redirect to /login. `auth()` populates `req.auth` (null if the session
+//     is absent or was revoked), preserving the prior behavior.
+//
+// The matcher excludes `/unlock` (else a logged-out visitor would be bounced
+// off the PIN page itself) plus the other public/asset paths. It now RUNS on
+// `/`, `/i/*`, `/receipts/*` (previously excluded) so the PIN gate can see them.
+export const proxy = auth(async (req) => {
+  const { pathname, search } = req.nextUrl;
+  const loggedIn = !!req.auth;
+
+  const isPublicPii =
+    pathname === "/" ||
+    pathname.startsWith("/i/") ||
+    pathname.startsWith("/receipts/");
+
+  if (isPublicPii) {
+    const flagEnabled = process.env.PUBLIC_ACCESS_PIN_ENABLED === "true";
+    const secret = process.env.AUTH_SECRET ?? "";
+    const secure = process.env.NODE_ENV === "production";
+    const cookieValue = req.cookies.get(unlockCookieName(secure))?.value;
+    const unlockValid = await verifyUnlockValue(cookieValue, secret, Date.now());
+    if (shouldAllowPublic({ flagEnabled, loggedIn, unlockValid })) {
+      return NextResponse.next();
+    }
+    const url = new URL("/unlock", req.url);
+    url.searchParams.set("next", sanitizeNext(pathname + search));
+    return NextResponse.redirect(url);
+  }
+
+  // Existing coarse login gate for all other matched routes.
+  if (!loggedIn) {
+    return NextResponse.redirect(new URL("/login", req.url));
+  }
+  return NextResponse.next();
+});
 
 export const config = {
-  // Public: home (receipt search), login, privacy, terms, receipt pages,
-  // item pages, auth API, the cron endpoint (self-guarded by CRON_SECRET, no user
-  // session), static assets. Everything else (incl. /items and /admin/*) requires
-  // auth. The `|$` branch in the negative lookahead excludes the bare `/` root path
-  // (matched only when nothing remains after the leading slash) -- verified against a
-  // standalone regex test, since the matcher supports full regex per the Next.js docs.
-  // `wasm/` is the in-page QR scanner's self-hosted decode binary (public/wasm/,
-  // an open-source zxing-wasm build — not user data). It must be excluded like the
-  // other static assets: auth-gating it would make the scanner's WASM load depend on
-  // the session cookie riding along on that fetch, block CDN caching of a 1MB binary,
-  // and re-run the proxy on every scanner open. Not sensitive, so serving it public
-  // is correct (mirrors _next/static, which ships the app's JS the same way).
-  matcher: ["/((?!api/auth|api/cron|login|forgot-password|reset-password|privacy|terms|receipts/|i/|_next/static|_next/image|favicon.ico|wasm/|$).*)"],
+  // Same negative-lookahead as before, with three changes: `receipts/`, `i/`,
+  // and the bare-root `$` are REMOVED (so the proxy now runs on the public PII
+  // routes to PIN-gate them), and `unlock` is ADDED (so the PIN page stays
+  // reachable). `wasm/` etc. stay excluded — see the prior comment history.
+  matcher: ["/((?!api/auth|api/cron|login|forgot-password|reset-password|privacy|terms|unlock|_next/static|_next/image|favicon.ico|wasm/).*)"],
 };

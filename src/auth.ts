@@ -88,9 +88,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       session.user.role = token.role;
       return session;
     },
-    // Required so that `auth` used as `proxy` actually redirects unauthenticated
-    // requests to `pages.signIn` for every matched route, instead of merely
-    // attaching `req.auth` without enforcing anything.
+    // `src/proxy.ts` uses the functional `auth(async (req) => {...})` form and
+    // performs its own `/login` and `/unlock` redirects, so this declarative
+    // `authorized` callback is not the active enforcement path for the proxy.
+    // Retained as a harmless default / for any future declarative `export {
+    // auth as proxy }` use.
     authorized({ auth }) {
       return !!auth;
     },

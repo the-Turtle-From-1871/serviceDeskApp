@@ -4,6 +4,27 @@
 **Status:** Approved design, pending implementation plan
 **Author:** ops@turtolabs.com (Turto Labs) + Claude
 
+## Implementation note (2026-07-22, post-build)
+
+This section corrects the record against what actually shipped; the rest of
+this doc is left as the original (historical) design.
+
+- `src/proxy.ts` was **not** greenfield — it already existed as the app's
+  session-auth boundary for `/items`, `/admin/*`, etc. The PIN gate was
+  **merged into** the existing file, not created from scratch.
+- Next 16 `proxy` runs on the **Node.js runtime** (`runtime` is not
+  configurable — there is no edge option to opt into). The "edge-safe" /
+  "must not touch Prisma or bcrypt" framing below is therefore a portability
+  nicety, not a hard runtime requirement.
+- The shipped logged-in check uses `req.auth` from the functional
+  `auth(async (req) => {...})` wrapper form, not a standalone `getToken`
+  call. Logged-out visitors carry no session token, so the proxy still does
+  no DB read on the dominant public-traffic path — the perf property below
+  holds, just via a different mechanism.
+- The 7-day unlock cookie is **fixed at 7 days from the unlock action**, not
+  a rolling/refreshed-per-visit window (the doc below says "rolling" in one
+  place; that word is incorrect).
+
 ## Problem
 
 The public, unauthenticated surface of the hand-receipt app exposes PII to
@@ -28,7 +49,7 @@ This is a **deliberate feature change**, not a security auto-remediation — the
 |---|---|
 | What the PIN gates | **Everything public**: `/`, `/i/*`, `/receipts/*` (pages, PDF route, and the home search server actions). Logged-in users bypass entirely. |
 | PIN storage | **DB-stored, bcrypt-hashed**, admin-settable in-app (no redeploy to rotate). |
-| Unlock duration | **7 days** (rolling cookie). |
+| Unlock duration | **7 days**, fixed at unlock time (not rolling/refreshed per visit). |
 | Enforcement mechanism | **Next.js 16 proxy** (`src/proxy.ts`) — single choke point over the public routes. |
 | Brute-force protection | **Lightweight**: bcrypt compare + a small fixed delay on failed attempts. No lockout table. |
 

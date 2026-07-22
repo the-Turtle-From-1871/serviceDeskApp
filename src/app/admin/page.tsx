@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { requireAdmin, AuthError } from "@/lib/authz";
 import { getTimerDashboard, type TransferTimerRow, type ServiceTimerRow } from "./dashboard/dashboard.service";
 import { DueBadge } from "@/components/DueBadge";
+import { getPinMeta } from "@/lib/public-access";
+import { PublicAccessPinForm } from "./PublicAccessPinForm";
 
 type TimerRow = { key: string; href: string; label: string; note: string; dueAt: string };
 
@@ -44,6 +46,7 @@ export default async function AdminHome() {
   }
 
   const { overdueTransfers, soonTransfers, overdueService, soonService, nowMs } = await getTimerDashboard();
+  const pinMeta = await getPinMeta();
 
   return (
     <div className="stack">
@@ -76,6 +79,21 @@ export default async function AdminHome() {
           <Link className="btn btn-secondary" href="/admin/audit">Audit</Link>
           <Link className="btn btn-primary" href="/admin/items/new">+ New item</Link>
         </div>
+      </section>
+
+      <section className="card stack-sm">
+        <h2>Public access PIN</h2>
+        <p className="subtle">
+          Logged-out visitors must enter this 8-digit PIN to search or view hand receipts and item
+          records (when the gate is enabled). Rotating it stops new unlocks immediately; visitors
+          already unlocked stay in for up to 7 days.
+        </p>
+        <p className="subtle">
+          {pinMeta
+            ? `Last changed ${pinMeta.updatedAt.toLocaleDateString()}${pinMeta.updatedByName ? ` by ${pinMeta.updatedByName}` : ""}.`
+            : "No PIN set yet."}
+        </p>
+        <PublicAccessPinForm />
       </section>
     </div>
   );
