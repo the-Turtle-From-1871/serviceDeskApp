@@ -44,6 +44,7 @@ model User {
   itemAudits       ItemAudit[]          @relation("ItemAudits")
   signatures       Signature[]          @relation("UserSignatures")
   createdContacts  Contact[]            @relation("CreatedContacts")
+  publicAccessUpdates PublicAccessSetting[] @relation("PinUpdates")
 }
 
 // Self-service password reset. Only the SHA-256 hash of the emailed token is
@@ -386,4 +387,20 @@ model ItemAudit {
   createdAt      DateTime @default(now())
 
   @@index([itemId, createdAt])
+}
+
+// Single-row org config for the public-access PIN gate. `id` is pinned to
+// "singleton" so there is exactly one row (upserted). Stores only the bcrypt
+// hash of the 8-digit PIN — never the PIN. `updatedBy` is nullable + SetNull so
+// the row survives deletion of the admin who last set it (mirrors ItemEdit).
+// New tables inherit RLS-enabled/deny-all via the rls_auto_enable trigger; the
+// app reaches this only through Prisma (see CLAUDE.md §6).
+model PublicAccessSetting {
+  id          String   @id @default("singleton")
+  pinHash     String
+  updatedAt   DateTime @updatedAt
+  updatedBy   User?    @relation("PinUpdates", fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedById String?
+
+  @@index([updatedById])
 }
