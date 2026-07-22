@@ -66,6 +66,10 @@ export async function verifyUnlockValue(
 // redirect). Reject the unlock page itself to avoid a pointless self-redirect.
 export function sanitizeNext(next: string | null | undefined): string {
   if (typeof next !== "string") return "/";
+  // Reject control chars (incl. tab/newline/CR) and backslashes — browsers may
+  // strip or normalize them into a protocol-relative `//host` open redirect.
+  if (/[\x00-\x1F\x7F]/.test(next)) return "/";
+  if (next.includes("\\")) return "/";
   if (!next.startsWith("/")) return "/";
   if (next.startsWith("//") || next.startsWith("/\\")) return "/";
   if (next === "/unlock" || next.startsWith("/unlock?") || next.startsWith("/unlock/")) return "/";

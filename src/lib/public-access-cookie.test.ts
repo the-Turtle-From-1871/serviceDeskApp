@@ -60,6 +60,12 @@ describe("sanitizeNext", () => {
     expect(sanitizeNext("/unlock")).toBe("/");
     expect(sanitizeNext("/unlock?next=/x")).toBe("/");
   });
+  it("rejects control chars and backslashes (open-redirect normalization)", () => {
+    expect(sanitizeNext("/\t/evil.com")).toBe("/");
+    expect(sanitizeNext("/\n/evil.com")).toBe("/");
+    expect(sanitizeNext("/foo\\bar")).toBe("/");
+    expect(sanitizeNext("/%09/evil")).toBe("/%09/evil"); // literal %09 (already-encoded) is a normal path, still allowed
+  });
 });
 
 describe("shouldAllowPublic", () => {

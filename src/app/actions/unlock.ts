@@ -20,7 +20,13 @@ export async function unlockAction(_prev: unknown, formData: FormData) {
   const parsed = schema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: "Enter the 8-digit PIN." };
 
-  const ok = await verifyPin(parsed.data.pin);
+  let ok = false;
+  try {
+    ok = await verifyPin(parsed.data.pin);
+  } catch (e) {
+    console.error("[unlockAction] verifyPin failed:", e);
+    return { error: "Something went wrong. Please try again." };
+  }
   if (!ok) {
     // Slow down online guessing; also masks "no PIN set" vs "wrong PIN".
     await new Promise((r) => setTimeout(r, 400));

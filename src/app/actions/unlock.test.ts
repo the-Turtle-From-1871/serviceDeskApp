@@ -51,4 +51,12 @@ describe("unlockAction", () => {
     await expect(unlockAction(undefined, fd({ pin: "12345678", next: "https://evil.com" })))
       .rejects.toThrow("REDIRECT:/");
   });
+
+  it("returns a generic error (does not throw) when verifyPin rejects", async () => {
+    verifyPin.mockRejectedValue(new Error("DB connection lost"));
+    const res = await unlockAction(undefined, fd({ pin: "12345678", next: "/i/x" }));
+    expect(res).toEqual({ error: "Something went wrong. Please try again." });
+    expect(cookieSet).not.toHaveBeenCalled();
+    expect(redirect).not.toHaveBeenCalled();
+  });
 });

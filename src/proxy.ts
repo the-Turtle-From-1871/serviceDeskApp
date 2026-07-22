@@ -37,8 +37,12 @@ export const proxy = auth(async (req) => {
     const flagEnabled = process.env.PUBLIC_ACCESS_PIN_ENABLED === "true";
     const secret = process.env.AUTH_SECRET ?? "";
     const secure = process.env.NODE_ENV === "production";
-    const cookieValue = req.cookies.get(unlockCookieName(secure))?.value;
-    const unlockValid = await verifyUnlockValue(cookieValue, secret, Date.now());
+    // Only the async HMAC verify runs when it can actually change the outcome
+    // (flag on AND not already logged in) — off/ logged-in skip the crypto.
+    const unlockValid =
+      flagEnabled && !loggedIn
+        ? await verifyUnlockValue(req.cookies.get(unlockCookieName(secure))?.value, secret, Date.now())
+        : false;
     if (shouldAllowPublic({ flagEnabled, loggedIn, unlockValid })) {
       return NextResponse.next();
     }
