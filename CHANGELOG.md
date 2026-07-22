@@ -3,6 +3,20 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-07-22
+
+### Added
+- Public-access PIN gate: logged-out visitors must enter a shared 8-digit PIN to search inventory or view item / hand-receipt pages. Admins set and rotate the PIN from the admin dashboard; a successful unlock is remembered for 7 days. Logged-in staff are unaffected.
+
+### Security
+- The previously open public surface (`/`, `/i/*`, `/receipts/*`, receipt PDFs, and the home search) is now behind the PIN when enabled, reducing casual PII enumeration. Enforcement is merged into the existing `src/proxy.ts` (Node runtime); it is a non-authz gate and does not alter existing role-based authorization or the proxy's pre-existing login gate for `/items`/`/admin/*`.
+
+### Notes
+- **New table:** `PublicAccessSetting` (single row, bcrypt-hashed PIN). Migration `20260721170000_public_access_setting`. Apply with `prisma migrate deploy` locally; apply to prod via the Supabase MCP.
+- **New env var:** `PUBLIC_ACCESS_PIN_ENABLED` — `"true"` turns the gate on. Default/absent = off (open access, as before). Also the emergency kill-switch.
+- **Rollout:** apply the migration → set the PIN in `/admin` → set `PUBLIC_ACCESS_PIN_ENABLED=true` (Vercel + local) and redeploy.
+- Rotating the PIN is not retroactive: existing unlock cookies remain valid until they expire (≤7 days). For immediate global revocation, rotate `AUTH_SECRET` (also logs everyone out).
+
 ## 2026-07-21
 
 ### Fixed
