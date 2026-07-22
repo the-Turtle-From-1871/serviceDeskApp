@@ -6,18 +6,19 @@ import { useState, useTransition } from "react";
 // cached so hide/re-show is instant, no second round-trip. Used by the item-page
 // audit history and the account page's saved signatures.
 //
-// The toggle button keeps the exact position the "Show signature" button had:
-// pass `imageFirst` where the control is right-justified (the button trails the
-// image, staying at the right edge); otherwise the button leads and the image
-// reveals to its right. Either way, revealing the image never shifts the button.
+// When revealed, the image stacks BELOW the toggle button (a column), never
+// inline — so it can't widen the row into other controls or wrap the button to a
+// new line. The button therefore keeps the exact spot the "Show signature" button
+// had. `align` anchors the column: "end" for a right-justified control (audit
+// column), "start" (default) for a left-anchored one (account list).
 export function SignatureReveal({
   load,
   alt,
-  imageFirst = false,
+  align = "start",
 }: {
   load: () => Promise<string | null>;
   alt: string;
-  imageFirst?: boolean;
+  align?: "start" | "end";
 }) {
   const [image, setImage] = useState<string | null>(null); // cached once fetched
   const [visible, setVisible] = useState(false);
@@ -25,18 +26,20 @@ export function SignatureReveal({
   const [pending, start] = useTransition();
 
   if (visible && image) {
-    const img = (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img key="img" src={image} alt={alt} className="sig-preview" />
-    );
-    const hide = (
-      <button key="btn" type="button" className="btn btn-ghost btn-sm" onClick={() => setVisible(false)}>
-        Hide signature
-      </button>
-    );
     return (
-      <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-        {imageFirst ? [img, hide] : [hide, img]}
+      <span
+        style={{
+          display: "inline-flex",
+          flexDirection: "column",
+          gap: 4,
+          alignItems: align === "end" ? "flex-end" : "flex-start",
+        }}
+      >
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setVisible(false)}>
+          Hide signature
+        </button>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={image} alt={alt} className="sig-preview" />
       </span>
     );
   }

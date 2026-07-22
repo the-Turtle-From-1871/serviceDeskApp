@@ -41,7 +41,7 @@ export function SignatureManager({ signatures }: { signatures: SavedSignature[] 
       ) : (
         <ul className="stack-sm">
           {signatures.map((s) => (
-            <li key={s.id} className="row" style={{ gap: 8, alignItems: "center" }}>
+            <li key={s.id} className="row" style={{ gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
               <strong>{s.name}</strong>
               <SignatureReveal load={() => revealOwnSignatureAction(s.id)} alt={`Signature for ${s.name}`} />
               <span className="spacer" />

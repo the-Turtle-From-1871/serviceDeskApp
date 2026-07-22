@@ -29,22 +29,24 @@ describe("SignatureReveal", () => {
     expect(load).toHaveBeenCalledTimes(1);
   });
 
-  it("places the toggle button LAST when imageFirst (right-justified use)", async () => {
-    const load = vi.fn().mockResolvedValueOnce("data:image/png;base64,SIG");
-    const { container } = render(<SignatureReveal load={load} alt="sig" imageFirst />);
-    await userEvent.click(screen.getByRole("button", { name: /show signature/i }));
-    await screen.findByRole("img");
-    const kids = Array.from(container.querySelector("span")!.children).map((c) => c.tagName);
-    expect(kids).toEqual(["IMG", "BUTTON"]); // image then Hide button
-  });
-
-  it("places the toggle button FIRST by default (left-anchored use)", async () => {
+  it("stacks the button above the image in a column (image is never inline)", async () => {
     const load = vi.fn().mockResolvedValueOnce("data:image/png;base64,SIG");
     const { container } = render(<SignatureReveal load={load} alt="sig" />);
     await userEvent.click(screen.getByRole("button", { name: /show signature/i }));
     await screen.findByRole("img");
-    const kids = Array.from(container.querySelector("span")!.children).map((c) => c.tagName);
-    expect(kids).toEqual(["BUTTON", "IMG"]); // Hide button then image
+    const span = container.querySelector("span")!;
+    // Button first, image second, laid out as a column so revealing can't widen
+    // the row into neighbouring controls.
+    expect(Array.from(span.children).map((c) => c.tagName)).toEqual(["BUTTON", "IMG"]);
+    expect(span.style.flexDirection).toBe("column");
+  });
+
+  it("anchors to the right when align='end' (right-justified use)", async () => {
+    const load = vi.fn().mockResolvedValueOnce("data:image/png;base64,SIG");
+    const { container } = render(<SignatureReveal load={load} alt="sig" align="end" />);
+    await userEvent.click(screen.getByRole("button", { name: /show signature/i }));
+    await screen.findByRole("img");
+    expect(container.querySelector("span")!.style.alignItems).toBe("flex-end");
   });
 
   it("shows a retry label when the image can't be loaded", async () => {

@@ -159,7 +159,7 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
                 <div className="subtle" style={{ fontSize: 12 }}>Audit history</div>
                 <ul className="stack-sm">
                   {audits.map((a) => (
-                    <li key={a.id} className="row" style={{ gap: 8, alignItems: "center" }}>
+                    <li key={a.id} className="row" style={{ gap: 8, alignItems: "flex-start" }}>
                       <span>{a.signerName} · {formatDateTimeHST(a.createdAt)}</span>
                       {/* Signature reveal sits on the RIGHT of the name/date and is
                           right-justified in the column (spacer = margin-left:auto).

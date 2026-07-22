@@ -5,6 +5,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-07-21
 
+### Fixed
+- **Revealed signatures no longer break their row layout.** A shown signature now
+  stacks *below* its Show/Hide toggle button (a column) instead of rendering
+  inline, so it can't widen the row into the Remove button, overflow the account
+  card, or push the audit button down beside the image. The toggle button keeps
+  the exact spot the Show button had.
+
 ### Changed
 - **Account-page saved signatures are hidden by default.** On the account page,
   each saved signature now shows its name with a **Show signature** / **Hide
