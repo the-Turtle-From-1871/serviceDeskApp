@@ -17,6 +17,26 @@ export const newItemSchema = z.object({
 
 export type NewItemInput = z.infer<typeof newItemSchema>;
 
+// Row shape for the CSV importer. Only serialNumber is hard-required here — the
+// make/model-required-for-NEW-items rule lives in planImport, which alone knows
+// whether the serial already exists. Reuses the `optional` helper so blank/absent
+// cells become undefined ("not provided" → leave untouched on update).
+export const importRowSchema = z.object({
+  serialNumber: z.string().trim().min(1, "serial number is required"),
+  make: optional,
+  model: optional,
+  deviceName: optional,
+  homeUnit: optional,
+  notes: optional,
+  assignedUser: optional,
+  lastLogonUserPrincipalName: optional,
+  lastLogonDate: optional,
+  enrollmentDate: optional,
+  compliance: optional,
+});
+
+export type ImportRowInput = z.infer<typeof importRowSchema>;
+
 // The fields any authenticated user may edit from the item detail card.
 //
 // NOTE: deliberately does NOT use the `optional` helper above. That helper maps
