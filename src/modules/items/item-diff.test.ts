@@ -51,4 +51,13 @@ describe("diffItemFields", () => {
       { field: "currentPosition", from: null, to: "S6" },
     ]);
   });
+
+  it("diffs the new telemetry fields when present in after", () => {
+    expect(
+      diffItemFields(
+        { compliance: "Noncompliant", lastLogonDate: "2026-01-01" },
+        { compliance: "Compliant", lastLogonDate: "2026-01-01" },
+      ),
+    ).toEqual([{ field: "compliance", from: "Noncompliant", to: "Compliant" }]);
+  });
 });
