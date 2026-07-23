@@ -3,6 +3,18 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-07-23
+
+### Added
+- CSV item import now updates an existing item instead of skipping it: when a row's `serialNumber` matches, changed `deviceName` / assigned user / MDM telemetry are written, and the item is no longer marked a duplicate.
+- New importable fields: `assignedUser` (→ the item's current-user email) and MDM telemetry `lastLogonUserPrincipalName`, `lastLogonDate`, `enrollmentDate`, `compliance`, shown read-only on the item detail page for logged-in users.
+
+### Changed
+- Import required-field rules: only `serialNumber` is a required column. New items still require `make`, `model`, `serialNumber`; existing (matched) items require only `serialNumber`. Blank cells leave stored values untouched on an update. `make`/`model` are never overwritten on a match — a difference is reported as a warning. `deviceName` / assigned-user changes are logged to item history; telemetry updates silently.
+
+### Notes
+- Migration `20260723000000_add_mdm_telemetry_fields` adds four nullable text columns to `Item` (`lastLogonUserPrincipalName`, `lastLogonDate`, `enrollmentDate`, `compliance`) and `updatedCount` (default 0) to `ImportBatch`. Apply with `npx prisma migrate deploy`; prod is hand-applied via the standard manual process.
+
 ## 2026-07-22
 
 ### Added
