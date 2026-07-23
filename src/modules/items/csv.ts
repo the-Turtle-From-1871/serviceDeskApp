@@ -10,6 +10,11 @@ export type RawRow = {
   deviceName: string;
   homeUnit: string;
   notes: string;
+  assignedUser: string;
+  lastLogonUserPrincipalName: string;
+  lastLogonDate: string;
+  enrollmentDate: string;
+  compliance: string;
 };
 
 // Map a normalized (lowercased, alphanumeric-only) header to a canonical field.
@@ -21,6 +26,11 @@ const HEADER_MAP: Record<string, keyof Omit<RawRow, "row">> = {
   devicename: "deviceName",
   homeunit: "homeUnit",
   notes: "notes",
+  assigneduser: "assignedUser",
+  lastlogonuserprincipalname: "lastLogonUserPrincipalName",
+  lastlogondate: "lastLogonDate",
+  enrollmentdate: "enrollmentDate",
+  compliance: "compliance",
 };
 
 const normalizeHeader = (h: string) => h.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -46,7 +56,7 @@ export function parseItemsCsv(text: string): { rows: RawRow[]; error?: string } 
   if (records.length === 0) return { rows: [], error: "The CSV has no data rows." };
 
   const present = new Set(headers);
-  const missing = (["make", "model", "serialNumber", "deviceName"] as const).filter((k) => !present.has(k));
+  const missing = (["serialNumber"] as const).filter((k) => !present.has(k));
   if (missing.length) return { rows: [], error: `Missing required column(s): ${missing.join(", ")}.` };
 
   if (records.length > MAX_IMPORT_ROWS) {
@@ -61,6 +71,11 @@ export function parseItemsCsv(text: string): { rows: RawRow[]; error?: string } 
     deviceName: r.deviceName ?? "",
     homeUnit: r.homeUnit ?? "",
     notes: r.notes ?? "",
+    assignedUser: r.assignedUser ?? "",
+    lastLogonUserPrincipalName: r.lastLogonUserPrincipalName ?? "",
+    lastLogonDate: r.lastLogonDate ?? "",
+    enrollmentDate: r.enrollmentDate ?? "",
+    compliance: r.compliance ?? "",
   }));
   return { rows };
 }
