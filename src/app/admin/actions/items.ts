@@ -59,7 +59,7 @@ function readCsvFile(formData: FormData): { file: File } | { error: string } {
 
 export async function analyzeImportAction(
   formData: FormData
-): Promise<{ counts: { toImport: number; skipped: number; autoDetected: number }; skipped: SkippedRow[]; unresolved: UnresolvedRow[] } | { error: string }> {
+): Promise<{ counts: { toImport: number; toUpdate: number; unchanged: number; skipped: number; autoDetected: number }; skipped: SkippedRow[]; unresolved: UnresolvedRow[]; mismatches: { serialNumber: string }[] } | { error: string }> {
   await requireAdmin();
   const f = readCsvFile(formData);
   if ("error" in f) return f;
@@ -67,7 +67,7 @@ export async function analyzeImportAction(
     const text = await f.file.text();
     const res = await analyzeImport(text);
     if (res.error) return { error: res.error };
-    return { counts: res.counts, skipped: res.skipped, unresolved: res.unresolved };
+    return { counts: res.counts, skipped: res.skipped, unresolved: res.unresolved, mismatches: res.mismatches };
   } catch (e) {
     console.error("[analyzeImportAction] unexpected error:", e);
     return { error: "Something went wrong reading the file. Please try again." };
@@ -76,7 +76,7 @@ export async function analyzeImportAction(
 
 export async function commitImportAction(
   formData: FormData
-): Promise<{ added: number; skipped: SkippedRow[]; detected: number } | { error: string }> {
+): Promise<{ added: number; updated: number; skipped: SkippedRow[]; unchanged: number; detected: number; mismatches: { serialNumber: string }[] } | { error: string }> {
   const admin = await requireAdmin();
   const f = readCsvFile(formData);
   if ("error" in f) return f;
@@ -91,11 +91,11 @@ export async function commitImportAction(
 
   try {
     const text = await f.file.text();
-    const res = await commitImport(text, f.file.name, resolutions, admin.id);
+    const res = await commitImport(text, f.file.name, resolutions, { id: admin.id, name: admin.name });
     if (res.error) return { error: res.error };
     revalidatePath("/items");
     revalidatePath("/admin/audit");
-    return { added: res.added, skipped: res.skipped, detected: res.detected };
+    return { added: res.added, updated: res.updated, skipped: res.skipped, unchanged: res.unchanged, detected: res.detected, mismatches: res.mismatches };
   } catch (e) {
     console.error("[commitImportAction] unexpected error:", e);
     return { error: "Something went wrong importing the file. Please try again." };
