@@ -9,6 +9,10 @@ export type ItemDetailsValues = {
   currentUserEmail: string | null;
   currentPosition: string | null;
   notes: string | null;
+  lastLogonUserPrincipalName: string | null;
+  lastLogonDate: string | null;
+  enrollmentDate: string | null;
+  compliance: string | null;
 };
 
 type Props = {
@@ -117,6 +121,14 @@ export function ItemDetailsCard({ item, isAdmin, units, dateLogged, loggedBy, ha
           <dd>{item.currentUserEmail || dash}</dd>
           <dt>Current position</dt>
           <dd>{item.currentPosition || dash}</dd>
+          <dt>Assigned user (last logon)</dt>
+          <dd>{item.lastLogonUserPrincipalName || dash}</dd>
+          <dt>Last logon date</dt>
+          <dd>{item.lastLogonDate || dash}</dd>
+          <dt>Enrollment date</dt>
+          <dd>{item.enrollmentDate || dash}</dd>
+          <dt>Compliance</dt>
+          <dd>{item.compliance || dash}</dd>
           {isAdmin && (
             <>
               <dt>Notes</dt>
