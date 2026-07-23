@@ -89,6 +89,18 @@ describe("planImport", () => {
     expect(unchanged).toHaveLength(1);
   });
 
+  it("never writes homeUnit/notes on a matched update, even when the CSV supplies them", () => {
+    const { toUpdate } = planImport(
+      [mk(1, { serialNumber: "A1", deviceName: "NewName", homeUnit: "SomeUnit", notes: "some notes" })],
+      map("A1", existing({ id: "x", deviceName: "Old" })),
+      UNITS,
+    );
+    // deviceName changed -> it's an update; homeUnit/notes are ignored on a match.
+    expect(toUpdate[0].data).toEqual({ deviceName: "NewName" });
+    expect(toUpdate[0].data).not.toHaveProperty("homeUnit");
+    expect(toUpdate[0].data).not.toHaveProperty("notes");
+  });
+
   it("skips a new row missing make or model", () => {
     const { toCreate, skipped } = planImport([mk(1, { serialNumber: "N1", make: "" })], new Map(), UNITS);
     expect(toCreate).toHaveLength(0);
