@@ -2,7 +2,7 @@ import type { Item, ItemStatus, Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { newItemSchema, type NewItemInput } from "./items.schema";
 import { parseItemsCsv } from "./csv";
-import { planImport, type SkippedRow, type UnresolvedRow } from "./import";
+import { planImport, type SkippedRow, type UnresolvedRow, type ExistingItem } from "./import";
 import { loadUnitMap, learnUnits, type UnitResolution } from "./units.service";
 import { diffItemFields, type ItemLoggedFields } from "./item-diff";
 import { ItemError } from "./items.errors";
@@ -160,27 +160,58 @@ export function searchItemsBySerial(q: string): Promise<SerialSearchHit[]> {
     LIMIT 50`;
 }
 
+// One query pulls every column planImport needs to match + diff a row. Keyed by
+// lowercased serial to mirror the DB's citext identity. Bounded — same single
+// findMany as the old serial-only fetch, just more columns.
+async function loadExistingBySerial(): Promise<Map<string, ExistingItem>> {
+  const rows = await prisma.item.findMany({
+    select: {
+      id: true, serialNumber: true, make: true, model: true, deviceName: true,
+      currentUserEmail: true, lastLogonUserPrincipalName: true, lastLogonDate: true,
+      enrollmentDate: true, compliance: true,
+    },
+  });
+  const map = new Map<string, ExistingItem>();
+  for (const r of rows) {
+    const { serialNumber, ...rest } = r;
+    map.set(serialNumber.toLowerCase(), rest);
+  }
+  return map;
+}
+
+// Make/model mismatch summary from a plan, for the UI warning list.
+function collectMismatches(plan: { toUpdate: { serialNumber: string; makeModelMismatch: boolean }[]; unchanged: { serialNumber: string; makeModelMismatch: boolean }[] }): { serialNumber: string }[] {
+  return [...plan.toUpdate, ...plan.unchanged]
+    .filter((r) => r.makeModelMismatch)
+    .map((r) => ({ serialNumber: r.serialNumber }));
+}
+
 export async function analyzeImport(text: string): Promise<{
-  counts: { toImport: number; skipped: number; autoDetected: number };
+  counts: { toImport: number; toUpdate: number; unchanged: number; skipped: number; autoDetected: number };
   skipped: SkippedRow[];
   unresolved: UnresolvedRow[];
+  mismatches: { serialNumber: string }[];
   error?: string;
 }> {
+  const empty = { toImport: 0, toUpdate: 0, unchanged: 0, skipped: 0, autoDetected: 0 };
   const { rows, error } = parseItemsCsv(text);
-  if (error) return { counts: { toImport: 0, skipped: 0, autoDetected: 0 }, skipped: [], unresolved: [], error };
+  if (error) return { counts: empty, skipped: [], unresolved: [], mismatches: [], error };
 
-  const existing = new Set(
-    // Lowercased to match the DB's case-insensitive (citext) unique on serialNumber,
-    // so planImport dedups "ABC123" and "abc123" as the same device.
-    (await prisma.item.findMany({ select: { serialNumber: true } })).map((i) => i.serialNumber.toLowerCase())
-  );
+  const existing = await loadExistingBySerial();
   const units = await loadUnitMap();
-  const { toCreate, skipped, unresolved, detected } = planImport(rows, existing, units);
+  const plan = planImport(rows, existing, units);
 
   return {
-    counts: { toImport: toCreate.length, skipped: skipped.length, autoDetected: detected },
-    skipped,
-    unresolved,
+    counts: {
+      toImport: plan.toCreate.length,
+      toUpdate: plan.toUpdate.length,
+      unchanged: plan.unchanged.length,
+      skipped: plan.skipped.length,
+      autoDetected: plan.detected,
+    },
+    skipped: plan.skipped,
+    unresolved: plan.unresolved,
+    mismatches: collectMismatches(plan),
   };
 }
 
@@ -188,49 +219,68 @@ export async function commitImport(
   text: string,
   filename: string,
   resolutions: UnitResolution[],
-  createdById: string
-): Promise<{ added: number; skipped: SkippedRow[]; detected: number; error?: string }> {
+  editor: { id: string; name: string }
+): Promise<{ added: number; updated: number; skipped: SkippedRow[]; unchanged: number; detected: number; mismatches: { serialNumber: string }[]; error?: string }> {
   const { rows, error } = parseItemsCsv(text);
-  if (error) return { added: 0, skipped: [], detected: 0, error };
+  if (error) return { added: 0, updated: 0, skipped: [], unchanged: 0, detected: 0, mismatches: [], error };
 
-  // Persist what the admin taught us BEFORE planning, so detection re-runs with
-  // the enriched map and applies each new unit to every row that shares its code.
+  // Persist learned units BEFORE planning so detection re-runs with the enriched map.
   await learnUnits(resolutions);
 
-  const existing = new Set(
-    // Lowercased to match the DB's case-insensitive (citext) unique on serialNumber,
-    // so planImport dedups "ABC123" and "abc123" as the same device.
-    (await prisma.item.findMany({ select: { serialNumber: true } })).map((i) => i.serialNumber.toLowerCase())
-  );
+  const existing = await loadExistingBySerial();
   const units = await loadUnitMap();
-  const { toCreate, skipped, detected } = planImport(rows, existing, units);
+  const plan = planImport(rows, existing, units);
+  const { toCreate, toUpdate, unchanged, skipped, detected } = plan;
 
   const added = await prisma.$transaction(async (tx) => {
     const created = await tx.item.createMany({
-      data: toCreate.map((d) => ({ ...d, createdById })),
-      // The DB unique(serialNumber, citext) is the real dedup: skip — rather than
-      // throw on — any serial a concurrent import inserted between our read of
-      // `existing` above and this write. Fixes the read-then-write race.
+      // The DB unique(serialNumber, citext) is the race-safe backstop: skip rather
+      // than throw on a serial a concurrent import inserted after loadExistingBySerial.
+      data: toCreate.map((d) => ({ ...d, createdById: editor.id })),
       skipDuplicates: true,
     });
+
+    // Per-match writes carry distinct values, so individual updates are required
+    // (no batch-update-with-different-values in Prisma). Before-values already came
+    // from planImport — no per-row SELECT here. Bounded by the 2000-row import cap.
+    for (const u of toUpdate) {
+      await tx.item.update({ where: { id: u.itemId }, data: u.data });
+      if (u.loggedChanges.length > 0) {
+        await tx.itemEdit.create({
+          data: {
+            itemId: u.itemId,
+            editedById: editor.id,
+            editedByName: editor.name,
+            changes: u.loggedChanges as unknown as Prisma.InputJsonValue,
+          },
+        });
+      }
+    }
+
     await tx.importBatch.create({
       data: {
-        createdById,
+        createdById: editor.id,
         filename,
         addedCount: created.count,
+        updatedCount: toUpdate.length,
         skippedCount: skipped.length,
         skipped: skipped as unknown as Prisma.InputJsonValue,
       },
     });
     return created.count;
+  }, {
+    // A full-fleet MDM refresh is an all-UPDATE import: up to MAX_IMPORT_ROWS (2000)
+    // sequential item.update + itemEdit.create pairs in one interactive transaction.
+    // Prisma's default interactive-transaction timeout is 5s, which a few hundred
+    // round-trips to hosted Postgres can blow — aborting and rolling back the whole
+    // import. Size the budget to the row cap instead. maxWait covers pool-acquire.
+    timeout: 120_000,
+    maxWait: 15_000,
   });
 
-  // added < toCreate.length means the DB skipped rows the in-app planner didn't
-  // catch (a concurrent import or a casing variant) — rare; surface it rather
-  // than silently under-reporting.
   if (added < toCreate.length) {
     console.warn(`[commitImport] ${toCreate.length - added} row(s) skipped by the DB serialNumber unique constraint (concurrent import or casing variant).`);
   }
 
-  return { added, skipped, detected };
+  return { added, updated: toUpdate.length, skipped, unchanged: unchanged.length, detected, mismatches: collectMismatches(plan) };
 }

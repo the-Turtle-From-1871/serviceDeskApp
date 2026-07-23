@@ -19,6 +19,10 @@ export type ItemLoggedFields = {
   model: string | null;
   serialNumber: string | null;
   notes: string | null;
+  lastLogonUserPrincipalName: string | null;
+  lastLogonDate: string | null;
+  enrollmentDate: string | null;
+  compliance: string | null;
 };
 
 export type FieldChange = {

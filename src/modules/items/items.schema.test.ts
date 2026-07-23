@@ -21,3 +21,25 @@ describe("itemDetailsSchema", () => {
     expect(itemDetailsSchema.safeParse({ ...base, deviceName: "  " }).success).toBe(false);
   });
 });
+
+import { importRowSchema } from "./items.schema";
+
+describe("importRowSchema", () => {
+  it("requires only serialNumber; blanks become undefined", () => {
+    const r = importRowSchema.parse({ serialNumber: "A1", make: "", assignedUser: "  " });
+    expect(r.serialNumber).toBe("A1");
+    expect(r.make).toBeUndefined();
+    expect(r.assignedUser).toBeUndefined();
+  });
+
+  it("rejects a blank serialNumber", () => {
+    const res = importRowSchema.safeParse({ serialNumber: "   " });
+    expect(res.success).toBe(false);
+  });
+
+  it("keeps provided telemetry values", () => {
+    const r = importRowSchema.parse({ serialNumber: "A1", compliance: "Compliant", lastLogonDate: "2026-07-01" });
+    expect(r.compliance).toBe("Compliant");
+    expect(r.lastLogonDate).toBe("2026-07-01");
+  });
+});

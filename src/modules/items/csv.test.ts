@@ -6,9 +6,28 @@ describe("parseItemsCsv", () => {
     const csv = "Make,Model,Serial Number,Device Name,Home Unit,Notes\nM4,Carbine,A1,Radio,A Co,tan\n";
     const { rows, error } = parseItemsCsv(csv);
     expect(error).toBeUndefined();
-    expect(rows).toEqual([
-      { row: 1, make: "M4", model: "Carbine", serialNumber: "A1", deviceName: "Radio", homeUnit: "A Co", notes: "tan" },
-    ]);
+    expect(rows[0]).toMatchObject({
+      row: 1, make: "M4", model: "Carbine", serialNumber: "A1", deviceName: "Radio", homeUnit: "A Co", notes: "tan",
+      assignedUser: "", lastLogonUserPrincipalName: "", lastLogonDate: "", enrollmentDate: "", compliance: "",
+    });
+  });
+
+  it("maps the new assignedUser + telemetry headers in any column order and any case", () => {
+    const csv =
+      "SerialNumber,Compliance,Assigned User,LASTLOGONDATE,lastLogonUserPrincipalName,EnrollmentDate\n" +
+      "A1,Compliant,jane@x.mil,2026-07-01,jane@x.mil,2025-01-15\n";
+    const { rows, error } = parseItemsCsv(csv);
+    expect(error).toBeUndefined();
+    expect(rows[0]).toMatchObject({
+      serialNumber: "A1", compliance: "Compliant", assignedUser: "jane@x.mil",
+      lastLogonDate: "2026-07-01", lastLogonUserPrincipalName: "jane@x.mil", enrollmentDate: "2025-01-15",
+    });
+  });
+
+  it("requires only the serialNumber column (make/model/deviceName optional)", () => {
+    const { rows, error } = parseItemsCsv("serialNumber,compliance\nA1,Compliant\n");
+    expect(error).toBeUndefined();
+    expect(rows[0]).toMatchObject({ serialNumber: "A1", make: "", model: "", deviceName: "" });
   });
 
   it("handles quoted fields with embedded commas and skips blank lines", () => {
@@ -19,7 +38,7 @@ describe("parseItemsCsv", () => {
     expect(rows[1]).toMatchObject({ row: 2, make: "PVS", serialNumber: "B7", notes: "" });
   });
 
-  it("errors when a required header is missing", () => {
+  it("errors when the serialNumber column is missing", () => {
     const { error } = parseItemsCsv("make,model\nM4,Carbine\n");
     expect(error).toMatch(/serialNumber/);
   });

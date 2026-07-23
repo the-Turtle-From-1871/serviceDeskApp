@@ -92,6 +92,10 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
               // item.notes, or a non-admin can read admin-only notes out
               // of the response even though the UI hides them.
               notes: isAdmin ? item.notes : null,
+              lastLogonUserPrincipalName: item.lastLogonUserPrincipalName,
+              lastLogonDate: item.lastLogonDate,
+              enrollmentDate: item.enrollmentDate,
+              compliance: item.compliance,
             }}
             isAdmin={isAdmin}
             units={isAdmin ? units : []}

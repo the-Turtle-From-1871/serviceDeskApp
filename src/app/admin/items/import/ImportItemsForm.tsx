@@ -3,18 +3,21 @@ import { useState } from "react";
 import Link from "next/link";
 import { analyzeImportAction, commitImportAction } from "@/app/admin/actions/items";
 
-const TEMPLATE = "make,model,serialNumber,deviceName,homeUnit,notes\n";
+const TEMPLATE = "make,model,serialNumber,deviceName,homeUnit,notes,assignedUser,lastLogonUserPrincipalName,lastLogonDate,enrollmentDate,compliance\n";
 // A CSV of items is small; anything larger is almost certainly a mistake — and the
 // two-step analyze→commit flow uploads the file twice, so bound it up front.
 const MAX_CSV_BYTES = 5 * 1024 * 1024; // 5 MB
 
 type Skipped = { row: number; serialNumber: string; reason: string };
 type Unresolved = { row: number; deviceName: string; segments: string[] };
+type Mismatch = { serialNumber: string };
 type Analysis = {
-  counts: { toImport: number; skipped: number; autoDetected: number };
+  counts: { toImport: number; toUpdate: number; unchanged: number; skipped: number; autoDetected: number };
   skipped: Skipped[];
   unresolved: Unresolved[];
+  mismatches: Mismatch[];
 };
+type CommitResult = { added: number; updated: number; skipped: Skipped[]; unchanged: number; detected: number; mismatches: Mismatch[] };
 
 function groupSkipped(skipped: Skipped[]) {
   const by = new Map<string, string[]>();
@@ -30,7 +33,7 @@ export function ImportItemsForm() {
   const [phase, setPhase] = useState<"idle" | "busy" | "resolve" | "done">("idle");
   const [error, setError] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
-  const [result, setResult] = useState<{ added: number; skipped: Skipped[]; detected: number } | null>(null);
+  const [result, setResult] = useState<CommitResult | null>(null);
 
   // learned[UPPERCASE_ABBREV] = fullName, collected during the resolve step
   const [learned, setLearned] = useState<Record<string, string>>({});
@@ -85,8 +88,11 @@ export function ImportItemsForm() {
     return (
       <div className="stack">
         <div className="card stack-sm">
-          <p className="alert-success">{result.added} item{result.added === 1 ? "" : "s"} added.</p>
-          {result.detected > 0 && <p className="subtle">{result.detected} home unit{result.detected === 1 ? "" : "s"} auto-detected from device names.</p>}
+          <p className="alert-success">{result.added} item{result.added === 1 ? "" : "s"} added · {result.updated} updated.</p>
+          {result.unchanged > 0 && <p className="subtle">{result.unchanged} already up to date.</p>}
+          {result.mismatches.length > 0 && (
+            <p className="alert-warning">Make/model differ from stored on: {result.mismatches.map((m) => m.serialNumber).join(", ")} (device name / assigned user still updated; make and model were left unchanged).</p>
+          )}
           {result.skipped.length > 0 ? (
             <div className="stack-sm">
               <p><strong>{result.skipped.length} skipped:</strong></p>
@@ -113,7 +119,10 @@ export function ImportItemsForm() {
     return (
       <div className="stack">
         <div className="card stack-sm">
-          <p><strong>{analysis.counts.toImport}</strong> items ready to import — <strong>{analysis.counts.autoDetected}</strong> home units auto-detected, <strong>{analysis.counts.skipped}</strong> skipped.</p>
+          <p><strong>{analysis.counts.toImport}</strong> to add · <strong>{analysis.counts.toUpdate}</strong> to update · <strong>{analysis.counts.unchanged}</strong> unchanged · <strong>{analysis.counts.autoDetected}</strong> units auto-detected · <strong>{analysis.counts.skipped}</strong> skipped.</p>
+          {analysis.mismatches.length > 0 && (
+            <p className="alert-warning">Make/model differ on: {analysis.mismatches.map((m) => m.serialNumber).join(", ")} — these will still update device name / assigned user, but make and model won&apos;t be changed.</p>
+          )}
           {analysis.unresolved.length > 0 && (
             <p className="subtle">{pending.length} of {analysis.unresolved.length} device name{analysis.unresolved.length === 1 ? "" : "s"} still need a unit. Pick the segment that is the unit code and name it, or leave it — unresolved items import with an empty home unit.</p>
           )}
@@ -134,7 +143,7 @@ export function ImportItemsForm() {
         {error && <p role="alert" className="alert-error">{error}</p>}
         <div className="row">
           <button className="btn btn-primary" onClick={onCommit} disabled={phase === "busy"}>
-            {phase === "busy" ? "Importing…" : `Import ${analysis.counts.toImport} items`}
+            {phase === "busy" ? "Importing…" : `Import ${analysis.counts.toImport + analysis.counts.toUpdate} items`}
           </button>
           <button className="btn btn-ghost" onClick={reset}>Cancel</button>
         </div>
@@ -166,7 +175,7 @@ export function ImportItemsForm() {
               setFile(f);
             }}
           />
-          <p className="subtle">Columns: make, model, serialNumber, deviceName, homeUnit, notes. First row must be the header. homeUnit is optional — if blank, it&apos;s auto-detected from the device name.</p>
+          <p className="subtle">Only <strong>serialNumber</strong> is required. Columns (any order, case-insensitive): make, model, serialNumber, deviceName, homeUnit, notes, assignedUser, lastLogonUserPrincipalName, lastLogonDate, enrollmentDate, compliance. A row whose serial already exists updates its device name, assigned user and telemetry; make/model are required only for new items. Blank cells are left unchanged on existing items.</p>
         </div>
         {error && <p role="alert" className="alert-error">{error}</p>}
         <div className="row">
