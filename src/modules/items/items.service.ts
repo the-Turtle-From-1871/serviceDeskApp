@@ -242,7 +242,7 @@ export async function commitImport(
   const plan = planImport(rows, existing, units);
   const { toCreate, toUpdate, unchanged, skipped, detected } = plan;
 
-  const { added, updated } = await prisma.$transaction(async (tx) => {
+  const { added, updated, skipped: finalSkipped } = await prisma.$transaction(async (tx) => {
     const created = await tx.item.createMany({
       // The DB unique(serialNumber, citext) is the race-safe backstop: skip rather
       // than throw on a serial a concurrent import inserted after loadExistingBySerial.
@@ -250,39 +250,45 @@ export async function commitImport(
       skipDuplicates: true,
     });
 
-    // Per-match writes carry distinct values, so individual updates are required
-    // (no batch-update-with-different-values in Prisma). Before-values already came
-    // from planImport — no per-row SELECT here. Bounded by the 2000-row import cap.
+    // item.update must be per-row (distinct values, no batch form in Prisma), but
     // updateMany (not update) so a serial deleted between the read above and this
-    // write is a no-op (count 0) instead of a P2025 that aborts the whole batch.
+    // write is a no-op (count 0) instead of a P2025 that aborts the whole batch —
+    // the vanished row is reported as skipped, not silently dropped. The ItemEdit
+    // rows are uniform-shape, so they're collected and written in ONE createMany
+    // after the loop instead of one insert per row. Bounded by the 2000-row cap.
     let updatedCount = 0;
+    const vanished: SkippedRow[] = [];
+    const edits: Prisma.ItemEditCreateManyInput[] = [];
     for (const u of toUpdate) {
       const res = await tx.item.updateMany({ where: { id: u.itemId }, data: u.data });
-      if (res.count === 0) continue; // item vanished concurrently — skip, don't abort
+      if (res.count === 0) {
+        vanished.push({ row: u.row, serialNumber: u.serialNumber, reason: "item no longer exists" });
+        continue;
+      }
       updatedCount++;
       if (u.loggedChanges.length > 0) {
-        await tx.itemEdit.create({
-          data: {
-            itemId: u.itemId,
-            editedById: editor.id,
-            editedByName: editor.name,
-            changes: u.loggedChanges as unknown as Prisma.InputJsonValue,
-          },
+        edits.push({
+          itemId: u.itemId,
+          editedById: editor.id,
+          editedByName: editor.name,
+          changes: u.loggedChanges as unknown as Prisma.InputJsonValue,
         });
       }
     }
+    if (edits.length > 0) await tx.itemEdit.createMany({ data: edits });
 
+    const allSkipped = vanished.length > 0 ? [...skipped, ...vanished] : skipped;
     await tx.importBatch.create({
       data: {
         createdById: editor.id,
         filename,
         addedCount: created.count,
         updatedCount,
-        skippedCount: skipped.length,
-        skipped: skipped as unknown as Prisma.InputJsonValue,
+        skippedCount: allSkipped.length,
+        skipped: allSkipped as unknown as Prisma.InputJsonValue,
       },
     });
-    return { added: created.count, updated: updatedCount };
+    return { added: created.count, updated: updatedCount, skipped: allSkipped };
   }, {
     // A full-fleet MDM refresh is an all-UPDATE import: up to MAX_IMPORT_ROWS (2000)
     // sequential item.update + itemEdit.create pairs in one interactive transaction.
@@ -297,5 +303,5 @@ export async function commitImport(
     console.warn(`[commitImport] ${toCreate.length - added} row(s) skipped by the DB serialNumber unique constraint (concurrent import or casing variant).`);
   }
 
-  return { added, updated, skipped, unchanged: unchanged.length, detected, mismatches: collectMismatches(plan) };
+  return { added, updated, skipped: finalSkipped, unchanged: unchanged.length, detected, mismatches: collectMismatches(plan) };
 }

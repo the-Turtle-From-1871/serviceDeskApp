@@ -90,6 +90,7 @@ export function ImportItemsForm() {
         <div className="card stack-sm">
           <p className="alert-success">{result.added} item{result.added === 1 ? "" : "s"} added · {result.updated} updated.</p>
           {result.unchanged > 0 && <p className="subtle">{result.unchanged} already up to date.</p>}
+          {result.detected > 0 && <p className="subtle">{result.detected} home unit{result.detected === 1 ? "" : "s"} auto-detected from device names.</p>}
           {result.mismatches.length > 0 && (
             <p className="alert-warning">CSV make/model differ from what&apos;s stored for: {result.mismatches.map((m) => m.serialNumber).join(", ")}. Make and model are never changed by import.</p>
           )}

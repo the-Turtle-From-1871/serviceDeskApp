@@ -121,7 +121,7 @@ export function ItemDetailsCard({ item, isAdmin, units, dateLogged, loggedBy, ha
           <dd>{item.currentUserEmail || dash}</dd>
           <dt>Current position</dt>
           <dd>{item.currentPosition || dash}</dd>
-          <dt>Assigned user (last logon)</dt>
+          <dt>Last logon user</dt>
           <dd>{item.lastLogonUserPrincipalName || dash}</dd>
           <dt>Last logon date</dt>
           <dd>{item.lastLogonDate || dash}</dd>
