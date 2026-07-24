@@ -73,6 +73,23 @@ test("commitImport telemetry-only change writes no ItemEdit", async () => {
   expect(await prisma.itemEdit.count({ where: { itemId: item.id } })).toBe(0);
 });
 
+test("commitImport updates a RETIRED item's fields but writes no ItemEdit", async () => {
+  await createItem({ make: "Dell", model: "5540", serialNumber: "RET1", deviceName: "Old", homeUnit: undefined, notes: undefined }, admin.id);
+  await prisma.item.update({ where: { serialNumber: "RET1" }, data: { status: "RETIRED" } });
+
+  const csv = "serialNumber,deviceName,assignedUser,compliance\nRET1,NewName,jane@x.mil,Compliant\n";
+  const res = await commitImport(csv, "items.csv", [], admin);
+  expect(res.updated).toBe(1); // the update still happens
+
+  const item = await prisma.item.findUniqueOrThrow({ where: { serialNumber: "RET1" } });
+  expect(item.deviceName).toBe("NewName");
+  expect(item.currentUserEmail).toBe("jane@x.mil");
+  expect(item.compliance).toBe("Compliant");
+  expect(item.status).toBe("RETIRED");
+  // No history row for a retired item, even though deviceName/assignedUser changed.
+  expect(await prisma.itemEdit.count({ where: { itemId: item.id } })).toBe(0);
+});
+
 test("analyzeImport reports mismatches and update counts without writing", async () => {
   await createItem({ make: "Dell", model: "5540", serialNumber: "M1", deviceName: "Old", homeUnit: undefined, notes: undefined }, admin.id);
   const csv = "make,model,serialNumber,deviceName\nHP,x360,M1,New\n"; // make/model differ, deviceName differs

@@ -91,7 +91,7 @@ export function ImportItemsForm() {
           <p className="alert-success">{result.added} item{result.added === 1 ? "" : "s"} added · {result.updated} updated.</p>
           {result.unchanged > 0 && <p className="subtle">{result.unchanged} already up to date.</p>}
           {result.mismatches.length > 0 && (
-            <p className="alert-warning">Make/model differ from stored on: {result.mismatches.map((m) => m.serialNumber).join(", ")} (device name / assigned user still updated; make and model were left unchanged).</p>
+            <p className="alert-warning">CSV make/model differ from what&apos;s stored for: {result.mismatches.map((m) => m.serialNumber).join(", ")}. Make and model are never changed by import.</p>
           )}
           {result.skipped.length > 0 ? (
             <div className="stack-sm">
@@ -121,7 +121,7 @@ export function ImportItemsForm() {
         <div className="card stack-sm">
           <p><strong>{analysis.counts.toImport}</strong> to add · <strong>{analysis.counts.toUpdate}</strong> to update · <strong>{analysis.counts.unchanged}</strong> unchanged · <strong>{analysis.counts.autoDetected}</strong> units auto-detected · <strong>{analysis.counts.skipped}</strong> skipped.</p>
           {analysis.mismatches.length > 0 && (
-            <p className="alert-warning">Make/model differ on: {analysis.mismatches.map((m) => m.serialNumber).join(", ")} — these will still update device name / assigned user, but make and model won&apos;t be changed.</p>
+            <p className="alert-warning">CSV make/model differ from what&apos;s stored for: {analysis.mismatches.map((m) => m.serialNumber).join(", ")}. Make and model are never overwritten by import.</p>
           )}
           {analysis.unresolved.length > 0 && (
             <p className="subtle">{pending.length} of {analysis.unresolved.length} device name{analysis.unresolved.length === 1 ? "" : "s"} still need a unit. Pick the segment that is the unit code and name it, or leave it — unresolved items import with an empty home unit.</p>

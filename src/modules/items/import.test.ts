@@ -11,7 +11,7 @@ const mk = (row: number, over: Partial<RawRow> = {}): RawRow => ({
 });
 
 const existing = (over: Partial<ExistingItem> = {}): ExistingItem => ({
-  id: "id-1", make: "M4", model: "Carbine", deviceName: "Radio", currentUserEmail: null,
+  id: "id-1", status: "ACTIVE", make: "M4", model: "Carbine", deviceName: "Radio", currentUserEmail: null,
   lastLogonUserPrincipalName: null, lastLogonDate: null, enrollmentDate: null, compliance: null, ...over,
 });
 
@@ -99,6 +99,19 @@ describe("planImport", () => {
     expect(toUpdate[0].data).toEqual({ deviceName: "NewName" });
     expect(toUpdate[0].data).not.toHaveProperty("homeUnit");
     expect(toUpdate[0].data).not.toHaveProperty("notes");
+  });
+
+  it("updates a RETIRED item's fields but emits no loggedChanges (no history row)", () => {
+    const { toUpdate } = planImport(
+      [mk(1, { serialNumber: "A1", deviceName: "NewName", assignedUser: "jane@x.mil", compliance: "Compliant" })],
+      map("A1", existing({ id: "x", status: "RETIRED", deviceName: "Old", currentUserEmail: null })),
+      UNITS,
+    );
+    expect(toUpdate).toHaveLength(1);
+    // Fields still update (data carries every change)...
+    expect(toUpdate[0].data).toEqual({ deviceName: "NewName", currentUserEmail: "jane@x.mil", compliance: "Compliant" });
+    // ...but no ItemEdit history is written for a retired item.
+    expect(toUpdate[0].loggedChanges).toEqual([]);
   });
 
   it("skips a new row missing make or model", () => {

@@ -160,13 +160,17 @@ export function searchItemsBySerial(q: string): Promise<SerialSearchHit[]> {
     LIMIT 50`;
 }
 
-// One query pulls every column planImport needs to match + diff a row. Keyed by
-// lowercased serial to mirror the DB's citext identity. Bounded — same single
-// findMany as the old serial-only fetch, just more columns.
-async function loadExistingBySerial(): Promise<Map<string, ExistingItem>> {
+// One query pulls every column planImport needs to match + diff a row. Scoped to
+// the serials actually in the CSV (`in` over the citext column, so it matches
+// case-insensitively) — bounds the fetch to the upload size instead of the whole
+// catalog. Keyed by lowercased serial to mirror the DB's citext identity.
+async function loadExistingBySerial(serials: string[]): Promise<Map<string, ExistingItem>> {
+  const wanted = serials.filter((s) => s.trim() !== "");
+  if (wanted.length === 0) return new Map();
   const rows = await prisma.item.findMany({
+    where: { serialNumber: { in: wanted } },
     select: {
-      id: true, serialNumber: true, make: true, model: true, deviceName: true,
+      id: true, status: true, serialNumber: true, make: true, model: true, deviceName: true,
       currentUserEmail: true, lastLogonUserPrincipalName: true, lastLogonDate: true,
       enrollmentDate: true, compliance: true,
     },
@@ -197,8 +201,11 @@ export async function analyzeImport(text: string): Promise<{
   const { rows, error } = parseItemsCsv(text);
   if (error) return { counts: empty, skipped: [], unresolved: [], mismatches: [], error };
 
-  const existing = await loadExistingBySerial();
-  const units = await loadUnitMap();
+  // Independent reads — run them together.
+  const [existing, units] = await Promise.all([
+    loadExistingBySerial(rows.map((r) => r.serialNumber)),
+    loadUnitMap(),
+  ]);
   const plan = planImport(rows, existing, units);
 
   return {
@@ -227,12 +234,15 @@ export async function commitImport(
   // Persist learned units BEFORE planning so detection re-runs with the enriched map.
   await learnUnits(resolutions);
 
-  const existing = await loadExistingBySerial();
-  const units = await loadUnitMap();
+  // Independent reads — run them together (loadUnitMap must follow learnUnits above).
+  const [existing, units] = await Promise.all([
+    loadExistingBySerial(rows.map((r) => r.serialNumber)),
+    loadUnitMap(),
+  ]);
   const plan = planImport(rows, existing, units);
   const { toCreate, toUpdate, unchanged, skipped, detected } = plan;
 
-  const added = await prisma.$transaction(async (tx) => {
+  const { added, updated } = await prisma.$transaction(async (tx) => {
     const created = await tx.item.createMany({
       // The DB unique(serialNumber, citext) is the race-safe backstop: skip rather
       // than throw on a serial a concurrent import inserted after loadExistingBySerial.
@@ -243,8 +253,13 @@ export async function commitImport(
     // Per-match writes carry distinct values, so individual updates are required
     // (no batch-update-with-different-values in Prisma). Before-values already came
     // from planImport — no per-row SELECT here. Bounded by the 2000-row import cap.
+    // updateMany (not update) so a serial deleted between the read above and this
+    // write is a no-op (count 0) instead of a P2025 that aborts the whole batch.
+    let updatedCount = 0;
     for (const u of toUpdate) {
-      await tx.item.update({ where: { id: u.itemId }, data: u.data });
+      const res = await tx.item.updateMany({ where: { id: u.itemId }, data: u.data });
+      if (res.count === 0) continue; // item vanished concurrently — skip, don't abort
+      updatedCount++;
       if (u.loggedChanges.length > 0) {
         await tx.itemEdit.create({
           data: {
@@ -262,12 +277,12 @@ export async function commitImport(
         createdById: editor.id,
         filename,
         addedCount: created.count,
-        updatedCount: toUpdate.length,
+        updatedCount,
         skippedCount: skipped.length,
         skipped: skipped as unknown as Prisma.InputJsonValue,
       },
     });
-    return created.count;
+    return { added: created.count, updated: updatedCount };
   }, {
     // A full-fleet MDM refresh is an all-UPDATE import: up to MAX_IMPORT_ROWS (2000)
     // sequential item.update + itemEdit.create pairs in one interactive transaction.
@@ -282,5 +297,5 @@ export async function commitImport(
     console.warn(`[commitImport] ${toCreate.length - added} row(s) skipped by the DB serialNumber unique constraint (concurrent import or casing variant).`);
   }
 
-  return { added, updated: toUpdate.length, skipped, unchanged: unchanged.length, detected, mismatches: collectMismatches(plan) };
+  return { added, updated, skipped, unchanged: unchanged.length, detected, mismatches: collectMismatches(plan) };
 }

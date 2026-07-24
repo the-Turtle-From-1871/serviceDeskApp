@@ -10,6 +10,10 @@ export type UnresolvedRow = { row: number; deviceName: string; segments: string[
 // in one findMany by the caller and keyed by lowercased serial (citext identity).
 export type ExistingItem = {
   id: string;
+  // "ACTIVE" | "RETIRED". Retired items still update, but we never write an
+  // ItemEdit history row for them (an MDM refresh shouldn't add churn to the
+  // audit trail of an out-of-service device).
+  status: string;
   make: string;
   model: string;
   deviceName: string | null;
@@ -134,7 +138,10 @@ export function planImport(
       }
       const data: Record<string, string | null> = {};
       for (const c of allChanges) data[c.field] = c.to;
-      toUpdate.push({ row: r.row, itemId: match.id, serialNumber: sn, data, loggedChanges, makeModelMismatch });
+      // Retired items still get their fields updated (data holds every change),
+      // but emit no loggedChanges so commitImport writes no ItemEdit for them.
+      const emittedLogged = match.status === "RETIRED" ? [] : loggedChanges;
+      toUpdate.push({ row: r.row, itemId: match.id, serialNumber: sn, data, loggedChanges: emittedLogged, makeModelMismatch });
       continue;
     }
 
