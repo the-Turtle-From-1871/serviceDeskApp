@@ -41,7 +41,7 @@ export default async function AuditPage() {
           <div className="table-wrap">
             <table className="table">
               <thead>
-                <tr><th>Date</th><th>By</th><th>File</th><th>Added</th><th>Skipped</th></tr>
+                <tr><th>Date</th><th>By</th><th>File</th><th>Added</th><th>Updated</th><th>Skipped</th></tr>
               </thead>
               <tbody>
                 {imports.map((b) => {
@@ -52,6 +52,7 @@ export default async function AuditPage() {
                       <td data-label="By">{b.createdBy.name}</td>
                       <td data-label="File">{b.filename}</td>
                       <td data-label="Added">{b.addedCount}</td>
+                      <td data-label="Updated">{b.updatedCount}</td>
                       <td className="is-stacked" data-label="Skipped">
                         {b.skippedCount}
                         {skipped.length > 0 && <span className="subtle"> ({skipped.map((s) => s.serialNumber || "?").join(", ")})</span>}

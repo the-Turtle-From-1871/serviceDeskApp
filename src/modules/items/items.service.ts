@@ -291,11 +291,13 @@ export async function commitImport(
     return { added: created.count, updated: updatedCount, skipped: allSkipped };
   }, {
     // A full-fleet MDM refresh is an all-UPDATE import: up to MAX_IMPORT_ROWS (2000)
-    // sequential item.update + itemEdit.create pairs in one interactive transaction.
-    // Prisma's default interactive-transaction timeout is 5s, which a few hundred
-    // round-trips to hosted Postgres can blow — aborting and rolling back the whole
-    // import. Size the budget to the row cap instead. maxWait covers pool-acquire.
-    timeout: 120_000,
+    // sequential item.updateMany writes (ItemEdits are batched) in one interactive
+    // transaction. Prisma's default 5s timeout is far too small; but the ceiling is
+    // the hosting function timeout — the import page sets `maxDuration = 60`, so keep
+    // this just under 60s so a too-large import aborts cleanly here (caught → generic
+    // error) instead of being killed mid-transaction by the platform. maxWait covers
+    // pool-acquire. Chunking large imports across transactions is a deferred follow-up.
+    timeout: 55_000,
     maxWait: 15_000,
   });
 

@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Notes
 - Migration `20260723000000_add_mdm_telemetry_fields` adds four nullable text columns to `Item` (`lastLogonUserPrincipalName`, `lastLogonDate`, `enrollmentDate`, `compliance`) and `updatedCount` (default 0) to `ImportBatch`. Apply with `npx prisma migrate deploy`; prod is hand-applied via the standard manual process.
+- The import route (`/admin/items/import`) sets `export const maxDuration = 60` because a full-fleet all-update refresh runs a bounded sequential write loop; the `commitImport` DB transaction timeout is kept just under it (55s). Very large imports (thousands of rows at high DB latency) still need the deferred chunking follow-up. The `/admin/audit` "CSV imports" table now shows an **Updated** column.
 
 ## 2026-07-22
 
