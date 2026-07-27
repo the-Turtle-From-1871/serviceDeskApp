@@ -29,13 +29,17 @@ const HEADER_MAP: Record<string, keyof Omit<RawRow, "row">> = {
   homeunit: "homeUnit",
   deviceuic: "deviceUIC",
   uic: "deviceUIC",
-  // Only EXPLICIT category headers map here. `type`/`devicetype` were tried and
-  // removed: MDM exports routinely carry a "Type" column holding OS strings
-  // ("Windows 11 Pro 23H2"), which previously fell through as an unknown header
-  // and was ignored. Aliasing it would overwrite every matched item's category
-  // with an OS string, log that to ItemEdit history, and pollute the managed
-  // vocabulary. Do not re-add a generic alias.
+  // Category headers. `deviceType` is the column the fleet export carries
+  // ("Laptop", "Switch"), and it fills the device category.
+  //
+  // NOTE the deliberate absence of a bare `type` alias. MDM exports routinely
+  // include a generic "Type" column holding OS strings ("Windows 11 Pro
+  // 23H2"); today that header is unrecognised and ignored, which is the safe
+  // outcome. Aliasing it would overwrite every matched item's category with an
+  // OS string, log that churn to ItemEdit history, and pollute the managed
+  // category vocabulary. Keep the alias list explicit.
   devicecategory: "deviceCategory",
+  devicetype: "deviceCategory",
   category: "deviceCategory",
   notes: "notes",
   assigneduser: "assignedUser",

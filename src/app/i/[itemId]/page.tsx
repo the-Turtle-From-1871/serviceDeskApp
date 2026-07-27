@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getItemWithCreator } from "@/modules/items/items.service";
+import { readinessForItem } from "@/modules/items/readiness.query";
+import { READINESS_LABEL } from "@/modules/items/readiness";
+import { MarkReadyButton } from "@/components/MarkReadyButton";
 import { listReceiptsForItem, getHoldingTransfer } from "@/modules/transfers/transfers.service";
 import { formatParty } from "@/modules/transfers/party";
 import { itemQrDataUrl, itemUrl } from "@/modules/items/qr";
@@ -25,7 +28,7 @@ import { DueBadge } from "@/components/DueBadge";
 export default async function PublicItemPage({ params }: { params: Promise<{ itemId: string }> }) {
   const { itemId } = await params;
   // All fetches depend only on itemId (known up front), so run them together.
-  const [item, user, receipts, currentHolder, qr, service, units, lastEdit, audits] = await Promise.all([
+  const [item, user, receipts, currentHolder, qr, service, units, lastEdit, audits, readiness] = await Promise.all([
     getItemWithCreator(itemId),
     getCurrentUser(),
     listReceiptsForItem(itemId),
@@ -39,6 +42,13 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
     listUnits(),
     prisma.itemEdit.findFirst({ where: { itemId }, orderBy: { createdAt: "desc" } }),
     getAuditsForItem(itemId),
+    // Readiness is derived, and deliberately from the SAME SQL the dashboard
+    // and the /items list use rather than re-deriving it here from `service`
+    // and `currentHolder`. Those two are close but not identical inputs
+    // (getHoldingTransfer only inspects the item's LATEST receipt), so
+    // recomputing locally is exactly how the item page and the fleet numbers
+    // would start disagreeing.
+    readinessForItem(itemId),
   ]);
   if (!item) notFound();
   const loggedIn = !!user && user.isActive;
@@ -109,6 +119,21 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
             }
             lastEdited={lastEdit ? `${lastEdit.editedByName} · ${formatDateTimeHST(lastEdit.createdAt)}` : null}
           />
+        )}
+
+        {/* Readiness is DERIVED and read-only — there is no state to pick.
+            The single admin control stamps markedReadyAt ("it's back on my
+            shelf"), which reads as Ready to deploy until something contradicts
+            it: an open receipt, a service flag, or an MDM logon dated after
+            the stamp. Logged-in only, like the Service and Audit cards. */}
+        {loggedIn && (
+          <div className="card stack-sm">
+            <div className="card__title">Readiness</div>
+            <div className="row" style={{ gap: 8, alignItems: "center" }}>
+              <strong>{READINESS_LABEL[readiness]}</strong>
+            </div>
+            {isAdmin && item.status === "ACTIVE" && <MarkReadyButton itemIds={[item.id]} />}
+          </div>
         )}
 
         {loggedIn && (

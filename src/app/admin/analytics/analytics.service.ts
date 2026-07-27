@@ -1,31 +1,39 @@
 import "server-only";
-import { Prisma, type DeployableStatus } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { listItemUics } from "@/modules/items/items.service";
+import { auditCutoff, type AuditState } from "@/modules/audit/audit.status";
+import type { ReadinessState } from "@/modules/items/readiness";
+import {
+  READINESS_CASE,
+  READINESS_JOINS,
+  readinessScope,
+} from "@/modules/items/readiness.sql";
 
 /* ============================================================
    Analytics aggregation for the readiness dashboard.
 
    Every function here obeys the project's non-negotiable data-fetching
-   rules (CLAUDE.md): aggregate in SQL with groupBy, never query inside a
-   loop, select only what is rendered, and bound every list. The whole
-   page is five queries plus one for the filter's option list — it does
-   not grow with the size of the fleet.
+   rules (CLAUDE.md): aggregate in SQL, never query inside a loop, select
+   only what is rendered, and bound every list. The page is a fixed handful
+   of queries — it does not grow with the size of the fleet.
+
+   Readiness is DERIVED, not stored (modules/items/readiness.ts). The two
+   widgets that bucket by it embed READINESS_CASE / READINESS_JOINS so the
+   database does the classifying; the parity test keeps that SQL and the
+   TypeScript readinessState() answering identically.
 
    Every widget honours the same optional `deviceUIC` filter, so the
    global Select at the top of the page re-scopes the entire view.
    ============================================================ */
 
 import {
-  DEPLOYABLE_STATUSES,
   RANGES,
   UNCATEGORIZED,
-  UNTRIAGED,
-  statusKey,
-  type AccountabilitySlice,
+  AUDIT_STATE_ORDER,
+  type AuditReadinessSlice,
   type CategoryKpi,
   type RangeKey,
-  type StatusPoint,
   type UicFilter,
   type UnitAllocation,
   type VelocityPoint,
@@ -38,16 +46,15 @@ export * from "./analytics.types";
 /**
  * Base scope for every readiness aggregate.
  *
- * Lifecycle-RETIRED items are EXCLUDED. They are decommissioned kit, and
- * because `isAccountedFor` defaults to true they would otherwise pad the
- * "accounted for" numerator and the unit totals with equipment nobody is
- * responsible for finding — readiness figures that quietly overstate.
- * The rest of the app already treats retired as out of scope (`/items`
- * renders no audit state for them).
+ * Lifecycle-RETIRED items are EXCLUDED. They are decommissioned kit, and would
+ * otherwise pad the unit totals — and the audit-readiness donut — with equipment
+ * nobody is responsible for finding, producing readiness figures that quietly
+ * overstate. The rest of the app already treats retired as out of scope
+ * (`/items` renders no audit state for them).
  *
  * NOTE the two different RETIREDs: `Item.status` is the ACTIVE/RETIRED
- * lifecycle filtered here; `deployableStatus: "RETIRED"` is a readiness
- * state and remains a legitimate series in the charts.
+ * lifecycle filtered here; the derived readiness state "RETIRED" is what that
+ * lifecycle looks like from the readiness side (see readiness.ts).
  */
 const itemWhere = (uic: UicFilter): Prisma.ItemWhereInput => ({
   status: "ACTIVE",
@@ -72,17 +79,40 @@ export function listUnitOptions(limit = 200): Promise<string[]> {
    Widget 1 — Audit readiness (accounted for vs not).
    ------------------------------------------------------------ */
 
-export async function getAccountability(uic: UicFilter): Promise<AccountabilitySlice[]> {
-  const rows = await prisma.item.groupBy({
-    by: ["isAccountedFor"],
-    where: itemWhere(uic),
-    _count: { _all: true },
-  });
-  // Always emit both slices so the donut's legend is stable even when one
-  // side is empty (an all-accounted-for fleet must still show "0 missing").
-  return [true, false].map((accountedFor) => ({
-    accountedFor,
-    count: rows.find((r) => r.isAccountedFor === accountedFor)?._count._all ?? 0,
+/**
+ * Accountability by audit recency.
+ *
+ * This USED to read `Item.isAccountedFor`, a boolean defaulting to true that
+ * only one admin bulk action ever wrote. In practice nothing wrote it, so the
+ * donut reported a 100%-accounted-for fleet built entirely out of the column
+ * default while the actual evidence of physical verification — an ItemAudit,
+ * denormalized to `lastAuditedAt` — sat in a different column it never read.
+ * The flag is gone; possession is now claimed only where an audit proves it.
+ *
+ * Bucketed in SQL rather than by fetching rows: this counts the whole fleet and
+ * must stay one bounded query. `auditCutoff` keeps the period rule shared with
+ * the per-row `auditState` badge instead of restating "1 year" here.
+ */
+export async function getAuditReadiness(uic: UicFilter): Promise<AuditReadinessSlice[]> {
+  const cutoff = auditCutoff(new Date());
+  // Parameterized $queryRaw — never string interpolation (CLAUDE.md §2).
+  const rows = await prisma.$queryRaw<{ state: AuditState; count: number }[]>(Prisma.sql`
+    SELECT CASE
+             WHEN "lastAuditedAt" IS NULL          THEN 'never'
+             WHEN "lastAuditedAt" > ${cutoff}      THEN 'compliant'
+             ELSE                                       'overdue'
+           END AS state,
+           COUNT(*)::int AS count
+    FROM "Item"
+    WHERE "status" = 'ACTIVE'
+      AND (${uic}::text IS NULL OR "deviceUIC" = ${uic}::text)
+    GROUP BY 1
+  `);
+  // Always emit all three slices so the legend is stable and the wedges sum to
+  // the fleet size even when a state is empty.
+  return AUDIT_STATE_ORDER.map((state) => ({
+    state,
+    count: Number(rows.find((r) => r.state === state)?.count ?? 0),
   }));
 }
 
@@ -90,31 +120,52 @@ export async function getAccountability(uic: UicFilter): Promise<AccountabilityS
    Widget 2 — Fleet KPIs: In Service vs Ready, by category.
    ------------------------------------------------------------ */
 
+type CategoryReadinessRow = { category: string | null; readiness: ReadinessState; count: number };
+
+/**
+ * In-service vs ready-to-deploy, per category.
+ *
+ * Readiness is DERIVED (readiness.ts), so this can no longer be a Prisma
+ * `groupBy` over a stored column — the state comes from four signals across
+ * three tables. It stays ONE bounded query all the same: READINESS_CASE
+ * computes the state in SQL and the whole fleet is bucketed by the database,
+ * never by fetching rows and classifying them here. The group count is at most
+ * categories x 5 states regardless of fleet size.
+ */
 export async function getFleetKpis(uic: UicFilter): Promise<{
   totalDeployed: number;
   totalReady: number;
   byCategory: CategoryKpi[];
 }> {
-  // ONE grouped query covers both statuses and every category — not one
-  // query per status, and not one per category.
-  const rows = await prisma.item.groupBy({
-    by: ["deviceCategory", "deployableStatus"],
-    where: { ...itemWhere(uic), deployableStatus: { in: ["DEPLOYED", "READY_TO_DEPLOY"] } },
-    _count: { _all: true },
-  });
+  // Parameterized Prisma.sql throughout — the only interpolations are the
+  // pre-built fragments from readiness.sql.ts (CLAUDE.md §2).
+  const rows = await prisma.$queryRaw<CategoryReadinessRow[]>(Prisma.sql`
+    SELECT i."deviceCategory" AS category,
+           ${READINESS_CASE} AS readiness,
+           COUNT(*)::int AS count
+    FROM "Item" i
+    ${READINESS_JOINS}
+    WHERE i."status" = 'ACTIVE'
+      AND ${readinessScope(uic)}
+    GROUP BY 1, 2
+  `);
 
   const byCategory = new Map<string, CategoryKpi>();
   let totalDeployed = 0;
   let totalReady = 0;
 
   for (const r of rows) {
-    const category = r.deviceCategory ?? UNCATEGORIZED;
+    // Only the two headline states are tiled; the rest are counted by the
+    // query but deliberately not shown here (the card is "in service vs
+    // ready", not a full readiness breakdown).
+    if (r.readiness !== "DEPLOYED" && r.readiness !== "READY_TO_DEPLOY") continue;
+    const category = r.category ?? UNCATEGORIZED;
     const entry = byCategory.get(category) ?? { category, deployed: 0, ready: 0 };
-    const n = r._count._all;
-    if (r.deployableStatus === "DEPLOYED") {
+    const n = Number(r.count);
+    if (r.readiness === "DEPLOYED") {
       entry.deployed += n;
       totalDeployed += n;
-    } else if (r.deployableStatus === "READY_TO_DEPLOY") {
+    } else {
       entry.ready += n;
       totalReady += n;
     }
@@ -129,76 +180,16 @@ export async function getFleetKpis(uic: UicFilter): Promise<{
 }
 
 /* ------------------------------------------------------------
-   Widget 3 — Fleet status over time.
-   ------------------------------------------------------------ */
+   Widget 3 — DA Form 2062 velocity.
 
-type StatusHistoryRow = { ts: Date; deployableStatus: DeployableStatus | null; count: number };
-
-/**
- * Composition of the fleet at each bucket boundary, from ItemStatusHistory.
- *
- * The history table stores SNAPSHOTS (state after each change), so an item's
- * state at instant T is simply its newest row at or before T — that is the
- * `DISTINCT ON (bucket, itemId) ... ORDER BY createdAt DESC` below. No delta
- * replay, and no per-bucket round trip: the whole series is one query.
- *
- * KNOWN COST — read before scaling this up. Only the OUTPUT is bounded (RANGES
- * caps a window at ~90 buckets). The join itself is buckets x |history|,
- * because `h."createdAt" <= b.ts` has no lower bound: every history row ever
- * written pairs with every bucket at or after it, and the whole product is
- * sorted for the DISTINCT ON. At ~1,200 items with a monthly readiness sweep
- * that is fine for years; at high write volume it will not be. Fixing it is
- * NOT as simple as adding `h."createdAt" >= start` — that drops the carry-in
- * state for items untouched during the window, silently shrinking the fleet.
- * The correct rewrite is a per-item last-known-state LATERAL seeded at `start`
- * plus in-window changes. Deliberately not done here: the current form is
- * correct, and the volume that makes it slow does not exist yet.
- */
-export async function getStatusOverTime(uic: UicFilter, range: RangeKey): Promise<StatusPoint[]> {
-  const { days, bucket } = RANGES[range];
-  const end = new Date();
-  const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
-
-  // Parameterized $queryRaw — never string interpolation (CLAUDE.md §2).
-  const rows = await prisma.$queryRaw<StatusHistoryRow[]>(Prisma.sql`
-    WITH buckets AS (
-      SELECT generate_series(${start}::timestamptz, ${end}::timestamptz, ${bucket}::interval) AS ts
-    ),
-    snap AS (
-      SELECT DISTINCT ON (b.ts, h."itemId")
-             b.ts AS ts,
-             h."deployableStatus" AS "deployableStatus"
-      FROM buckets b
-      JOIN "ItemStatusHistory" h ON h."createdAt" <= b.ts
-      JOIN "Item" i ON i."id" = h."itemId"
-      WHERE i."status" = 'ACTIVE'
-        AND (${uic}::text IS NULL OR i."deviceUIC" = ${uic}::text)
-      ORDER BY b.ts, h."itemId", h."createdAt" DESC
-    )
-    SELECT ts, "deployableStatus", COUNT(*)::int AS count
-    FROM snap
-    GROUP BY ts, "deployableStatus"
-    ORDER BY ts
-  `);
-
-  // Pivot to one object per bucket, zero-filling every series so the stacked
-  // areas are continuous rather than breaking wherever a status had no items.
-  const byTs = new Map<number, StatusPoint>();
-  for (const r of rows) {
-    const t = r.ts.getTime();
-    let point = byTs.get(t);
-    if (!point) {
-      point = { date: r.ts.toISOString() };
-      for (const s of [...DEPLOYABLE_STATUSES, UNTRIAGED]) point[s] = 0;
-      byTs.set(t, point);
-    }
-    point[statusKey(r.deployableStatus)] = Number(r.count);
-  }
-  return [...byTs.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v);
-}
-
-/* ------------------------------------------------------------
-   Widget 4 — DA Form 2062 velocity.
+   There is deliberately NO "fleet status over time" series any more.
+   Readiness is derived from live signals (readiness.ts), so there is nothing
+   to replay: the old chart read ItemStatusHistory snapshots of the stored
+   `deployableStatus` enum, and both are gone. Reconstructing a timeline from
+   today's signals would only ever redraw today's answer across the x-axis,
+   which is a fabricated series, not history. If fleet readiness over time is
+   wanted again it needs a deliberate periodic snapshot of the DERIVED state —
+   a new feature, not a query.
    ------------------------------------------------------------ */
 
 type VelocityRow = { month: Date; category: string | null; count: number };
@@ -269,19 +260,21 @@ export async function getTransferVelocity(
 }
 
 /* ------------------------------------------------------------
-   Widget 5 — Unit allocation leaderboard.
+   Widget 4 — Unit allocation leaderboard.
    ------------------------------------------------------------ */
+
+type UnitReadinessRow = { uic: string; readiness: ReadinessState; count: number };
 
 /**
  * Per-UIC totals. TWO grouped queries regardless of how many units exist —
  * never one per unit.
  *
- * Why not a single `groupBy(["deviceUIC","deployableStatus"], { take })`:
- * `take` bounds the number of GROUPS, and each unit produces up to one group
- * per status. A cap would slice through the middle of a unit and report that
- * unit's totals as short — silently wrong numbers, which is worse than a
- * visible truncation. So: pick the top N units first (query 1), then fetch
- * the status breakdown for exactly those units (query 2).
+ * Why not one query grouping by (unit, readiness) with a `take`: a cap bounds
+ * the number of GROUPS, and each unit produces up to one group per readiness
+ * state. It would slice through the middle of a unit and report that unit's
+ * totals as short — silently wrong numbers, which is worse than a visible
+ * truncation. So: pick the top N units first (query 1), then derive the
+ * readiness breakdown for exactly those units (query 2).
  *
  * Deliberately NOT filtered by the global UIC filter: the leaderboard is how
  * a user picks a unit, so it must keep listing every unit while one is
@@ -305,15 +298,20 @@ export async function getUnitAllocations(limit = 200): Promise<{
   const uics = page.map((t) => t.deviceUIC).filter((u): u is string => u !== null);
   if (uics.length === 0) return { rows: [], truncated: false };
 
-  const breakdown = await prisma.item.groupBy({
-    by: ["deviceUIC", "deployableStatus"],
-    // MUST carry the same status: "ACTIVE" scope as the totals query above.
-    // Without it the Deployed/Ready columns count lifecycle-retired kit that
-    // Total excludes, so a unit with retired-but-still-DEPLOYED items can show
-    // Deployed + Ready greater than its Total.
-    where: { status: "ACTIVE", deviceUIC: { in: uics } },
-    _count: { _all: true },
-  });
+  // MUST carry the same status = 'ACTIVE' scope as the totals query above.
+  // Without it the Deployed/Ready columns count lifecycle-retired kit that
+  // Total excludes, so a unit with retired items could show Deployed + Ready
+  // greater than its Total. The UIC list is bound as parameters, never spliced.
+  const breakdown = await prisma.$queryRaw<UnitReadinessRow[]>(Prisma.sql`
+    SELECT i."deviceUIC" AS uic,
+           ${READINESS_CASE} AS readiness,
+           COUNT(*)::int AS count
+    FROM "Item" i
+    ${READINESS_JOINS}
+    WHERE i."status" = 'ACTIVE'
+      AND i."deviceUIC" IN (${Prisma.join(uics)})
+    GROUP BY 1, 2
+  `);
 
   const byUic = new Map<string, UnitAllocation>(
     page
@@ -321,11 +319,10 @@ export async function getUnitAllocations(limit = 200): Promise<{
       .map((t) => [t.deviceUIC, { uic: t.deviceUIC, total: t._count._all, deployed: 0, ready: 0 }]),
   );
   for (const r of breakdown) {
-    if (!r.deviceUIC) continue;
-    const entry = byUic.get(r.deviceUIC);
+    const entry = byUic.get(r.uic);
     if (!entry) continue;
-    if (r.deployableStatus === "DEPLOYED") entry.deployed += r._count._all;
-    if (r.deployableStatus === "READY_TO_DEPLOY") entry.ready += r._count._all;
+    if (r.readiness === "DEPLOYED") entry.deployed += Number(r.count);
+    if (r.readiness === "READY_TO_DEPLOY") entry.ready += Number(r.count);
   }
   return { rows: [...byUic.values()].sort((a, b) => b.total - a.total), truncated };
 }
@@ -337,12 +334,11 @@ export async function getUnitAllocations(limit = 200): Promise<{
 export type DashboardData = Awaited<ReturnType<typeof getDashboard>>;
 
 export async function getDashboard(uic: UicFilter, range: RangeKey) {
-  const [units, accountability, kpis, statusOverTime, velocity, allocations, fleetTotal, vocabulary] =
+  const [units, auditReadiness, kpis, velocity, allocations, fleetTotal, vocabulary] =
     await Promise.all([
       listUnitOptions(),
-      getAccountability(uic),
+      getAuditReadiness(uic),
       getFleetKpis(uic),
-      getStatusOverTime(uic, range),
       getTransferVelocity(uic, range),
       getUnitAllocations(),
       prisma.item.count({ where: itemWhere(uic) }),
@@ -354,5 +350,5 @@ export async function getDashboard(uic: UicFilter, range: RangeKey) {
         .then((rows) => rows.map((r) => r.name)),
     ]);
 
-  return { units, accountability, kpis, statusOverTime, velocity, allocations, fleetTotal, vocabulary };
+  return { units, auditReadiness, kpis, velocity, allocations, fleetTotal, vocabulary };
 }

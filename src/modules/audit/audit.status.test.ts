@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { auditState, auditStateDisplay } from "./audit.status";
+import { auditCutoff, auditState, auditStateDisplay } from "./audit.status";
 
 describe("auditState", () => {
   it("returns 'never' when there is no audit date", () => {
@@ -25,6 +25,38 @@ describe("auditState", () => {
     const last = new Date("2024-02-29T00:00:00Z");
     expect(auditState(last, new Date("2025-02-28T00:00:00Z"))).toBe("compliant");
     expect(auditState(last, new Date("2025-03-02T00:00:00Z"))).toBe("overdue");
+  });
+});
+
+/* auditCutoff is what the analytics donut buckets on in SQL (`lastAuditedAt >
+   cutoff` = compliant). auditState is what the per-item badge shows. If those
+   two ever disagree, the dashboard and the item list report different fleets —
+   so the contract under test is that they classify the SAME dates the same way,
+   not merely that the arithmetic looks right. */
+describe("auditCutoff", () => {
+  const classify = (last: Date, now: Date) => (last > auditCutoff(now) ? "compliant" : "overdue");
+
+  it("agrees with auditState on both sides of the boundary", () => {
+    const now = new Date("2026-07-27T00:00:00Z");
+    const inside = new Date("2026-07-26T00:00:00Z");
+    const outside = new Date("2024-01-01T00:00:00Z");
+
+    expect(classify(inside, now)).toBe("compliant");
+    expect(auditState(inside, now)).toBe("compliant");
+    expect(classify(outside, now)).toBe("overdue");
+    expect(auditState(outside, now)).toBe("overdue");
+  });
+
+  it("treats the boundary itself as overdue, exactly as auditState does", () => {
+    const now = new Date("2026-01-01T00:00:00Z");
+    const exactlyAYearAgo = new Date("2025-01-01T00:00:00Z");
+
+    expect(classify(exactlyAYearAgo, now)).toBe("overdue");
+    expect(auditState(exactlyAYearAgo, now)).toBe("overdue");
+  });
+
+  it("is exactly one audit period before `now`", () => {
+    expect(auditCutoff(new Date("2026-07-27T12:34:56Z")).toISOString()).toBe("2025-07-27T12:34:56.000Z");
   });
 });
 

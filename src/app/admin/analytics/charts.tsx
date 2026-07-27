@@ -1,8 +1,6 @@
 "use client";
 
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -85,52 +83,12 @@ export function DonutChart({
   );
 }
 
-/* ------------------------------------------------------------ */
-
-export function StackedAreaChart({
-  data,
-  series,
-  xKey,
-  formatX,
-}: {
-  data: Array<Record<string, unknown>>;
-  series: Array<{ key: string; label: string; color: string }>;
-  xKey: string;
-  formatX: (v: string) => string;
-}) {
-  return (
-    <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-      <AreaChart data={data} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
-        <CartesianGrid stroke={CHROME.grid} strokeDasharray="2 4" vertical={false} />
-        <XAxis dataKey={xKey} {...AXIS} tickFormatter={formatX} minTickGap={24} />
-        <YAxis {...AXIS} allowDecimals={false} width={44} />
-        <Tooltip
-          {...TOOLTIP_STYLE}
-          labelFormatter={(v) => formatX(String(v))}
-          formatter={(value, key) => [
-            Number(value ?? 0),
-            series.find((s) => s.key === String(key))?.label ?? String(key),
-          ]}
-        />
-        {series.map((s) => (
-          <Area
-            key={s.key}
-            type="stepAfter"
-            dataKey={s.key}
-            name={s.label}
-            stackId="fleet"
-            fill={s.color}
-            fillOpacity={0.85}
-            {...SEGMENT_GAP}
-            isAnimationActive={false}
-          />
-        ))}
-      </AreaChart>
-    </ResponsiveContainer>
-  );
-}
-
-/* ------------------------------------------------------------ */
+/* ------------------------------------------------------------
+   There is no stacked-AREA chart here any more. Its only caller was the
+   "fleet status over time" widget, retired when readiness became derived —
+   see analytics.service.ts. Reinstate it from git history if a genuine time
+   series turns up.
+   ------------------------------------------------------------ */
 
 export function StackedBarChart({
   data,

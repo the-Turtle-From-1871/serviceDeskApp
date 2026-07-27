@@ -35,16 +35,11 @@ describe("listItems", () => {
     expect(whereOf()).toBeUndefined();
   });
 
-  // Rows are grouped by readiness by DEFAULT, which prepends this clause to
-  // every ORDER BY. The sort tests below pass `group: "none"` so they assert
-  // the sort contract itself, undisturbed by grouping; the grouped default
-  // gets its own tests immediately after.
-  const GROUP_CLAUSE = { deployableStatus: { sort: "asc", nulls: "last" } };
   const orderOf = () => vi.mocked(prisma.item.findMany).mock.calls[0][0]!.orderBy;
 
   it("paginates with skip/take and a stable default order (createdAt desc, id asc)", async () => {
     vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
-    await listItems({ page: 3, pageSize: 10, group: "none" });
+    await listItems({ page: 3, pageSize: 10 });
     const arg = vi.mocked(prisma.item.findMany).mock.calls[0][0]!;
     expect(arg.take).toBe(10);
     expect(arg.skip).toBe(20); // (page 3 - 1) * 10
@@ -53,21 +48,21 @@ describe("listItems", () => {
 
   it("sorts by a server-sortable column, mapping straight to the like-named column", async () => {
     vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
-    await listItems({ sort: "make", dir: "asc", group: "none" });
+    await listItems({ sort: "make", dir: "asc" });
     expect(orderOf()).toEqual([{ make: "asc" }, { id: "asc" }]);
   });
 
   it("maps the derived auditState sort to lastAuditedAt, nulls last, in both directions", async () => {
     vi.mocked(prisma.item.count).mockResolvedValue(100);
 
-    await listItems({ sort: "auditState", dir: "asc", group: "none" });
+    await listItems({ sort: "auditState", dir: "asc" });
     expect(orderOf()).toEqual([
       { lastAuditedAt: { sort: "asc", nulls: "last" } },
       { id: "asc" },
     ]);
 
     vi.mocked(prisma.item.findMany).mockClear();
-    await listItems({ sort: "auditState", dir: "desc", group: "none" });
+    await listItems({ sort: "auditState", dir: "desc" });
     expect(orderOf()).toEqual([
       { lastAuditedAt: { sort: "desc", nulls: "last" } },
       { id: "asc" },
@@ -76,27 +71,31 @@ describe("listItems", () => {
 
   it("ignores an unknown sort key, falling back to the default order", async () => {
     vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
-    await listItems({ sort: "bogus", dir: "asc", group: "none" });
+    await listItems({ sort: "bogus", dir: "asc" });
     expect(orderOf()).toEqual([{ createdAt: "desc" }, { id: "asc" }]);
   });
 
-  it("groups by readiness FIRST by default, ahead of the fallback order", async () => {
-    vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
-    await listItems({});
-    expect(orderOf()).toEqual([GROUP_CLAUSE, { createdAt: "desc" }, { id: "asc" }]);
-  });
-
-  it("keeps the group clause ahead of an explicit sort", async () => {
-    // Grouping must outrank the user's sort, or rows from different readiness
-    // states interleave and the group headers become nonsense.
+  it("orders by the chosen sort alone — no readiness clause is prepended", async () => {
+    // The list used to group by readiness ahead of the user's sort. It no
+    // longer does: readiness composition is the analytics dashboard's job, and
+    // the group clause silently demoted the chosen sort to a within-group one.
     vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
     await listItems({ sort: "make", dir: "asc" });
-    expect(orderOf()).toEqual([GROUP_CLAUSE, { make: "asc" }, { id: "asc" }]);
+    expect(orderOf()).toEqual([{ make: "asc" }, { id: "asc" }]);
+  });
+
+  it("refuses to sort by readiness — it is derived, with no column to order by", async () => {
+    // Readiness comes from four signals across three tables (readiness.ts), so
+    // there is nothing to ORDER BY. A crafted ?sort=readiness must fall back to
+    // the default order rather than reach Prisma with a non-existent column.
+    vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
+    await listItems({ sort: "readiness", dir: "desc" });
+    expect(orderOf()).toEqual([{ createdAt: "desc" }, { id: "asc" }]);
   });
 
   it("orders a compound sort in the order the keys were given", async () => {
     vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
-    await listItems({ sort: "make,serialNumber", dir: "asc,desc", group: "none" });
+    await listItems({ sort: "make,serialNumber", dir: "asc,desc" });
     expect(orderOf()).toEqual([{ make: "asc" }, { serialNumber: "desc" }, { id: "asc" }]);
   });
 

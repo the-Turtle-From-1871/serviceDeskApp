@@ -5,9 +5,8 @@ import { getDashboard, isRangeKey, type RangeKey } from "./analytics.service";
 import { firstParam } from "@/lib/search-params";
 import { UnitFilter } from "./Filters";
 import {
-  AccountabilityWidget,
+  AuditReadinessWidget,
   FleetKpiWidget,
-  StatusOverTimeWidget,
   UnitLeaderboardWidget,
   VelocityWidget,
 } from "./widgets";
@@ -49,7 +48,7 @@ export default async function AnalyticsPage({
   const rawUic = firstParam(sp.uic)?.trim();
   const uic = rawUic ? rawUic : null;
 
-  const { units, accountability, kpis, statusOverTime, velocity, allocations, fleetTotal, vocabulary } =
+  const { units, auditReadiness, kpis, velocity, allocations, fleetTotal, vocabulary } =
     await getDashboard(uic, range);
 
   return (
@@ -82,17 +81,13 @@ export default async function AnalyticsPage({
           </div>
         </div>
 
-        <AccountabilityWidget data={accountability} uic={uic} />
+        <AuditReadinessWidget data={auditReadiness} uic={uic} />
 
         <FleetKpiWidget
           totalDeployed={kpis.totalDeployed}
           totalReady={kpis.totalReady}
           byCategory={kpis.byCategory}
         />
-
-        <div className="lg:col-span-2">
-          <StatusOverTimeWidget data={statusOverTime} range={range} uic={uic} />
-        </div>
 
         <div className="lg:col-span-2">
           <VelocityWidget

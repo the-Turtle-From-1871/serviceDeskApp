@@ -1,8 +1,11 @@
 import { sortRows, parseSortPref as parseSortPrefGeneric, parseHiddenCols as parseHiddenColsGeneric, type SortDir, type SortPref as GenericSortPref } from "@/components/column-view";
 import type { AuditState } from "@/modules/audit/audit.status";
+import { READINESS_LABEL, type ReadinessState } from "@/modules/items/readiness";
 
 export type { SortDir };
 
+/** Columns the SERVER can order by — every one maps to a stored column (see
+ *  listItems). Readiness is deliberately absent; see COLUMN_KEY below. */
 export type SortField =
   | "deviceName"
   | "make"
@@ -11,23 +14,21 @@ export type SortField =
   | "status"
   | "auditState"
   | "deviceUIC"
-  | "deviceCategory"
-  | "deployableStatus";
+  | "deviceCategory";
 
-/* The readiness vocabulary has ONE definition, in analytics.types.ts. It used
-   to be duplicated here — same order array, same label strings — so adding a
-   fifth DeployableStatus value meant editing two label maps and two order
-   arrays, and missing either silently rendered the new state as "Untriaged" on
-   one surface only. These are re-exports under this module's original names so
-   existing callers are unchanged. */
-import { deployableKey, type DeployableKey } from "@/app/admin/analytics/analytics.types";
+/** Every column the table can render. A superset of SortField: `readiness` is
+ *  DISPLAY-ONLY. It is derived from four signals across three tables
+ *  (modules/items/readiness.ts), so there is no column to ORDER BY — offering
+ *  it in the Sort control would either need a stored duplicate that drifts or
+ *  a per-page sort that lies about the other 1,100 rows. */
+export type ColumnKey = SortField | "readiness";
 
-export {
-  DEPLOYABLE_ORDER,
-  DEPLOYABLE_LABEL,
-  deployableKey,
-  type DeployableKey,
-} from "@/app/admin/analytics/analytics.types";
+/* Readiness labels have ONE definition, in modules/items/readiness.ts, next to
+   the function that derives them. Re-exported here so the table imports its
+   vocabulary from this module like everything else, without a second copy that
+   could drift. */
+export { READINESS_LABEL };
+export type { ReadinessState };
 
 export type ItemRow = {
   id: string;
@@ -39,39 +40,34 @@ export type ItemRow = {
   auditState: AuditState | null;
   deviceUIC: string | null;
   deviceCategory: string | null;
-  deployableStatus: string | null;
-  isAccountedFor: boolean;
+  /** Derived server-side for the whole page in one query — never per row.
+   *  See modules/items/readiness.query.ts. */
+  readiness: ReadinessState;
 };
 
 export type SortPref = GenericSortPref<SortField>;
 
-export const ITEM_COLUMNS: { key: SortField; label: string }[] = [
+export const ITEM_COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: "deviceName", label: "Device Name" },
   { key: "make", label: "Make" },
   { key: "model", label: "Model" },
   { key: "serialNumber", label: "Serial" },
   { key: "deviceUIC", label: "UIC" },
   { key: "deviceCategory", label: "Category" },
-  { key: "deployableStatus", label: "Readiness" },
+  { key: "readiness", label: "Readiness" },
   { key: "status", label: "Status" },
   { key: "auditState", label: "Audit" },
 ];
 
-/** Consecutive runs of rows sharing a readiness state, for group headers.
- *  Relies on the server having ORDER BY'd by deployableStatus first, so this
- *  is a single pass over the page — it never re-sorts or re-queries. */
-export function groupByReadiness(items: ItemRow[]): { key: DeployableKey; rows: ItemRow[] }[] {
-  const groups: { key: DeployableKey; rows: ItemRow[] }[] = [];
-  for (const item of items) {
-    const key = deployableKey(item.deployableStatus);
-    const last = groups[groups.length - 1];
-    if (last && last.key === key) last.rows.push(item);
-    else groups.push({ key, rows: [item] });
-  }
-  return groups;
-}
+/** The Sort control's options: every column except the display-only ones. */
+export const SORTABLE_COLUMNS: { key: SortField; label: string }[] = ITEM_COLUMNS.filter(
+  (c): c is { key: SortField; label: string } => c.key !== "readiness",
+);
 
-const SORT_FIELDS = new Set<string>(ITEM_COLUMNS.map((c) => c.key));
+const SORT_FIELDS = new Set<string>(SORTABLE_COLUMNS.map((c) => c.key));
+// Column visibility covers EVERY column, sortable or not — a readiness column
+// you cannot sort is still one you can hide.
+const COLUMN_KEYS = new Set<string>(ITEM_COLUMNS.map((c) => c.key));
 
 export function sortItemRows(items: ItemRow[], field: SortField | null, dir: SortDir): ItemRow[] {
   return sortRows(items, field, dir);
@@ -100,6 +96,6 @@ export function selectAllState(items: ItemRow[], selected: ReadonlySet<string>):
   return hits === ids.length ? "all" : "some";
 }
 
-export function parseHiddenCols(raw: string | null): SortField[] {
-  return parseHiddenColsGeneric<SortField>(raw, SORT_FIELDS, ITEM_COLUMNS.length);
+export function parseHiddenCols(raw: string | null): ColumnKey[] {
+  return parseHiddenColsGeneric<ColumnKey>(raw, COLUMN_KEYS, ITEM_COLUMNS.length);
 }

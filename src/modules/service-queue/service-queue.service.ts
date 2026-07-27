@@ -52,8 +52,24 @@ export async function clearServiceRequest(itemId: string): Promise<void> {
 }
 
 // PENDING -> COMPLETED. Guarded; never deletes.
+//
+// Also stamps the item's markedReadyAt, in the SAME transaction as the status
+// change. Finishing service means the device is physically on the bench in our
+// hands, which is exactly what markedReadyAt asserts — and readiness is derived
+// (readiness.ts), so without this the item would drop out of IN_REPAIR straight
+// back to whatever its stale MDM logon implies. Two writes, one transaction: a
+// queue row that says COMPLETED while the item was never marked on hand is the
+// inconsistency worth preventing.
 export function completeServiceItem(id: string): Promise<ServiceQueueItem> {
-  return transition(id, canComplete, "COMPLETED");
+  return transition(id, canComplete, "COMPLETED", undefined, (tx, current) =>
+    // updateMany, not update: a retired item is out of scope for "on hand"
+    // (readiness reports RETIRED regardless), and an item deleted underneath us
+    // must not roll back a legitimate completion.
+    tx.item.updateMany({
+      where: { id: current.itemId, status: "ACTIVE" },
+      data: { markedReadyAt: new Date() },
+    }),
+  );
 }
 
 // COMPLETED -> PENDING (reopen from the item detail page). Restarts the SLA
@@ -70,19 +86,24 @@ export function reopenServiceItem(id: string, overrideDays?: number | null): Pro
 
 // Guarded status transition in one transaction. `extra` optionally contributes
 // additional update fields derived from the current row (e.g. reopen recomputing
-// the SLA deadline) — so callers share the NOT_FOUND / INVALID_STATUS guards
-// rather than re-implementing the findUnique+guard+update scaffold.
+// the SLA deadline); `sideEffect` optionally writes to ANOTHER table inside the
+// same transaction (e.g. complete stamping the item's markedReadyAt) — so
+// callers share the NOT_FOUND / INVALID_STATUS guards rather than
+// re-implementing the findUnique+guard+update scaffold.
 function transition(
   id: string,
   guard: (s: ServiceQueueItem["status"]) => boolean,
   next: ServiceQueueItem["status"],
   extra?: (current: ServiceQueueItem) => Prisma.ServiceQueueItemUpdateInput,
+  sideEffect?: (tx: Prisma.TransactionClient, current: ServiceQueueItem) => Promise<unknown>,
 ): Promise<ServiceQueueItem> {
   return prisma.$transaction(async (tx) => {
     const current = await tx.serviceQueueItem.findUnique({ where: { id } });
     if (!current) throw new ServiceQueueError("NOT_FOUND");
     if (!guard(current.status)) throw new ServiceQueueError("INVALID_STATUS");
-    return tx.serviceQueueItem.update({ where: { id }, data: { status: next, ...extra?.(current) } });
+    const updated = await tx.serviceQueueItem.update({ where: { id }, data: { status: next, ...extra?.(current) } });
+    if (sideEffect) await sideEffect(tx, current);
+    return updated;
   });
 }
 

@@ -1,34 +1,29 @@
 "use client";
 
-import { CheckCircle2, AlertTriangle, PackageCheck, Truck } from "lucide-react";
+import { CheckCircle2, AlertTriangle, CircleHelp, PackageCheck, Truck } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { ChartCard } from "./ChartCard";
-import { DonutChart, StackedAreaChart, StackedBarChart } from "./charts";
+import { DonutChart, StackedBarChart } from "./charts";
 import { RangeToggle, useSetParam } from "./Filters";
 import {
-  ACCOUNTED_COLOR,
-  NOT_ACCOUNTED_COLOR,
+  AUDIT_STATE_COLOR,
   OTHER_COLOR,
-  STATUS_COLOR,
   foldCategories,
   makeCategoryColor,
 } from "./palette";
 import {
-  DEPLOYABLE_STATUSES,
-  STATUS_LABEL,
-  UNTRIAGED,
-  type AccountabilitySlice,
+  AUDIT_STATE_ORDER,
+  type AuditReadinessSlice,
   type CategoryKpi,
   type RangeKey,
-  type StatusPoint,
   type UnitAllocation,
   type VelocityPoint,
 } from "./analytics.types";
 
 /* ------------------------------------------------------------
-   Date formatting for the two time-series axes.
+   Date formatting for the velocity axis.
    ------------------------------------------------------------ */
 
 /* Pinned to HST, like every other date in this app (see lib/datetime.ts).
@@ -38,44 +33,57 @@ import {
    exported CSV row, one month early. */
 const HST = "Pacific/Honolulu";
 
-const dayFmt = new Intl.DateTimeFormat("en-US", { timeZone: HST, month: "short", day: "numeric" });
 const monthFmt = new Intl.DateTimeFormat("en-US", { timeZone: HST, month: "short", year: "2-digit" });
 
 /** A month bucket arrives as the UTC instant that starts the month. Formatting
  *  that instant in HST would roll it back into the previous month, so nudge to
  *  midday UTC first: the label names the BUCKET, not a moment in time. */
-const formatDay = (iso: string) => dayFmt.format(new Date(new Date(iso).getTime() + 12 * 60 * 60 * 1000));
 const formatMonth = (iso: string) => monthFmt.format(new Date(new Date(iso).getTime() + 12 * 60 * 60 * 1000));
 
 /* ------------------------------------------------------------
    Widget 1 — Audit readiness.
    ------------------------------------------------------------ */
 
-export function AccountabilityWidget({
+/** Label + icon per audit state. The icon is not decoration: it is the secondary
+ *  encoding that keeps the three states legible without colour (the yellow slot
+ *  also sits under 3:1 on the ledger surface — see palette.ts). */
+const AUDIT_STATE_UI = {
+  compliant: { label: "Audited (current)", Icon: CheckCircle2 },
+  overdue: { label: "Audit overdue", Icon: AlertTriangle },
+  never: { label: "Never audited", Icon: CircleHelp },
+} as const;
+
+export function AuditReadinessWidget({
   data,
   uic,
 }: {
-  data: AccountabilitySlice[];
+  data: AuditReadinessSlice[];
   // Deliberately takes no `range`: this donut is a point-in-time snapshot of
   // the current fleet and does not read the time filter at all.
   uic: string | null;
 }) {
-  const accounted = data.find((d) => d.accountedFor)?.count ?? 0;
-  const missing = data.find((d) => !d.accountedFor)?.count ?? 0;
-  const total = accounted + missing;
-  const pct = total ? Math.round((accounted / total) * 100) : 0;
+  const countOf = (state: (typeof AUDIT_STATE_ORDER)[number]) =>
+    data.find((d) => d.state === state)?.count ?? 0;
+  const total = data.reduce((sum, d) => sum + d.count, 0);
+  const compliant = countOf("compliant");
+  const pct = total ? Math.round((compliant / total) * 100) : 0;
 
-  const slices = [
-    { label: "Accounted for", value: accounted, color: ACCOUNTED_COLOR },
-    { label: "Not accounted for", value: missing, color: NOT_ACCOUNTED_COLOR },
-  ];
-  // A zero-total fleet must not render a donut of two empty wedges.
+  const slices = AUDIT_STATE_ORDER.map((state) => ({
+    label: AUDIT_STATE_UI[state].label,
+    value: countOf(state),
+    color: AUDIT_STATE_COLOR[state],
+  }));
+  // A zero-total fleet must not render a donut of empty wedges.
   const rows = total === 0 ? [] : slices.map((s) => ({ Status: s.label, Items: s.value }));
 
   return (
     <ChartCard
       title="Audit readiness"
-      description={total ? `${pct}% of ${total} items accounted for` : "No items in scope"}
+      // Says what the number MEANS. Accountability is claimed from audit
+      // evidence, so an unaudited item is not counted as accounted for.
+      description={
+        total ? `${pct}% of ${total} items audited within the last year` : "No items in scope"
+      }
       legend={slices.map((s) => ({ label: s.label, color: s.color }))}
       exportBase="audit-readiness"
       // No range in the filename: this donut is a point-in-time snapshot and
@@ -90,19 +98,20 @@ export function AccountabilityWidget({
             reading a tooltip or matching a colour. */}
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
           <span className="text-2xl font-semibold tabular-nums text-foreground">{pct}%</span>
-          <span className="text-xs text-muted-foreground">accounted for</span>
+          <span className="text-xs text-muted-foreground">audited</span>
         </div>
       </div>
-      {/* Icon + label pairing, so the good/problem split never rests on hue. */}
+      {/* Icon + label + count per state, so identity never rests on hue alone. */}
       <div className="mt-2 flex flex-wrap justify-center gap-x-5 gap-y-1 text-xs">
-        <span className="flex items-center gap-1.5 text-muted-foreground">
-          <CheckCircle2 className="size-3.5" style={{ color: ACCOUNTED_COLOR }} aria-hidden="true" />
-          {accounted} accounted for
-        </span>
-        <span className="flex items-center gap-1.5 text-muted-foreground">
-          <AlertTriangle className="size-3.5" style={{ color: NOT_ACCOUNTED_COLOR }} aria-hidden="true" />
-          {missing} missing
-        </span>
+        {AUDIT_STATE_ORDER.map((state) => {
+          const { label, Icon } = AUDIT_STATE_UI[state];
+          return (
+            <span key={state} className="flex items-center gap-1.5 text-muted-foreground">
+              <Icon className="size-3.5" style={{ color: AUDIT_STATE_COLOR[state] }} aria-hidden="true" />
+              {countOf(state)} {label.toLowerCase()}
+            </span>
+          );
+        })}
       </div>
     </ChartCard>
   );
@@ -202,48 +211,12 @@ function StatTile({
 }
 
 /* ------------------------------------------------------------
-   Widget 3 — Fleet status over time.
-   ------------------------------------------------------------ */
+   Widget 3 — DA Form 2062 velocity.
 
-const STATUS_SERIES = [...DEPLOYABLE_STATUSES, UNTRIAGED].map((key) => ({
-  key,
-  label: STATUS_LABEL[key],
-  color: STATUS_COLOR[key],
-}));
-
-export function StatusOverTimeWidget({
-  data,
-  range,
-  uic,
-}: {
-  data: StatusPoint[];
-  range: RangeKey;
-  uic: string | null;
-}) {
-  const rows = data.map((p) => {
-    const row: Record<string, unknown> = { Date: formatDay(p.date) };
-    for (const s of STATUS_SERIES) row[s.label] = p[s.key] ?? 0;
-    return row;
-  });
-
-  return (
-    <ChartCard
-      title="Fleet status over time"
-      description="Readiness composition at each point in the window"
-      controls={<RangeToggle value={range} />}
-      legend={STATUS_SERIES.map((s) => ({ label: s.label, color: s.color }))}
-      exportBase="fleet-status"
-      exportParts={[range, uic ?? "all-units"]}
-      exportColumns={["Date", ...STATUS_SERIES.map((s) => s.label)]}
-      exportRows={rows}
-    >
-      <StackedAreaChart data={data} series={STATUS_SERIES} xKey="date" formatX={formatDay} />
-    </ChartCard>
-  );
-}
-
-/* ------------------------------------------------------------
-   Widget 4 — DA Form 2062 velocity.
+   The "Fleet status over time" stacked area used to sit here. It is gone
+   along with the stored readiness enum and its history table: readiness is
+   now derived from live signals, so there is no timeline to plot and drawing
+   one would mean inventing it. See analytics.service.ts for the full note.
    ------------------------------------------------------------ */
 
 export function VelocityWidget({
@@ -311,7 +284,7 @@ export function VelocityWidget({
 }
 
 /* ------------------------------------------------------------
-   Widget 5 — Unit allocation leaderboard.
+   Widget 4 — Unit allocation leaderboard.
    ------------------------------------------------------------ */
 
 export function UnitLeaderboardWidget({

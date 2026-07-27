@@ -94,9 +94,11 @@ deactivation take effect on the *next request* instead of at token expiry.
 `deviceName` / `homeUnit` / `notes` are admin-only. `updateItemDetailsAction`
 **picks the Zod schema by role**, so a crafted POST can't widen the field set.
 
-**Readiness edits live in their own admin-only action** (`bulkUpdateReadinessAction`)
-rather than being folded into `updateItemDetailsAction` — that keeps the
-USER-editable field set exactly as narrow as it was.
+**Readiness edits live in their own admin-only action** (`markItemsReadyAction`,
+the "Mark as on hand" button) rather than being folded into
+`updateItemDetailsAction` — that keeps the USER-editable field set exactly as
+narrow as it was. It stamps `markedReadyAt` and nothing else; readiness itself
+is derived, so there is no state a POST could assert.
 
 **Admin-only capabilities:** returns, user management, named signatures,
 service-queue mutations, receipt timers, audits, analytics, category management.
@@ -302,9 +304,8 @@ days after close; the worker hard-deletes on expiry. `purgeExpiredTransfers`
 edited, or modified.
 
 **Changes are audit-trailed** across `ItemEdit` (field-level history: holder,
-`deviceUIC`, `deviceCategory`, …), `ItemAudit`, `ItemStatusHistory`, and
-`ReturnTransaction` — each written in the same transaction as the change it
-describes.
+`deviceUIC`, `deviceCategory`, …), `ItemAudit`, and `ReturnTransaction` — each
+written in the same transaction as the change it describes.
 
 ---
 

@@ -819,23 +819,6 @@ input[type="file"].input {
   border-color: var(--red-border);
 }
 
-/* Readiness group header on the /items table. A full-width heading row that
-   separates runs of rows sharing a deployableStatus.
-   NOT sticky: the nearest scrollport is .table-wrap (overflow-x:auto implies
-   overflow-y:auto) which has no bounded height, so it never scrolls
-   vertically — `position:sticky; top:0` would do nothing here except create a
-   stacking context that paints over the sticky selection bar. */
-.group-row th {
-  text-align: left;
-  background: var(--surface-2);
-  border-top: 1px solid var(--border-strong);
-  border-bottom: 1px solid var(--border);
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  padding: 6px 12px;
-}
 .audit-dot {
   display: inline-block;
   width: 12px;

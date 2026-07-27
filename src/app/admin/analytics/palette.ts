@@ -13,8 +13,21 @@
                                chart ships a legend AND a "View as table" mode.
                                Do not drop the table view; it is the mitigation.
 
-     accountability pair    -> blue + critical-red, ALL CHECKS PASS
-                               (CVD ΔE 23.8, normal-vision 31.6)
+     audit-readiness trio   -> blue + yellow + critical-red, ALL CHECKS PASS
+                               (worst adjacent CVD ΔE 19.8 deutan / 20.6 tritan,
+                               normal-vision 24.1)
+                               WARN: yellow sits at 2.1:1 on this surface, so the
+                               "relief rule" applies — the widget ships a legend,
+                               per-state icons + counts, and a table view.
+                               (Was a two-slice blue/red pair when the donut read
+                               a stored isAccountedFor flag. That flag is gone;
+                               the donut now derives all three audit states.)
+
+     The /items dot colours (green #4caf50 / amber #8a5a12 / slate #4d564b) were
+     tried for this donut so the two surfaces would match, and FAILED: slate is
+     under the chroma floor (reads gray) and slate-vs-amber measures normal-vision
+     ΔE 11.8, below the 15 floor. Small dots beside a text label survive that;
+     three adjacent wedges carrying the meaning alone do not.
 
    IMPORTANT — the obvious green/red pair for "accounted for vs not" was
    tried first and FAILED: #0ca30c vs #d03b3b measures CVD ΔE 4.1 under
@@ -24,9 +37,13 @@
 
    If you change any hex here, re-run the validator before committing:
      node scripts/validate_palette.js "<hex,hex,...>" --mode light --surface "#fbfcf9"
+
+   NOTE: that validator is NOT vendored in this repo — it ships with the data-viz
+   tooling used to produce these numbers. Until it is vendored, re-validating
+   means running it from there; do not substitute an eyeball check.
    ============================================================ */
 
-import type { StatusKey } from "./analytics.types";
+import type { AuditState } from "@/modules/audit/audit.status";
 
 /** Categorical slots, in fixed order. Assign by slot, NEVER cycle, and never
  *  reassign on filter — colour follows the entity, not its rank. */
@@ -47,20 +64,20 @@ export const MAX_SERIES = SERIES.length;
 export const OTHER_CATEGORY = "Other";
 export const OTHER_COLOR = "#8a9487"; // ledger --text-subtle, deliberately recessive
 
-/** Readiness states get fixed slots so a status keeps its colour no matter
- *  which other states happen to be present. Stack order matches slot order,
- *  which is the order the adjacent-pair CVD check was run against. */
-export const STATUS_COLOR: Record<StatusKey, string> = {
-  DEPLOYED: SERIES[0],
-  READY_TO_DEPLOY: SERIES[1],
-  IN_REPAIR: SERIES[2],
-  RETIRED: SERIES[3],
-  UNTRIAGED: SERIES[4],
-};
+/* No per-readiness-state colour map lives here any more: the only chart that
+   coloured by readiness state was "fleet status over time", retired when
+   readiness became derived. The remaining readiness figures are numbers in
+   tables, not marks. */
 
-/** Two-slice accountability donut. See the FAILED green/red note above. */
-export const ACCOUNTED_COLOR = "#2a78d6";
-export const NOT_ACCOUNTED_COLOR = "#d03b3b";
+/** Three-slice audit-readiness donut, in AUDIT_STATE_ORDER. An ordinal ramp of
+ *  concern (fine -> stale -> no record at all), NOT a categorical set: yellow
+ *  sits between the original blue and red rather than replacing either, so the
+ *  FAILED green/red note above still stands. */
+export const AUDIT_STATE_COLOR: Record<AuditState, string> = {
+  compliant: "#2a78d6", // blue   — audited within the period
+  overdue: "#eda100", // yellow — audited, but the period has lapsed
+  never: "#d03b3b", // red    — no audit on record
+};
 
 /** Chart chrome, taken from the ledger design system so plots sit on the
  *  paper rather than on a foreign white card. */
