@@ -22,35 +22,29 @@ jobs:
     name: Semgrep SAST
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Run Semgrep from its official image (a known-good Python env — sidesteps the
+    # setuptools/pkg_resources breakage a pipx install hits on the runner's
+    # Python 3.12) via `docker run`. checkout + upload-sarif stay on the HOST
+    # runner (glibc), so the JS-based actions never execute inside the container
+    # and there is no musl/glibc mismatch.
+    env:
+      SEMGREP_IMAGE: semgrep/semgrep:1.90.0
+      # Curated, token-free registry rulesets (no Semgrep AppSec account needed).
+      # Folded to one line; the shell word-splits it into flags.
+      SEMGREP_CONFIGS: >-
+        --config p/security-audit --config p/secrets --config p/javascript
+        --config p/typescript --config p/react --config p/owasp-top-ten
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Semgrep
-        # Run on the host runner (glibc) rather than the Alpine/musl semgrep image,
-        # so the JS-based checkout/upload actions run without a libc mismatch.
-        # pipx is preinstalled on GitHub-hosted ubuntu runners.
-        # semgrep's OpenTelemetry dep imports pkg_resources at startup, but
-        # Python 3.12 ships no setuptools and setuptools >=81 REMOVED pkg_resources.
-        # Inject a pre-81 setuptools (which still provides pkg_resources) or the
-        # CLI crashes on import (ModuleNotFoundError: No module named 'pkg_resources').
-        run: |
-          pipx install semgrep==1.90.0
-          pipx inject semgrep "setuptools<81"
-
-      # Curated, token-free registry rulesets (no Semgrep AppSec account needed).
-      # All six packs resolve to real rule sets.
       - name: Semgrep scan (SARIF, informational)
+        # SARIF is written into the mounted workspace so the host upload step finds it.
         run: |
-          semgrep scan \
-            --config p/security-audit \
-            --config p/secrets \
-            --config p/javascript \
-            --config p/typescript \
-            --config p/react \
-            --config p/owasp-top-ten \
-            --sarif --output semgrep.sarif \
-            --metrics off
+          docker run --rm -v "$PWD:/src" -w /src "$SEMGREP_IMAGE" \
+            semgrep scan $SEMGREP_CONFIGS \
+              --sarif --output semgrep.sarif \
+              --metrics off
 
       - name: Upload SARIF
         # Skip on forked PRs, whose read-only GITHUB_TOKEN can't write security-events.
@@ -68,16 +62,11 @@ jobs:
         # baseline stays clean without low-severity/accepted-by-design noise
         # permanently reddening the pipeline. Full findings are in the SARIF above.
         run: |
-          semgrep scan \
-            --config p/security-audit \
-            --config p/secrets \
-            --config p/javascript \
-            --config p/typescript \
-            --config p/react \
-            --config p/owasp-top-ten \
-            --severity ERROR \
-            --error \
-            --metrics off
+          docker run --rm -v "$PWD:/src" -w /src "$SEMGREP_IMAGE" \
+            semgrep scan $SEMGREP_CONFIGS \
+              --severity ERROR \
+              --error \
+              --metrics off
 
   # --- Compile / build gate ----------------------------------------------------
   build:
