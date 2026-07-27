@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/authz";
 import { listItems, listItemUics } from "@/modules/items/items.service";
+import { readinessForItems } from "@/modules/items/readiness.query";
 import { SiteHeader } from "@/components/SiteHeader";
 import { ItemSelectTable } from "@/components/ItemSelectTable";
 import { ItemsSearchInput } from "./ItemsSearchInput";
@@ -18,7 +19,6 @@ export default async function ItemsListPage({
     dir?: string | string[];
     page?: string | string[];
     uic?: string | string[];
-    group?: string | string[];
   }>;
 }) {
   const user = await requireUser();
@@ -38,10 +38,14 @@ export default async function ItemsListPage({
       dir: firstParam(sp.dir) ?? null,
       page: pageParam ? Number.parseInt(pageParam, 10) : 1,
       uic: firstParam(sp.uic) ?? null,
-      group: firstParam(sp.group) ?? null,
     }),
     listItemUics(),
   ]);
+  // Readiness is derived from signals in three tables, so it cannot ride along
+  // on the item row. ONE extra query derives it for the whole page at once —
+  // never one per row — and it has to follow listItems because it needs the
+  // page's ids. Bounded by ITEMS_PAGE_SIZE.
+  const readiness = await readinessForItems(result.items.map((it) => it.id));
   const now = new Date();
   const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
 
@@ -65,11 +69,10 @@ export default async function ItemsListPage({
           q={q ?? ""}
           sortKeys={result.sortKeys}
           uic={result.uic}
-          grouped={result.grouped}
         />
 
         {/* ItemSelectTable renders even with zero rows, because it OWNS the
-            filter/sort/grouping controls. Swapping it for an empty-state card
+            filter/sort controls. Swapping it for an empty-state card
             (as this used to) removed the very controls needed to undo the
             filter that emptied the list — leaving the URL as the only way out.
             The empty message now lives inside the table instead. */}
@@ -84,8 +87,9 @@ export default async function ItemsListPage({
               auditState: it.status === "RETIRED" ? null : auditState(it.lastAuditedAt, now),
               deviceUIC: it.deviceUIC,
               deviceCategory: it.deviceCategory,
-              deployableStatus: it.deployableStatus,
-              isAccountedFor: it.isAccountedFor,
+              // A row that vanished between the two queries falls back to
+              // "we know nothing about it" rather than dropping the row.
+              readiness: readiness.get(it.id) ?? "UNTRIAGED",
             }))}
             isAdmin={isAdmin}
             q={q ?? ""}
@@ -94,7 +98,6 @@ export default async function ItemsListPage({
             page={result.page}
             totalPages={totalPages}
             sortKeys={result.sortKeys}
-            grouped={result.grouped}
             uic={result.uic}
             uics={uics}
           />

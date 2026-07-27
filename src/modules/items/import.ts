@@ -2,6 +2,7 @@ import { importRowSchema } from "./items.schema";
 import type { RawRow } from "./csv";
 import { detectHomeUnit, splitSegments } from "./unit-detect";
 import { diffItemFields, type FieldChange, type ItemLoggedFields } from "./item-diff";
+import { parseLastLogonAt } from "./readiness";
 
 export type SkippedRow = { row: number; serialNumber: string; reason: string };
 export type UnresolvedRow = { row: number; deviceName: string; segments: string[] };
@@ -40,6 +41,8 @@ export type NewItemImport = {
   currentUserEmail?: string;
   lastLogonUserPrincipalName?: string;
   lastLogonDate?: string;
+  /** Derived from lastLogonDate at plan time; see readiness.ts. */
+  lastLogonAt?: Date;
   enrollmentDate?: string;
   compliance?: string;
 };
@@ -51,7 +54,9 @@ export type ItemUpdate = {
   row: number;
   itemId: string;
   serialNumber: string;
-  data: Record<string, string | null>;
+  // `string | Date` because the derived `lastLogonAt` instant travels
+  // alongside the raw `lastLogonDate` text it is parsed from.
+  data: Record<string, string | Date | null>;
   loggedChanges: FieldChange[];
   makeModelMismatch: boolean;
 };
@@ -144,8 +149,15 @@ export function planImport(
         unchanged.push({ row: r.row, serialNumber: sn, makeModelMismatch });
         continue;
       }
-      const data: Record<string, string | null> = {};
+      const data: Record<string, string | Date | null> = {};
       for (const c of allChanges) data[c.field] = c.to;
+      // Keep the parsed instant in step with the raw text. readiness compares
+      // lastLogonAt to markedReadyAt, so a refreshed lastLogonDate whose
+      // lastLogonAt went stale would leave a device reading "Ready" after it
+      // had plainly been used again.
+      if (data.lastLogonDate !== undefined) {
+        data.lastLogonAt = parseLastLogonAt(data.lastLogonDate as string | null);
+      }
       // Retired items still get their fields updated (data holds every change),
       // but emit no loggedChanges so commitImport writes no ItemEdit for them.
       const emittedLogged = match.status === "RETIRED" ? [] : loggedChanges;
@@ -170,6 +182,7 @@ export function planImport(
       currentUserEmail: d.assignedUser,
       lastLogonUserPrincipalName: d.lastLogonUserPrincipalName,
       lastLogonDate: d.lastLogonDate,
+      lastLogonAt: parseLastLogonAt(d.lastLogonDate) ?? undefined,
       enrollmentDate: d.enrollmentDate,
       compliance: d.compliance,
     };

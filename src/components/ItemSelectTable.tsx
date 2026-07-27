@@ -1,22 +1,21 @@
 "use client";
-import { Fragment, useMemo, useState, useTransition } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/StatusBadge";
 import { AuditLight } from "@/components/AuditLight";
-import { toggleItemStatusAction, bulkUpdateReadinessAction } from "@/app/admin/actions/items";
+import { MarkReadyButton } from "@/components/MarkReadyButton";
+import { toggleItemStatusAction } from "@/app/admin/actions/items";
 import { MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW } from "@/modules/transfers/receipt-lines";
 import {
-  DEPLOYABLE_LABEL,
-  DEPLOYABLE_ORDER,
-  deployableKey,
-  groupByReadiness,
+  READINESS_LABEL,
   ITEM_COLUMNS,
+  SORTABLE_COLUMNS,
   parseHiddenCols,
   selectableIds,
   selectAllState,
+  type ColumnKey,
   type ItemRow,
-  type SortField,
 } from "@/components/items-view";
 import { makeStore, usePersistedPref } from "@/components/persisted-pref";
 import type { SortKey } from "@/modules/items/items.service";
@@ -28,17 +27,12 @@ const HIDDEN_KEY = "items:hiddenCols";
 // and category is opt-in for people who work by device class. It stays
 // filterable and sortable while hidden. (Only applies to new visitors — an
 // existing stored preference wins over this default.)
-const DEFAULT_HIDDEN: SortField[] = ["deviceCategory"];
+const DEFAULT_HIDDEN: ColumnKey[] = ["deviceCategory"];
 const hiddenStore = makeStore(HIDDEN_KEY, parseHiddenCols);
 
 // Re-export rather than redeclare: the shape is owned by listItems, which is
 // what parses and consumes it.
 export type { SortKey };
-
-// Every column is server-sortable. `auditState` (the derived badge) sorts via the
-// denormalized Item.lastAuditedAt column server-side (see listItems), so it's
-// offered in the Sort control like the rest.
-const SORTABLE_COLUMNS = ITEM_COLUMNS;
 
 export function ItemSelectTable({
   items,
@@ -49,7 +43,6 @@ export function ItemSelectTable({
   page,
   totalPages,
   sortKeys,
-  grouped,
   uic,
   uics,
 }: {
@@ -61,7 +54,6 @@ export function ItemSelectTable({
   page: number;
   totalPages: number;
   sortKeys: SortKey[];
-  grouped: boolean;
   uic: string | null;
   uics: string[];
 }) {
@@ -99,10 +91,10 @@ export function ItemSelectTable({
   // View preferences (column visibility) persist to localStorage. Sort + paging are
   // URL-driven (server-side), so they are NOT stored here.
   const [hidden, setHidden] = usePersistedPref(hiddenStore, DEFAULT_HIDDEN);
-  const isHidden = (key: SortField) => hidden.includes(key);
+  const isHidden = (key: ColumnKey) => hidden.includes(key);
   const visibleCols = ITEM_COLUMNS.filter((c) => !isHidden(c.key));
 
-  const toggleCol = (key: SortField) => {
+  const toggleCol = (key: ColumnKey) => {
     const next = new Set(hidden);
     if (next.has(key)) { next.delete(key); setHidden([...next]); return; }
     // Keep at least one data column visible.
@@ -129,9 +121,6 @@ export function ItemSelectTable({
   }, [selected]);
   const tooManyPerRow = maxGroupSize > MAX_ITEMS_PER_ROW;
 
-  // 1 select column + the visible data columns + 1 actions column.
-  const colCount = visibleCols.length + 2;
-
   const renderRow = (it: ItemRow) => (
     <tr key={it.id}>
       <td data-label="Select">{it.status === "ACTIVE" && <input type="checkbox" checked={selected.has(it.id)} onChange={() => toggle(it)} aria-label={`Select ${it.deviceName ?? ""} ${it.make} ${it.model} ${it.serialNumber}`} />}</td>
@@ -141,15 +130,12 @@ export function ItemSelectTable({
       {!isHidden("serialNumber") && <td className="mono" data-label="Serial">{it.serialNumber}</td>}
       {!isHidden("deviceUIC") && <td className="mono" data-label="UIC">{it.deviceUIC ?? <span className="subtle">—</span>}</td>}
       {!isHidden("deviceCategory") && <td data-label="Category">{it.deviceCategory ?? <span className="subtle">—</span>}</td>}
-      {!isHidden("deployableStatus") && (
-        <td data-label="Readiness">
-          {DEPLOYABLE_LABEL[deployableKey(it.deployableStatus)]}
-          {/* Accountability is a flag, not a status, so it rides alongside the
-              readiness cell rather than claiming a column of its own. */}
-          {!it.isAccountedFor && <span className="badge badge-danger" style={{ marginLeft: 6 }}>Not accounted for</span>}
-          {/* `badge-danger` is defined in globals.css alongside badge-override. */}
-        </td>
-      )}
+      {/* Derived server-side (readiness.query.ts), so no client-side narrowing
+          of an untrusted stored value is needed — the row already carries a
+          real ReadinessState. Accountability used to ride along here as a "Not
+          accounted for" badge off Item.isAccountedFor; that flag is gone —
+          the Audit column IS the accountability signal now. */}
+      {!isHidden("readiness") && <td data-label="Readiness">{READINESS_LABEL[it.readiness]}</td>}
       {!isHidden("status") && <td data-label="Status"><StatusBadge status={it.status} /></td>}
       {!isHidden("auditState") && <td data-label="Audit" style={{ textAlign: "center" }}><AuditLight state={it.auditState} /></td>}
       <td data-label="">
@@ -173,7 +159,7 @@ export function ItemSelectTable({
   const printQr = () => { if (selected.size) window.open(`/admin/items/qr-sheet/pdf?items=${selectedKeys()}&preview=1`, "_blank", "noopener"); };
 
   // Build a /items URL preserving the current query, overriding only what changes.
-  // Changing the sort/filter/grouping resets to page 1; paging keeps them.
+  // Changing the sort/filter resets to page 1; paging keeps them.
   //
   // Compound sort travels as parallel comma lists (`sort=make,serialNumber` +
   // `dir=asc,asc`) — the server pairs them positionally, so the two lists must
@@ -182,7 +168,6 @@ export function ItemSelectTable({
     keys?: SortKey[];
     page?: number;
     uic?: string | null;
-    grouped?: boolean;
   }) => {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
@@ -195,10 +180,6 @@ export function ItemSelectTable({
 
     const nextUic = over.uic !== undefined ? over.uic : uic;
     if (nextUic) params.set("uic", nextUic);
-
-    const nextGrouped = over.grouped !== undefined ? over.grouped : grouped;
-    // Grouping is the default, so only the OFF state needs to be in the URL.
-    if (!nextGrouped) params.set("group", "none");
 
     const nextPage = over.page ?? page;
     if (nextPage > 1) params.set("page", String(nextPage));
@@ -277,22 +258,6 @@ export function ItemSelectTable({
             {uics.map((u) => <option key={u} value={u}>{u}</option>)}
           </select>
         </label>
-        <label className="row" style={{ gap: 6, alignItems: "center" }}>
-          <input
-            type="checkbox"
-            checked={grouped}
-            onChange={(e) => navigate({ grouped: e.target.checked, page: 1 })}
-          />
-          <span className="subtle" style={{ fontSize: 12 }}>
-            Group by readiness
-            {/* Grouping is an ORDER BY that runs ahead of the chosen sort, so
-                say so — otherwise "sorted by Serial" quietly means "sorted by
-                serial *within each readiness group*". */}
-            {grouped && sort && sort !== "deployableStatus" && (
-              <span className="subtle"> (sort applies within each group)</span>
-            )}
-          </span>
-        </label>
         {isAdmin && (
           <button
             type="button"
@@ -352,23 +317,7 @@ export function ItemSelectTable({
             </tr>
           </thead>
           <tbody>
-            {grouped
-              ? groupByReadiness(items).map((g) => (
-                  <Fragment key={g.key}>
-                    {/* A group header repeats if a group spans a page break —
-                        the page is a window onto a server-ordered list, so the
-                        header states which group the rows below belong to
-                        rather than implying the group starts here. */}
-                    <tr className="group-row">
-                      <th colSpan={colCount} scope="colgroup">
-                        {DEPLOYABLE_LABEL[g.key]}{" "}
-                        <span className="subtle">({g.rows.length} on this page)</span>
-                      </th>
-                    </tr>
-                    {g.rows.map(renderRow)}
-                  </Fragment>
-                ))
-              : items.map(renderRow)}
+            {items.map(renderRow)}
           </tbody>
         </table>
       </div>
@@ -382,8 +331,7 @@ export function ItemSelectTable({
       )}
 
       {selected.size > 0 && (
-        // zIndex must beat the sticky group headers (.group-row th, z-index 1),
-        // or a header scrolling past renders on top of these controls.
+        // zIndex keeps this bar above the table rows it floats over.
         <div className="card stack-sm" style={{ position: "sticky", bottom: 0, zIndex: 2 }}>
           <div className="row" style={{ justifyContent: "space-between" }}>
             <span>{selected.size} selected · {groupCount} row{groupCount === 1 ? "" : "s"}</span>
@@ -393,8 +341,12 @@ export function ItemSelectTable({
               ? <span role="alert" className="alert-error">Too many of one item ({maxGroupSize}). Max {MAX_ITEMS_PER_ROW} per row — split into two.</span>
               : <button className="btn btn-primary" onClick={create}>Create receipt from {selected.size} selected</button>}
           </div>
+          {/* The bulk "Set readiness" / "Set accountability" selects are gone.
+              Readiness is derived, not picked: the only thing left for a human
+              to assert is "these are back in my possession", and accountability
+              comes from audit evidence (record an audit instead). */}
           {isAdmin && (
-            <BulkReadinessBar
+            <MarkReadyButton
               itemIds={[...selected.keys()]}
               onDone={() => setSelected(new Map())}
             />
@@ -402,82 +354,5 @@ export function ItemSelectTable({
         </div>
       )}
     </>
-  );
-}
-
-/**
- * Admin-only bulk edit of readiness fields for the current selection.
- *
- * Rendered only for admins, but that is presentation — the server action
- * re-checks with requireAdmin(), which is the actual boundary.
- */
-function BulkReadinessBar({ itemIds, onDone }: { itemIds: string[]; onDone: () => void }) {
-  const router = useRouter();
-  const [status, setStatus] = useState("");
-  const [accounted, setAccounted] = useState("");
-  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
-  const [pending, startTransition] = useTransition();
-
-  const nothingChosen = !status && !accounted;
-
-  const apply = () => {
-    setMessage(null);
-    const fd = new FormData();
-    fd.set("itemIds", itemIds.join(","));
-    if (status) fd.set("deployableStatus", status);
-    if (accounted) fd.set("isAccountedFor", accounted);
-
-    startTransition(async () => {
-      const res = await bulkUpdateReadinessAction(fd);
-      if ("error" in res && res.error) {
-        setMessage({ ok: false, text: res.error });
-        return;
-      }
-      const n = "updated" in res ? res.updated : 0;
-      setMessage({
-        ok: true,
-        // "0 changed" is a real, useful outcome (every selected item already
-        // had that state) — report it rather than implying work happened.
-        text: n === 0 ? "No changes — those items already had that state." : `Updated ${n} item${n === 1 ? "" : "s"}.`,
-      });
-      setStatus("");
-      setAccounted("");
-      onDone();
-      router.refresh();
-    });
-  };
-
-  return (
-    <div className="row" style={{ gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-      <label className="stack" style={{ gap: 4 }}>
-        <span className="subtle" style={{ fontSize: 12 }}>Set readiness</span>
-        <select className="select" value={status} onChange={(e) => setStatus(e.target.value)} disabled={pending}>
-          <option value="">Leave unchanged</option>
-          {DEPLOYABLE_ORDER.map((k) => (
-            <option key={k} value={k}>{DEPLOYABLE_LABEL[k]}</option>
-          ))}
-        </select>
-      </label>
-      <label className="stack" style={{ gap: 4 }}>
-        <span className="subtle" style={{ fontSize: 12 }}>Set accountability</span>
-        <select className="select" value={accounted} onChange={(e) => setAccounted(e.target.value)} disabled={pending}>
-          <option value="">Leave unchanged</option>
-          <option value="true">Accounted for</option>
-          <option value="false">Not accounted for</option>
-        </select>
-      </label>
-      <button
-        type="button"
-        className="btn btn-secondary"
-        disabled={pending || nothingChosen}
-        onClick={apply}
-        title={nothingChosen ? "Choose a change to apply" : undefined}
-      >
-        {pending ? "Applying…" : `Apply to ${itemIds.length}`}
-      </button>
-      {message && (
-        <span role="status" className={message.ok ? "subtle" : "alert-error"}>{message.text}</span>
-      )}
-    </div>
   );
 }

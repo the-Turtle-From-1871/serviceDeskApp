@@ -2,60 +2,29 @@
    Shared analytics vocabulary — constants, labels, and row shapes.
 
    Deliberately FREE of `server-only` and of any Prisma runtime import, so
-   the client widgets can import these values (status keys, labels, range
-   definitions) without dragging the query layer — and the database client —
-   into the browser bundle. analytics.service.ts re-exports everything here,
-   so server code has a single import site.
-
-   Only the `DeployableStatus` *type* is imported from the Prisma client;
-   type-only imports are erased at compile time and ship nothing.
+   the client widgets can import these values (labels, range definitions)
+   without dragging the query layer — and the database client — into the
+   browser bundle. analytics.service.ts re-exports everything here, so
+   server code has a single import site.
    ============================================================ */
 
-import type { DeployableStatus } from "@prisma/client";
+// Pure derivation logic (no Prisma runtime) — safe for the client bundle.
+import type { AuditState } from "@/modules/audit/audit.status";
 
-/** The four readiness states. */
-export const DEPLOYABLE_STATUSES = ["DEPLOYED", "READY_TO_DEPLOY", "IN_REPAIR", "RETIRED"] as const;
+/** Readiness has ONE definition, next to the function that derives it
+ *  (modules/items/readiness.ts). Re-exported rather than restated so the
+ *  dashboard and the /items table cannot drift apart — there is no second
+ *  state list or label map to keep in step. */
+export type { ReadinessState } from "@/modules/items/readiness";
 
-/** Items whose deployableStatus is NULL have never been triaged. They are
- *  surfaced as their own series rather than dropped: hiding them would make
- *  the chart's total silently disagree with the fleet size. */
-export const UNTRIAGED = "UNTRIAGED" as const;
-
-export type StatusKey = (typeof DEPLOYABLE_STATUSES)[number] | typeof UNTRIAGED;
-
-export const STATUS_LABEL: Record<StatusKey, string> = {
-  DEPLOYED: "Deployed",
-  READY_TO_DEPLOY: "Ready to deploy",
-  IN_REPAIR: "In repair",
-  RETIRED: "Retired",
-  UNTRIAGED: "Untriaged",
-};
-
-export const statusKey = (s: DeployableStatus | null): StatusKey => s ?? UNTRIAGED;
-
-/* ---------- Aliases used by the /items table ----------
-   Same vocabulary, named for that surface. Defined here rather than duplicated
-   in items-view.ts so a new DeployableStatus value only has to be added once. */
-
-/** Grouping/display order: the four states, then the untriaged bucket. */
-export const DEPLOYABLE_ORDER = [...DEPLOYABLE_STATUSES, UNTRIAGED] as const;
-export type DeployableKey = StatusKey;
-export const DEPLOYABLE_LABEL = STATUS_LABEL;
-
-/** Narrow an untrusted string (a DB value an older client hasn't heard of, or
- *  null) to a known key. Anything unrecognised reads as untriaged rather than
- *  being trusted through. */
-export const deployableKey = (s: string | null | undefined): DeployableKey =>
-  s && (DEPLOYABLE_ORDER as readonly string[]).includes(s) ? (s as DeployableKey) : UNTRIAGED;
-
-/** Time windows offered by the chart ToggleGroup. `bucket` is chosen so a
- *  window never renders more than ~90 points: a longer window steps up to a
- *  coarser bucket instead of returning an unbounded series. */
+/** Time windows offered by the range ToggleGroup, in days. Used by the
+ *  transfer-velocity series, which buckets by calendar month in SQL — so a
+ *  window only ever yields a handful of points regardless of its length. */
 export const RANGES = {
-  "30d": { days: 30, bucket: "1 day", label: "30 days" },
-  "90d": { days: 90, bucket: "1 day", label: "90 days" },
-  "6m": { days: 182, bucket: "1 week", label: "6 months" },
-  "1y": { days: 365, bucket: "1 month", label: "1 year" },
+  "30d": { days: 30, label: "30 days" },
+  "90d": { days: 90, label: "90 days" },
+  "6m": { days: 182, label: "6 months" },
+  "1y": { days: 365, label: "1 year" },
 } as const;
 
 export type RangeKey = keyof typeof RANGES;
@@ -70,8 +39,15 @@ export type UicFilter = string | null;
 
 /* ---------- Row shapes returned by the service ---------- */
 
-export type AccountabilitySlice = { accountedFor: boolean; count: number };
+/** One slice of the audit-readiness donut. Accountability is DERIVED from audit
+ *  recency — there is no stored "accounted for" flag (see docs/ARCHITECTURE.md).
+ *  All three states are always emitted, so the legend is stable and the slices
+ *  sum to the fleet size. */
+export type AuditReadinessSlice = { state: AuditState; count: number };
+
+/** Render/stack order, worst-last. Also the order the palette's adjacent-pair
+ *  CVD check was run against — keep them in step. */
+export const AUDIT_STATE_ORDER = ["compliant", "overdue", "never"] as const;
 export type CategoryKpi = { category: string; deployed: number; ready: number };
-export type StatusPoint = { date: string } & Partial<Record<StatusKey, number>>;
 export type VelocityPoint = { month: string } & Record<string, string | number>;
 export type UnitAllocation = { uic: string; total: number; deployed: number; ready: number };

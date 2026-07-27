@@ -1,0 +1,131 @@
+import { describe, it, expect } from "vitest";
+import { readinessState, parseLastLogonAt, type ReadinessSignals } from "./readiness";
+
+const base: ReadinessSignals = {
+  status: "ACTIVE",
+  flaggedForService: false,
+  onOpenReceipt: false,
+  lastLogonAt: null,
+  lastLogonUser: null,
+  markedReadyAt: null,
+};
+const s = (over: Partial<ReadinessSignals> = {}): ReadinessSignals => ({ ...base, ...over });
+
+const JAN = new Date("2026-01-01T00:00:00Z");
+const JUN = new Date("2026-06-01T00:00:00Z");
+
+describe("readinessState", () => {
+  it("reports UNTRIAGED when nothing is known", () => {
+    expect(readinessState(s())).toBe("UNTRIAGED");
+  });
+
+  it("RETIRED outranks every other signal", () => {
+    expect(
+      readinessState(s({
+        status: "RETIRED",
+        flaggedForService: true,
+        onOpenReceipt: true,
+        lastLogonUser: "a@b.mil",
+        markedReadyAt: JAN,
+      })),
+    ).toBe("RETIRED");
+  });
+
+  it("a service flag outranks an open receipt", () => {
+    // The whole reason the receipt rule is safe: a device turned in for repair
+    // while its receipt is still open must not read Deployed.
+    expect(readinessState(s({ flaggedForService: true, onOpenReceipt: true }))).toBe("IN_REPAIR");
+  });
+
+  it("a service flag outranks the MDM last-logon signal", () => {
+    expect(readinessState(s({ flaggedForService: true, lastLogonUser: "a@b.mil" }))).toBe("IN_REPAIR");
+  });
+
+  it("an open receipt means DEPLOYED immediately, with no import needed", () => {
+    expect(readinessState(s({ onOpenReceipt: true }))).toBe("DEPLOYED");
+  });
+
+  it("an open receipt outranks a fresh on-hand marking", () => {
+    expect(readinessState(s({ onOpenReceipt: true, markedReadyAt: JUN }))).toBe("DEPLOYED");
+  });
+
+  it("marking it on hand makes it READY_TO_DEPLOY", () => {
+    expect(readinessState(s({ markedReadyAt: JAN }))).toBe("READY_TO_DEPLOY");
+  });
+
+  it("a marking beats a STALE logon that predates it", () => {
+    // Shelved in June after being used in January -> it is on the shelf.
+    expect(readinessState(s({ markedReadyAt: JUN, lastLogonAt: JAN, lastLogonUser: "a@b.mil" }))).toBe(
+      "READY_TO_DEPLOY",
+    );
+  });
+
+  it("a logon AFTER the marking flips it back to DEPLOYED", () => {
+    // The self-expiring property — why markedReadyAt is a timestamp, not a bool.
+    expect(readinessState(s({ markedReadyAt: JAN, lastLogonAt: JUN, lastLogonUser: "a@b.mil" }))).toBe(
+      "DEPLOYED",
+    );
+  });
+
+  it("keeps a marking when the logon instant is unparseable, even if a user is present", () => {
+    // lastLogonAt null = "we don't know when", which must not silently beat an
+    // explicit operator marking.
+    expect(readinessState(s({ markedReadyAt: JAN, lastLogonAt: null, lastLogonUser: "a@b.mil" }))).toBe(
+      "READY_TO_DEPLOY",
+    );
+  });
+
+  it("falls back to DEPLOYED for a legacy device with only an MDM user", () => {
+    // The ~1,053 devices in soldiers' hands that predate the app.
+    expect(readinessState(s({ lastLogonUser: "a@b.mil" }))).toBe("DEPLOYED");
+  });
+
+  it("treats a blank MDM user as no signal", () => {
+    expect(readinessState(s({ lastLogonUser: "   " }))).toBe("UNTRIAGED");
+  });
+
+  it("does not read DEPLOYED from a logon date with no user", () => {
+    expect(readinessState(s({ lastLogonAt: JUN }))).toBe("UNTRIAGED");
+  });
+});
+
+describe("parseLastLogonAt", () => {
+  it("parses the MDM export's format", () => {
+    expect(parseLastLogonAt("7/25/2026 1:40:21 AM")?.toISOString()).toBe("2026-07-25T01:40:21.000Z");
+  });
+
+  it("handles PM correctly", () => {
+    expect(parseLastLogonAt("7/25/2026 1:40:21 PM")?.toISOString()).toBe("2026-07-25T13:40:21.000Z");
+  });
+
+  it("maps 12 AM to midnight and 12 PM to noon", () => {
+    expect(parseLastLogonAt("7/25/2026 12:00:00 AM")?.toISOString()).toBe("2026-07-25T00:00:00.000Z");
+    expect(parseLastLogonAt("7/25/2026 12:00:00 PM")?.toISOString()).toBe("2026-07-25T12:00:00.000Z");
+  });
+
+  it("accepts a date with no time", () => {
+    expect(parseLastLogonAt("7/8/2025")?.toISOString()).toBe("2025-07-08T00:00:00.000Z");
+  });
+
+  it("accepts ISO-8601", () => {
+    expect(parseLastLogonAt("2026-07-25T01:40:21Z")?.toISOString()).toBe("2026-07-25T01:40:21.000Z");
+  });
+
+  it("returns null for blank or missing input", () => {
+    expect(parseLastLogonAt(null)).toBeNull();
+    expect(parseLastLogonAt(undefined)).toBeNull();
+    expect(parseLastLogonAt("   ")).toBeNull();
+  });
+
+  it("returns null rather than throwing on junk", () => {
+    // An unparseable date must degrade to "unknown", never fail an import.
+    expect(parseLastLogonAt("not a date")).toBeNull();
+    expect(parseLastLogonAt("Never")).toBeNull();
+  });
+
+  it("rejects an impossible date instead of rolling it over", () => {
+    // Date.UTC would silently turn 2/30 into 3/2.
+    expect(parseLastLogonAt("2/30/2026")).toBeNull();
+    expect(parseLastLogonAt("13/1/2026")).toBeNull();
+  });
+});

@@ -65,8 +65,28 @@ describe("planImport", () => {
       map("A1", existing({ id: "x" })),
       UNITS,
     );
-    expect(toUpdate[0].data).toEqual({ compliance: "Compliant", lastLogonDate: "2026-07-01" });
+    // lastLogonAt rides along with the raw text it is parsed from: readiness
+    // compares it to markedReadyAt, so a refreshed lastLogonDate whose parsed
+    // instant went stale would leave a device reading "Ready" after it had
+    // plainly been used again.
+    expect(toUpdate[0].data).toEqual({
+      compliance: "Compliant",
+      lastLogonDate: "2026-07-01",
+      lastLogonAt: new Date("2026-07-01T00:00:00.000Z"),
+    });
     expect(toUpdate[0].loggedChanges).toEqual([]);
+  });
+
+  it("nulls the parsed instant when the incoming logon date is unparseable", () => {
+    // The raw text is still stored for display, but readiness must fall back to
+    // "we don't know when" rather than keep a stale instant from a prior import.
+    const { toUpdate } = planImport(
+      [mk(1, { serialNumber: "A1", lastLogonDate: "not a date" })],
+      map("A1", existing({ id: "x", lastLogonDate: "2026-07-01" })),
+      UNITS,
+    );
+    expect(toUpdate[0].data.lastLogonDate).toBe("not a date");
+    expect(toUpdate[0].data.lastLogonAt).toBeNull();
   });
 
   it("marks a fully-matching row unchanged", () => {

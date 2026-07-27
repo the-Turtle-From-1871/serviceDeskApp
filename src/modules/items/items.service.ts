@@ -1,49 +1,23 @@
-import type { DeployableStatus, Item, ItemStatus, Prisma } from "@prisma/client";
+// Prisma is a VALUE import here, not type-only: the batched import UPDATE uses
+// Prisma.sql / Prisma.join / Prisma.raw to build a parameterized statement.
+import { Prisma } from "@prisma/client";
+import type { Item, ItemStatus } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { newItemSchema, type NewItemInput } from "./items.schema";
 import { parseItemsCsv } from "./csv";
-import { planImport, type SkippedRow, type UnresolvedRow, type ExistingItem } from "./import";
+import { planImport, type SkippedRow, type UnresolvedRow, type ExistingItem, type ItemUpdate } from "./import";
 import { loadUnitMap, learnUnits, type UnitResolution } from "./units.service";
 import { diffItemFields, type ItemLoggedFields } from "./item-diff";
 import { learnCategories } from "./categories.service";
 import { ItemError } from "./items.errors";
 
-/** The readiness state a brand-new item starts in, as a history row.
- *
- *  WHY THIS EXISTS: the status-over-time chart reconstructs the fleet from
- *  ItemStatusHistory alone. An item with no history row is invisible to it, so
- *  without a baseline at creation the chart would drift permanently below the
- *  real item count — the migration backfilled existing rows once, but every
- *  item created afterwards would be missing. Both creation paths (single
- *  create and CSV import) must write one. */
-const baselineHistory = (
-  item: { id: string; deployableStatus: DeployableStatus | null; isAccountedFor: boolean },
-  actor: { id?: string | null; name: string },
-  source: string,
-): Prisma.ItemStatusHistoryCreateManyInput => ({
-  itemId: item.id,
-  deployableStatus: item.deployableStatus,
-  isAccountedFor: item.isAccountedFor,
-  changedById: actor.id ?? null,
-  changedByName: actor.name,
-  source,
-});
-
-export async function createItem(
-  input: NewItemInput,
-  createdById: string,
-  // Optional so existing callers/tests keep working; the action passes the
-  // real admin name so the timeline attributes the baseline correctly.
-  createdByName = "System",
-): Promise<Item> {
+export async function createItem(input: NewItemInput, createdById: string): Promise<Item> {
   const data = newItemSchema.parse(input);
-  return prisma.$transaction(async (tx) => {
-    const item = await tx.item.create({ data: { ...data, createdById } });
-    await tx.itemStatusHistory.create({
-      data: baselineHistory(item, { id: createdById, name: createdByName }, "create"),
-    });
-    return item;
-  });
+  // No history row, and no transaction to hold one: readiness is derived from
+  // live signals (service queue, open receipts, MDM last-logon, markedReadyAt),
+  // so a brand-new item has nothing to record. It simply reads "Untriaged"
+  // until one of those signals appears.
+  return prisma.item.create({ data: { ...data, createdById } });
 }
 
 export function getItem(id: string) {
@@ -84,7 +58,6 @@ const ITEM_SORT_COLUMNS = new Set([
   "auditState",
   "deviceUIC",
   "deviceCategory",
-  "deployableStatus",
 ]);
 
 export const ITEMS_PAGE_SIZE = 50;
@@ -105,7 +78,6 @@ export type ItemsPage = {
   /** The full parsed compound sort; `sort`/`dir` above are its first key,
    *  kept for the existing single-key callers and links. */
   sortKeys: SortKey[];
-  grouped: boolean;
   uic: string | null;
 };
 
@@ -141,7 +113,6 @@ export function parseSortKeys(sort: string | null | undefined, dir: string | nul
  *  untriaged/unassigned row never outranks a real value. */
 function orderClauseFor({ key, dir }: SortKey): Prisma.ItemOrderByWithRelationInput {
   if (key === "auditState") return { lastAuditedAt: { sort: dir, nulls: "last" } };
-  if (key === "deployableStatus") return { deployableStatus: { sort: dir, nulls: "last" } };
   if (key === "deviceUIC") return { deviceUIC: { sort: dir, nulls: "last" } };
   if (key === "deviceCategory") return { deviceCategory: { sort: dir, nulls: "last" } };
   return { [key]: dir } as Prisma.ItemOrderByWithRelationInput;
@@ -158,8 +129,6 @@ export async function listItems(opts: {
   pageSize?: number;
   /** Filter to one issuing unit. Blank/absent = every unit. */
   uic?: string | null;
-  /** Group rows by deployableStatus. Defaults ON — pass "none" to flatten. */
-  group?: string | null;
 } = {}): Promise<ItemsPage> {
   const pageSize = opts.pageSize && opts.pageSize > 0 ? Math.floor(opts.pageSize) : ITEMS_PAGE_SIZE;
   const search = opts.search?.trim();
@@ -181,25 +150,15 @@ export async function listItems(opts: {
     filters.length === 0 ? undefined : filters.length === 1 ? filters[0] : { AND: filters };
 
   const sortKeys = parseSortKeys(opts.sort, opts.dir);
-  // Grouping is the DEFAULT view: rows arrive already clustered by readiness
-  // state so the table can print a header per group. It is an ORDER BY, not a
-  // separate query per group — grouping must not cost N queries.
-  const grouped = opts.group !== "none";
 
-  const orderBy: Prisma.ItemOrderByWithRelationInput[] = [];
-  // Grouping outranks the user's sort — otherwise rows from different
-  // readiness states interleave and the group headers become nonsense. The UI
-  // states this next to the toggle, because it does silently demote the chosen
-  // sort to a within-group ordering.
+  // The chosen sort is the whole ORDER BY.
   //
-  // EXCEPT when the user is explicitly sorting BY readiness: prepending the
-  // group clause there would emit `ORDER BY deployableStatus ASC, deployableStatus DESC`,
-  // making the direction control a dead no-op. In that case the user's own key
-  // already groups the rows, so it is used directly.
-  const sortsByReadiness = sortKeys[0]?.key === "deployableStatus";
-  if (grouped && !sortsByReadiness) {
-    orderBy.push({ deployableStatus: { sort: "asc", nulls: "last" } });
-  }
+  // Readiness is deliberately NOT sortable here: it is derived from four
+  // signals across three tables (see readiness.ts), so there is no column to
+  // ORDER BY and faking one would mean either a stored duplicate that drifts
+  // or a per-row sort that breaks pagination. Fleet readiness composition is
+  // the analytics dashboard's job; this table sorts on stored facts.
+  const orderBy: Prisma.ItemOrderByWithRelationInput[] = [];
   for (const k of sortKeys) orderBy.push(orderClauseFor(k));
   // Newest-first is the historical default; keep it when nothing else orders.
   if (sortKeys.length === 0) orderBy.push({ createdAt: "desc" });
@@ -220,7 +179,6 @@ export async function listItems(opts: {
     sort: sortKeys[0]?.key ?? null,
     dir: sortKeys[0]?.dir ?? "desc",
     sortKeys,
-    grouped,
     uic,
   };
 }
@@ -244,82 +202,90 @@ export async function listItemUics(
 
 export type ItemEditor = { id: string; name: string };
 
+/** Columns the CSV importer may write in its batched UPDATE.
+ *
+ *  This is an ALLOWLIST guarding a SQL-identifier interpolation: column names
+ *  are spliced into the statement (values are always bound), so nothing outside
+ *  this set may reach it. It mirrors the loggable/telemetry field set that
+ *  planImport emits — keep the two in step when adding an importable column. */
+const UPDATABLE_ITEM_COLUMNS = new Set<string>([
+  "make",
+  "model",
+  "serialNumber",
+  "deviceName",
+  "homeUnit",
+  "deviceUIC",
+  "deviceCategory",
+  "notes",
+  "currentUserEmail",
+  "currentPosition",
+  "lastLogonUserPrincipalName",
+  "lastLogonDate",
+  "lastLogonAt",
+  "enrollmentDate",
+  "compliance",
+]);
+
+/** Prisma FIELD name -> physical COLUMN name, for fields that differ.
+ *
+ *  The batched UPDATE is raw SQL, so it must name real columns. Prisma's
+ *  `@map` means the field name and the column name can diverge:
+ *  `currentUserEmail` is physically `"currentUser"`. Interpolating the field
+ *  name produced `column "currentUserEmail" of relation "Item" does not exist`
+ *  and failed any import that changed the assigned user. Add an entry here for
+ *  every @map'd column the importer can write. */
+const FIELD_TO_COLUMN: Record<string, string> = { currentUserEmail: "currentUser" };
+const columnFor = (field: string) => FIELD_TO_COLUMN[field] ?? field;
+
+/** Per-column cast for the batched UPDATE's VALUES list.
+ *
+ *  A cast is required so Postgres can type a column whose values are all NULL
+ *  in a given chunk. Everything the importer writes is text EXCEPT the derived
+ *  `lastLogonAt` instant — casting that to text would store a string in a
+ *  timestamp column and fail the statement. */
+const COLUMN_CAST: Record<string, string> = { lastLogonAt: "timestamptz" };
+const castFor = (column: string) => COLUMN_CAST[column] ?? "text";
+
+/** Rows per batched UPDATE statement. Keeps bind parameters well under
+ *  Postgres's 65,535 ceiling (500 rows x 15 columns = 7,500) while keeping the
+ *  round-trip count small. */
+const UPDATE_CHUNK_ROWS = 500;
+
 /** Hard cap on one bulk action. The UI selects at most a page at a time, but
  *  the action is reachable by POST, so the server bounds it too. */
 export const MAX_BULK_ITEMS = 500;
 
-export type BulkReadinessInput = {
-  deployableStatus?: DeployableStatus | null;
-  isAccountedFor?: boolean;
-};
-
 /**
- * Set readiness fields on many items at once, recording the new state of each
- * changed item in ItemStatusHistory.
+ * Mark items as back in our possession.
  *
- * Correctness properties that must not be lost:
- *  - ONE transaction. The Item write and its history rows commit together, so
- *    the timeline can never disagree with the current state.
- *  - NO query in a loop. Three statements total (read, updateMany, createMany)
- *    regardless of how many items are selected.
- *  - Only genuinely CHANGED items are touched. Re-applying the status an item
- *    already has writes nothing, so the chart doesn't grow a step where
- *    nothing actually happened.
+ * This is the ONLY hand-set readiness signal; everything else is derived (see
+ * modules/items/readiness.ts). It stamps `markedReadyAt = now`, which reads as
+ * "Ready to deploy" until something contradicts it — an open hand receipt, a
+ * service flag, or an MDM logon dated AFTER the stamp. That last case is why
+ * this is a timestamp and not a boolean: the marking expires on its own once
+ * the device is used again, instead of quietly going stale.
+ *
+ * Writes only rows that are not already marked at this instant, so re-running
+ * it is a no-op rather than churn. There is no history table to keep in step
+ * any more — the stamp itself is the record.
  *
  * Enforces NO permissions — the calling Server Action owns the admin guard.
  */
-export async function bulkUpdateReadiness(
+export async function markItemsReady(
   itemIds: string[],
-  data: BulkReadinessInput,
-  actor: ItemEditor,
+  now: Date = new Date(),
 ): Promise<{ updated: number }> {
   const ids = [...new Set(itemIds.filter((id) => id.trim() !== ""))];
   if (ids.length === 0) return { updated: 0 };
   if (ids.length > MAX_BULK_ITEMS) throw new ItemError("TOO_MANY");
-  if (data.deployableStatus === undefined && data.isAccountedFor === undefined) {
-    return { updated: 0 };
-  }
 
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.item.findMany({
-      where: { id: { in: ids } },
-      select: { id: true, deployableStatus: true, isAccountedFor: true },
-    });
-
-    const changed = current.filter(
-      (it) =>
-        (data.deployableStatus !== undefined && data.deployableStatus !== it.deployableStatus) ||
-        (data.isAccountedFor !== undefined && data.isAccountedFor !== it.isAccountedFor),
-    );
-    if (changed.length === 0) return { updated: 0 };
-
-    const changedIds = changed.map((c) => c.id);
-    await tx.item.updateMany({
-      where: { id: { in: changedIds } },
-      data: {
-        ...(data.deployableStatus !== undefined ? { deployableStatus: data.deployableStatus } : {}),
-        ...(data.isAccountedFor !== undefined ? { isAccountedFor: data.isAccountedFor } : {}),
-      },
-    });
-
-    // Snapshot the resulting state — the fields the caller did NOT set keep
-    // each item's existing value, so every history row is a complete picture
-    // of that item rather than a partial delta.
-    await tx.itemStatusHistory.createMany({
-      data: changed.map((it) => ({
-        itemId: it.id,
-        deployableStatus:
-          data.deployableStatus !== undefined ? data.deployableStatus : it.deployableStatus,
-        isAccountedFor:
-          data.isAccountedFor !== undefined ? data.isAccountedFor : it.isAccountedFor,
-        changedById: actor.id,
-        changedByName: actor.name,
-        source: "bulk",
-      })),
-    });
-
-    return { updated: changed.length };
+  // Retired kit is out of scope: "back on the shelf" is meaningless for a
+  // device that has left the fleet, and readiness reports RETIRED regardless.
+  const res = await prisma.item.updateMany({
+    where: { id: { in: ids }, status: "ACTIVE" },
+    data: { markedReadyAt: now },
   });
+  return { updated: res.count };
 }
 
 /** Update an item's loggable fields and record ONE ItemEdit describing the diff,
@@ -477,7 +443,9 @@ export async function commitImport(
     await learnCategories(
       [
         ...toCreate.map((d) => d.deviceCategory),
-        ...toUpdate.map((u) => u.data.deviceCategory),
+        // `data` is a mixed column bag (the derived lastLogonAt is a Date), so
+        // narrow to the text values learnCategories accepts rather than casting.
+        ...toUpdate.map((u) => (typeof u.data.deviceCategory === "string" ? u.data.deviceCategory : null)),
       ],
       tx,
     );
@@ -489,42 +457,105 @@ export async function commitImport(
       skipDuplicates: true,
     });
 
-    // Baseline history for the rows this import actually created (see
-    // baselineHistory). createMany returns a count, not ids, so the new rows
-    // are re-read by serial — and filtered to those with NO history yet, which
-    // both excludes the serials skipDuplicates bounced and stays correct if a
-    // concurrent import created one first. Two statements, not one per row.
-    if (created.count > 0) {
-      const newlyCreated = await tx.item.findMany({
-        where: {
-          serialNumber: { in: toCreate.map((d) => d.serialNumber) },
-          statusHistory: { none: {} },
-        },
-        select: { id: true, deployableStatus: true, isAccountedFor: true },
-      });
-      if (newlyCreated.length > 0) {
-        await tx.itemStatusHistory.createMany({
-          data: newlyCreated.map((i) => baselineHistory(i, editor, "import")),
-        });
+    // No baseline history is written for newly created rows. Readiness is
+    // derived from live signals, so a fresh item needs no recorded starting
+    // point — the import already stored the only thing that matters to it
+    // (lastLogonUserPrincipalName / lastLogonAt, set above).
+
+    // Updates are BATCHED, not one query per row.
+    //
+    // This used to loop `tx.item.updateMany` once per changed row. Locally that
+    // is ~1.4ms a row and invisible; against a hosted database it is one network
+    // round trip each, so a ~1,000-row fleet refresh became ~1,000 sequential
+    // round trips — 15-40s depending on latency, against a 50s transaction
+    // timeout and a 60s function limit. That is the "very large imports at high
+    // DB latency" hazard the changelog flagged, and it is why a full re-import
+    // could fail with a generic error while the same file imported fine locally.
+    //
+    // Prisma has no batch form for "different values per row", but SQL does:
+    // `UPDATE ... FROM (VALUES ...)`. One statement can only SET a fixed column
+    // list, so rows are grouped by their changed-column SIGNATURE first — and a
+    // fleet export produces only a handful of distinct signatures (e.g. "just
+    // telemetry", "telemetry + device name"), so ~1,000 round trips collapse to
+    // a handful.
+    //
+    // RETURNING id is what preserves the old semantics: a row whose id vanished
+    // between the read above and this write simply does not come back, and is
+    // reported as skipped rather than aborting the batch (the reason updateMany,
+    // not update, was used before).
+    const bySignature = new Map<string, { columns: string[]; rows: ItemUpdate[] }>();
+    for (const u of toUpdate) {
+      const columns = Object.keys(u.data).sort();
+      // A row with no changed columns cannot happen (planImport filters those
+      // out), but an empty SET would be invalid SQL — so guard rather than emit.
+      if (columns.length === 0) continue;
+      const key = columns.join(",");
+      const bucket = bySignature.get(key);
+      if (bucket) bucket.rows.push(u);
+      else bySignature.set(key, { columns, rows: [u] });
+    }
+
+    const updatedIds = new Set<string>();
+    for (const { columns, rows: sigRows } of bySignature.values()) {
+      // Chunk the VALUES list. Postgres caps a statement at 65,535 bind
+      // parameters; at the 2,000-row import limit with the widest signature
+      // that is ~30,000, which fits — but only by luck, and adding importable
+      // columns would erode the margin silently. Chunking keeps each statement
+      // far under the ceiling while still being a handful of round trips.
+      for (let start = 0; start < sigRows.length; start += UPDATE_CHUNK_ROWS) {
+      const rows = sigRows.slice(start, start + UPDATE_CHUNK_ROWS);
+      // Identifiers are interpolated, so they must come from the allowlist —
+      // never straight from the parsed CSV. planImport only ever produces
+      // ItemLoggedFields keys, and this re-checks that at the SQL boundary.
+      const unknown = columns.filter((c) => !UPDATABLE_ITEM_COLUMNS.has(c));
+      if (unknown.length > 0) {
+        throw new ItemError("INVALID", `Refusing to update unknown column(s): ${unknown.join(", ")}`);
+      }
+
+      // Target the PHYSICAL column (see FIELD_TO_COLUMN); the VALUES alias keeps
+      // using the field name, so the two only have to agree within this
+      // statement.
+      const setList = Prisma.join(
+        columns.map((c) => Prisma.sql`${Prisma.raw(`"${columnFor(c)}"`)} = v.${Prisma.raw(`"${c}"`)}`),
+        ", ",
+      );
+      // Every value is bound, never interpolated. The casts let Postgres type a
+      // column that is all-NULL within a chunk; text assigns implicitly to the
+      // citext serialNumber column, and lastLogonAt casts to timestamptz (see
+      // castFor) because it carries a Date, not a string.
+      const tuples = Prisma.join(
+        rows.map(
+          (r) =>
+            Prisma.sql`(${r.itemId}::text, ${Prisma.join(
+              columns.map((c) => Prisma.sql`${r.data[c]}${Prisma.raw(`::${castFor(c)}`)}`),
+              ", ",
+            )})`,
+        ),
+        ", ",
+      );
+      const aliasCols = Prisma.raw(["id", ...columns].map((c) => `"${c}"`).join(", "));
+
+      const returned = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+        UPDATE "Item" AS t
+        SET ${setList},
+            -- Raw SQL bypasses Prisma's @updatedAt, so it is set explicitly.
+            -- Without this, an imported change would stop bumping updatedAt.
+            "updatedAt" = NOW()
+        FROM (VALUES ${tuples}) AS v(${aliasCols})
+        WHERE t."id" = v."id"
+        RETURNING t."id"
+      `);
+      for (const r of returned) updatedIds.add(r.id);
       }
     }
 
-    // item.update must be per-row (distinct values, no batch form in Prisma), but
-    // updateMany (not update) so a serial deleted between the read above and this
-    // write is a no-op (count 0) instead of a P2025 that aborts the whole batch —
-    // the vanished row is reported as skipped, not silently dropped. The ItemEdit
-    // rows are uniform-shape, so they're collected and written in ONE createMany
-    // after the loop instead of one insert per row. Bounded by the 2000-row cap.
-    let updatedCount = 0;
     const vanished: SkippedRow[] = [];
     const edits: Prisma.ItemEditCreateManyInput[] = [];
     for (const u of toUpdate) {
-      const res = await tx.item.updateMany({ where: { id: u.itemId }, data: u.data });
-      if (res.count === 0) {
+      if (!updatedIds.has(u.itemId)) {
         vanished.push({ row: u.row, serialNumber: u.serialNumber, reason: "item no longer exists" });
         continue;
       }
-      updatedCount++;
       if (u.loggedChanges.length > 0) {
         edits.push({
           itemId: u.itemId,
@@ -534,6 +565,7 @@ export async function commitImport(
         });
       }
     }
+    const updatedCount = updatedIds.size;
     if (edits.length > 0) await tx.itemEdit.createMany({ data: edits });
 
     const allSkipped = vanished.length > 0 ? [...skipped, ...vanished] : skipped;

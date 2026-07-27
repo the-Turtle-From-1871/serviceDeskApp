@@ -6,6 +6,7 @@ import {
   selectableIds,
   selectAllState,
   ITEM_COLUMNS,
+  SORTABLE_COLUMNS,
   type ItemRow,
 } from "./items-view";
 
@@ -19,8 +20,7 @@ const row = (over: Partial<ItemRow>): ItemRow => ({
   auditState: over.auditState ?? null,
   deviceUIC: over.deviceUIC ?? null,
   deviceCategory: over.deviceCategory ?? null,
-  deployableStatus: over.deployableStatus ?? null,
-  isAccountedFor: over.isAccountedFor ?? true,
+  readiness: over.readiness ?? "UNTRIAGED",
 });
 
 describe("sortItemRows", () => {
@@ -66,6 +66,13 @@ describe("parseSortPref", () => {
     expect(parseSortPref(JSON.stringify({ field: "hacker", dir: "asc" }))).toEqual({ field: null, dir: "asc" });
   });
 
+  it("rejects readiness — it is a rendered column, not a sortable one", () => {
+    // Readiness is derived from four signals across three tables, so there is
+    // no column to ORDER BY. A stored preference naming it (or a hand-crafted
+    // one) must fall back to the default rather than reaching the server.
+    expect(parseSortPref(JSON.stringify({ field: "readiness", dir: "asc" }))).toEqual({ field: null, dir: "asc" });
+  });
+
   it("rejects an unknown direction", () => {
     expect(parseSortPref(JSON.stringify({ field: "make", dir: "sideways" }))).toEqual({ field: null, dir: "asc" });
   });
@@ -75,9 +82,26 @@ describe("parseSortPref", () => {
   });
 });
 
+describe("columns", () => {
+  it("offers readiness as a column but not as a sort key", () => {
+    expect(ITEM_COLUMNS.map((c) => c.key)).toContain("readiness");
+    expect(SORTABLE_COLUMNS.map((c) => c.key)).not.toContain("readiness");
+  });
+
+  it("keeps every other column sortable", () => {
+    expect(SORTABLE_COLUMNS).toHaveLength(ITEM_COLUMNS.length - 1);
+  });
+});
+
 describe("parseHiddenCols", () => {
   it("keeps only valid column keys", () => {
     expect(parseHiddenCols(JSON.stringify(["make", "bogus", "status"]))).toEqual(["make", "status"]);
+  });
+
+  it("can hide readiness even though it cannot be sorted", () => {
+    // Column visibility covers every rendered column, sortable or not — the
+    // two lists are separate on purpose.
+    expect(parseHiddenCols(JSON.stringify(["readiness"]))).toEqual(["readiness"]);
   });
 
   it("falls back to empty on garbage", () => {

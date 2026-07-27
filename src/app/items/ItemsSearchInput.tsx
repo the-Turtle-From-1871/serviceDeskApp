@@ -13,22 +13,20 @@ export function ItemsSearchInput({
   q,
   sortKeys,
   uic,
-  grouped,
 }: {
   q: string;
   /** The FULL compound sort, not just the first key — rebuilding the URL from
    *  a lone `sort`/`dir` silently collapsed a two-key sort down to one. */
   sortKeys: SortKey[];
   uic: string | null;
-  grouped: boolean;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState(q);
   const [isPending, startTransition] = useTransition();
   // This component REBUILDS the /items URL from scratch, so it must carry every
   // piece of state that lives there. Anything missing here is silently dropped
-  // the moment someone types in the search box — that is how the UIC filter,
-  // the grouping toggle and the secondary sort key all used to disappear.
+  // the moment someone types in the search box — that is how the UIC filter and
+  // the secondary sort key both used to disappear.
   //
   // Read the latest values via refs (synced every render, via an effect —
   // mutating a ref directly during render is disallowed) so the debounce timer
@@ -36,11 +34,9 @@ export function ItemsSearchInput({
   // is still pending.
   const sortRef = useRef(sortKeys);
   const uicRef = useRef(uic);
-  const groupedRef = useRef(grouped);
   useEffect(() => {
     sortRef.current = sortKeys;
     uicRef.current = uic;
-    groupedRef.current = grouped;
   });
 
   useEffect(() => {
@@ -60,8 +56,6 @@ export function ItemsSearchInput({
         params.set("dir", sortRef.current.map((k) => k.dir).join(","));
       }
       if (uicRef.current) params.set("uic", uicRef.current);
-      // Grouping is the default, so only the OFF state travels in the URL.
-      if (!groupedRef.current) params.set("group", "none");
       // Changing the query resets to page 1 (omitted = page 1): a narrower
       // result set could otherwise strand the user on a now-empty page.
       const s = params.toString();

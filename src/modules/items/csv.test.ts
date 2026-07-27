@@ -12,6 +12,36 @@ describe("parseItemsCsv", () => {
     });
   });
 
+  it("fills the device category from a deviceType column", () => {
+    const csv = "SerialNumber,deviceType\nA1,Laptop\nA2,Switch\n";
+    const { rows, error } = parseItemsCsv(csv);
+    expect(error).toBeUndefined();
+    expect(rows.map((r) => r.deviceCategory)).toEqual(["Laptop", "Switch"]);
+  });
+
+  it("accepts deviceType in any spacing/casing, alongside the other category aliases", () => {
+    for (const header of ["deviceType", "Device Type", "DEVICE_TYPE", "deviceCategory", "Category"]) {
+      const { rows, error } = parseItemsCsv(`SerialNumber,${header}\nA1,Laptop\n`);
+      expect(error, header).toBeUndefined();
+      expect(rows[0].deviceCategory, header).toBe("Laptop");
+    }
+  });
+
+  it("still IGNORES a bare `type` column", () => {
+    // MDM exports carry a generic "Type" column of OS strings. Mapping it to
+    // the category would overwrite every matched item's category on import, so
+    // it must stay unrecognised — deviceType is the explicit opt-in.
+    const csv = "SerialNumber,Type\nA1,Windows 11 Pro 23H2\n";
+    const { rows, error } = parseItemsCsv(csv);
+    expect(error).toBeUndefined();
+    expect(rows[0].deviceCategory).toBe("");
+  });
+
+  it("prefers nothing when deviceType is blank, leaving the stored value untouched", () => {
+    const { rows } = parseItemsCsv("SerialNumber,deviceType\nA1,\n");
+    expect(rows[0].deviceCategory).toBe("");
+  });
+
   it("maps the new assignedUser + telemetry headers in any column order and any case", () => {
     const csv =
       "SerialNumber,Compliance,Assigned User,LASTLOGONDATE,lastLogonUserPrincipalName,EnrollmentDate\n" +

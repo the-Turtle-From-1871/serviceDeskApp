@@ -12,10 +12,10 @@ receipt PDF.
 
 ## Features
 
-- **Item registry** — make, model, serial number (**unique, case-insensitive**), device name, home unit, issuing unit (UIC), device category, current-holder email/position, notes; ACTIVE/RETIRED status. The list is **server-paginated, filterable (by UIC), compound-sortable, and grouped by readiness** by default.
-- **Device categories** — admins curate the list of device classes ("Laptops", "Switches") at `/admin/categories`; removing one that items still use is refused, and a CSV import carrying a new category registers it automatically.
-- **Operational readiness** — each item carries an *accounted-for* flag and a *deployable status* (`DEPLOYED` / `READY_TO_DEPLOY` / `IN_REPAIR` / `RETIRED`, or untriaged). Admins can set these on many items at once from the items table, and every change is recorded to a readiness history.
-- **Readiness analytics** (`/admin/analytics`, admin-only) — audit readiness, fleet KPIs by category, fleet status over time, DA 2062 velocity, and a unit-allocation leaderboard. One **Unit (UIC)** filter re-scopes the whole page; charts export to PNG/CSV or switch to a table view.
+- **Item registry** — make, model, serial number (**unique, case-insensitive**), device name, home unit, issuing unit (UIC), device category, current-holder email/position, notes; ACTIVE/RETIRED status. The list is **server-paginated, filterable (by UIC), and compound-sortable**.
+- **Device categories** — admins curate the list of device classes ("Laptop", "Switch") at `/admin/categories`; removing one that items still use is refused. CSV import fills the category from a **`deviceType`** column and registers any new value automatically.
+- **Operational readiness** — each item carries a *deployable status* (`DEPLOYED` / `READY_TO_DEPLOY` / `IN_REPAIR` / `RETIRED`, or untriaged). Admins can set it on many items at once from the items table, and every change is recorded to a readiness history. **Accountability is not a separate flag** — an item counts as accounted for when an audit says so, from its most recent audit date.
+- **Readiness analytics** (`/admin/analytics`, admin-only) — audit readiness (audited / overdue / never audited), fleet KPIs by category, DA 2062 velocity, and a unit-allocation leaderboard. Readiness is derived live from service flags, open receipts, MDM last-logon, and the "Mark as on hand" stamp. One **Unit (UIC)** filter re-scopes the whole page; charts export to PNG/CSV or switch to a table view.
 - **QR codes** — each item has a public read-only page (`/i/[itemId]`); QR is printable and downloadable as a PDF.
 - **Signed custody chain** — holder initiates a transfer, recipient draws a signature to accept; custody moves only on signature.
 - **Admin console** — create/edit/retire items, manage users (create, set role, activate/deactivate), process property returns, work the service queue, full audit log.

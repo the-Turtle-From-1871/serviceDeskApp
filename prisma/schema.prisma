@@ -42,7 +42,6 @@ model User {
   passwordResets      PasswordResetToken[]  @relation("PasswordResets")
   itemEdits           ItemEdit[]            @relation("ItemEdits")
   itemAudits          ItemAudit[]           @relation("ItemAudits")
-  itemStatusChanges   ItemStatusHistory[]   @relation("ItemStatusChanges")
   createdCategories   DeviceCategory[]      @relation("CreatedCategories")
   signatures          Signature[]           @relation("UserSignatures")
   createdContacts     Contact[]             @relation("CreatedContacts")
@@ -68,15 +67,10 @@ enum ItemStatus {
   RETIRED
 }
 
-// Operational-readiness state of a device (distinct from ItemStatus, which is
-// the lifecycle ACTIVE/RETIRED). Separate Postgres enum type — the shared
-// RETIRED value name does not collide across enum types.
-enum DeployableStatus {
-  DEPLOYED
-  READY_TO_DEPLOY
-  IN_REPAIR
-  RETIRED
-}
+// NOTE: a `DeployableStatus` enum lived here and was dropped along with the
+// column that used it. Readiness is now a DERIVED value with no stored
+// representation — its states live as a TypeScript union in
+// modules/items/readiness.ts, so there is nothing for Postgres to enumerate.
 
 model Item {
   id                         String            @id @default(cuid())
@@ -111,16 +105,30 @@ model Item {
   // leaves the stored value untouched. Not editable from the UI.
   lastLogonUserPrincipalName String?
   lastLogonDate              String?
+  // `lastLogonDate` parsed to an instant at import time (parseLastLogonAt).
+  // Denormalized for the same reason as lastAuditedAt: readiness compares the
+  // last logon to markedReadyAt, and the dashboard has to make that comparison
+  // across the whole fleet in SQL. Parsing the free-text column inside Postgres
+  // would abort an import on the first unexpected format. Null = absent or
+  // unparseable; the raw string above is always kept for display.
+  lastLogonAt                DateTime?
   enrollmentDate             String?
   compliance                 String?
   status                     ItemStatus        @default(ACTIVE)
-  // Operational readiness (Day 1 sprint). isAccountedFor defaults true (assume
-  // present until an audit says otherwise). deployableStatus is intentionally
-  // nullable with NO default: existing rows stay "unknown" until triaged, and an
-  // open hand receipt does NOT imply DEPLOYED (a device may be turned in for
-  // service), so there is deliberately no automatic backfill.
-  isAccountedFor             Boolean           @default(true)
-  deployableStatus           DeployableStatus?
+  // READINESS IS DERIVED, NOT STORED — see modules/items/readiness.ts.
+  //
+  // A `deployableStatus` enum column lived here and was dropped. It was written
+  // only by a bulk admin action, so 0 of 1,139 production rows ever had a value
+  // and every device read "Untriaged": the column measured its own default, not
+  // the fleet. Same lesson as the isAccountedFor flag dropped before it. Do not
+  // reintroduce either — readiness is computed from lifecycle status, the
+  // service queue, open hand receipts, and MDM last-logon.
+  //
+  // `markedReadyAt` is the ONE piece an operator sets by hand: "this is back in
+  // our possession". A TIMESTAMP rather than a boolean on purpose — a logon
+  // newer than this instant means the device has been used since it was
+  // shelved, so the marking self-expires instead of going stale.
+  markedReadyAt              DateTime?
   createdBy                  User              @relation("CreatedItems", fields: [createdById], references: [id])
   createdById                String
   transferItems              TransferItem[]
@@ -135,7 +143,6 @@ model Item {
   serviceQueueItem ServiceQueueItem?
   edits            ItemEdit[]
   audits           ItemAudit[]
-  statusHistory    ItemStatusHistory[]
 
   // The /items list sorts by createdAt desc on every load (unbounded today).
   @@index([createdAt])
@@ -146,6 +153,11 @@ model Item {
   @@index([deviceUIC])
   // Audit-status sort on /items: ORDER BY lastAuditedAt (nulls last).
   @@index([lastAuditedAt])
+  // Readiness derivation reads these two on every dashboard aggregate and on
+  // the /items readiness sort. Both are nullable and mostly-null today, so a
+  // plain B-tree is the right shape.
+  @@index([markedReadyAt])
+  @@index([lastLogonAt])
   // Trigram GIN for the public, per-keystroke serial search (searchItemsBySerial),
   // which is `ILIKE '%q%'` — a leading wildcard a B-tree can't serve. Needs pg_trgm.
   @@index([serialNumber(ops: raw("gin_trgm_ops"))], type: Gin, map: "Item_serialNumber_trgm_idx")
@@ -460,45 +472,6 @@ model ItemAudit {
   createdAt      DateTime @default(now())
 
   @@index([itemId, createdAt])
-}
-
-// Operational-readiness timeline for an item. One row per change to
-// deployableStatus or isAccountedFor, written in the same transaction as the
-// Item update so the two can never diverge.
-//
-// SNAPSHOT, not a delta: each row records the item's state *after* the change,
-// so the fleet's composition at any instant T is "for each item, the newest row
-// with createdAt <= T" — one indexed DISTINCT ON, with no need to replay deltas
-// from the beginning of time. That is what the stacked-area chart reads.
-//
-// Forward-only by design. The migration seeds ONE baseline row per existing
-// item at backfill time; there is no invented history before that point,
-// because none was ever recorded. Charts are therefore flat until real changes
-// accrue — that is honest, not a bug.
-//
-// Nullable actor + denormalized name snapshot so the timeline survives deletion
-// of the acting account (mirrors ItemEdit / ItemAudit).
-model ItemStatusHistory {
-  id               String            @id @default(cuid())
-  item             Item              @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  itemId           String
-  // The item's state as of this row. deployableStatus stays nullable because
-  // an untriaged item legitimately has no readiness state yet (see Item).
-  deployableStatus DeployableStatus?
-  isAccountedFor   Boolean
-  changedBy        User?             @relation("ItemStatusChanges", fields: [changedById], references: [id], onDelete: SetNull)
-  changedById      String?
-  changedByName    String
-  // "system:backfill" for the migration's baseline rows, "bulk" for a bulk
-  // action, "item-edit" for a single-item save. Lets the timeline explain a
-  // step change without joining anything.
-  source           String
-  createdAt        DateTime          @default(now())
-
-  // The chart's hot path: newest row per item at or before a cutoff.
-  @@index([itemId, createdAt])
-  // Range scan when bucketing the whole fleet over a window.
-  @@index([createdAt])
 }
 
 // Single-row org config for the public-access PIN gate. `id` is pinned to

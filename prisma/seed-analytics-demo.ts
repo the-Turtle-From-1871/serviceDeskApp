@@ -5,15 +5,21 @@ import prisma from "../src/lib/prisma";
 /**
  * DEV-ONLY demo data for the readiness dashboard (`npm run db:seed:analytics`).
  *
- * The analytics widgets are driven by deviceCategory, deviceUIC,
- * deployableStatus and ItemStatusHistory. A fresh dev database has none of
- * those populated, so every chart renders empty and there is nothing to look
- * at while developing. This script assigns a plausible spread to the items
- * that already exist and back-dates a status timeline so the stacked-area
- * chart has a real shape.
+ * The analytics widgets are driven by deviceCategory, deviceUIC, lastAuditedAt
+ * and the DERIVED readiness state. A fresh dev database has none of those
+ * populated, so every chart renders empty and there is nothing to look at while
+ * developing. This script assigns a plausible spread to the items that already
+ * exist.
+ *
+ * READINESS IS DERIVED, NOT SET (see modules/items/readiness.ts): there is no
+ * status column to write and no history table to fabricate. So the fixture
+ * writes the SIGNALS readiness reads — a service flag, a markedReadyAt stamp,
+ * an MDM last-logon user + instant — and lets the real derivation produce the
+ * spread. That means the demo data exercises the same code path production
+ * does, instead of a shortcut that could disagree with it.
  *
  * It is NOT wired into `db:seed` and must never be run against production —
- * it overwrites readiness fields on existing rows and fabricates history.
+ * it overwrites readiness signals and audit dates on existing rows.
  *
  * GUARDING ON NODE_ENV IS NOT ENOUGH, and was the original bug here: this
  * runs under `tsx` with NODE_ENV unset, and its first act is to load whatever
@@ -41,16 +47,77 @@ function assertSafeTarget() {
   if (!LOCAL_HOSTS.has(host)) {
     throw new Error(
       `Refusing to run: DATABASE_URL points at "${host}", which is not a local database.\n` +
-        "This fixture OVERWRITES deviceCategory / deviceUIC / deployableStatus / isAccountedFor on every\n" +
-        "item, fabricates status history, and inserts fake CLOSED receipts. If you genuinely mean to run\n" +
-        "it against this host, set ALLOW_NONLOCAL_DEMO_SEED=1 — and be certain it is not production.",
+        "This fixture OVERWRITES deviceCategory / deviceUIC / lastAuditedAt and the readiness signals\n" +
+        "(markedReadyAt, MDM last-logon) on every item, flags items for service, and inserts fake CLOSED\n" +
+        "receipts. If you genuinely mean to run it against this host, set ALLOW_NONLOCAL_DEMO_SEED=1 —\n" +
+        "and be certain it is not production.",
     );
   }
 }
 
 const CATEGORIES = ["Laptops", "Switches", "Printers", "Radios", "Tablets"];
 const UICS = ["W6BTAA", "W6BTAB", "W6BTAC", "W91HRT"];
-const STATUSES = ["DEPLOYED", "READY_TO_DEPLOY", "IN_REPAIR", "RETIRED"] as const;
+
+/** The readiness OUTCOMES this fixture aims for. Nothing writes these strings
+ *  to the database — each one names a combination of signals (below) that the
+ *  real derivation should turn into that state. */
+const READINESS_SPREAD = ["deployed", "ready", "repair", "untriaged"] as const;
+type DemoReadiness = (typeof READINESS_SPREAD)[number];
+
+/** `Item.lastLogonDate` is the MDM export's verbatim text; `lastLogonAt` is the
+ *  instant parsed from it on import. The fixture writes both, in the same shape
+ *  parseLastLogonAt expects, so the demo rows look like imported ones. */
+const mdmDate = (d: Date) =>
+  `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${d.getUTCFullYear()} 8:00:00 AM`;
+
+const DEMO_LOGON_USER = "demo.user@example.mil";
+
+/** The signal set that should derive to `readiness`. See readiness.ts for the
+ *  precedence these lean on. */
+function signalsFor(readiness: DemoReadiness, now: number, day: number) {
+  switch (readiness) {
+    case "deployed": {
+      // Shelved, then used again since. This is the case that proves
+      // markedReadyAt self-expires rather than going stale — a logon NEWER
+      // than the stamp outranks it.
+      const logon = new Date(now - 3 * day);
+      return {
+        markedReadyAt: new Date(now - 40 * day),
+        lastLogonUserPrincipalName: DEMO_LOGON_USER,
+        lastLogonDate: mdmDate(logon),
+        lastLogonAt: logon,
+      };
+    }
+    case "ready":
+      // Marked back on the shelf with nothing since to contradict it.
+      return {
+        markedReadyAt: new Date(now - 5 * day),
+        lastLogonUserPrincipalName: null,
+        lastLogonDate: null,
+        lastLogonAt: null,
+      };
+    case "repair": {
+      // Deliberately carries a logon as well: the PENDING service row written
+      // below must OUTRANK it. If this bucket ever renders as Deployed, the
+      // precedence has been broken.
+      const logon = new Date(now - 60 * day);
+      return {
+        markedReadyAt: null,
+        lastLogonUserPrincipalName: DEMO_LOGON_USER,
+        lastLogonDate: mdmDate(logon),
+        lastLogonAt: logon,
+      };
+    }
+    case "untriaged":
+      // No signal at all — "we have never heard anything about this device".
+      return {
+        markedReadyAt: null,
+        lastLogonUserPrincipalName: null,
+        lastLogonDate: null,
+        lastLogonAt: null,
+      };
+  }
+}
 
 async function main() {
   // NODE_ENV=production is refused unconditionally — the escape hatch below
@@ -77,53 +144,36 @@ async function main() {
   // BATCHED, not a per-item loop: CLAUDE.md forbids querying inside a loop, and
   // against the real 1,200+ catalogue the previous shape issued ~2,400 round
   // trips. Because the spread is a pure function of the index, items sharing a
-  // (category, uic, status, accounted) combination can be updated together —
-  // that is at most CATEGORIES x UICS x STATUSES x 2 buckets regardless of
-  // fleet size — and all history rows go in ONE createMany.
-  type Combo = { category: string; uic: string; status: string; accounted: boolean };
+  // (category, uic, readiness, audited) combination can be updated together —
+  // that is at most CATEGORIES x UICS x READINESS_SPREAD x 3 buckets regardless
+  // of fleet size — and the service flags go in ONE createMany.
+  //
+  // `audited` drives the audit-readiness donut, which reads lastAuditedAt rather
+  // than any stored accountability flag: null = never audited, a recent date =
+  // compliant, an old one = overdue. Spread across all three so the donut shows
+  // three wedges instead of one ring.
+  //
+  // NOTE this writes lastAuditedAt WITHOUT matching ItemAudit rows, so a demo
+  // item shows an audit light with an empty audit history on its detail page.
+  // Acceptable for a local fixture; do not copy the shortcut into app code,
+  // where recordAudit maintains both in one transaction.
+  type Combo = { category: string; uic: string; readiness: DemoReadiness; audited: "recent" | "old" | "never" };
   const buckets = new Map<string, { combo: Combo; ids: string[] }>();
-  const history: Array<{
-    itemId: string;
-    deployableStatus: (typeof STATUSES)[number];
-    isAccountedFor: boolean;
-    changedByName: string;
-    source: string;
-    createdAt: Date;
-  }> = [];
+  const needService: string[] = [];
 
   for (const [i, item] of items.entries()) {
     const combo: Combo = {
       category: CATEGORIES[i % CATEGORIES.length],
       uic: UICS[i % UICS.length],
-      status: STATUSES[i % STATUSES.length],
-      accounted: i % 7 !== 0, // ~14% unaccounted for, so the donut isn't a solid ring
+      readiness: READINESS_SPREAD[i % READINESS_SPREAD.length],
+      audited: i % 7 === 0 ? "never" : i % 3 === 0 ? "old" : "recent",
     };
-    const key = `${combo.category}|${combo.uic}|${combo.status}|${combo.accounted}`;
+    const key = `${combo.category}|${combo.uic}|${combo.readiness}|${combo.audited}`;
     const bucket = buckets.get(key);
     if (bucket) bucket.ids.push(item.id);
     else buckets.set(key, { combo, ids: [item.id] });
 
-    // Back-date a small timeline: an earlier state, then the current one, so
-    // the stacked area actually steps instead of being a flat band.
-    const earlier = STATUSES[(i + 2) % STATUSES.length];
-    history.push(
-      {
-        itemId: item.id,
-        deployableStatus: earlier,
-        isAccountedFor: true,
-        changedByName: "System (demo fixture)",
-        source: "system:demo",
-        createdAt: new Date(now - (60 - (i % 45)) * day),
-      },
-      {
-        itemId: item.id,
-        deployableStatus: combo.status as (typeof STATUSES)[number],
-        isAccountedFor: combo.accounted,
-        changedByName: "System (demo fixture)",
-        source: "system:demo",
-        createdAt: new Date(now - (i % 25) * day),
-      },
-    );
+    if (combo.readiness === "repair") needService.push(item.id);
   }
 
   for (const { combo, ids } of buckets.values()) {
@@ -132,13 +182,30 @@ async function main() {
       data: {
         deviceCategory: combo.category,
         deviceUIC: combo.uic,
-        deployableStatus: combo.status as (typeof STATUSES)[number],
-        isAccountedFor: combo.accounted,
+        ...signalsFor(combo.readiness, now, day),
+        lastAuditedAt:
+          combo.audited === "never"
+            ? null
+            : combo.audited === "old"
+              ? new Date(now - 500 * day) // > 1 year ago = overdue
+              : new Date(now - 30 * day), // within the period = compliant
       },
     });
   }
-  await prisma.itemStatusHistory.createMany({ data: history });
-  const historyRows = history.length;
+
+  // The IN_REPAIR half of the spread. ServiceQueueItem is unique per item, so
+  // skipDuplicates makes a re-run idempotent instead of a unique violation —
+  // and the rows are left alone rather than reset, so a queue item completed
+  // by hand while demoing stays completed.
+  const flagged = await prisma.serviceQueueItem.createMany({
+    data: needService.map((itemId) => ({
+      itemId,
+      serviceType: "REPAIR" as const,
+      status: "PENDING" as const,
+      dueAt: new Date(now + 7 * day),
+    })),
+    skipDuplicates: true,
+  });
 
   // Closed hand receipts, so the DA 2062 velocity chart has something to plot.
   // Spread across recent months; each carries a couple of items so the stack
@@ -210,7 +277,7 @@ async function main() {
 
   console.log(
     `Decorated ${items.length} items across ${UICS.length} UICs / ${CATEGORIES.length} categories, ` +
-      `wrote ${historyRows} status-history rows, and created ${receipts} closed demo receipts.`,
+      `flagged ${flagged.count} for service, and created ${receipts} closed demo receipts.`,
   );
 }
 

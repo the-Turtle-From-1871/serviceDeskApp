@@ -3,6 +3,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("@/lib/prisma", () => {
   const tx = {
     serviceQueueItem: { findUnique: vi.fn(), update: vi.fn(), upsert: vi.fn() },
+    // Completing a queue item also stamps the ITEM's markedReadyAt in the same
+    // transaction, so the stub needs the item delegate too.
+    item: { updateMany: vi.fn(async () => ({ count: 1 })) },
   };
   type Tx = typeof tx;
   return {
@@ -83,21 +86,46 @@ describe("clearServiceRequest", () => {
 
 describe("completeServiceItem", () => {
   it("PENDING -> COMPLETED", async () => {
-    vi.mocked(__tx.serviceQueueItem.findUnique).mockResolvedValueOnce({ id: "sq1", status: "PENDING" });
+    vi.mocked(__tx.serviceQueueItem.findUnique).mockResolvedValueOnce({ id: "sq1", itemId: "i1", status: "PENDING" });
     vi.mocked(__tx.serviceQueueItem.update).mockResolvedValueOnce({ id: "sq1", status: "COMPLETED" });
     const r = await completeServiceItem("sq1");
     expect(__tx.serviceQueueItem.update).toHaveBeenCalledWith({ where: { id: "sq1" }, data: { status: "COMPLETED" } });
     expect(r.status).toBe("COMPLETED");
   });
 
+  it("stamps the item's markedReadyAt in the SAME transaction", async () => {
+    // Finishing service means the device is physically in hand. Readiness is
+    // derived, so without this stamp the item would leave IN_REPAIR straight
+    // back to whatever its stale MDM logon implies.
+    vi.mocked(__tx.serviceQueueItem.findUnique).mockResolvedValueOnce({ id: "sq1", itemId: "i1", status: "PENDING" });
+    vi.mocked(__tx.serviceQueueItem.update).mockResolvedValueOnce({ id: "sq1", status: "COMPLETED" });
+    await completeServiceItem("sq1");
+    const arg = vi.mocked(__tx.item.updateMany).mock.calls[0][0];
+    // Scoped to ACTIVE: "on hand" is meaningless for retired kit, and
+    // updateMany means a vanished item cannot roll back the completion.
+    expect(arg.where).toEqual({ id: "i1", status: "ACTIVE" });
+    expect(arg.data.markedReadyAt).toBeInstanceOf(Date);
+  });
+
   it("throws INVALID_STATUS when already completed", async () => {
     vi.mocked(__tx.serviceQueueItem.findUnique).mockResolvedValueOnce({ id: "sq1", status: "COMPLETED" });
     await expect(completeServiceItem("sq1")).rejects.toBeInstanceOf(ServiceQueueError);
+    expect(__tx.item.updateMany).not.toHaveBeenCalled();
   });
 
   it("throws NOT_FOUND when missing", async () => {
     vi.mocked(__tx.serviceQueueItem.findUnique).mockResolvedValueOnce(null);
     await expect(completeServiceItem("nope")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(__tx.item.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("reopenServiceItem side effects", () => {
+  it("does NOT touch markedReadyAt — reopening means service again, not on hand", async () => {
+    vi.mocked(__tx.serviceQueueItem.findUnique).mockResolvedValueOnce({ id: "sq1", itemId: "i1", status: "COMPLETED", serviceType: "REPAIR" });
+    vi.mocked(__tx.serviceQueueItem.update).mockResolvedValueOnce({ id: "sq1", status: "PENDING" });
+    await reopenServiceItem("sq1");
+    expect(__tx.item.updateMany).not.toHaveBeenCalled();
   });
 });
 

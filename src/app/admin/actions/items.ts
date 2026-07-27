@@ -7,7 +7,7 @@ import {
   setItemStatus,
   analyzeImport,
   commitImport,
-  bulkUpdateReadiness,
+  markItemsReady,
   MAX_BULK_ITEMS,
 } from "@/modules/items/items.service";
 import { ItemError } from "@/modules/items/items.errors";
@@ -23,7 +23,7 @@ export async function createItemAction(_prev: unknown, formData: FormData) {
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  const item = await createItem(parsed.data, admin.id, admin.name);
+  const item = await createItem(parsed.data, admin.id);
   return { itemId: item.id };
 }
 
@@ -61,51 +61,36 @@ export async function updateItemAction(_prev: unknown, formData: FormData) {
   return { ok: true };
 }
 
-// Bulk readiness update from the /items table.
+// "Mark as on hand" — from the /items selection bar or a single item page.
 //
-// ADMIN-ONLY, enforced here on the server — the UI hides the controls from a
-// standard USER, but hiding is not a guard. requireAdmin() re-reads role +
+// This replaces the old bulk "set readiness" control. Readiness is no longer a
+// stored enum an admin picks from a dropdown; it is DERIVED (readiness.ts), and
+// this stamps the ONE signal a human owns: markedReadyAt = "this device is back
+// on my shelf right now". Everything else about the state — in repair, issued
+// out, logged on since — the app already knows.
+//
+// ADMIN-ONLY, enforced here on the server. The UI hides the button from a
+// standard USER, but hiding is not a guard: requireAdmin() re-reads role +
 // isActive from the DB per request, so a demoted account loses this
-// immediately. Note this is deliberately NOT part of updateItemDetailsAction's
-// role-picked schema: readiness is an admin capability, and routing it through
-// its own action keeps the USER-editable field set exactly as narrow as it was.
-const bulkReadinessSchema = z
-  .object({
-    itemIds: z.array(z.string().min(1)).min(1, "Select at least one item."),
-    // Three-way: a concrete status, or "UNTRIAGED" to clear it back to null.
-    deployableStatus: z.enum(["DEPLOYED", "READY_TO_DEPLOY", "IN_REPAIR", "RETIRED", "UNTRIAGED"]).optional(),
-    isAccountedFor: z.enum(["true", "false"]).optional(),
-  })
-  .refine((v) => v.deployableStatus !== undefined || v.isAccountedFor !== undefined, {
-    message: "Choose a change to apply.",
-  });
+// immediately. Deliberately NOT folded into updateItemDetailsAction's
+// role-picked schema — routing it through its own action keeps the
+// USER-editable field set exactly as narrow as it was.
+const markReadySchema = z.object({
+  itemIds: z.array(z.string().min(1)).min(1, "Select at least one item."),
+});
 
-export async function bulkUpdateReadinessAction(formData: FormData) {
-  const admin = await requireAdmin();
+export async function markItemsReadyAction(formData: FormData) {
+  await requireAdmin();
 
-  const parsed = bulkReadinessSchema.safeParse({
+  const parsed = markReadySchema.safeParse({
     itemIds: String(formData.get("itemIds") ?? "").split(",").filter(Boolean),
-    deployableStatus: formData.get("deployableStatus") || undefined,
-    isAccountedFor: formData.get("isAccountedFor") || undefined,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  const { itemIds, deployableStatus, isAccountedFor } = parsed.data;
 
   try {
-    const { updated } = await bulkUpdateReadiness(
-      itemIds,
-      {
-        // "UNTRIAGED" is the sentinel for clearing the column, which is a
-        // meaningful state (never triaged) and distinct from "not submitted".
-        ...(deployableStatus !== undefined
-          ? { deployableStatus: deployableStatus === "UNTRIAGED" ? null : deployableStatus }
-          : {}),
-        ...(isAccountedFor !== undefined ? { isAccountedFor: isAccountedFor === "true" } : {}),
-      },
-      { id: admin.id, name: admin.name },
-    );
+    const { updated } = await markItemsReady(parsed.data.itemIds);
     revalidatePath("/items");
     revalidatePath("/admin/analytics");
     return { ok: true, updated };
@@ -113,7 +98,7 @@ export async function bulkUpdateReadinessAction(formData: FormData) {
     if (e instanceof ItemError && e.code === "TOO_MANY") {
       return { error: `Too many items selected. The limit is ${MAX_BULK_ITEMS} per action.` };
     }
-    console.error("[bulkUpdateReadinessAction] unexpected error:", e);
+    console.error("[markItemsReadyAction] unexpected error:", e);
     return { error: "Something went wrong updating those items. Please try again." };
   }
 }
