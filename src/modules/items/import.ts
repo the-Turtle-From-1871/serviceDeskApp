@@ -18,6 +18,7 @@ export type ExistingItem = {
   model: string;
   deviceName: string | null;
   deviceUIC: string | null;
+  deviceCategory: string | null;
   currentUserEmail: string | null;
   lastLogonUserPrincipalName: string | null;
   lastLogonDate: string | null;
@@ -34,6 +35,7 @@ export type NewItemImport = {
   deviceName?: string;
   homeUnit?: string;
   deviceUIC?: string;
+  deviceCategory?: string;
   notes?: string;
   currentUserEmail?: string;
   lastLogonUserPrincipalName?: string;
@@ -91,6 +93,7 @@ export function planImport(
       deviceName: r.deviceName,
       homeUnit: r.homeUnit,
       deviceUIC: r.deviceUIC,
+      deviceCategory: r.deviceCategory,
       notes: r.notes,
       assignedUser: r.assignedUser,
       lastLogonUserPrincipalName: r.lastLogonUserPrincipalName,
@@ -124,6 +127,7 @@ export function planImport(
       const loggedAfter: Partial<ItemLoggedFields> = {};
       if (d.deviceName !== undefined) loggedAfter.deviceName = d.deviceName;
       if (d.deviceUIC !== undefined) loggedAfter.deviceUIC = d.deviceUIC;
+      if (d.deviceCategory !== undefined) loggedAfter.deviceCategory = d.deviceCategory;
       if (d.assignedUser !== undefined) loggedAfter.currentUserEmail = d.assignedUser;
       const loggedChanges = diffItemFields(match, loggedAfter);
 
@@ -161,6 +165,7 @@ export function planImport(
       deviceName: d.deviceName,
       homeUnit: d.homeUnit,
       deviceUIC: d.deviceUIC,
+      deviceCategory: d.deviceCategory,
       notes: d.notes,
       currentUserEmail: d.assignedUser,
       lastLogonUserPrincipalName: d.lastLogonUserPrincipalName,

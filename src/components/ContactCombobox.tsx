@@ -138,7 +138,7 @@ export function ContactCombobox({
               onMouseEnter={() => setActive(i)}
               onClick={() => pick(c)}
               style={{
-                padding: "6px 8px", cursor: "pointer", borderRadius: "var(--radius-sm)",
+                padding: "6px 8px", cursor: "pointer", borderRadius: "var(--ledger-radius-sm)",
                 background: i === activeIndex ? "var(--surface-2)" : undefined,
               }}
             >

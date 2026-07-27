@@ -12,7 +12,10 @@ receipt PDF.
 
 ## Features
 
-- **Item registry** — make, model, serial number (**unique, case-insensitive**), device name, home unit, current-holder email/position, notes; ACTIVE/RETIRED status. The list is **server-paginated and sortable**.
+- **Item registry** — make, model, serial number (**unique, case-insensitive**), device name, home unit, issuing unit (UIC), device category, current-holder email/position, notes; ACTIVE/RETIRED status. The list is **server-paginated, filterable (by UIC), compound-sortable, and grouped by readiness** by default.
+- **Device categories** — admins curate the list of device classes ("Laptops", "Switches") at `/admin/categories`; removing one that items still use is refused, and a CSV import carrying a new category registers it automatically.
+- **Operational readiness** — each item carries an *accounted-for* flag and a *deployable status* (`DEPLOYED` / `READY_TO_DEPLOY` / `IN_REPAIR` / `RETIRED`, or untriaged). Admins can set these on many items at once from the items table, and every change is recorded to a readiness history.
+- **Readiness analytics** (`/admin/analytics`, admin-only) — audit readiness, fleet KPIs by category, fleet status over time, DA 2062 velocity, and a unit-allocation leaderboard. One **Unit (UIC)** filter re-scopes the whole page; charts export to PNG/CSV or switch to a table view.
 - **QR codes** — each item has a public read-only page (`/i/[itemId]`); QR is printable and downloadable as a PDF.
 - **Signed custody chain** — holder initiates a transfer, recipient draws a signature to accept; custody moves only on signature.
 - **Admin console** — create/edit/retire items, manage users (create, set role, activate/deactivate), process property returns, work the service queue, full audit log.
@@ -27,6 +30,7 @@ receipt PDF.
 - **PostgreSQL** (Supabase in prod, Docker `postgres:16` locally) via **Prisma 7** with the **`@prisma/adapter-pg`** driver over **`pg`**
 - **Auth.js v5** (Credentials + JWT sessions) · **bcryptjs**
 - **Zod** validation · **pdf-lib** (PDFs) · **qrcode**
+- **Tailwind CSS v4** + **shadcn/ui** (new UI only — the original `globals.css` design system still backs existing pages; see the styling section of `CLAUDE.md`) · **Recharts** · **lucide-react**
 - **Vitest** (real-DB integration tests) · **Playwright** · **ESLint 9**
 - Hosted on **Vercel** + **Supabase**
 
@@ -84,6 +88,7 @@ create it once with `CREATE DATABASE handreceipt_test;`.
 | `npm run db:migrate` | `prisma migrate dev` (local)               |
 | `npm run db:deploy`  | `prisma migrate deploy` (prod)             |
 | `npm run db:seed`    | Seed the admin account                     |
+| `npm run db:seed:analytics` | **Dev only.** Populate categories, UICs, readiness states, back-dated history + demo closed receipts so the analytics dashboard renders locally. Overwrites readiness fields; refuses to run with `NODE_ENV=production`. |
 | `npm run db:reset`   | Reset the local dev DB                     |
 | `npm run lint`    | ESLint                                        |
 

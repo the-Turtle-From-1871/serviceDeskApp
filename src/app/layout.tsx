@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import "./globals.css";
+// Entry stylesheet: pulls globals.css into the `legacy` cascade layer and
+// adds Tailwind's theme + utilities layers on top. See styles.css.
+import "./styles.css";
 import { SiteFooter } from "@/components/SiteFooter";
 
 const geistSans = Geist({

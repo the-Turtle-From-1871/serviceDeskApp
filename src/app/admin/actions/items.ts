@@ -1,7 +1,15 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/authz";
-import { createItem, updateItemFields, setItemStatus, analyzeImport, commitImport } from "@/modules/items/items.service";
+import {
+  createItem,
+  updateItemFields,
+  setItemStatus,
+  analyzeImport,
+  commitImport,
+  bulkUpdateReadiness,
+  MAX_BULK_ITEMS,
+} from "@/modules/items/items.service";
 import { ItemError } from "@/modules/items/items.errors";
 import { newItemSchema } from "@/modules/items/items.schema";
 import { z } from "zod";
@@ -14,7 +22,7 @@ export async function createItemAction(_prev: unknown, formData: FormData) {
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  const item = await createItem(parsed.data, admin.id);
+  const item = await createItem(parsed.data, admin.id, admin.name);
   return { itemId: item.id };
 }
 
@@ -40,6 +48,63 @@ export async function updateItemAction(_prev: unknown, formData: FormData) {
   revalidatePath("/items");
   revalidatePath(`/i/${id}`);
   return { ok: true };
+}
+
+// Bulk readiness update from the /items table.
+//
+// ADMIN-ONLY, enforced here on the server — the UI hides the controls from a
+// standard USER, but hiding is not a guard. requireAdmin() re-reads role +
+// isActive from the DB per request, so a demoted account loses this
+// immediately. Note this is deliberately NOT part of updateItemDetailsAction's
+// role-picked schema: readiness is an admin capability, and routing it through
+// its own action keeps the USER-editable field set exactly as narrow as it was.
+const bulkReadinessSchema = z
+  .object({
+    itemIds: z.array(z.string().min(1)).min(1, "Select at least one item."),
+    // Three-way: a concrete status, or "UNTRIAGED" to clear it back to null.
+    deployableStatus: z.enum(["DEPLOYED", "READY_TO_DEPLOY", "IN_REPAIR", "RETIRED", "UNTRIAGED"]).optional(),
+    isAccountedFor: z.enum(["true", "false"]).optional(),
+  })
+  .refine((v) => v.deployableStatus !== undefined || v.isAccountedFor !== undefined, {
+    message: "Choose a change to apply.",
+  });
+
+export async function bulkUpdateReadinessAction(formData: FormData) {
+  const admin = await requireAdmin();
+
+  const parsed = bulkReadinessSchema.safeParse({
+    itemIds: String(formData.get("itemIds") ?? "").split(",").filter(Boolean),
+    deployableStatus: formData.get("deployableStatus") || undefined,
+    isAccountedFor: formData.get("isAccountedFor") || undefined,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  }
+  const { itemIds, deployableStatus, isAccountedFor } = parsed.data;
+
+  try {
+    const { updated } = await bulkUpdateReadiness(
+      itemIds,
+      {
+        // "UNTRIAGED" is the sentinel for clearing the column, which is a
+        // meaningful state (never triaged) and distinct from "not submitted".
+        ...(deployableStatus !== undefined
+          ? { deployableStatus: deployableStatus === "UNTRIAGED" ? null : deployableStatus }
+          : {}),
+        ...(isAccountedFor !== undefined ? { isAccountedFor: isAccountedFor === "true" } : {}),
+      },
+      { id: admin.id, name: admin.name },
+    );
+    revalidatePath("/items");
+    revalidatePath("/admin/analytics");
+    return { ok: true, updated };
+  } catch (e) {
+    if (e instanceof ItemError && e.code === "TOO_MANY") {
+      return { error: `Too many items selected. The limit is ${MAX_BULK_ITEMS} per action.` };
+    }
+    console.error("[bulkUpdateReadinessAction] unexpected error:", e);
+    return { error: "Something went wrong updating those items. Please try again." };
+  }
 }
 
 export async function toggleItemStatusAction(formData: FormData) {

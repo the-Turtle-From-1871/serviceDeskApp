@@ -17,6 +17,10 @@ const row = (over: Partial<ItemRow>): ItemRow => ({
   serialNumber: over.serialNumber ?? "",
   status: over.status ?? "ACTIVE",
   auditState: over.auditState ?? null,
+  deviceUIC: over.deviceUIC ?? null,
+  deviceCategory: over.deviceCategory ?? null,
+  deployableStatus: over.deployableStatus ?? null,
+  isAccountedFor: over.isAccountedFor ?? true,
 });
 
 describe("sortItemRows", () => {

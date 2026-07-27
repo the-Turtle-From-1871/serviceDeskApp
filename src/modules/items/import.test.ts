@@ -6,12 +6,12 @@ const UNITS = new Map<string, string>([["DCSIM", "DCSIM"], ["487B", "487FA BATTE
 
 const mk = (row: number, over: Partial<RawRow> = {}): RawRow => ({
   row, make: "M4", model: "Carbine", serialNumber: `S${row}`, deviceName: "Radio",
-  homeUnit: "", deviceUIC: "", notes: "", assignedUser: "", lastLogonUserPrincipalName: "",
+  homeUnit: "", deviceUIC: "", deviceCategory: "", notes: "", assignedUser: "", lastLogonUserPrincipalName: "",
   lastLogonDate: "", enrollmentDate: "", compliance: "", ...over,
 });
 
 const existing = (over: Partial<ExistingItem> = {}): ExistingItem => ({
-  id: "id-1", status: "ACTIVE", make: "M4", model: "Carbine", deviceName: "Radio", deviceUIC: null, currentUserEmail: null,
+  id: "id-1", status: "ACTIVE", make: "M4", model: "Carbine", deviceName: "Radio", deviceUIC: null, deviceCategory: null, currentUserEmail: null,
   lastLogonUserPrincipalName: null, lastLogonDate: null, enrollmentDate: null, compliance: null, ...over,
 });
 

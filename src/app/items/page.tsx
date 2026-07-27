@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/authz";
-import { listItems } from "@/modules/items/items.service";
+import { listItems, listItemUics } from "@/modules/items/items.service";
 import { SiteHeader } from "@/components/SiteHeader";
 import { ItemSelectTable } from "@/components/ItemSelectTable";
 import { ItemsSearchInput } from "./ItemsSearchInput";
@@ -9,7 +9,14 @@ import { auditState } from "@/modules/audit/audit.status";
 export default async function ItemsListPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; sort?: string; dir?: string; page?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    sort?: string;
+    dir?: string;
+    page?: string;
+    uic?: string;
+    group?: string;
+  }>;
 }) {
   const user = await requireUser();
   const isAdmin = user.role === "ADMIN";
@@ -19,12 +26,18 @@ export default async function ItemsListPage({
   // Server-side paginate + sort: only the current page is fetched and serialized to
   // the client (the list was previously unbounded). The audit-status badge and the
   // audit-status sort both read the denormalized Item.lastAuditedAt column.
-  const result = await listItems({
-    search: q,
-    sort: sp.sort ?? null,
-    dir: sp.dir ?? null,
-    page: sp.page ? Number.parseInt(sp.page, 10) : 1,
-  });
+  // Two queries, both bounded: the page of rows, and the UIC filter's options.
+  const [result, uics] = await Promise.all([
+    listItems({
+      search: q,
+      sort: sp.sort ?? null,
+      dir: sp.dir ?? null,
+      page: sp.page ? Number.parseInt(sp.page, 10) : 1,
+      uic: sp.uic ?? null,
+      group: sp.group ?? null,
+    }),
+    listItemUics(),
+  ]);
   const now = new Date();
   const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
 
@@ -58,6 +71,10 @@ export default async function ItemsListPage({
               serialNumber: it.serialNumber,
               status: it.status,
               auditState: it.status === "RETIRED" ? null : auditState(it.lastAuditedAt, now),
+              deviceUIC: it.deviceUIC,
+              deviceCategory: it.deviceCategory,
+              deployableStatus: it.deployableStatus,
+              isAccountedFor: it.isAccountedFor,
             }))}
             isAdmin={isAdmin}
             q={q ?? ""}
@@ -65,6 +82,10 @@ export default async function ItemsListPage({
             dir={result.dir}
             page={result.page}
             totalPages={totalPages}
+            sortKeys={result.sortKeys}
+            grouped={result.grouped}
+            uic={result.uic}
+            uics={uics}
           />
         )}
       </main>

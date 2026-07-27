@@ -1,12 +1,16 @@
 "use client";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/StatusBadge";
 import { AuditLight } from "@/components/AuditLight";
-import { toggleItemStatusAction } from "@/app/admin/actions/items";
+import { toggleItemStatusAction, bulkUpdateReadinessAction } from "@/app/admin/actions/items";
 import { MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW } from "@/modules/transfers/receipt-lines";
 import {
+  DEPLOYABLE_LABEL,
+  DEPLOYABLE_ORDER,
+  deployableKey,
+  groupByReadiness,
   ITEM_COLUMNS,
   parseHiddenCols,
   selectableIds,
@@ -19,8 +23,14 @@ import { makeStore, usePersistedPref } from "@/components/persisted-pref";
 export type { ItemRow };
 
 const HIDDEN_KEY = "items:hiddenCols";
-const DEFAULT_HIDDEN: SortField[] = [];
+// Category is hidden by default: the table already carries a lot of columns,
+// and category is opt-in for people who work by device class. It stays
+// filterable and sortable while hidden. (Only applies to new visitors — an
+// existing stored preference wins over this default.)
+const DEFAULT_HIDDEN: SortField[] = ["deviceCategory"];
 const hiddenStore = makeStore(HIDDEN_KEY, parseHiddenCols);
+
+export type SortKey = { key: string; dir: "asc" | "desc" };
 
 // Every column is server-sortable. `auditState` (the derived badge) sorts via the
 // denormalized Item.lastAuditedAt column server-side (see listItems), so it's
@@ -35,6 +45,10 @@ export function ItemSelectTable({
   dir,
   page,
   totalPages,
+  sortKeys,
+  grouped,
+  uic,
+  uics,
 }: {
   items: ItemRow[];
   isAdmin: boolean;
@@ -43,8 +57,13 @@ export function ItemSelectTable({
   dir: "asc" | "desc";
   page: number;
   totalPages: number;
+  sortKeys: SortKey[];
+  grouped: boolean;
+  uic: string | null;
+  uics: string[];
 }) {
   const router = useRouter();
+  const secondarySort = sortKeys[1] ?? null;
 
   // Selection is a Map (id -> row), not a Set of ids, so it survives paging: the
   // receipt-group validation below needs each selected item's make/model, and an
@@ -107,24 +126,101 @@ export function ItemSelectTable({
   }, [selected]);
   const tooManyPerRow = maxGroupSize > MAX_ITEMS_PER_ROW;
 
+  // 1 select column + the visible data columns + 1 actions column.
+  const colCount = visibleCols.length + 2;
+
+  const renderRow = (it: ItemRow) => (
+    <tr key={it.id}>
+      <td data-label="Select">{it.status === "ACTIVE" && <input type="checkbox" checked={selected.has(it.id)} onChange={() => toggle(it)} aria-label={`Select ${it.deviceName ?? ""} ${it.make} ${it.model} ${it.serialNumber}`} />}</td>
+      {!isHidden("deviceName") && <td data-label="Device Name">{it.deviceName ? it.deviceName : <span className="subtle">—</span>}</td>}
+      {!isHidden("make") && <td data-label="Make">{it.make}</td>}
+      {!isHidden("model") && <td data-label="Model">{it.model}</td>}
+      {!isHidden("serialNumber") && <td className="mono" data-label="Serial">{it.serialNumber}</td>}
+      {!isHidden("deviceUIC") && <td className="mono" data-label="UIC">{it.deviceUIC ?? <span className="subtle">—</span>}</td>}
+      {!isHidden("deviceCategory") && <td data-label="Category">{it.deviceCategory ?? <span className="subtle">—</span>}</td>}
+      {!isHidden("deployableStatus") && (
+        <td data-label="Readiness">
+          {DEPLOYABLE_LABEL[deployableKey(it.deployableStatus)]}
+          {/* Accountability is a flag, not a status, so it rides alongside the
+              readiness cell rather than claiming a column of its own. */}
+          {!it.isAccountedFor && <span className="badge badge-danger" style={{ marginLeft: 6 }}>Not accounted for</span>}
+          {/* `badge-danger` is defined in globals.css alongside badge-override. */}
+        </td>
+      )}
+      {!isHidden("status") && <td data-label="Status"><StatusBadge status={it.status} /></td>}
+      {!isHidden("auditState") && <td data-label="Audit" style={{ textAlign: "center" }}><AuditLight state={it.auditState} /></td>}
+      <td data-label="">
+        <div className="actions actions--end">
+          <Link href={`/i/${it.id}`} className="btn btn-ghost btn-sm">View</Link>
+          {isAdmin && <Link href={`/admin/items/${it.id}/edit`} className="btn btn-ghost btn-sm">Edit</Link>}
+          {isAdmin && (
+            <form action={toggleItemStatusAction}>
+              <input type="hidden" name="id" value={it.id} />
+              <input type="hidden" name="status" value={it.status === "RETIRED" ? "ACTIVE" : "RETIRED"} />
+              <button type="submit" className={`btn btn-sm ${it.status === "RETIRED" ? "btn-secondary" : "btn-danger"}`}>{it.status === "RETIRED" ? "Reactivate" : "Retire"}</button>
+            </form>
+          )}
+        </div>
+      </td>
+    </tr>
+  );
+
   const selectedKeys = () => [...selected.keys()].join(",");
   const create = () => { if (selected.size && !tooMany && !tooManyPerRow) router.push(`/receipts/new?items=${selectedKeys()}`); };
   const printQr = () => { if (selected.size) window.open(`/admin/items/qr-sheet/pdf?items=${selectedKeys()}&preview=1`, "_blank", "noopener"); };
 
   // Build a /items URL preserving the current query, overriding only what changes.
-  // Changing the sort resets to page 1; paging keeps the sort.
-  const hrefFor = (over: { sort?: string | null; dir?: "asc" | "desc"; page?: number }) => {
+  // Changing the sort/filter/grouping resets to page 1; paging keeps them.
+  //
+  // Compound sort travels as parallel comma lists (`sort=make,serialNumber` +
+  // `dir=asc,asc`) — the server pairs them positionally, so the two lists must
+  // always be written together and in the same order.
+  const hrefFor = (over: {
+    keys?: SortKey[];
+    page?: number;
+    uic?: string | null;
+    grouped?: boolean;
+  }) => {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
-    const nextSort = over.sort !== undefined ? over.sort : sort;
-    const nextDir = over.dir ?? dir;
+
+    const nextKeys = over.keys ?? sortKeys;
+    if (nextKeys.length > 0) {
+      params.set("sort", nextKeys.map((k) => k.key).join(","));
+      params.set("dir", nextKeys.map((k) => k.dir).join(","));
+    }
+
+    const nextUic = over.uic !== undefined ? over.uic : uic;
+    if (nextUic) params.set("uic", nextUic);
+
+    const nextGrouped = over.grouped !== undefined ? over.grouped : grouped;
+    // Grouping is the default, so only the OFF state needs to be in the URL.
+    if (!nextGrouped) params.set("group", "none");
+
     const nextPage = over.page ?? page;
-    if (nextSort) { params.set("sort", nextSort); params.set("dir", nextDir); }
     if (nextPage > 1) params.set("page", String(nextPage));
+
     const s = params.toString();
     return s ? `/items?${s}` : "/items";
   };
-  const navigate = (over: { sort?: string | null; dir?: "asc" | "desc"; page?: number }) => router.push(hrefFor(over));
+  const navigate = (over: Parameters<typeof hrefFor>[0]) => router.push(hrefFor(over));
+
+  /** Replace the primary sort, keeping any secondary key that isn't now a duplicate. */
+  const setPrimary = (key: string | null) => {
+    if (!key) return navigate({ keys: [], page: 1 });
+    const kept = sortKeys.slice(1).filter((k) => k.key !== key);
+    navigate({ keys: [{ key, dir }, ...kept], page: 1 });
+  };
+  const setSecondary = (key: string | null) => {
+    if (sortKeys.length === 0) return;
+    const primary = sortKeys[0];
+    navigate({ keys: key ? [primary, { key, dir: "asc" }] : [primary], page: 1 });
+  };
+  const flipPrimaryDir = () => {
+    if (sortKeys.length === 0) return;
+    const [first, ...rest] = sortKeys;
+    navigate({ keys: [{ ...first, dir: first.dir === "asc" ? "desc" : "asc" }, ...rest], page: 1 });
+  };
 
   return (
     <>
@@ -134,7 +230,7 @@ export function ItemSelectTable({
           <select
             className="select toolbar__control"
             value={sort ?? ""}
-            onChange={(e) => navigate({ sort: e.target.value || null, page: 1 })}
+            onChange={(e) => setPrimary(e.target.value || null)}
           >
             <option value="">Default (newest)</option>
             {SORTABLE_COLUMNS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
@@ -144,11 +240,56 @@ export function ItemSelectTable({
           type="button"
           className="btn btn-secondary"
           disabled={!sort}
-          onClick={() => navigate({ dir: dir === "asc" ? "desc" : "asc", page: 1 })}
+          onClick={flipPrimaryDir}
           aria-label={dir === "asc" ? "Ascending" : "Descending"}
         >
           {dir === "asc" ? "Asc ▲" : "Desc ▼"}
         </button>
+        {/* Compound sort: "Manufacturer, then Serial Number". Only offered once
+            a primary key is chosen — a tie-breaker with nothing to break is
+            meaningless, and the default (newest) sort has no ties worth
+            resolving. The primary column is excluded from the options. */}
+        <label className="stack" style={{ gap: 4 }}>
+          <span className="subtle" style={{ fontSize: 12 }}>Then by</span>
+          <select
+            className="select toolbar__control"
+            value={secondarySort?.key ?? ""}
+            disabled={!sort}
+            onChange={(e) => setSecondary(e.target.value || null)}
+          >
+            <option value="">—</option>
+            {SORTABLE_COLUMNS.filter((c) => c.key !== sort).map((c) => (
+              <option key={c.key} value={c.key}>{c.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="stack" style={{ gap: 4 }}>
+          <span className="subtle" style={{ fontSize: 12 }}>Unit (UIC)</span>
+          <select
+            className="select toolbar__control"
+            value={uic ?? ""}
+            onChange={(e) => navigate({ uic: e.target.value || null, page: 1 })}
+          >
+            <option value="">All units</option>
+            {uics.map((u) => <option key={u} value={u}>{u}</option>)}
+          </select>
+        </label>
+        <label className="row" style={{ gap: 6, alignItems: "center" }}>
+          <input
+            type="checkbox"
+            checked={grouped}
+            onChange={(e) => navigate({ grouped: e.target.checked, page: 1 })}
+          />
+          <span className="subtle" style={{ fontSize: 12 }}>
+            Group by readiness
+            {/* Grouping is an ORDER BY that runs ahead of the chosen sort, so
+                say so — otherwise "sorted by Serial" quietly means "sorted by
+                serial *within each readiness group*". */}
+            {grouped && sort && sort !== "deployableStatus" && (
+              <span className="subtle"> (sort applies within each group)</span>
+            )}
+          </span>
+        </label>
         {isAdmin && (
           <button
             type="button"
@@ -200,30 +341,23 @@ export function ItemSelectTable({
             </tr>
           </thead>
           <tbody>
-            {items.map((it) => (
-              <tr key={it.id}>
-                <td data-label="Select">{it.status === "ACTIVE" && <input type="checkbox" checked={selected.has(it.id)} onChange={() => toggle(it)} aria-label={`Select ${it.deviceName ?? ""} ${it.make} ${it.model} ${it.serialNumber}`} />}</td>
-                {!isHidden("deviceName") && <td data-label="Device Name">{it.deviceName ? it.deviceName : <span className="subtle">—</span>}</td>}
-                {!isHidden("make") && <td data-label="Make">{it.make}</td>}
-                {!isHidden("model") && <td data-label="Model">{it.model}</td>}
-                {!isHidden("serialNumber") && <td className="mono" data-label="Serial">{it.serialNumber}</td>}
-                {!isHidden("status") && <td data-label="Status"><StatusBadge status={it.status} /></td>}
-                {!isHidden("auditState") && <td data-label="Audit" style={{ textAlign: "center" }}><AuditLight state={it.auditState} /></td>}
-                <td data-label="">
-                  <div className="actions actions--end">
-                    <Link href={`/i/${it.id}`} className="btn btn-ghost btn-sm">View</Link>
-                    {isAdmin && <Link href={`/admin/items/${it.id}/edit`} className="btn btn-ghost btn-sm">Edit</Link>}
-                    {isAdmin && (
-                      <form action={toggleItemStatusAction}>
-                        <input type="hidden" name="id" value={it.id} />
-                        <input type="hidden" name="status" value={it.status === "RETIRED" ? "ACTIVE" : "RETIRED"} />
-                        <button type="submit" className={`btn btn-sm ${it.status === "RETIRED" ? "btn-secondary" : "btn-danger"}`}>{it.status === "RETIRED" ? "Reactivate" : "Retire"}</button>
-                      </form>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {grouped
+              ? groupByReadiness(items).map((g) => (
+                  <Fragment key={g.key}>
+                    {/* A group header repeats if a group spans a page break —
+                        the page is a window onto a server-ordered list, so the
+                        header states which group the rows below belong to
+                        rather than implying the group starts here. */}
+                    <tr className="group-row">
+                      <th colSpan={colCount} scope="colgroup">
+                        {DEPLOYABLE_LABEL[g.key]}{" "}
+                        <span className="subtle">({g.rows.length} on this page)</span>
+                      </th>
+                    </tr>
+                    {g.rows.map(renderRow)}
+                  </Fragment>
+                ))
+              : items.map(renderRow)}
           </tbody>
         </table>
       </div>
@@ -237,15 +371,102 @@ export function ItemSelectTable({
       )}
 
       {selected.size > 0 && (
-        <div className="card row" style={{ position: "sticky", bottom: 0, justifyContent: "space-between" }}>
-          <span>{selected.size} selected · {groupCount} row{groupCount === 1 ? "" : "s"}</span>
-          {tooMany
-            ? <span role="alert" className="alert-error">Too many item types ({groupCount}). Max {MAX_RECEIPT_ROWS} per receipt — split into two.</span>
-            : tooManyPerRow
-            ? <span role="alert" className="alert-error">Too many of one item ({maxGroupSize}). Max {MAX_ITEMS_PER_ROW} per row — split into two.</span>
-            : <button className="btn btn-primary" onClick={create}>Create receipt from {selected.size} selected</button>}
+        // zIndex must beat the sticky group headers (.group-row th, z-index 1),
+        // or a header scrolling past renders on top of these controls.
+        <div className="card stack-sm" style={{ position: "sticky", bottom: 0, zIndex: 2 }}>
+          <div className="row" style={{ justifyContent: "space-between" }}>
+            <span>{selected.size} selected · {groupCount} row{groupCount === 1 ? "" : "s"}</span>
+            {tooMany
+              ? <span role="alert" className="alert-error">Too many item types ({groupCount}). Max {MAX_RECEIPT_ROWS} per receipt — split into two.</span>
+              : tooManyPerRow
+              ? <span role="alert" className="alert-error">Too many of one item ({maxGroupSize}). Max {MAX_ITEMS_PER_ROW} per row — split into two.</span>
+              : <button className="btn btn-primary" onClick={create}>Create receipt from {selected.size} selected</button>}
+          </div>
+          {isAdmin && (
+            <BulkReadinessBar
+              itemIds={[...selected.keys()]}
+              onDone={() => setSelected(new Map())}
+            />
+          )}
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * Admin-only bulk edit of readiness fields for the current selection.
+ *
+ * Rendered only for admins, but that is presentation — the server action
+ * re-checks with requireAdmin(), which is the actual boundary.
+ */
+function BulkReadinessBar({ itemIds, onDone }: { itemIds: string[]; onDone: () => void }) {
+  const router = useRouter();
+  const [status, setStatus] = useState("");
+  const [accounted, setAccounted] = useState("");
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  const nothingChosen = !status && !accounted;
+
+  const apply = () => {
+    setMessage(null);
+    const fd = new FormData();
+    fd.set("itemIds", itemIds.join(","));
+    if (status) fd.set("deployableStatus", status);
+    if (accounted) fd.set("isAccountedFor", accounted);
+
+    startTransition(async () => {
+      const res = await bulkUpdateReadinessAction(fd);
+      if ("error" in res && res.error) {
+        setMessage({ ok: false, text: res.error });
+        return;
+      }
+      const n = "updated" in res ? res.updated : 0;
+      setMessage({
+        ok: true,
+        // "0 changed" is a real, useful outcome (every selected item already
+        // had that state) — report it rather than implying work happened.
+        text: n === 0 ? "No changes — those items already had that state." : `Updated ${n} item${n === 1 ? "" : "s"}.`,
+      });
+      setStatus("");
+      setAccounted("");
+      onDone();
+      router.refresh();
+    });
+  };
+
+  return (
+    <div className="row" style={{ gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+      <label className="stack" style={{ gap: 4 }}>
+        <span className="subtle" style={{ fontSize: 12 }}>Set readiness</span>
+        <select className="select" value={status} onChange={(e) => setStatus(e.target.value)} disabled={pending}>
+          <option value="">Leave unchanged</option>
+          {DEPLOYABLE_ORDER.map((k) => (
+            <option key={k} value={k}>{DEPLOYABLE_LABEL[k]}</option>
+          ))}
+        </select>
+      </label>
+      <label className="stack" style={{ gap: 4 }}>
+        <span className="subtle" style={{ fontSize: 12 }}>Set accountability</span>
+        <select className="select" value={accounted} onChange={(e) => setAccounted(e.target.value)} disabled={pending}>
+          <option value="">Leave unchanged</option>
+          <option value="true">Accounted for</option>
+          <option value="false">Not accounted for</option>
+        </select>
+      </label>
+      <button
+        type="button"
+        className="btn btn-secondary"
+        disabled={pending || nothingChosen}
+        onClick={apply}
+        title={nothingChosen ? "Choose a change to apply" : undefined}
+      >
+        {pending ? "Applying…" : `Apply to ${itemIds.length}`}
+      </button>
+      {message && (
+        <span role="status" className={message.ok ? "subtle" : "alert-error"}>{message.text}</span>
+      )}
+    </div>
   );
 }

@@ -8,7 +8,20 @@
 - Driver: `@prisma/adapter-pg` over `pg`
 - Authentication: Auth.js v5 (Credentials, JWT sessions) + `bcryptjs`
 - Validation & Utils: Zod, `pdf-lib`, `qrcode`
+- Styling: **two systems, on purpose** — see the styling rule below
+- Charts: `recharts`; icons: `lucide-react`; PNG export: `html-to-image`
 - Testing & Linting: Vitest (Integration), Playwright, ESLint 9
+
+## Styling — Two Systems Coexist (read before touching CSS)
+- **`globals.css` is the original design system** (the "property book" ledger look) and backs every pre-existing page via classes like `.card` / `.stack` / `.btn` / `.table`. It is NOT being migrated wholesale.
+- **Tailwind v4 + `shadcn/ui` are for NEW UI only** (`src/components/ui/*`, the analytics dashboard). New work should prefer them; do not rewrite existing pages to Tailwind as a drive-by.
+- `src/app/styles.css` is the entry point and makes the coexistence safe. Two rules keep it that way — **do not "simplify" either one**:
+  - **Preflight is deliberately NOT imported.** Only Tailwind's `theme` + `utilities` layers are. Importing `tailwindcss` wholesale pulls in preflight and would restyle every existing page.
+  - **`globals.css` is imported into a `legacy` cascade layer declared before Tailwind's layers**, so a utility beats a legacy rule of equal specificity. Unlayered CSS outranks *all* layered CSS, so without this every Tailwind utility would silently lose to `globals.css`.
+- Because preflight is absent, `shadcn` primitives must set what preflight normally supplies: `appearance-none` + an explicit background/font on `<button>`-rooted parts, **`border-solid` wherever a `border-*` width is set** (Tailwind's border utilities set width only), and `[&_svg]:block` on icons.
+- shadcn tokens are mapped onto the ledger palette in `styles.css` via `var()` references, so retuning `globals.css` retunes the dashboard. shadcn's `--primary` is aliased to `--primary-token` because `globals.css` already defines `--primary` (a self-reference would resolve to nothing).
+- **Touch targets:** shadcn's stock sizes (32/36px) are below this app's documented 44px floor (`--tap`). The primitives carry `pointer-coarse:` + `max-md:` height overrides to restore it; if you add a component or override a height (e.g. `h-auto`), restore the floor explicitly or it ships as a ~22px tap target on a phone.
+- **`npm run build` and jsdom are NOT evidence for a CSS change.** Neither has a layout engine. Verify visual work in a real browser.
 
 ## Core Commands
 - Dev Server: `npm run dev`
@@ -87,6 +100,15 @@
 * **90-Day Purge:** Tickets must automatically calculate an expiration timestamp exactly 90 days after closing. A background worker must permanently delete these records upon expiration.
 * **DCSIM Notifications:** Entities are identified as "DCSIM" via a checkbox/boolean field. The "Notify for pickup" UI button must be completely hidden if the recipient isn't DCSIM, paired with backend validation to reject non-DCSIM notification events.
 
+
+### 🤖 Operational Readiness & Analytics
+* **Two independent readiness fields.** `Item.isAccountedFor` (bool, default true) answers "do we physically have it"; `Item.deployableStatus` (nullable enum `DEPLOYED` / `READY_TO_DEPLOY` / `IN_REPAIR` / `RETIRED`) answers "can it go out". `deployableStatus` is **nullable with no default on purpose** — an untriaged item genuinely has no readiness state, and an open hand receipt does NOT imply `DEPLOYED` (a device may be turned in for service). Never backfill it from receipt state. UI surfaces null as **"Untriaged"** rather than hiding it, so chart totals always match the fleet size.
+* **`ItemStatusHistory` is a SNAPSHOT table, not deltas.** Each row is the item's state *after* a change, so composition at time T is "newest row per item at or before T" — one indexed `DISTINCT ON`, no delta replay. Every write path must record history **in the same transaction** as the `Item` update, and must write **only for items that actually changed** (re-applying an identical status writes nothing, so the chart never grows a step where nothing happened). Forward-only: the migration seeds one baseline row per item and invents no history before it.
+* **Categories are a MANAGED LIST with a DENORMALIZED value — deliberately not a foreign key.** `DeviceCategory` (citext-unique `name`) is the curated vocabulary admins maintain at `/admin/categories`; `Item.deviceCategory` stays a plain indexed **string**. The reason: a CSV import must be able to carry a category the property book has not registered yet, so an unknown category must never make an import fail. Keeping the two coherent is `categories.service.ts`'s job, and it does it two ways — **deletion is refused while any item still carries the name** (otherwise those devices hold a value that appears in no picker), and **imports register unseen names** (`learnCategories`, mirroring `learnUnits`). Do not "normalise" this into an FK without re-solving both. Changes to an item's category are logged to `ItemEdit` like `deviceUIC`.
+* **Readiness edits are ADMIN-only** and live in their own Server Action (`bulkUpdateReadinessAction`), deliberately NOT folded into `updateItemDetailsAction`'s role-picked schema — that keeps the USER-editable field set exactly as narrow as it was (holder email + position only).
+* **Analytics is admin-only and re-queries on the server.** All dashboard state lives in the URL (`?uic=&range=`), so there is exactly one filtering implementation and it is the SQL one. The whole page is a fixed number of queries and does not grow with fleet size. The unit leaderboard is intentionally NOT scoped by the global UIC filter — it is how a user picks a unit.
+* **Velocity counts ITEMS, not receipts.** A receipt can carry mixed categories, so counting receipts per category would double-count and the stack would not sum to the total. Also note closed receipts are purged after 90 days, so that series cannot see further back than the purge window — say so in the UI rather than hiding it.
+* **Chart colours are validated, not taste.** See `src/app/admin/analytics/palette.ts`: re-run the validator against the ledger surface (`#fbfcf9`) before changing a hex. The accountability donut is blue-vs-red because green-vs-red fails colourblind separation — **do not "fix" it back to green.** The per-chart **table view** is the documented mitigation for three under-contrast palette slots; do not remove it.
 
 ### 🤖 Service Queue (item-level)
 * **Needs-service flag:** Items are placed in the service queue by a per-item "Needs service?" flag captured on the hand-receipt builder (per serial) or on the item detail page. Each flagged item carries a service type: **Reimage**, **Repair**, or **Other** (with a custom message stored in `serviceNote`).
