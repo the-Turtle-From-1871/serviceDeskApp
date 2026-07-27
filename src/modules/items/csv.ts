@@ -9,6 +9,7 @@ export type RawRow = {
   serialNumber: string;
   deviceName: string;
   homeUnit: string;
+  deviceUIC: string;
   notes: string;
   assignedUser: string;
   lastLogonUserPrincipalName: string;
@@ -25,6 +26,8 @@ const HEADER_MAP: Record<string, keyof Omit<RawRow, "row">> = {
   serial: "serialNumber",
   devicename: "deviceName",
   homeunit: "homeUnit",
+  deviceuic: "deviceUIC",
+  uic: "deviceUIC",
   notes: "notes",
   assigneduser: "assignedUser",
   lastlogonuserprincipalname: "lastLogonUserPrincipalName",
@@ -70,6 +73,7 @@ export function parseItemsCsv(text: string): { rows: RawRow[]; error?: string } 
     serialNumber: r.serialNumber ?? "",
     deviceName: r.deviceName ?? "",
     homeUnit: r.homeUnit ?? "",
+    deviceUIC: r.deviceUIC ?? "",
     notes: r.notes ?? "",
     assignedUser: r.assignedUser ?? "",
     lastLogonUserPrincipalName: r.lastLogonUserPrincipalName ?? "",

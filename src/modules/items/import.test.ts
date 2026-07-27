@@ -6,12 +6,12 @@ const UNITS = new Map<string, string>([["DCSIM", "DCSIM"], ["487B", "487FA BATTE
 
 const mk = (row: number, over: Partial<RawRow> = {}): RawRow => ({
   row, make: "M4", model: "Carbine", serialNumber: `S${row}`, deviceName: "Radio",
-  homeUnit: "", notes: "", assignedUser: "", lastLogonUserPrincipalName: "",
+  homeUnit: "", deviceUIC: "", notes: "", assignedUser: "", lastLogonUserPrincipalName: "",
   lastLogonDate: "", enrollmentDate: "", compliance: "", ...over,
 });
 
 const existing = (over: Partial<ExistingItem> = {}): ExistingItem => ({
-  id: "id-1", status: "ACTIVE", make: "M4", model: "Carbine", deviceName: "Radio", currentUserEmail: null,
+  id: "id-1", status: "ACTIVE", make: "M4", model: "Carbine", deviceName: "Radio", deviceUIC: null, currentUserEmail: null,
   lastLogonUserPrincipalName: null, lastLogonDate: null, enrollmentDate: null, compliance: null, ...over,
 });
 
@@ -47,6 +47,16 @@ describe("planImport", () => {
     );
     expect(toUpdate[0].data).toEqual({ currentUserEmail: "jane@x.mil" });
     expect(toUpdate[0].loggedChanges).toEqual([{ field: "currentUserEmail", from: null, to: "jane@x.mil" }]);
+  });
+
+  it("updates deviceUIC on a serial match (logged)", () => {
+    const { toUpdate } = planImport(
+      [mk(1, { serialNumber: "A1", deviceUIC: "WABC00" })],
+      map("A1", existing({ id: "x", deviceUIC: null })),
+      UNITS,
+    );
+    expect(toUpdate[0].data).toEqual({ deviceUIC: "WABC00" });
+    expect(toUpdate[0].loggedChanges).toEqual([{ field: "deviceUIC", from: null, to: "WABC00" }]);
   });
 
   it("updates telemetry silently (no loggedChanges)", () => {

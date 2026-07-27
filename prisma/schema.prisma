@@ -74,6 +74,10 @@ model Item {
   // device can't be logged twice (incl. "ABC123" vs "abc123"). Mirrors User.email.
   serialNumber               String         @unique @db.Citext
   homeUnit                   String?
+  // Unit Identification Code (UIC) of the unit the device is issued to. Importable
+  // and editable-via-import; a change is logged to ItemEdit like deviceName. Not a
+  // DB-unique field — many devices share a UIC.
+  deviceUIC                  String?
   deviceName                 String?
   notes                      String?
   // The email of the person actually using the device. Distinct from the

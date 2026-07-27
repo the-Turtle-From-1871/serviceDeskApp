@@ -27,6 +27,7 @@ export const importRowSchema = z.object({
   model: optional,
   deviceName: optional,
   homeUnit: optional,
+  deviceUIC: optional,
   notes: optional,
   assignedUser: optional,
   lastLogonUserPrincipalName: optional,

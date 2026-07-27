@@ -7,13 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - CSV item import now updates an existing item instead of skipping it: when a row's `serialNumber` matches, changed `deviceName` / assigned user / MDM telemetry are written, and the item is no longer marked a duplicate.
-- New importable fields: `assignedUser` (→ the item's current-user email) and MDM telemetry `lastLogonUserPrincipalName`, `lastLogonDate`, `enrollmentDate`, `compliance`, shown read-only on the item detail page for logged-in users.
+- New importable fields: `assignedUser` (→ the item's current-user email), `deviceUIC` (the Unit Identification Code of the unit a device is issued to), and MDM telemetry `lastLogonUserPrincipalName`, `lastLogonDate`, `enrollmentDate`, `compliance` — all shown read-only on the item detail page for logged-in users. `deviceUIC` updates on a serial match and its change is logged to item history (like device name / assigned user); telemetry updates silently.
 
 ### Changed
 - Import required-field rules: only `serialNumber` is a required column. New items still require `make`, `model`, `serialNumber`; existing (matched) items require only `serialNumber`. Blank cells leave stored values untouched on an update. `make`/`model` are never overwritten on a match — a difference is reported as a warning. `deviceName` / assigned-user changes are logged to item history; telemetry updates silently.
 
 ### Notes
-- Migration `20260723000000_add_mdm_telemetry_fields` adds four nullable text columns to `Item` (`lastLogonUserPrincipalName`, `lastLogonDate`, `enrollmentDate`, `compliance`) and `updatedCount` (default 0) to `ImportBatch`. Apply with `npx prisma migrate deploy`; prod is hand-applied via the standard manual process.
+- Migration `20260723000000_add_mdm_telemetry_fields` adds four nullable text columns to `Item` (`lastLogonUserPrincipalName`, `lastLogonDate`, `enrollmentDate`, `compliance`) and `updatedCount` (default 0) to `ImportBatch`. Migration `20260727000000_add_device_uic` adds the nullable `Item.deviceUIC` text column. Apply with `npx prisma migrate deploy`; prod is hand-applied via the standard manual process.
 - The import route (`/admin/items/import`) sets `export const maxDuration = 60` because a full-fleet all-update refresh runs a bounded sequential write loop; the `commitImport` DB transaction timeout is kept just under it (55s). Very large imports (thousands of rows at high DB latency) still need the deferred chunking follow-up. The `/admin/audit` "CSV imports" table now shows an **Updated** column.
 
 ## 2026-07-22

@@ -12,6 +12,7 @@
 // attempt to null out a NOT NULL column and fail.
 export type ItemLoggedFields = {
   homeUnit: string | null;
+  deviceUIC: string | null;
   deviceName: string | null;
   currentUserEmail: string | null;
   currentPosition: string | null;

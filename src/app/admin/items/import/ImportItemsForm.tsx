@@ -3,7 +3,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { analyzeImportAction, commitImportAction } from "@/app/admin/actions/items";
 
-const TEMPLATE = "make,model,serialNumber,deviceName,homeUnit,notes,assignedUser,lastLogonUserPrincipalName,lastLogonDate,enrollmentDate,compliance\n";
+const TEMPLATE = "make,model,serialNumber,deviceName,homeUnit,deviceUIC,notes,assignedUser,lastLogonUserPrincipalName,lastLogonDate,enrollmentDate,compliance\n";
 // A CSV of items is small; anything larger is almost certainly a mistake — and the
 // two-step analyze→commit flow uploads the file twice, so bound it up front.
 const MAX_CSV_BYTES = 5 * 1024 * 1024; // 5 MB
@@ -176,7 +176,7 @@ export function ImportItemsForm() {
               setFile(f);
             }}
           />
-          <p className="subtle">Only <strong>serialNumber</strong> is required. Columns (any order, case-insensitive): make, model, serialNumber, deviceName, homeUnit, notes, assignedUser, lastLogonUserPrincipalName, lastLogonDate, enrollmentDate, compliance. A row whose serial already exists updates its device name, assigned user and telemetry; make/model are required only for new items. Blank cells are left unchanged on existing items.</p>
+          <p className="subtle">Only <strong>serialNumber</strong> is required. Columns (any order, case-insensitive): make, model, serialNumber, deviceName, homeUnit, deviceUIC, notes, assignedUser, lastLogonUserPrincipalName, lastLogonDate, enrollmentDate, compliance. A row whose serial already exists updates its device name, device UIC, assigned user and telemetry; make/model are required only for new items. Blank cells are left unchanged on existing items.</p>
         </div>
         {error && <p role="alert" className="alert-error">{error}</p>}
         <div className="row">

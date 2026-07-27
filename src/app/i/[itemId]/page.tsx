@@ -83,6 +83,7 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
               id: item.id,
               deviceName: item.deviceName,
               homeUnit: item.homeUnit,
+              deviceUIC: item.deviceUIC,
               currentUserEmail: item.currentUserEmail,
               currentPosition: item.currentPosition,
               // ItemDetailsCard is a client component, so its props are

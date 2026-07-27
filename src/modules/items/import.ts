@@ -17,6 +17,7 @@ export type ExistingItem = {
   make: string;
   model: string;
   deviceName: string | null;
+  deviceUIC: string | null;
   currentUserEmail: string | null;
   lastLogonUserPrincipalName: string | null;
   lastLogonDate: string | null;
@@ -32,6 +33,7 @@ export type NewItemImport = {
   serialNumber: string;
   deviceName?: string;
   homeUnit?: string;
+  deviceUIC?: string;
   notes?: string;
   currentUserEmail?: string;
   lastLogonUserPrincipalName?: string;
@@ -88,6 +90,7 @@ export function planImport(
       serialNumber: r.serialNumber,
       deviceName: r.deviceName,
       homeUnit: r.homeUnit,
+      deviceUIC: r.deviceUIC,
       notes: r.notes,
       assignedUser: r.assignedUser,
       lastLogonUserPrincipalName: r.lastLogonUserPrincipalName,
@@ -117,9 +120,10 @@ export function planImport(
         ...(d.model !== undefined ? { model: d.model } : {}),
       }).length > 0;
 
-      // Logged fields (deviceName, currentUserEmail) -> ItemEdit history.
+      // Logged fields (deviceName, deviceUIC, currentUserEmail) -> ItemEdit history.
       const loggedAfter: Partial<ItemLoggedFields> = {};
       if (d.deviceName !== undefined) loggedAfter.deviceName = d.deviceName;
+      if (d.deviceUIC !== undefined) loggedAfter.deviceUIC = d.deviceUIC;
       if (d.assignedUser !== undefined) loggedAfter.currentUserEmail = d.assignedUser;
       const loggedChanges = diffItemFields(match, loggedAfter);
 
@@ -156,6 +160,7 @@ export function planImport(
       serialNumber: sn,
       deviceName: d.deviceName,
       homeUnit: d.homeUnit,
+      deviceUIC: d.deviceUIC,
       notes: d.notes,
       currentUserEmail: d.assignedUser,
       lastLogonUserPrincipalName: d.lastLogonUserPrincipalName,

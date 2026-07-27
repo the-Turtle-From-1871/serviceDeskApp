@@ -42,8 +42,8 @@ test("commitImport updates deviceName + assignedUser (logged) and telemetry (sil
   await createItem({ make: "Dell", model: "5540", serialNumber: "UP1", deviceName: "Old", homeUnit: undefined, notes: undefined }, admin.id);
 
   const csv = [
-    "serialNumber,deviceName,assignedUser,lastLogonDate,compliance",
-    "UP1,NewName,jane@x.mil,2026-07-01,Compliant",
+    "serialNumber,deviceName,deviceUIC,assignedUser,lastLogonDate,compliance",
+    "UP1,NewName,WABC00,jane@x.mil,2026-07-01,Compliant",
   ].join("\n");
 
   const res = await commitImport(csv, "items.csv", [], admin);
@@ -52,15 +52,17 @@ test("commitImport updates deviceName + assignedUser (logged) and telemetry (sil
 
   const item = await prisma.item.findUniqueOrThrow({ where: { serialNumber: "UP1" } });
   expect(item.deviceName).toBe("NewName");
+  expect(item.deviceUIC).toBe("WABC00");
   expect(item.currentUserEmail).toBe("jane@x.mil");
   expect(item.lastLogonDate).toBe("2026-07-01");
   expect(item.compliance).toBe("Compliant");
 
-  // Exactly one ItemEdit, covering only the two logged fields (not telemetry).
+  // Exactly one ItemEdit, covering only the logged fields (deviceName, deviceUIC,
+  // currentUserEmail) — not the silently-updated telemetry.
   const edits = await prisma.itemEdit.findMany({ where: { itemId: item.id } });
   expect(edits).toHaveLength(1);
   const fields = (edits[0].changes as { field: string }[]).map((c) => c.field).sort();
-  expect(fields).toEqual(["currentUserEmail", "deviceName"]);
+  expect(fields).toEqual(["currentUserEmail", "deviceName", "deviceUIC"]);
 });
 
 test("commitImport telemetry-only change writes no ItemEdit", async () => {

@@ -6,6 +6,7 @@ export type ItemDetailsValues = {
   id: string;
   deviceName: string | null;
   homeUnit: string | null;
+  deviceUIC: string | null;
   currentUserEmail: string | null;
   currentPosition: string | null;
   notes: string | null;
@@ -117,6 +118,8 @@ export function ItemDetailsCard({ item, isAdmin, units, dateLogged, loggedBy, ha
           <dd>{item.deviceName || dash}</dd>
           <dt>Home unit</dt>
           <dd>{item.homeUnit || dash}</dd>
+          <dt>Device UIC</dt>
+          <dd>{item.deviceUIC || dash}</dd>
           <dt>Current user email</dt>
           <dd>{item.currentUserEmail || dash}</dd>
           <dt>Current position</dt>

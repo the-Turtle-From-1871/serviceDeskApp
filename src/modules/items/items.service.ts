@@ -171,7 +171,7 @@ async function loadExistingBySerial(serials: string[]): Promise<Map<string, Exis
     where: { serialNumber: { in: wanted } },
     select: {
       id: true, status: true, serialNumber: true, make: true, model: true, deviceName: true,
-      currentUserEmail: true, lastLogonUserPrincipalName: true, lastLogonDate: true,
+      deviceUIC: true, currentUserEmail: true, lastLogonUserPrincipalName: true, lastLogonDate: true,
       enrollmentDate: true, compliance: true,
     },
   });
@@ -293,12 +293,13 @@ export async function commitImport(
     // A full-fleet MDM refresh is an all-UPDATE import: up to MAX_IMPORT_ROWS (2000)
     // sequential item.updateMany writes (ItemEdits are batched) in one interactive
     // transaction. Prisma's default 5s timeout is far too small; but the ceiling is
-    // the hosting function timeout — the import page sets `maxDuration = 60`, so keep
-    // this just under 60s so a too-large import aborts cleanly here (caught → generic
-    // error) instead of being killed mid-transaction by the platform. maxWait covers
-    // pool-acquire. Chunking large imports across transactions is a deferred follow-up.
-    timeout: 55_000,
-    maxWait: 15_000,
+    // the hosting function timeout — the import page sets `maxDuration = 60`. maxWait
+    // (pool-acquire) and timeout are consumed sequentially, so keep their SUM under
+    // 60s (5 + 50 = 55, ~5s headroom) — otherwise a slow pool-acquire plus the txn
+    // could reach ~70s and be killed by the platform instead of aborting cleanly here
+    // (caught → generic error). Chunking large imports is a deferred follow-up.
+    timeout: 50_000,
+    maxWait: 5_000,
   });
 
   if (added < toCreate.length) {
