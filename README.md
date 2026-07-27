@@ -15,7 +15,7 @@ receipt PDF.
 - **Item registry** — make, model, serial number (**unique, case-insensitive**), device name, home unit, current-holder email/position, notes; ACTIVE/RETIRED status. The list is **server-paginated and sortable**.
 - **QR codes** — each item has a public read-only page (`/i/[itemId]`); QR is printable and downloadable as a PDF.
 - **Signed custody chain** — holder initiates a transfer, recipient draws a signature to accept; custody moves only on signature.
-- **Admin console** — create/edit/retire items, manage users (create, set role, activate/deactivate), force-reassign (override), full audit log.
+- **Admin console** — create/edit/retire items, manage users (create, set role, activate/deactivate), process property returns, work the service queue, full audit log.
 - **DA Form 2062 hand receipt** — every completed transfer exports a filled, flattened DA 2062 PDF with a vertical recipient signature + date in the quantity column and a custody-record page.
 - **Accounts** — **admin-provisioned only** (no public self-registration). Rank is captured separately from name. Self-serve password reset is available (`/forgot-password`).
 - **Roles** — `ADMIN` and `USER`, enforced server-side; deactivations/role changes take effect on the next request. A `USER` may create receipts and edit only an item's current-holder email/position — all other item fields and the service/admin queues are admin-only.
