@@ -30,12 +30,13 @@ jobs:
         # Run on the host runner (glibc) rather than the Alpine/musl semgrep image,
         # so the JS-based checkout/upload actions run without a libc mismatch.
         # pipx is preinstalled on GitHub-hosted ubuntu runners.
-        # `pipx inject setuptools`: Python 3.12 dropped setuptools/pkg_resources
-        # from the stdlib, and semgrep's OpenTelemetry dep imports pkg_resources
-        # at startup — without this the CLI crashes on import (ModuleNotFoundError).
+        # semgrep's OpenTelemetry dep imports pkg_resources at startup, but
+        # Python 3.12 ships no setuptools and setuptools >=81 REMOVED pkg_resources.
+        # Inject a pre-81 setuptools (which still provides pkg_resources) or the
+        # CLI crashes on import (ModuleNotFoundError: No module named 'pkg_resources').
         run: |
           pipx install semgrep==1.90.0
-          pipx inject semgrep setuptools
+          pipx inject semgrep "setuptools<81"
 
       # Curated, token-free registry rulesets (no Semgrep AppSec account needed).
       # All six packs resolve to real rule sets.
