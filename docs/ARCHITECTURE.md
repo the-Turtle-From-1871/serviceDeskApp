@@ -31,7 +31,7 @@ The core models (`prisma/schema.prisma`) are `User`, `Item`, and `Transfer`, des
 - Accounts are **admin-provisioned only** — self-registration has been removed. `User` rows are operator/staff logins for the kiosk, not a record of every party who ever appears on a receipt.
 
 ### Item
-`id, make, model, serialNumber (unique, citext), deviceName?, homeUnit?, currentUserEmail?, currentPosition?, notes?, status (ACTIVE|RETIRED), createdById, timestamps`
+`id, make, model, serialNumber (unique, citext), homeUnit?, deviceUIC? (unit issued-to code), deviceName?, notes?, currentUserEmail?, currentPosition?, MDM telemetry (lastLogonUserPrincipalName?, lastLogonDate?, enrollmentDate?, compliance? — imported, read-only), status (ACTIVE|RETIRED), isAccountedFor (default true), deployableStatus? (DEPLOYED|READY_TO_DEPLOY|IN_REPAIR|RETIRED, nullable — operational readiness), lastAuditedAt? (denormalized audit recency), createdById, timestamps`
 - `serialNumber` is **`@unique @db.Citext`** — a device's case-insensitive identity (like `User.email`), so it can't be logged twice even with different casing; the CSV import dedups case-insensitively and relies on the DB constraint (`skipDuplicates`).
 - No `currentHolderId`: "who holds it now" is derived by reading the most recent `Transfer` for the item (`getLastReceiver`). A standard `USER` may edit only `currentUserEmail` + `currentPosition` (`userItemDetailsSchema`); every other field is admin-only.
 - The `/items` list is **server-side paginated + sorted** (`listItems`); only the current page reaches the client.
@@ -171,3 +171,4 @@ converts — so the data is correct regardless of where the server runs.
 
 - **Vercel** runs the Next.js app (server components + serverless route handlers + the Node-runtime proxy). Git-integration deploys build on push.
 - **Supabase** provides Postgres. The app uses the **transaction pooler** (port 6543, `pgbouncer=true`) at runtime; migrations use the **session/direct** connection (port 5432). See [`../DEPLOY.md`](../DEPLOY.md).
+- **CI** (`.github/workflows/ci.yml`) runs a Semgrep SAST scan + `next build` on every push/PR to `main`; `main` is branch-protected so merges require both checks green (admins may bypass). Apply prod migrations **before** merging — Vercel's build never runs `migrate deploy`. See `CLAUDE.md` → CI/CD & Branch Protection.

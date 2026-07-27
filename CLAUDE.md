@@ -19,6 +19,13 @@
 - Run Integration Tests: `npx vitest run integration`
 - Run E2E Tests: `npx playwright test`
 
+## CI/CD & Branch Protection (`main` is protected)
+- **`main` is branch-protected.** Merging requires a PR whose required checks pass: **`Semgrep SAST`** and **`Build (next build)`** (both defined in `.github/workflows/ci.yml`, run on push + PR to `main`). `strict` is on (the branch must be up to date with `main`). Admins may bypass in an emergency (`enforce_admins: false`), but the default path is **branch → PR → green checks → merge**; Vercel deploys prod from `main` after merge.
+- **Do feature work on a branch, not direct pushes to `main`.** Honor **migrate-before-push**: apply any new prod migration to Supabase *before* the merge deploys — a bare `next build` never runs `migrate deploy`, so deployed code that `SELECT`s a not-yet-created column will break. See `docs/ARCHITECTURE.md` (Hosting topology) and `DEPLOY.md`.
+- **Semgrep runs from the official docker image** (`semgrep/semgrep`) via `docker run`, NOT a host `pipx` install — a pipx install crashes on the runner's Python 3.12 with `ModuleNotFoundError: pkg_resources` (setuptools ≥81 removed it). Don't "simplify" it back to pipx.
+- **Pushing workflow files (`.github/workflows/*`) needs the `workflow` gh token scope** — a plain `repo`-scoped token is rejected. Grant with `gh auth refresh -s workflow`.
+- **A pre-push hook requires an `xhigh` review marker.** Before pushing, run `/code-review xhigh` on the branch, then record `git rev-parse HEAD > .git/xhigh-review-ok` (per-commit — a new commit needs a fresh review).
+
 ## Documentation — Keep Docs Current as You Change Code (Non-Negotiable)
 - **Docs are part of the change, not a follow-up.** Any commit that alters behavior, UI, data, an endpoint, a command, an env var, or an architectural rule MUST update the affected documentation **in the same commit as the code** — never "later", never a separate PR. A change that ships without its doc update is incomplete.
 - **Keep this file (and `AGENTS.md`/`README.md`) truthful.** When a change contradicts, extends, or retires something written here — a security rule, a data-fetching constraint, a feature-constraint section, a listed command — edit the relevant section in the same commit so the guide never describes code that no longer exists. Do not leave stale instructions for the next reader.
