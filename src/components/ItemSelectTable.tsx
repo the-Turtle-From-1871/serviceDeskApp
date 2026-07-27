@@ -19,6 +19,7 @@ import {
   type SortField,
 } from "@/components/items-view";
 import { makeStore, usePersistedPref } from "@/components/persisted-pref";
+import type { SortKey } from "@/modules/items/items.service";
 
 export type { ItemRow };
 
@@ -30,7 +31,9 @@ const HIDDEN_KEY = "items:hiddenCols";
 const DEFAULT_HIDDEN: SortField[] = ["deviceCategory"];
 const hiddenStore = makeStore(HIDDEN_KEY, parseHiddenCols);
 
-export type SortKey = { key: string; dir: "asc" | "desc" };
+// Re-export rather than redeclare: the shape is owned by listItems, which is
+// what parses and consumes it.
+export type { SortKey };
 
 // Every column is server-sortable. `auditState` (the derived badge) sorts via the
 // denormalized Item.lastAuditedAt column server-side (see listItems), so it's
@@ -318,7 +321,15 @@ export function ItemSelectTable({
         </details>
       </div>
 
-      <div className="table-wrap">
+      {/* Rendered below the toolbar, so the controls that produced an empty
+          result stay on screen and the filter can be undone. */}
+      {items.length === 0 && (
+        <div className="card empty">
+          No items match {uic ? "this unit and " : ""}your search.
+        </div>
+      )}
+
+      <div className="table-wrap" hidden={items.length === 0}>
         <table className="table">
           <thead>
             <tr>

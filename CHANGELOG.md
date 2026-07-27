@@ -14,6 +14,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Inventory table upgrades** on `/items`: rows are **grouped by readiness** by default (toggleable), with new **UIC**, **Category**, and **Readiness** columns, a **Unit (UIC)** filter, and **compound sorting** ("sort by Make, then by Serial"). Items that are not accounted for carry a badge.
 - **Bulk readiness actions** (admin only): select items and set `deployableStatus` and/or accountability on all of them at once. Only items whose state actually changes are written, and each change is recorded to readiness history.
 
+### Fixed
+- The admin item edit form now actually saves **Category** and **Unit (UIC)**. They were being validated away by a schema that didn't declare them, so the form reported "Saved" while discarding both.
+- Searching on `/items` no longer clears the **Unit (UIC)** filter, the grouping toggle, or the second key of a compound sort. The search box rebuilds the URL, and was not carrying the new state.
+- The `/items` filter controls stay on screen when a filter returns no rows — previously the whole toolbar was replaced by an empty-state card, leaving no way to undo the filter except editing the URL.
+- Chart date labels and CSV exports are pinned to **HST** like the rest of the app. Without it, month buckets rendered a month early for viewers west of UTC.
+- The unit-allocation leaderboard no longer counts retired equipment in its Deployed/Ready columns while excluding it from Total (which could make Deployed + Ready exceed Total). All analytics widgets now consistently exclude lifecycle-retired items.
+- A repeated query parameter (`?uic=A&uic=B`) no longer 500s `/admin/analytics` or `/items`.
+- Velocity chart colours no longer shift when the unit filter changes, and the "Other" bucket now folds the *smallest* categories rather than the alphabetically-last ones.
+- Category names are normalised identically on every write path, so an item's stored category can't drift from its vocabulary entry and make the in-use count under-report.
+
+### Security
+- The category in-use check no longer uses a `LIKE`-based comparison, where `%` or `_` in a category name acted as a wildcard and could refuse (or allow) deletion based on the wrong rows.
+- CSV exports neutralise spreadsheet formula injection: an imported category like `=HYPERLINK(...)` is written as text rather than becoming a live formula in an admin's export.
+- The dev-only analytics seed now refuses to run against a non-local `DATABASE_URL`. Its previous `NODE_ENV` check passed straight through under `tsx` (where `NODE_ENV` is unset), so a prod-pointing `.env` would have let it overwrite readiness fields fleet-wide.
+
 ### Changed
 - The `/items` table is grouped by readiness on load. Previous behaviour (flat, newest-first) is one click away via the **Group by readiness** toggle, or `?group=none`.
 - Tailwind CSS v4 and `shadcn/ui` were introduced **for new UI only**. Existing pages are untouched: the original stylesheet is loaded into a `legacy` CSS cascade layer and Tailwind's `preflight` reset is deliberately not loaded, so no pre-existing page is restyled.
@@ -23,6 +38,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Notes
 - Migration `20260727210000_device_category_table` adds the `DeviceCategory` table (`name` is `CITEXT UNIQUE`) and **seeds it from the categories already present on items**, so the managed list starts out matching reality rather than empty. Note it is deliberately **not** a foreign key on `Item.deviceCategory` — that column stays a plain indexed string so a CSV import can carry a category the property book has not registered yet. Keeping the two coherent is the service layer's job (deletion is refused while in use; imports register new names).
+- Migration `20260727230000_transfer_closed_at_index` adds `@@index([status, closedAt])` on `Transfer` — the velocity chart range-scans `closedAt` on every dashboard load and no existing index served it.
+- The CSV importer no longer treats a generic `type` / `devicetype` column as the device category. Only explicit `category` / `deviceCategory` headers map. MDM exports commonly carry a `Type` column of OS strings, which would otherwise overwrite every matched item's category and pollute the managed vocabulary.
 - Touch targets in the new Tailwind UI meet the app's documented 44px floor (`--tap`) on touch devices and narrow viewports; shadcn's stock 32/36px heights apply on desktop only.
 - Migration `20260727180000_device_category_and_status_history` adds the nullable `Item.deviceCategory` text column, B-tree indexes on `Item.deviceCategory` and `Item.deviceUIC` (both are equality filters feeding `groupBy`), and the new `ItemStatusHistory` table. **It also seeds one baseline history row per existing item** so the status-over-time chart has an anchor to step from — without it, items are invisible to the chart until someone edits them. The insert uses `gen_random_uuid()` for the id (`cuid()` is client-side only). Apply with `npx prisma migrate deploy`; prod is hand-applied via the standard manual process.
 - New dependencies: `tailwindcss@4` + `@tailwindcss/postcss` (with a new root `postcss.config.mjs`), `recharts`, `lucide-react`, `html-to-image`, `class-variance-authority`, `tailwind-merge`, `clsx`, and four `@radix-ui` primitives. `npm audit` is unchanged by this install — same 13 pre-existing high-severity advisories before and after.

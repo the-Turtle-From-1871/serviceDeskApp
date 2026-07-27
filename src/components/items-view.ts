@@ -14,29 +14,20 @@ export type SortField =
   | "deviceCategory"
   | "deployableStatus";
 
-/** The four readiness states plus the untriaged bucket, in the order they are
- *  grouped and displayed. Kept in sync with the Prisma DeployableStatus enum;
- *  `null` (never triaged) renders last under UNTRIAGED. */
-export const DEPLOYABLE_ORDER = [
-  "DEPLOYED",
-  "READY_TO_DEPLOY",
-  "IN_REPAIR",
-  "RETIRED",
-  "UNTRIAGED",
-] as const;
+/* The readiness vocabulary has ONE definition, in analytics.types.ts. It used
+   to be duplicated here — same order array, same label strings — so adding a
+   fifth DeployableStatus value meant editing two label maps and two order
+   arrays, and missing either silently rendered the new state as "Untriaged" on
+   one surface only. These are re-exports under this module's original names so
+   existing callers are unchanged. */
+import { deployableKey, type DeployableKey } from "@/app/admin/analytics/analytics.types";
 
-export type DeployableKey = (typeof DEPLOYABLE_ORDER)[number];
-
-export const DEPLOYABLE_LABEL: Record<DeployableKey, string> = {
-  DEPLOYED: "Deployed",
-  READY_TO_DEPLOY: "Ready to deploy",
-  IN_REPAIR: "In repair",
-  RETIRED: "Retired",
-  UNTRIAGED: "Untriaged",
-};
-
-export const deployableKey = (s: string | null | undefined): DeployableKey =>
-  s && (DEPLOYABLE_ORDER as readonly string[]).includes(s) ? (s as DeployableKey) : "UNTRIAGED";
+export {
+  DEPLOYABLE_ORDER,
+  DEPLOYABLE_LABEL,
+  deployableKey,
+  type DeployableKey,
+} from "@/app/admin/analytics/analytics.types";
 
 export type ItemRow = {
   id: string;

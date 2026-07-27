@@ -1,6 +1,7 @@
 import "server-only";
 import { Prisma, type DeployableStatus } from "@prisma/client";
 import prisma from "@/lib/prisma";
+import { listItemUics } from "@/modules/items/items.service";
 
 /* ============================================================
    Analytics aggregation for the readiness dashboard.
@@ -57,17 +58,14 @@ const itemWhere = (uic: UicFilter): Prisma.ItemWhereInput => ({
    Filter options — the distinct UICs present in the catalogue.
    ------------------------------------------------------------ */
 
-/** Distinct deviceUIC values, for the global filter's option list. Capped:
- *  a UIC is a unit identifier, so real cardinality is dozens, but the cap
- *  keeps a bad import from rendering an unbounded <Select>. */
-export async function listUnitOptions(limit = 200): Promise<string[]> {
-  const rows = await prisma.item.groupBy({
-    by: ["deviceUIC"],
-    where: { status: "ACTIVE", deviceUIC: { not: null } },
-    orderBy: { deviceUIC: "asc" },
-    take: limit,
-  });
-  return rows.map((r) => r.deviceUIC).filter((u): u is string => u !== null);
+/** Distinct deviceUIC values, for the global filter's option list.
+ *
+ *  Delegates to the shared `listItemUics` rather than keeping a near-identical
+ *  copy of the same groupBy. The dashboard scopes to ACTIVE items (retired kit
+ *  is out of scope for readiness — see itemWhere); /items lists everything, so
+ *  it passes no status filter. */
+export function listUnitOptions(limit = 200): Promise<string[]> {
+  return listItemUics(limit, { status: "ACTIVE" });
 }
 
 /* ------------------------------------------------------------
@@ -242,7 +240,17 @@ export async function getTransferVelocity(
     ORDER BY 1
   `);
 
-  const categories = [...new Set(rows.map((r) => r.category ?? UNCATEGORIZED))].sort();
+  // Ordered by TOTAL VOLUME desc, not alphabetically: the chart folds the tail
+  // into "Other" past the palette's 8 slots, and folding alphabetically would
+  // bury the largest series while keeping trivial ones visible.
+  const volume = new Map<string, number>();
+  for (const r of rows) {
+    const c = r.category ?? UNCATEGORIZED;
+    volume.set(c, (volume.get(c) ?? 0) + Number(r.count));
+  }
+  const categories = [...volume.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([c]) => c);
   const byMonth = new Map<number, VelocityPoint>();
   for (const r of rows) {
     const t = r.month.getTime();
@@ -299,7 +307,11 @@ export async function getUnitAllocations(limit = 200): Promise<{
 
   const breakdown = await prisma.item.groupBy({
     by: ["deviceUIC", "deployableStatus"],
-    where: { deviceUIC: { in: uics } },
+    // MUST carry the same status: "ACTIVE" scope as the totals query above.
+    // Without it the Deployed/Ready columns count lifecycle-retired kit that
+    // Total excludes, so a unit with retired-but-still-DEPLOYED items can show
+    // Deployed + Ready greater than its Total.
+    where: { status: "ACTIVE", deviceUIC: { in: uics } },
     _count: { _all: true },
   });
 
@@ -325,7 +337,7 @@ export async function getUnitAllocations(limit = 200): Promise<{
 export type DashboardData = Awaited<ReturnType<typeof getDashboard>>;
 
 export async function getDashboard(uic: UicFilter, range: RangeKey) {
-  const [units, accountability, kpis, statusOverTime, velocity, allocations, fleetTotal] =
+  const [units, accountability, kpis, statusOverTime, velocity, allocations, fleetTotal, vocabulary] =
     await Promise.all([
       listUnitOptions(),
       getAccountability(uic),
@@ -334,7 +346,13 @@ export async function getDashboard(uic: UicFilter, range: RangeKey) {
       getTransferVelocity(uic, range),
       getUnitAllocations(),
       prisma.item.count({ where: itemWhere(uic) }),
+      // The full category vocabulary, in a stable order. Deliberately NOT
+      // scoped by the UIC filter: it is the chart's COLOUR KEY, so it must be
+      // identical whichever unit is selected, or series get repainted.
+      prisma.deviceCategory
+        .findMany({ select: { name: true }, orderBy: { name: "asc" }, take: 200 })
+        .then((rows) => rows.map((r) => r.name)),
     ]);
 
-  return { units, accountability, kpis, statusOverTime, velocity, allocations, fleetTotal };
+  return { units, accountability, kpis, statusOverTime, velocity, allocations, fleetTotal, vocabulary };
 }

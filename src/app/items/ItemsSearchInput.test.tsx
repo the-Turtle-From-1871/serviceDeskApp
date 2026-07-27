@@ -33,7 +33,7 @@ describe("ItemsSearchInput", () => {
     // delay: null disables user-event's own per-keystroke setTimeout waits,
     // so it never competes with the fake clock we advance by hand below.
     const user = userEvent.setup({ delay: null });
-    render(<ItemsSearchInput q="" sort="serialNumber" dir="asc" />);
+    render(<ItemsSearchInput q="" sortKeys={[{ key: "serialNumber", dir: "asc" }]} uic={null} grouped />);
 
     const input = screen.getByRole("textbox", { name: /search/i });
     await user.type(input, "abc");
@@ -63,7 +63,7 @@ describe("ItemsSearchInput", () => {
     // fake clock never advances.
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const user = userEvent.setup({ delay: null });
-    render(<ItemsSearchInput q="printer" sort={null} dir="desc" />);
+    render(<ItemsSearchInput q="printer" sortKeys={[]} uic={null} grouped />);
 
     const input = screen.getByRole("textbox", { name: /search/i }) as HTMLInputElement;
     expect(input.value).toBe("printer");
@@ -84,7 +84,7 @@ describe("ItemsSearchInput", () => {
     // e.g. /items?sort=make&dir=asc&page=3 would silently bounce the user
     // back to page 1 after 300ms with zero interaction.
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    render(<ItemsSearchInput q="" sort="make" dir="asc" />);
+    render(<ItemsSearchInput q="" sortKeys={[{ key: "make", dir: "asc" }]} uic={null} grouped />);
 
     await vi.advanceTimersByTimeAsync(300);
 
@@ -95,7 +95,7 @@ describe("ItemsSearchInput", () => {
 
   it("mounting with a non-empty q already in the URL does not navigate", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    render(<ItemsSearchInput q="foo" sort={null} dir="desc" />);
+    render(<ItemsSearchInput q="foo" sortKeys={[]} uic={null} grouped />);
 
     await vi.advanceTimersByTimeAsync(300);
 
@@ -107,14 +107,14 @@ describe("ItemsSearchInput", () => {
   it("uses the latest sort/dir, not a stale closure, if they change while the debounce is pending", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const user = userEvent.setup({ delay: null });
-    const { rerender } = render(<ItemsSearchInput q="" sort="serialNumber" dir="asc" />);
+    const { rerender } = render(<ItemsSearchInput q="" sortKeys={[{ key: "serialNumber", dir: "asc" }]} uic={null} grouped />);
 
     const input = screen.getByRole("textbox", { name: /search/i });
     await user.type(input, "abc");
 
     // Sort changes (e.g. user clicked a column header) while the debounce
     // timer armed by typing is still pending.
-    rerender(<ItemsSearchInput q="" sort="make" dir="desc" />);
+    rerender(<ItemsSearchInput q="" sortKeys={[{ key: "make", dir: "desc" }]} uic={null} grouped />);
 
     await vi.advanceTimersByTimeAsync(300);
 
@@ -126,11 +126,55 @@ describe("ItemsSearchInput", () => {
     vi.useRealTimers();
   });
 
+  // This component rebuilds the /items URL from scratch, so anything it does
+  // not carry is silently dropped on the next keystroke. These pin the state
+  // that used to disappear: the unit filter, the grouping toggle, and the
+  // SECOND key of a compound sort.
+  it("preserves the UIC filter, group=none, and both sort keys while searching", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ delay: null });
+    render(
+      <ItemsSearchInput
+        q=""
+        sortKeys={[
+          { key: "make", dir: "asc" },
+          { key: "serialNumber", dir: "desc" },
+        ]}
+        uic="W6BTAA"
+        grouped={false}
+      />,
+    );
+
+    await user.type(screen.getByRole("textbox", { name: /search/i }), "abc");
+    await vi.advanceTimersByTimeAsync(300);
+
+    const [url] = replace.mock.calls[0];
+    expect(url).toMatch(/(^|[?&])uic=W6BTAA(&|$)/);
+    expect(url).toMatch(/(^|[?&])group=none(&|$)/);
+    // Both keys, in order, with their own directions — not collapsed to one.
+    expect(url).toContain("sort=make%2CserialNumber");
+    expect(url).toContain("dir=asc%2Cdesc");
+
+    vi.useRealTimers();
+  });
+
+  it("omits group=none when grouping is on (the default)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ delay: null });
+    render(<ItemsSearchInput q="" sortKeys={[]} uic={null} grouped />);
+
+    await user.type(screen.getByRole("textbox", { name: /search/i }), "abc");
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(replace.mock.calls[0][0]).not.toContain("group=");
+    vi.useRealTimers();
+  });
+
   it("pressing Enter does not trigger a full-page form submit", async () => {
     const submitHandler = vi.fn((e: Event) => e.preventDefault());
     window.addEventListener("submit", submitHandler);
 
-    render(<ItemsSearchInput q="" sort={null} dir="desc" />);
+    render(<ItemsSearchInput q="" sortKeys={[]} uic={null} grouped />);
     const input = screen.getByRole("textbox", { name: /search/i });
     const user = userEvent.setup();
     await user.type(input, "x{enter}");

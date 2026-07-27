@@ -12,8 +12,8 @@ import {
   NOT_ACCOUNTED_COLOR,
   OTHER_COLOR,
   STATUS_COLOR,
-  colorForIndex,
   foldCategories,
+  makeCategoryColor,
 } from "./palette";
 import {
   DEPLOYABLE_STATUSES,
@@ -31,11 +31,21 @@ import {
    Date formatting for the two time-series axes.
    ------------------------------------------------------------ */
 
-const dayFmt = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
-const monthFmt = new Intl.DateTimeFormat("en-US", { month: "short", year: "2-digit" });
+/* Pinned to HST, like every other date in this app (see lib/datetime.ts).
+   Without an explicit timeZone these render in the VIEWER's zone, and because
+   the SQL buckets are UTC midnights, an HST viewer (UTC−10) sees each one as
+   14:00 the PREVIOUS day — which silently labels every month bar, and every
+   exported CSV row, one month early. */
+const HST = "Pacific/Honolulu";
 
-const formatDay = (iso: string) => dayFmt.format(new Date(iso));
-const formatMonth = (iso: string) => monthFmt.format(new Date(iso));
+const dayFmt = new Intl.DateTimeFormat("en-US", { timeZone: HST, month: "short", day: "numeric" });
+const monthFmt = new Intl.DateTimeFormat("en-US", { timeZone: HST, month: "short", year: "2-digit" });
+
+/** A month bucket arrives as the UTC instant that starts the month. Formatting
+ *  that instant in HST would roll it back into the previous month, so nudge to
+ *  midday UTC first: the label names the BUCKET, not a moment in time. */
+const formatDay = (iso: string) => dayFmt.format(new Date(new Date(iso).getTime() + 12 * 60 * 60 * 1000));
+const formatMonth = (iso: string) => monthFmt.format(new Date(new Date(iso).getTime() + 12 * 60 * 60 * 1000));
 
 /* ------------------------------------------------------------
    Widget 1 — Audit readiness.
@@ -239,21 +249,28 @@ export function StatusOverTimeWidget({
 export function VelocityWidget({
   points,
   categories,
+  vocabulary,
   range,
   uic,
 }: {
   points: VelocityPoint[];
+  /** Present in the current result, ordered by volume desc (folding order). */
   categories: string[];
+  /** EVERY known category, in a stable order — the colour key. Separate from
+   *  `categories` on purpose: colour must not change when a filter changes
+   *  which categories happen to have data. */
+  vocabulary: string[];
   range: RangeKey;
   uic: string | null;
 }) {
   // Past 8 categories the palette is not extended — the tail folds into
   // "Other" rather than inventing hues that would fail CVD separation.
   const { kept, folded, overflowLabel } = foldCategories(categories);
-  const series = kept.map((c, i) => ({
+  const colorFor = makeCategoryColor(vocabulary);
+  const series = kept.map((c) => ({
     key: c,
     label: c,
-    color: c === overflowLabel ? OTHER_COLOR : colorForIndex(i),
+    color: c === overflowLabel ? OTHER_COLOR : colorFor(c),
   }));
 
   const data = points.map((p) => {

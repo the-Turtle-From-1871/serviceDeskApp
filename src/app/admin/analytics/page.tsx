@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { requireAdmin, AuthError } from "@/lib/authz";
 import { getDashboard, isRangeKey, type RangeKey } from "./analytics.service";
+import { firstParam } from "@/lib/search-params";
 import { UnitFilter } from "./Filters";
 import {
   AccountabilityWidget,
@@ -29,7 +30,8 @@ export const metadata = { title: "Readiness analytics" };
 export default async function AnalyticsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ uic?: string; range?: string }>;
+  // string[] is reachable: Next supplies an array whenever a key is repeated.
+  searchParams: Promise<{ uic?: string | string[]; range?: string | string[] }>;
 }) {
   try {
     await requireAdmin();
@@ -40,11 +42,14 @@ export default async function AnalyticsPage({
 
   const sp = await searchParams;
   // Never trust the querystring: an unknown range falls back to the default
-  // rather than reaching the SQL bucket interval.
-  const range: RangeKey = sp.range && isRangeKey(sp.range) ? sp.range : "90d";
-  const uic = sp.uic?.trim() ? sp.uic.trim() : null;
+  // rather than reaching the SQL bucket interval, and firstParam collapses the
+  // repeated-key array form before anything calls a string method on it.
+  const rawRange = firstParam(sp.range);
+  const range: RangeKey = rawRange && isRangeKey(rawRange) ? rawRange : "90d";
+  const rawUic = firstParam(sp.uic)?.trim();
+  const uic = rawUic ? rawUic : null;
 
-  const { units, accountability, kpis, statusOverTime, velocity, allocations, fleetTotal } =
+  const { units, accountability, kpis, statusOverTime, velocity, allocations, fleetTotal, vocabulary } =
     await getDashboard(uic, range);
 
   return (
@@ -93,6 +98,7 @@ export default async function AnalyticsPage({
           <VelocityWidget
             points={velocity.points}
             categories={velocity.categories}
+            vocabulary={vocabulary}
             range={range}
             uic={uic}
           />

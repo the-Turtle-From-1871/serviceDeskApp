@@ -11,7 +11,8 @@ import {
   MAX_BULK_ITEMS,
 } from "@/modules/items/items.service";
 import { ItemError } from "@/modules/items/items.errors";
-import { newItemSchema } from "@/modules/items/items.schema";
+import { newItemSchema, adminItemEditSchema } from "@/modules/items/items.schema";
+import { learnCategories, normalizeCategoryName } from "@/modules/items/categories.service";
 import { z } from "zod";
 import { resolutionSchema, type UnitResolution } from "@/modules/items/units.service";
 import type { SkippedRow, UnresolvedRow } from "@/modules/items/import";
@@ -32,12 +33,22 @@ export async function createItemAction(_prev: unknown, formData: FormData) {
 export async function updateItemAction(_prev: unknown, formData: FormData) {
   const admin = await requireAdmin();
   const id = String(formData.get("id"));
-  const parsed = newItemSchema.partial().safeParse(Object.fromEntries(formData));
+  const parsed = adminItemEditSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
+  // Categories are stored on the item in the SAME canonical form the managed
+  // vocabulary uses, or the two drift and the in-use count silently misses
+  // (which would let an admin delete a category that is still assigned).
+  const data = { ...parsed.data };
+  if (data.deviceCategory !== undefined) {
+    data.deviceCategory = normalizeCategoryName(data.deviceCategory);
+  }
   try {
-    await updateItemFields(id, parsed.data, { id: admin.id, name: admin.name });
+    await updateItemFields(id, data, { id: admin.id, name: admin.name });
+    // A category typed directly into the form joins the vocabulary, so the
+    // managed list keeps reflecting what is actually in the fleet.
+    if (data.deviceCategory) await learnCategories([data.deviceCategory]);
   } catch (e) {
     if (e instanceof ItemError && e.code === "NOT_FOUND") {
       return { error: "That item no longer exists." };

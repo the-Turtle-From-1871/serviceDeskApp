@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import type { SortKey } from "@/components/ItemSelectTable";
 
 // Live, debounced search for /items — mirrors HomeSearch.tsx's debounce
 // pattern, but navigates the URL (via router.replace) instead of calling a
@@ -10,25 +11,36 @@ import { useRouter } from "next/navigation";
 // than filtering anything client-side.
 export function ItemsSearchInput({
   q,
-  sort,
-  dir,
+  sortKeys,
+  uic,
+  grouped,
 }: {
   q: string;
-  sort: string | null;
-  dir: "asc" | "desc";
+  /** The FULL compound sort, not just the first key — rebuilding the URL from
+   *  a lone `sort`/`dir` silently collapsed a two-key sort down to one. */
+  sortKeys: SortKey[];
+  uic: string | null;
+  grouped: boolean;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState(q);
   const [isPending, startTransition] = useTransition();
-  // Read the latest sort/dir via refs (synced every render, via an effect —
-  // mutating a ref directly during render is disallowed) so the debounce
-  // timer never fires with a stale closure if sort/dir change while a
-  // keystroke's timer is still pending.
-  const sortRef = useRef(sort);
-  const dirRef = useRef(dir);
+  // This component REBUILDS the /items URL from scratch, so it must carry every
+  // piece of state that lives there. Anything missing here is silently dropped
+  // the moment someone types in the search box — that is how the UIC filter,
+  // the grouping toggle and the secondary sort key all used to disappear.
+  //
+  // Read the latest values via refs (synced every render, via an effect —
+  // mutating a ref directly during render is disallowed) so the debounce timer
+  // never fires with a stale closure if they change while a keystroke's timer
+  // is still pending.
+  const sortRef = useRef(sortKeys);
+  const uicRef = useRef(uic);
+  const groupedRef = useRef(grouped);
   useEffect(() => {
-    sortRef.current = sort;
-    dirRef.current = dir;
+    sortRef.current = sortKeys;
+    uicRef.current = uic;
+    groupedRef.current = grouped;
   });
 
   useEffect(() => {
@@ -43,10 +55,13 @@ export function ItemsSearchInput({
       const params = new URLSearchParams();
       const trimmed = query.trim();
       if (trimmed) params.set("q", trimmed);
-      if (sortRef.current) {
-        params.set("sort", sortRef.current);
-        params.set("dir", dirRef.current);
+      if (sortRef.current.length > 0) {
+        params.set("sort", sortRef.current.map((k) => k.key).join(","));
+        params.set("dir", sortRef.current.map((k) => k.dir).join(","));
       }
+      if (uicRef.current) params.set("uic", uicRef.current);
+      // Grouping is the default, so only the OFF state travels in the URL.
+      if (!groupedRef.current) params.set("group", "none");
       // Changing the query resets to page 1 (omitted = page 1): a narrower
       // result set could otherwise strand the user on a now-empty page.
       const s = params.toString();

@@ -75,6 +75,35 @@ export const CHROME = {
 export const colorForIndex = (i: number) => SERIES[i % SERIES.length];
 
 /**
+ * Stable colour for a category, independent of what is on screen.
+ *
+ * `vocabulary` is the full ordered category list (every category that exists,
+ * not just the ones in the current result). Keying off position in THAT list
+ * means selecting a UIC — which changes how many categories have data —
+ * cannot repaint the survivors. Keying off the rendered array instead, as this
+ * originally did, shifted every colour whenever the filter changed, breaking
+ * the rule at the top of this file: colour follows the entity, never its rank.
+ *
+ * A category absent from the vocabulary (e.g. "Uncategorized", or a value only
+ * present on items) falls to the end deterministically rather than colliding
+ * with slot 0.
+ */
+export function makeCategoryColor(vocabulary: string[]): (category: string) => string {
+  const slot = new Map<string, number>();
+  vocabulary.forEach((name, i) => slot.set(name.toLowerCase(), i));
+  return (category: string) => {
+    if (category === OTHER_CATEGORY) return OTHER_COLOR;
+    const i = slot.get(category.toLowerCase());
+    if (i !== undefined) return colorForIndex(i);
+    // Deterministic fallback: hash the name so it is at least stable across
+    // renders and filters, even though it is outside the curated list.
+    let h = 0;
+    for (let k = 0; k < category.length; k++) h = (h * 31 + category.charCodeAt(k)) >>> 0;
+    return colorForIndex(vocabulary.length + (h % SERIES.length));
+  };
+}
+
+/**
  * Cap a category list at MAX_SERIES, folding the tail into "Other".
  * Returns the kept names in order plus the folded set, so the caller can
  * re-bucket its data points consistently.

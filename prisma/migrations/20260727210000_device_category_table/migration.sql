@@ -23,12 +23,20 @@ ALTER TABLE "DeviceCategory" ADD CONSTRAINT "DeviceCategory_createdById_fkey" FO
 -- list starts out matching reality instead of empty (any category typed into
 -- the edit form or arriving via CSV before this migration would otherwise be
 -- absent from the admin list, and look deletable/unknown).
--- DISTINCT over a citext column already folds case, so "Laptops"/"laptops"
--- collapse to one row and cannot violate the unique index.
+-- CAREFUL: Item."deviceCategory" is plain TEXT, but DeviceCategory."name" is
+-- CITEXT UNIQUE. A bare `SELECT DISTINCT` is therefore CASE-SENSITIVE and would
+-- emit "Laptops" and "laptops" as two rows, which the citext unique index
+-- rejects — aborting the migration mid-deploy. So fold case explicitly with
+-- DISTINCT ON (lower(...)) and normalize the stored value (trim + collapse
+-- internal whitespace) to match normalizeCategoryName in the app; otherwise a
+-- seeded row like " Laptops" never matches what the app writes.
+-- MIN() picks a deterministic representative among case variants.
 INSERT INTO "DeviceCategory" ("id", "name", "createdById", "createdAt", "updatedAt")
-SELECT gen_random_uuid()::text, DISTINCT_CATS."deviceCategory", NULL, NOW(), NOW()
+SELECT gen_random_uuid()::text, normalized_name, NULL, NOW(), NOW()
 FROM (
-    SELECT DISTINCT "deviceCategory"
+    SELECT MIN(regexp_replace(btrim("deviceCategory"), '\s+', ' ', 'g')) AS normalized_name
     FROM "Item"
-    WHERE "deviceCategory" IS NOT NULL AND btrim("deviceCategory") <> ''
-) AS DISTINCT_CATS;
+    WHERE "deviceCategory" IS NOT NULL
+      AND btrim("deviceCategory") <> ''
+    GROUP BY lower(regexp_replace(btrim("deviceCategory"), '\s+', ' ', 'g'))
+) AS distinct_cats;

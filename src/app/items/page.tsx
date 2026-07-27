@@ -5,23 +5,27 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { ItemSelectTable } from "@/components/ItemSelectTable";
 import { ItemsSearchInput } from "./ItemsSearchInput";
 import { auditState } from "@/modules/audit/audit.status";
+import { firstParam } from "@/lib/search-params";
 
 export default async function ItemsListPage({
   searchParams,
 }: {
+  // string[] is reachable: Next supplies an array whenever a key is repeated
+  // (`?uic=A&uic=B`). firstParam collapses that before any string method runs.
   searchParams: Promise<{
-    q?: string;
-    sort?: string;
-    dir?: string;
-    page?: string;
-    uic?: string;
-    group?: string;
+    q?: string | string[];
+    sort?: string | string[];
+    dir?: string | string[];
+    page?: string | string[];
+    uic?: string | string[];
+    group?: string | string[];
   }>;
 }) {
   const user = await requireUser();
   const isAdmin = user.role === "ADMIN";
   const sp = await searchParams;
-  const q = sp.q;
+  const q = firstParam(sp.q);
+  const pageParam = firstParam(sp.page);
 
   // Server-side paginate + sort: only the current page is fetched and serialized to
   // the client (the list was previously unbounded). The audit-status badge and the
@@ -30,11 +34,11 @@ export default async function ItemsListPage({
   const [result, uics] = await Promise.all([
     listItems({
       search: q,
-      sort: sp.sort ?? null,
-      dir: sp.dir ?? null,
-      page: sp.page ? Number.parseInt(sp.page, 10) : 1,
-      uic: sp.uic ?? null,
-      group: sp.group ?? null,
+      sort: firstParam(sp.sort) ?? null,
+      dir: firstParam(sp.dir) ?? null,
+      page: pageParam ? Number.parseInt(pageParam, 10) : 1,
+      uic: firstParam(sp.uic) ?? null,
+      group: firstParam(sp.group) ?? null,
     }),
     listItemUics(),
   ]);
@@ -57,13 +61,20 @@ export default async function ItemsListPage({
           {isAdmin && <Link href="/admin/items/import" className="btn btn-secondary">Import CSV</Link>}
         </div>
 
-        <ItemsSearchInput q={q ?? ""} sort={result.sort} dir={result.dir} />
+        <ItemsSearchInput
+          q={q ?? ""}
+          sortKeys={result.sortKeys}
+          uic={result.uic}
+          grouped={result.grouped}
+        />
 
-        {result.items.length === 0 ? (
-          <div className="card empty">No items match your search.</div>
-        ) : (
-          <ItemSelectTable
-            items={result.items.map((it) => ({
+        {/* ItemSelectTable renders even with zero rows, because it OWNS the
+            filter/sort/grouping controls. Swapping it for an empty-state card
+            (as this used to) removed the very controls needed to undo the
+            filter that emptied the list — leaving the URL as the only way out.
+            The empty message now lives inside the table instead. */}
+        <ItemSelectTable
+          items={result.items.map((it) => ({
               id: it.id,
               deviceName: it.deviceName,
               make: it.make,
@@ -87,7 +98,6 @@ export default async function ItemsListPage({
             uic={result.uic}
             uics={uics}
           />
-        )}
       </main>
     </>
   );

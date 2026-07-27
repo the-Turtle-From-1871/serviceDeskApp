@@ -33,6 +33,21 @@ export const STATUS_LABEL: Record<StatusKey, string> = {
 
 export const statusKey = (s: DeployableStatus | null): StatusKey => s ?? UNTRIAGED;
 
+/* ---------- Aliases used by the /items table ----------
+   Same vocabulary, named for that surface. Defined here rather than duplicated
+   in items-view.ts so a new DeployableStatus value only has to be added once. */
+
+/** Grouping/display order: the four states, then the untriaged bucket. */
+export const DEPLOYABLE_ORDER = [...DEPLOYABLE_STATUSES, UNTRIAGED] as const;
+export type DeployableKey = StatusKey;
+export const DEPLOYABLE_LABEL = STATUS_LABEL;
+
+/** Narrow an untrusted string (a DB value an older client hasn't heard of, or
+ *  null) to a known key. Anything unrecognised reads as untriaged rather than
+ *  being trusted through. */
+export const deployableKey = (s: string | null | undefined): DeployableKey =>
+  s && (DEPLOYABLE_ORDER as readonly string[]).includes(s) ? (s as DeployableKey) : UNTRIAGED;
+
 /** Time windows offered by the chart ToggleGroup. `bucket` is chosen so a
  *  window never renders more than ~90 points: a longer window steps up to a
  *  coarser bucket instead of returning an unbounded series. */

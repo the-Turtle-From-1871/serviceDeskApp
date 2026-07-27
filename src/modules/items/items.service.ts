@@ -225,12 +225,17 @@ export async function listItems(opts: {
   };
 }
 
-/** Distinct UICs present in the catalogue, for the /items filter dropdown.
- *  One grouped query, capped — mirrors the analytics filter's option list. */
-export async function listItemUics(limit = 200): Promise<string[]> {
+/** Distinct UICs present in the catalogue, for a filter dropdown. ONE grouped
+ *  query, capped. `scope` lets a caller narrow further — the readiness
+ *  dashboard passes `{ status: "ACTIVE" }` because retired kit is out of scope
+ *  there, while /items lists every unit. */
+export async function listItemUics(
+  limit = 200,
+  scope: Prisma.ItemWhereInput = {},
+): Promise<string[]> {
   const rows = await prisma.item.groupBy({
     by: ["deviceUIC"],
-    where: { deviceUIC: { not: null } },
+    where: { ...scope, deviceUIC: { not: null } },
     orderBy: { deviceUIC: "asc" },
     take: limit,
   });
@@ -464,8 +469,16 @@ export async function commitImport(
     // above. The import is deliberately NOT blocked by an unknown category —
     // Item.deviceCategory has no FK — so this is what keeps the admin's managed
     // list a true reflection of what is actually in the fleet. One statement.
+    //
+    // Sourced from the rows actually WRITTEN, not from every parsed row: a row
+    // rejected as invalid / duplicate-in-file / missing make+model never
+    // reaches an item, so its category must not enter the vocabulary either
+    // (an admin would then have to hand-delete a category nothing uses).
     await learnCategories(
-      rows.map((r) => r.deviceCategory),
+      [
+        ...toCreate.map((d) => d.deviceCategory),
+        ...toUpdate.map((u) => u.data.deviceCategory),
+      ],
       tx,
     );
 

@@ -2,6 +2,12 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { ItemError } from "./items.errors";
+import { MAX_CATEGORY_NAME, normalizeCategoryName } from "./items.schema";
+
+// Re-exported so callers have one import site for the vocabulary API. The
+// implementation lives in items.schema.ts because it must be reachable from
+// pure/validation code that cannot import a `server-only` module.
+export { normalizeCategoryName, MAX_CATEGORY_NAME };
 
 /* ============================================================
    The managed device-category vocabulary.
@@ -18,15 +24,6 @@ import { ItemError } from "./items.errors";
        same way unit abbreviations are learned, so an import can never fail on
        an unregistered category.
    ============================================================ */
-
-/** Canonical stored form. Trimmed and internal whitespace collapsed, so
- *  "Laptops " and "Laptops" cannot become two rows. Case is preserved for
- *  display; uniqueness is case-insensitive via the citext column. */
-export function normalizeCategoryName(raw: string): string {
-  return raw.trim().replace(/\s+/g, " ");
-}
-
-export const MAX_CATEGORY_NAME = 60;
 
 export type CategoryRow = { id: string; name: string; itemCount: number };
 
@@ -51,14 +48,14 @@ export async function listCategoriesWithCounts(): Promise<CategoryRow[]> {
   const byName = new Map<string, number>();
   for (const c of counts) {
     if (!c.deviceCategory) continue;
-    const key = c.deviceCategory.trim().toLowerCase();
+    const key = normalizeCategoryName(c.deviceCategory).toLowerCase();
     byName.set(key, (byName.get(key) ?? 0) + c._count._all);
   }
 
   return categories.map((c) => ({
     id: c.id,
     name: c.name,
-    itemCount: byName.get(c.name.trim().toLowerCase()) ?? 0,
+    itemCount: byName.get(normalizeCategoryName(c.name).toLowerCase()) ?? 0,
   }));
 }
 
@@ -104,11 +101,18 @@ export async function deleteCategory(id: string): Promise<{ name: string }> {
   const category = await prisma.deviceCategory.findUnique({ where: { id }, select: { name: true } });
   if (!category) throw new ItemError("NOT_FOUND", "That category no longer exists.");
 
-  const inUse = await prisma.item.count({
-    // `equals` on a plain-text column is case-sensitive; `mode: "insensitive"`
-    // matches the citext semantics of the name it is being compared against.
-    where: { deviceCategory: { equals: category.name, mode: "insensitive" } },
-  });
+  // NOT `mode: "insensitive"`. Prisma compiles that to ILIKE, which treats `_`
+  // and `%` inside the name as WILDCARDS — a category called "Laptop_A" would
+  // match "LaptopXA", and one called "%" would match every categorised item,
+  // so the refusal could fire (or fail to fire) on the wrong rows. LOWER() on
+  // both sides is an exact comparison that still ignores case, matching the
+  // citext semantics of DeviceCategory.name. Parameterized, never interpolated.
+  const [{ count }] = await prisma.$queryRaw<[{ count: bigint }]>(Prisma.sql`
+    SELECT COUNT(*)::bigint AS count
+    FROM "Item"
+    WHERE LOWER(btrim("deviceCategory")) = LOWER(${category.name})
+  `);
+  const inUse = Number(count);
   if (inUse > 0) {
     throw new ItemError(
       "IN_USE",

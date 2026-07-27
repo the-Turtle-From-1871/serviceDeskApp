@@ -264,6 +264,11 @@ model Transfer {
   @@index([createdAt])
   // Dashboard timer sweep filters status='OPEN' AND dueAt <= horizon.
   @@index([status, dueAt])
+  // Analytics velocity chart filters status='CLOSED' AND closedAt >= start on
+  // every dashboard load (all state is URL-driven, so each filter change
+  // re-queries). No existing index serves a closedAt range — [status, dueAt]
+  // cannot, and purgeAfter is a different column.
+  @@index([status, closedAt])
   // Trigram GIN for the public, per-keystroke receipt-number search
   // (searchReceiptsByNumber), `ILIKE '%q%'`. Needs pg_trgm.
   @@index([receiptNumber(ops: raw("gin_trgm_ops"))], type: Gin, map: "Transfer_receiptNumber_trgm_idx")

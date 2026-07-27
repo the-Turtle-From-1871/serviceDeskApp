@@ -73,43 +73,72 @@ async function main() {
 
   // Deterministic spread (index-based, not random) so repeated runs produce
   // the same fixture and screenshots stay comparable.
-  let historyRows = 0;
-  for (const [i, item] of items.entries()) {
-    const category = CATEGORIES[i % CATEGORIES.length];
-    const uic = UICS[i % UICS.length];
-    const status = STATUSES[i % STATUSES.length];
-    const accounted = i % 7 !== 0; // ~14% unaccounted for, so the donut is not a solid ring
+  //
+  // BATCHED, not a per-item loop: CLAUDE.md forbids querying inside a loop, and
+  // against the real 1,200+ catalogue the previous shape issued ~2,400 round
+  // trips. Because the spread is a pure function of the index, items sharing a
+  // (category, uic, status, accounted) combination can be updated together —
+  // that is at most CATEGORIES x UICS x STATUSES x 2 buckets regardless of
+  // fleet size — and all history rows go in ONE createMany.
+  type Combo = { category: string; uic: string; status: string; accounted: boolean };
+  const buckets = new Map<string, { combo: Combo; ids: string[] }>();
+  const history: Array<{
+    itemId: string;
+    deployableStatus: (typeof STATUSES)[number];
+    isAccountedFor: boolean;
+    changedByName: string;
+    source: string;
+    createdAt: Date;
+  }> = [];
 
-    await prisma.item.update({
-      where: { id: item.id },
-      data: { deviceCategory: category, deviceUIC: uic, deployableStatus: status, isAccountedFor: accounted },
-    });
+  for (const [i, item] of items.entries()) {
+    const combo: Combo = {
+      category: CATEGORIES[i % CATEGORIES.length],
+      uic: UICS[i % UICS.length],
+      status: STATUSES[i % STATUSES.length],
+      accounted: i % 7 !== 0, // ~14% unaccounted for, so the donut isn't a solid ring
+    };
+    const key = `${combo.category}|${combo.uic}|${combo.status}|${combo.accounted}`;
+    const bucket = buckets.get(key);
+    if (bucket) bucket.ids.push(item.id);
+    else buckets.set(key, { combo, ids: [item.id] });
 
     // Back-date a small timeline: an earlier state, then the current one, so
     // the stacked area actually steps instead of being a flat band.
     const earlier = STATUSES[(i + 2) % STATUSES.length];
-    await prisma.itemStatusHistory.createMany({
-      data: [
-        {
-          itemId: item.id,
-          deployableStatus: earlier,
-          isAccountedFor: true,
-          changedByName: "System (demo fixture)",
-          source: "system:demo",
-          createdAt: new Date(now - (60 - (i % 45)) * day),
-        },
-        {
-          itemId: item.id,
-          deployableStatus: status,
-          isAccountedFor: accounted,
-          changedByName: "System (demo fixture)",
-          source: "system:demo",
-          createdAt: new Date(now - (i % 25) * day),
-        },
-      ],
-    });
-    historyRows += 2;
+    history.push(
+      {
+        itemId: item.id,
+        deployableStatus: earlier,
+        isAccountedFor: true,
+        changedByName: "System (demo fixture)",
+        source: "system:demo",
+        createdAt: new Date(now - (60 - (i % 45)) * day),
+      },
+      {
+        itemId: item.id,
+        deployableStatus: combo.status as (typeof STATUSES)[number],
+        isAccountedFor: combo.accounted,
+        changedByName: "System (demo fixture)",
+        source: "system:demo",
+        createdAt: new Date(now - (i % 25) * day),
+      },
+    );
   }
+
+  for (const { combo, ids } of buckets.values()) {
+    await prisma.item.updateMany({
+      where: { id: { in: ids } },
+      data: {
+        deviceCategory: combo.category,
+        deviceUIC: combo.uic,
+        deployableStatus: combo.status as (typeof STATUSES)[number],
+        isAccountedFor: combo.accounted,
+      },
+    });
+  }
+  await prisma.itemStatusHistory.createMany({ data: history });
+  const historyRows = history.length;
 
   // Closed hand receipts, so the DA 2062 velocity chart has something to plot.
   // Spread across recent months; each carries a couple of items so the stack
@@ -119,6 +148,19 @@ async function main() {
     orderBy: { createdAt: "asc" },
   });
   const actor = await prisma.user.findFirst({ where: { role: "ADMIN" }, select: { id: true } });
+
+  // Which demo receipts already exist — ONE query up front, rather than a
+  // findUnique per iteration inside the loop below.
+  const plannedNumbers: string[] = [];
+  for (let m = 0; m < 6; m++) for (let k = 0; k < 2; k++) plannedNumbers.push(`DEMO-${String(m).padStart(2, "0")}${k}`);
+  const existingNumbers = new Set(
+    (
+      await prisma.transfer.findMany({
+        where: { receiptNumber: { in: plannedNumbers } },
+        select: { receiptNumber: true },
+      })
+    ).map((t) => t.receiptNumber),
+  );
 
   let receipts = 0;
   for (let m = 0; m < 6; m++) {
@@ -130,8 +172,9 @@ async function main() {
       const closedAt = new Date(now - (m * 30 + 5) * day);
       const receiptNumber = `DEMO-${String(m).padStart(2, "0")}${k}`;
       // Idempotent: re-running the fixture must not collide on the unique
-      // receiptNumber or pile up duplicate receipts.
-      if (await prisma.transfer.findUnique({ where: { receiptNumber }, select: { id: true } })) continue;
+      // receiptNumber or pile up duplicate receipts. Checked against the set
+      // fetched above rather than a query per iteration.
+      if (existingNumbers.has(receiptNumber)) continue;
 
       await prisma.transfer.create({
         data: {
