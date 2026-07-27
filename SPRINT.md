@@ -23,7 +23,7 @@ When instructed to execute a specific Day, follow these rules strictly:
     - Generate the migration, apply it locally, and ensure TypeScript types update.
 
 ## Day 2: The UI & Frontend Heavy-Lifting
-- [ ] **Analytics Dashboard Route:** Build a single-view dashboard at a new route using `shadcn/ui` and `lucide-react` in a CSS Grid (Global filters on top, charts in the middle, unit distribution at the bottom).
+- [x] **Analytics Dashboard Route:** Build a single-view dashboard at a new route using `shadcn/ui` and `lucide-react` in a CSS Grid (Global filters on top, charts in the middle, unit distribution at the bottom).
     - **Global UIC Filter:** Add a `shadcn/ui` Select dropdown at the top of the page to filter by `deviceUIC`. It must default to "All Units". When a specific UIC is selected, ALL widgets on the page must dynamically re-fetch and filter their data for that exact unit.
     - **Widget 1 (Audit Readiness):** Recharts donut chart showing `isAccountedFor` true vs false.
     - **Widget 2 (Fleet KPIs):** KPI cards showing the current count of items "In Service" (`DEPLOYED`) side-by-side with items "Ready" (`READY_TO_DEPLOY`), grouped by device category.
@@ -31,7 +31,7 @@ When instructed to execute a specific Day, follow these rules strictly:
     - **Widget 4 (DA Form 2062 Velocity):** Recharts stacked bar chart counting completed transfers per month, stacked by item category.
     - **Widget 5 (Unit Allocation Leaderboard):** A scrollable `shadcn/ui` Table/List card showing each `deviceUIC` and the total quantity of items assigned to it (broken down by Total, Deployed, and Ready). Clicking a unit in this list should update the Global UIC Filter.
     - **Chart Interactive Features:** Add a `shadcn/ui` ToggleGroup to the time-series charts for 30d, 90d, 6m, 1y views. Add a dropdown menu to all charts using `html-to-image` to export a PNG, and a CSV export for the raw JSON data.
-- [ ] **Sorting, Grouping, & Bulk Actions:** Update the main inventory table. Group items by `deployableStatus` by default. Add a new table column for `deviceUIC` and allow filtering by it. Implement compound sorting (e.g., Manufacturer then Serial Number). Add a bulk-action checkbox feature allowing admins to update the `deployableStatus` or `isAccountedFor` status for multiple items simultaneously.
+- [x] **Sorting, Grouping, & Bulk Actions:** Update the main inventory table. Group items by `deployableStatus` by default. Add a new table column for `deviceUIC` and allow filtering by it. Implement compound sorting (e.g., Manufacturer then Serial Number). Add a bulk-action checkbox feature allowing admins to update the `deployableStatus` or `isAccountedFor` status for multiple items simultaneously.
 
 ## Day 3: Security & Auth Hardening
 - [ ] **Rate Limiting:** Implement IP-based rate limiting using Vercel KV (Redis) and Next.js middleware. Limit auth routes (`/api/auth`, login, reset) to 5 attempts per 15 minutes per IP. Limit general API routes to 100 requests per minute to prevent scraping.

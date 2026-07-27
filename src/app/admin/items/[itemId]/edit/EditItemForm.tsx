@@ -9,6 +9,8 @@ type ItemValues = {
   model: string;
   serialNumber: string;
   homeUnit: string | null;
+  deviceUIC: string | null;
+  deviceCategory: string | null;
   deviceName: string | null;
   notes: string | null;
 };
@@ -19,9 +21,14 @@ const fields = [
   ["serialNumber", "Serial number", true],
   ["deviceName", "Device Name", true],
   ["homeUnit", "Home unit", false],
+  ["deviceUIC", "Unit (UIC)", false],
+  // Category groups the fleet in analytics and filters the items table. Free
+  // text so a new class of device needs no migration; the datalist below just
+  // nudges toward existing spellings.
+  ["deviceCategory", "Category", false],
 ] as const;
 
-export function EditItemForm({ item }: { item: ItemValues }) {
+export function EditItemForm({ item, categories = [] }: { item: ItemValues; categories?: string[] }) {
   const [state, action, pending] = useActionState(updateItemAction, undefined);
   const saved = !!(state && "ok" in state && state.ok);
 
@@ -40,9 +47,17 @@ export function EditItemForm({ item }: { item: ItemValues }) {
               name={name}
               required={req}
               defaultValue={item[name] ?? ""}
+              list={name === "deviceCategory" ? "device-category-options" : undefined}
             />
           </div>
         ))}
+        {/* Suggestions only — the field stays free text, so a new category can
+            be typed without anyone editing code. */}
+        <datalist id="device-category-options">
+          {categories.map((c) => (
+            <option key={c} value={c} />
+          ))}
+        </datalist>
         <div className="field col-span-2">
           <label className="label" htmlFor="notes">Notes</label>
           <textarea id="notes" className="textarea" name="notes" defaultValue={item.notes ?? ""} />

@@ -35,9 +35,16 @@ describe("listItems", () => {
     expect(whereOf()).toBeUndefined();
   });
 
+  // Rows are grouped by readiness by DEFAULT, which prepends this clause to
+  // every ORDER BY. The sort tests below pass `group: "none"` so they assert
+  // the sort contract itself, undisturbed by grouping; the grouped default
+  // gets its own tests immediately after.
+  const GROUP_CLAUSE = { deployableStatus: { sort: "asc", nulls: "last" } };
+  const orderOf = () => vi.mocked(prisma.item.findMany).mock.calls[0][0]!.orderBy;
+
   it("paginates with skip/take and a stable default order (createdAt desc, id asc)", async () => {
     vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
-    await listItems({ page: 3, pageSize: 10 });
+    await listItems({ page: 3, pageSize: 10, group: "none" });
     const arg = vi.mocked(prisma.item.findMany).mock.calls[0][0]!;
     expect(arg.take).toBe(10);
     expect(arg.skip).toBe(20); // (page 3 - 1) * 10
@@ -46,22 +53,22 @@ describe("listItems", () => {
 
   it("sorts by a server-sortable column, mapping straight to the like-named column", async () => {
     vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
-    await listItems({ sort: "make", dir: "asc" });
-    expect(vi.mocked(prisma.item.findMany).mock.calls[0][0]!.orderBy).toEqual([{ make: "asc" }, { id: "asc" }]);
+    await listItems({ sort: "make", dir: "asc", group: "none" });
+    expect(orderOf()).toEqual([{ make: "asc" }, { id: "asc" }]);
   });
 
   it("maps the derived auditState sort to lastAuditedAt, nulls last, in both directions", async () => {
     vi.mocked(prisma.item.count).mockResolvedValue(100);
 
-    await listItems({ sort: "auditState", dir: "asc" });
-    expect(vi.mocked(prisma.item.findMany).mock.calls[0][0]!.orderBy).toEqual([
+    await listItems({ sort: "auditState", dir: "asc", group: "none" });
+    expect(orderOf()).toEqual([
       { lastAuditedAt: { sort: "asc", nulls: "last" } },
       { id: "asc" },
     ]);
 
     vi.mocked(prisma.item.findMany).mockClear();
-    await listItems({ sort: "auditState", dir: "desc" });
-    expect(vi.mocked(prisma.item.findMany).mock.calls[0][0]!.orderBy).toEqual([
+    await listItems({ sort: "auditState", dir: "desc", group: "none" });
+    expect(orderOf()).toEqual([
       { lastAuditedAt: { sort: "desc", nulls: "last" } },
       { id: "asc" },
     ]);
@@ -69,8 +76,48 @@ describe("listItems", () => {
 
   it("ignores an unknown sort key, falling back to the default order", async () => {
     vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
-    await listItems({ sort: "bogus", dir: "asc" });
-    expect(vi.mocked(prisma.item.findMany).mock.calls[0][0]!.orderBy).toEqual([{ createdAt: "desc" }, { id: "asc" }]);
+    await listItems({ sort: "bogus", dir: "asc", group: "none" });
+    expect(orderOf()).toEqual([{ createdAt: "desc" }, { id: "asc" }]);
+  });
+
+  it("groups by readiness FIRST by default, ahead of the fallback order", async () => {
+    vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
+    await listItems({});
+    expect(orderOf()).toEqual([GROUP_CLAUSE, { createdAt: "desc" }, { id: "asc" }]);
+  });
+
+  it("keeps the group clause ahead of an explicit sort", async () => {
+    // Grouping must outrank the user's sort, or rows from different readiness
+    // states interleave and the group headers become nonsense.
+    vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
+    await listItems({ sort: "make", dir: "asc" });
+    expect(orderOf()).toEqual([GROUP_CLAUSE, { make: "asc" }, { id: "asc" }]);
+  });
+
+  it("orders a compound sort in the order the keys were given", async () => {
+    vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
+    await listItems({ sort: "make,serialNumber", dir: "asc,desc", group: "none" });
+    expect(orderOf()).toEqual([{ make: "asc" }, { serialNumber: "desc" }, { id: "asc" }]);
+  });
+
+  it("filters by UIC without disturbing the search filter", async () => {
+    vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
+    await listItems({ search: "router", uic: "W6BTAA" });
+    const where = vi.mocked(prisma.item.findMany).mock.calls[0][0]!.where as { AND: unknown[] };
+    expect(where.AND).toHaveLength(2);
+    expect(where.AND[1]).toEqual({ deviceUIC: "W6BTAA" });
+  });
+
+  it("applies a UIC filter on its own without wrapping it in AND", async () => {
+    vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
+    await listItems({ uic: "W6BTAA" });
+    expect(vi.mocked(prisma.item.findMany).mock.calls[0][0]!.where).toEqual({ deviceUIC: "W6BTAA" });
+  });
+
+  it("treats a blank UIC as no filter", async () => {
+    vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
+    await listItems({ uic: "   " });
+    expect(vi.mocked(prisma.item.findMany).mock.calls[0][0]!.where).toBeUndefined();
   });
 });
 

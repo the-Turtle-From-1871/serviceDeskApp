@@ -68,6 +68,34 @@ jobs:
               --error \
               --metrics off
 
+  # --- Security-doc guardrail --------------------------------------------------
+  security-docs:
+    name: Security docs current
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # PR-only: the check compares a branch against its merge base with main, which
+    # is not a meaningful question for a push to main itself.
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        # Full history so the merge-base diff (base...HEAD) can be computed.
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fail if security code changed without docs/SECURITY.md
+        # Escape hatch for genuine no-op changes: put "[skip security-doc]" in a
+        # commit message. See scripts/check-security-docs.mjs.
+        #
+        # `github.base_ref` goes through an intermediate env var rather than
+        # `${{ }}` interpolation directly in `run:`. A branch name is attacker-
+        # controlled on a fork PR, so interpolating it into the shell command is
+        # a script-injection hole (semgrep run-shell-injection, sg.run/pkzk).
+        # Quote the expansion.
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: node scripts/check-security-docs.mjs "origin/$BASE_REF"
+
   # --- Compile / build gate ----------------------------------------------------
   build:
     name: Build (next build)

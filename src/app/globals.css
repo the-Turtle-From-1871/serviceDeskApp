@@ -50,9 +50,9 @@
 
   /* Form stock, not floating cards: tight radii, hairlines over blur. */
   --radius: 5px;
-  --radius-sm: 3px;
-  --shadow-sm: 0 1px 0 rgba(25, 28, 24, 0.05);
-  --shadow-md: 0 6px 18px rgba(25, 28, 24, 0.12);
+  --ledger-radius-sm: 3px;
+  --ledger-shadow-sm: 0 1px 0 rgba(25, 28, 24, 0.05);
+  --ledger-shadow-md: 0 6px 18px rgba(25, 28, 24, 0.12);
   --font-sans: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, monospace;
 
@@ -195,7 +195,7 @@ h3 {
 .app-header {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--ledger-shadow-sm);
 }
 .app-header__inner {
   max-width: 960px;
@@ -247,7 +247,7 @@ h3 {
   height: 40px;
   padding: 0;
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ledger-radius-sm);
   background: var(--surface);
   cursor: pointer;
 }
@@ -289,7 +289,7 @@ h3 {
     box-shadow: none;
     border-left: 3px solid var(--primary);
     background: var(--primary-soft);
-    border-radius: var(--radius-sm);
+    border-radius: var(--ledger-radius-sm);
   }
 }
 
@@ -298,7 +298,7 @@ h3 {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--ledger-shadow-sm);
   padding: 22px;
 }
 .card__title {
@@ -337,7 +337,7 @@ h3 {
   gap: 7px;
   height: 40px;
   padding: 0 16px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ledger-radius-sm);
   border: 1px solid transparent;
   background: var(--surface-2);
   color: var(--text);
@@ -420,7 +420,7 @@ h3 {
   height: 40px;
   padding: 0 12px;
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ledger-radius-sm);
   background: var(--surface);
   color: var(--text);
   font-family: inherit;
@@ -510,7 +510,7 @@ input[type="file"].input {
   border: 1px solid var(--red-border);
   color: var(--danger-hover);
   padding: 10px 12px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ledger-radius-sm);
   font-size: 14px;
 }
 .alert-success {
@@ -518,7 +518,7 @@ input[type="file"].input {
   border: 1px solid var(--green-border);
   color: var(--green);
   padding: 10px 12px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ledger-radius-sm);
   font-size: 14px;
 }
 .hint {
@@ -541,8 +541,8 @@ input[type="file"].input {
   padding: 4px;
   background: var(--surface);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-md);
+  border-radius: var(--ledger-radius-sm);
+  box-shadow: var(--ledger-shadow-md);
 }
 .combo__option {
   padding: 8px 10px;
@@ -580,15 +580,15 @@ input[type="file"].input {
   padding: 6px;
   background: var(--surface);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-sm);
+  border-radius: var(--ledger-radius-sm);
+  box-shadow: var(--ledger-shadow-sm);
 }
 .col-menu-panel label {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ledger-radius-sm);
   font-size: 14px;
   cursor: pointer;
 }
@@ -695,7 +695,7 @@ input[type="file"].input {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--ledger-shadow-sm);
 }
 .table {
   width: 100%;
@@ -808,10 +808,33 @@ input[type="file"].input {
   background: var(--primary-soft);
   border-color: #c7d2fe;
 }
-.badge-override {
+/* `badge-override` is the original, override-specific name; `badge-danger` is
+   the same treatment under a generic name, used where the badge means "this is
+   a problem" rather than "a rule was overridden" (e.g. an unaccounted-for item
+   on the /items table). Same declaration block on purpose — one red badge. */
+.badge-override,
+.badge-danger {
   color: var(--danger);
   background: var(--red-soft);
   border-color: var(--red-border);
+}
+
+/* Readiness group header on the /items table. A full-width heading row that
+   separates runs of rows sharing a deployableStatus.
+   NOT sticky: the nearest scrollport is .table-wrap (overflow-x:auto implies
+   overflow-y:auto) which has no bounded height, so it never scrolls
+   vertically — `position:sticky; top:0` would do nothing here except create a
+   stacking context that paints over the sticky selection bar. */
+.group-row th {
+  text-align: left;
+  background: var(--surface-2);
+  border-top: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 6px 12px;
 }
 .audit-dot {
   display: inline-block;
@@ -858,7 +881,7 @@ input[type="file"].input {
   border: 1px solid var(--amber-border);
   color: var(--amber);
   padding: 10px 12px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ledger-radius-sm);
   font-size: 14px;
 }
 
@@ -869,7 +892,7 @@ input[type="file"].input {
   gap: 1px;
   background: var(--border);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ledger-radius-sm);
   overflow: hidden;
 }
 .dl dt {
@@ -903,7 +926,7 @@ input[type="file"].input {
 .timeline li {
   padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ledger-radius-sm);
   background: var(--surface);
   font-size: 14px;
 }
@@ -924,7 +947,7 @@ input[type="file"].input {
 .list li {
   padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ledger-radius-sm);
   background: var(--surface);
 }
 .empty {
@@ -936,7 +959,7 @@ input[type="file"].input {
 /* ---------- Signature pad ---------- */
 .sigpad {
   border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ledger-radius-sm);
   background: var(--surface-2);
   touch-action: none;
   display: block;
@@ -969,7 +992,7 @@ input[type="file"].input {
 }
 .qr-card img {
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ledger-radius-sm);
   padding: 12px;
   background: #fff;
 }
@@ -1136,7 +1159,7 @@ input[type="file"].input {
   align-items: center;
   justify-content: center;
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ledger-radius-sm);
   background: var(--surface-2);
   overflow: hidden;
 }
@@ -1152,7 +1175,7 @@ input[type="file"].input {
   max-width: 42ch;
   text-align: center;
   background: var(--surface);
-  border-radius: var(--radius-sm);
+  border-radius: var(--ledger-radius-sm);
 }
 /* Scan feedback, pinned over the video near the bottom of the frame so it does
    not cover the aiming area. Full-width band, readable at a glance. */

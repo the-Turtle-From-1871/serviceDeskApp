@@ -74,6 +74,8 @@ export default async function AdminHome() {
       <section className="card stack-sm">
         <h2>Manage</h2>
         <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <Link className="btn btn-secondary" href="/admin/analytics">Readiness analytics</Link>
+          <Link className="btn btn-secondary" href="/admin/categories">Device categories</Link>
           <Link className="btn btn-secondary" href="/admin/queue">Service queue</Link>
           <Link className="btn btn-secondary" href="/admin/users">Users</Link>
           <Link className="btn btn-secondary" href="/admin/audit">Audit</Link>

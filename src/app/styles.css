@@ -1,0 +1,128 @@
+/* ============================================================
+   Stylesheet entry point.
+
+   This app has TWO styling systems living side by side, on purpose:
+
+     1. globals.css — the hand-rolled "property book" design system
+        (.card / .btn / .stack / .table ...) that every pre-existing
+        page is built on. Untouched, and not being migrated.
+     2. Tailwind v4 + shadcn/ui — used for NEW UI only, starting with
+        the analytics dashboard.
+
+   Two rules make that coexistence safe:
+
+   (a) NO PREFLIGHT. Tailwind's base reset is deliberately not imported
+       (only the theme + utilities layers are). Preflight would restyle
+       every existing page — unstyling headings, lists and tables app
+       wide. globals.css already supplies the parts that matter
+       (`box-sizing: border-box` and the margin/padding reset).
+
+   (b) LAYER ORDER. globals.css is pulled into a `legacy` cascade layer
+       declared BEFORE Tailwind's layers, so a Tailwind utility always
+       beats a globals.css rule of equal specificity. Without this,
+       globals.css (being unlayered) would outrank every Tailwind
+       utility no matter the specificity — unlayered styles always win
+       over layered ones. Importing the whole file into one layer keeps
+       its rules' order relative to EACH OTHER identical.
+
+   (c) NARROW @source. Tailwind only scans the directories that actually
+       use it. See the @source block below — this is load-bearing, not
+       an optimisation.
+
+   NAME COLLISIONS ARE THE HAZARD HERE. Because `legacy` sits BELOW
+   Tailwind's layers, anything Tailwind emits under a name globals.css
+   also uses will silently beat it app-wide. Two classes of collision,
+   both already bitten once:
+
+     - CUSTOM PROPERTIES. Tailwind's theme layer defines --shadow-sm,
+       --shadow-md, --radius-sm (and more) on :root. globals.css used
+       those exact names, so its deliberate hairline shadow was being
+       replaced by Tailwind's generic drop shadow on every existing
+       page. The ledger tokens are now namespaced --ledger-* to make the
+       collision impossible. Do NOT reintroduce an unprefixed name that
+       Tailwind also ships.
+     - CLASS NAMES. Tailwind generates a `.container` utility (with
+       responsive max-widths) as soon as it sees `class="container"` in
+       a scanned file — which would override globals.css's .container /
+       -narrow / -mid / -wide caps on every page. Narrow @source keeps
+       the legacy markup out of Tailwind's sight entirely.
+   ============================================================ */
+
+@layer legacy, theme, base, components, utilities;
+
+@import "./globals.css" layer(legacy);
+@import "tailwindcss/theme.css" layer(theme);
+/* source(none) turns OFF automatic content detection. Without it, a bare
+   @source only ADDS to the automatic scan (which covers the whole project),
+   so the legacy markup is still seen and `.container` is still generated. */
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+
+/* Scan ONLY the directories that use Tailwind. Widening this to all of
+   src re-introduces the `.container` collision described above (every
+   legacy page uses that class name), so when new Tailwind UI is added
+   outside these paths, add its directory here rather than broadening to
+   "../". Verify after any change: build, then confirm the compiled CSS
+   contains no bare `.container{` rule in the utilities layer. */
+@source "../components/ui";
+@source "./admin/analytics";
+
+/* ------------------------------------------------------------
+   shadcn/ui design tokens, mapped onto the ledger palette that
+   globals.css already defines. Single source of truth: these are
+   `var()` references, not copied hex values, so retuning the ledger
+   palette in globals.css retunes the dashboard with it.
+
+   NOTE: shadcn's `--primary` is deliberately renamed `--primary-token`
+   here. globals.css already defines `--primary` on :root, so writing
+   `--primary: var(--primary)` would be a self-reference and resolve to
+   nothing. The alias keeps both systems pointing at one colour.
+   ------------------------------------------------------------ */
+:root {
+  --background: var(--surface);
+  --foreground: var(--text);
+  --card: var(--surface);
+  --card-foreground: var(--text);
+  --popover: var(--surface);
+  --popover-foreground: var(--text);
+  --primary-token: var(--primary);
+  --primary-token-foreground: var(--primary-fg);
+  --secondary: var(--surface-2);
+  --secondary-foreground: var(--text);
+  --muted: var(--surface-2);
+  --muted-foreground: var(--text-muted);
+  --accent: var(--primary-soft);
+  --accent-foreground: var(--primary);
+  --destructive: var(--danger);
+  --destructive-foreground: #ffffff;
+  --input: var(--border-strong);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary-token);
+  --color-primary-foreground: var(--primary-token-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-surface-2: var(--surface-2);
+  --color-text-subtle: var(--text-subtle);
+
+  --radius-ledger: var(--radius);
+  --radius-ledger-sm: var(--ledger-radius-sm);
+
+  --font-sans: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, monospace;
+}

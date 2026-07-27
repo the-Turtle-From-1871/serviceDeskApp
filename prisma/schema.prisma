@@ -42,6 +42,8 @@ model User {
   passwordResets      PasswordResetToken[]  @relation("PasswordResets")
   itemEdits           ItemEdit[]            @relation("ItemEdits")
   itemAudits          ItemAudit[]           @relation("ItemAudits")
+  itemStatusChanges   ItemStatusHistory[]   @relation("ItemStatusChanges")
+  createdCategories   DeviceCategory[]      @relation("CreatedCategories")
   signatures          Signature[]           @relation("UserSignatures")
   createdContacts     Contact[]             @relation("CreatedContacts")
   publicAccessUpdates PublicAccessSetting[] @relation("PinUpdates")
@@ -89,6 +91,13 @@ model Item {
   // DB-unique field — many devices share a UIC.
   deviceUIC                  String?
   deviceName                 String?
+  // Free-text device class used to group the fleet in analytics and to filter
+  // the /items table — "Laptops", "Switches", "Printers". Deliberately a
+  // nullable String and NOT an enum: the set of categories is open-ended and
+  // owned by the property book, so adding one must not require a migration.
+  // Importable (see csv.ts) so the existing catalogue can be backfilled in bulk
+  // through the normal CSV import rather than by hand. Normalized on write.
+  deviceCategory             String?
   notes                      String?
   // The email of the person actually using the device. Distinct from the
   // hand-receipt holder (derived from the latest OPEN Transfer), which stays the
@@ -126,14 +135,44 @@ model Item {
   serviceQueueItem ServiceQueueItem?
   edits            ItemEdit[]
   audits           ItemAudit[]
+  statusHistory    ItemStatusHistory[]
 
   // The /items list sorts by createdAt desc on every load (unbounded today).
   @@index([createdAt])
+  // Analytics groups/filters the fleet by category and by issuing unit, and the
+  // /items table filters on deviceUIC. Both are low-cardinality equality
+  // filters feeding groupBy — a plain B-tree serves them.
+  @@index([deviceCategory])
+  @@index([deviceUIC])
   // Audit-status sort on /items: ORDER BY lastAuditedAt (nulls last).
   @@index([lastAuditedAt])
   // Trigram GIN for the public, per-keystroke serial search (searchItemsBySerial),
   // which is `ILIKE '%q%'` — a leading wildcard a B-tree can't serve. Needs pg_trgm.
   @@index([serialNumber(ops: raw("gin_trgm_ops"))], type: Gin, map: "Item_serialNumber_trgm_idx")
+}
+
+// The managed vocabulary of device categories ("Laptops", "Switches"), curated
+// by admins.
+//
+// DELIBERATELY NOT A FOREIGN KEY on Item. `Item.deviceCategory` stays a plain
+// indexed string, because the CSV import must be able to carry a category for a
+// device the property book has not registered yet — the same "learn as you go"
+// model the Unit table uses. This table is the *canonical list* that the UI
+// offers and that the importer teaches itself, not a constraint that can make an
+// import fail. Consequence to keep in mind: deleting a row here does not touch
+// items already carrying that string, which is exactly why deletion is refused
+// while the category is still in use (see deleteDeviceCategory).
+model DeviceCategory {
+  id String @id @default(cuid())
+  // citext + unique: "Laptops" and "laptops" are one category, not two.
+  // Mirrors User.email / Item.serialNumber identity handling.
+  name        String   @unique @db.Citext
+  createdBy   User?    @relation("CreatedCategories", fields: [createdById], references: [id], onDelete: SetNull)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([createdById])
 }
 
 model Unit {
@@ -225,6 +264,11 @@ model Transfer {
   @@index([createdAt])
   // Dashboard timer sweep filters status='OPEN' AND dueAt <= horizon.
   @@index([status, dueAt])
+  // Analytics velocity chart filters status='CLOSED' AND closedAt >= start on
+  // every dashboard load (all state is URL-driven, so each filter change
+  // re-queries). No existing index serves a closedAt range — [status, dueAt]
+  // cannot, and purgeAfter is a different column.
+  @@index([status, closedAt])
   // Trigram GIN for the public, per-keystroke receipt-number search
   // (searchReceiptsByNumber), `ILIKE '%q%'`. Needs pg_trgm.
   @@index([receiptNumber(ops: raw("gin_trgm_ops"))], type: Gin, map: "Transfer_receiptNumber_trgm_idx")
@@ -416,6 +460,45 @@ model ItemAudit {
   createdAt      DateTime @default(now())
 
   @@index([itemId, createdAt])
+}
+
+// Operational-readiness timeline for an item. One row per change to
+// deployableStatus or isAccountedFor, written in the same transaction as the
+// Item update so the two can never diverge.
+//
+// SNAPSHOT, not a delta: each row records the item's state *after* the change,
+// so the fleet's composition at any instant T is "for each item, the newest row
+// with createdAt <= T" — one indexed DISTINCT ON, with no need to replay deltas
+// from the beginning of time. That is what the stacked-area chart reads.
+//
+// Forward-only by design. The migration seeds ONE baseline row per existing
+// item at backfill time; there is no invented history before that point,
+// because none was ever recorded. Charts are therefore flat until real changes
+// accrue — that is honest, not a bug.
+//
+// Nullable actor + denormalized name snapshot so the timeline survives deletion
+// of the acting account (mirrors ItemEdit / ItemAudit).
+model ItemStatusHistory {
+  id               String            @id @default(cuid())
+  item             Item              @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  itemId           String
+  // The item's state as of this row. deployableStatus stays nullable because
+  // an untriaged item legitimately has no readiness state yet (see Item).
+  deployableStatus DeployableStatus?
+  isAccountedFor   Boolean
+  changedBy        User?             @relation("ItemStatusChanges", fields: [changedById], references: [id], onDelete: SetNull)
+  changedById      String?
+  changedByName    String
+  // "system:backfill" for the migration's baseline rows, "bulk" for a bulk
+  // action, "item-edit" for a single-item save. Lets the timeline explain a
+  // step change without joining anything.
+  source           String
+  createdAt        DateTime          @default(now())
+
+  // The chart's hot path: newest row per item at or before a cutoff.
+  @@index([itemId, createdAt])
+  // Range scan when bucketing the whole fleet over a window.
+  @@index([createdAt])
 }
 
 // Single-row org config for the public-access PIN gate. `id` is pinned to

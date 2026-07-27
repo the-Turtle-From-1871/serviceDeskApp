@@ -31,7 +31,7 @@ The core models (`prisma/schema.prisma`) are `User`, `Item`, and `Transfer`, des
 - Accounts are **admin-provisioned only** — self-registration has been removed. `User` rows are operator/staff logins for the kiosk, not a record of every party who ever appears on a receipt.
 
 ### Item
-`id, make, model, serialNumber (unique, citext), homeUnit?, deviceUIC? (unit issued-to code), deviceName?, notes?, currentUserEmail?, currentPosition?, MDM telemetry (lastLogonUserPrincipalName?, lastLogonDate?, enrollmentDate?, compliance? — imported, read-only), status (ACTIVE|RETIRED), isAccountedFor (default true), deployableStatus? (DEPLOYED|READY_TO_DEPLOY|IN_REPAIR|RETIRED, nullable — operational readiness), lastAuditedAt? (denormalized audit recency), createdById, timestamps`
+`id, make, model, serialNumber (unique, citext), homeUnit?, deviceUIC? (unit issued-to code, indexed), deviceCategory? (free-text device class — "Laptops", "Switches"; indexed), deviceName?, notes?, currentUserEmail?, currentPosition?, MDM telemetry (lastLogonUserPrincipalName?, lastLogonDate?, enrollmentDate?, compliance? — imported, read-only), status (ACTIVE|RETIRED), isAccountedFor (default true), deployableStatus? (DEPLOYED|READY_TO_DEPLOY|IN_REPAIR|RETIRED, nullable — operational readiness), lastAuditedAt? (denormalized audit recency), createdById, timestamps`
 - `serialNumber` is **`@unique @db.Citext`** — a device's case-insensitive identity (like `User.email`), so it can't be logged twice even with different casing; the CSV import dedups case-insensitively and relies on the DB constraint (`skipDuplicates`).
 - No `currentHolderId`: "who holds it now" is derived by reading the most recent `Transfer` for the item (`getLastReceiver`). A standard `USER` may edit only `currentUserEmail` + `currentPosition` (`userItemDetailsSchema`); every other field is admin-only.
 - The `/items` list is **server-side paginated + sorted** (`listItems`); only the current page reaches the client.
@@ -53,9 +53,11 @@ Beyond the three above:
 - **`ReturnTransaction`** — one row per return event (`PARTIAL`|`FULL`) with the processing tech's name + signature snapshot and the JSON of returned serials.
 - **`ServiceQueueItem`** — the per-item service-queue entry (unique `itemId`; `PENDING`|`COMPLETED`).
 - **`ItemAudit` / `ItemEdit`** — annual-audit events and the field-level edit history for an item (nullable actor + denormalized name, so history survives account deletion).
+- **`ItemStatusHistory`** — the operational-readiness timeline. **Snapshot rows, not deltas**: each row records an item's `deployableStatus` + `isAccountedFor` *after* a change, so the fleet's composition at any instant is "the newest row per item at or before T" — one indexed `DISTINCT ON`, with no delta replay from the beginning of time. Written in the **same transaction** as the `Item` update, and only for items whose state actually changed. Forward-only by design: the introducing migration seeds one baseline row per item and fabricates no history before that point, so the status-over-time chart is flat until real changes accrue. Nullable actor + denormalized name, like `ItemEdit`.
 - **`Signature`** — a named signature owned by an `ADMIN` (printed as the signer on the DA 2062); non-admins use the single `User.signatureImage`.
 - **`Contact`** — a shared, org-wide address book for receipt autofill. The builder queries it through a **server-side type-ahead** (`searchContactsAction`, token-AND over name/email/unit) so the full book (outside people's PII) never ships to the client; admins manage the book. Any signed-in user can search; only admins write.
 - **`Unit`** — maps a unit abbreviation to its full name; feeds CSV home-unit auto-detection.
+- **`DeviceCategory`** — the curated vocabulary of device classes ("Laptops", "Switches"), managed by admins at `/admin/categories`. `name` is citext-unique. **Deliberately not a foreign key** on `Item.deviceCategory`, which stays a plain indexed string: a CSV import must be able to carry a category the property book hasn't registered yet, so an unknown category can never fail an import. Coherence is enforced in the service layer instead — deletion is refused while any item still carries the name, and imports register unseen names (`learnCategories`, mirroring `learnUnits`).
 - **`ImportBatch`** — an audit record of each CSV import (counts + skipped rows).
 - **`PasswordResetToken`** — single-use, hashed, expiring self-serve reset tokens.
 
@@ -122,6 +124,17 @@ Two independent deadlines, both built on `modules/timers/due.ts`:
 
 - **Audit status** (`modules/audit`) — items are audited annually (`AUDIT_PERIOD_YEARS` = 1). The item page shows a light derived from the newest `ItemAudit`: `compliant` / `overdue` / `never`. Recording an audit (admin) snapshots the auditing tech's name + signature.
 - **Edit history** — every change to an item's loggable fields writes one `ItemEdit` (the field-level diff + editor name), surfaced on the item page and the admin audit log.
+- **Readiness history** — separately from `ItemEdit`, any change to `deployableStatus` / `isAccountedFor` writes an `ItemStatusHistory` snapshot in the same transaction. This is what the analytics status-over-time chart reads.
+
+## Readiness analytics (`/admin/analytics`)
+
+Admin-only (`requireAdmin`, which re-reads role + `isActive` from the DB per request). Five widgets — audit readiness, fleet KPIs by category, fleet status over time, DA 2062 velocity, unit allocation.
+
+- **State lives in the URL** (`?uic=&range=`). Changing a filter re-renders on the server and every widget re-queries, so there is exactly one filtering implementation and it is the SQL one. Views are shareable and bookmarkable.
+- **Bounded by construction.** The page is a fixed number of queries — `groupBy` aggregation plus two parameterized `$queryRaw` time-series — and does not grow with fleet size. Time buckets step coarser as the window widens (daily → weekly → monthly) so a series never exceeds ~90 points.
+- **The unit leaderboard is deliberately NOT scoped by the global UIC filter** — it is the control used to pick a unit, so it must keep listing every unit while one is selected. It uses two queries (top-N units, then their status breakdown) rather than one capped `groupBy`, because capping a two-column `groupBy` slices through the middle of a unit and under-reports its total.
+- **Velocity counts items, not receipts** — a receipt can carry mixed categories, so per-category receipt counts would double-count and the stack would not sum to the total. It also cannot see past the 90-day receipt purge window; the UI says so.
+- **Colour is validated, not chosen by eye** (`admin/analytics/palette.ts`). The accountability donut is blue-vs-red because green-vs-red is indistinguishable under deuteranopia. Every chart ships a legend and a table view — the documented mitigation for palette slots under 3:1 contrast on the ledger surface.
 
 ## Background worker (cron)
 
@@ -134,6 +147,7 @@ Two independent deadlines, both built on `modules/timers/due.ts`:
 - The JWT carries `id` + `role`, signed with `AUTH_SECRET`.
 - **Freshness**: `requireUser`/`requireAdmin` (via `defaultGetSession` in `lib/authz.ts`) re-read `role` and `isActive` from the DB on each protected request. A demoted admin or deactivated user is rejected on their next request — not when the token expires.
 - **Self-lockout guards**: an admin cannot demote or deactivate their own account.
+- Full control inventory (including the public PIN gate, password-reset hardening, the Ed25519 receipt seal, RLS posture, and CI security gates): [`SECURITY.md`](./SECURITY.md).
 
 ### Why Auth.js and not Supabase Auth
 
