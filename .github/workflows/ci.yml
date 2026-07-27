@@ -86,7 +86,15 @@ jobs:
       - name: Fail if security code changed without docs/SECURITY.md
         # Escape hatch for genuine no-op changes: put "[skip security-doc]" in a
         # commit message. See scripts/check-security-docs.mjs.
-        run: node scripts/check-security-docs.mjs "origin/${{ github.base_ref }}"
+        #
+        # `github.base_ref` goes through an intermediate env var rather than
+        # `${{ }}` interpolation directly in `run:`. A branch name is attacker-
+        # controlled on a fork PR, so interpolating it into the shell command is
+        # a script-injection hole (semgrep run-shell-injection, sg.run/pkzk).
+        # Quote the expansion.
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: node scripts/check-security-docs.mjs "origin/$BASE_REF"
 
   # --- Compile / build gate ----------------------------------------------------
   build:

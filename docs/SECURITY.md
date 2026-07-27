@@ -348,6 +348,13 @@ permanently redden the pipeline.
 `security-events: write`. SARIF upload is skipped for forked PRs, whose read-only
 token can't write `security-events`.
 
+**No `${{ }}` interpolation of `github` context data into `run:` steps.** Branch
+names and other `github` context values are attacker-controlled on a fork PR, so
+interpolating them into a shell command is script injection. Pass them through an
+intermediate `env:` var and quote the expansion. Semgrep enforces this
+(`run-shell-injection`) — it caught exactly this bug in the `Security docs
+current` job before it merged.
+
 **`main` is branch-protected** — both checks required, `strict` mode (the branch
 must be up to date). Admin bypass exists for emergencies only.
 
