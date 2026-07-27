@@ -122,7 +122,10 @@ JWT (no DB session table). Authorization is enforced in `requireUser` /
 `requireAdmin`, which re-read `role`/`isActive` from the DB each request, so
 deactivations and role changes take effect immediately. See
 [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) for the full model and **why we
-use Auth.js rather than Supabase Auth**.
+use Auth.js rather than Supabase Auth**, and
+[`docs/SECURITY.md`](./docs/SECURITY.md) for the complete inventory of security
+controls (authn/authz, the public PIN gate, reset hardening, crypto seal, RLS
+posture, CI gates) plus the known gaps and accepted risks.
 
 ## Testing
 

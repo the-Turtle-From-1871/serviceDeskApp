@@ -7,6 +7,7 @@
     "build": "node scripts/copy-wasm.mjs && prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
+    "check:security-docs": "node scripts/check-security-docs.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest run .test.tsx",

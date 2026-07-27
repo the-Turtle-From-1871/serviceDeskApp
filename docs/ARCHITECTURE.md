@@ -147,6 +147,7 @@ Admin-only (`requireAdmin`, which re-reads role + `isActive` from the DB per req
 - The JWT carries `id` + `role`, signed with `AUTH_SECRET`.
 - **Freshness**: `requireUser`/`requireAdmin` (via `defaultGetSession` in `lib/authz.ts`) re-read `role` and `isActive` from the DB on each protected request. A demoted admin or deactivated user is rejected on their next request — not when the token expires.
 - **Self-lockout guards**: an admin cannot demote or deactivate their own account.
+- Full control inventory (including the public PIN gate, password-reset hardening, the Ed25519 receipt seal, RLS posture, and CI security gates): [`SECURITY.md`](./SECURITY.md).
 
 ### Why Auth.js and not Supabase Auth
 
