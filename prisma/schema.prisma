@@ -66,13 +66,23 @@ enum ItemStatus {
   RETIRED
 }
 
+// Operational-readiness state of a device (distinct from ItemStatus, which is
+// the lifecycle ACTIVE/RETIRED). Separate Postgres enum type — the shared
+// RETIRED value name does not collide across enum types.
+enum DeployableStatus {
+  DEPLOYED
+  READY_TO_DEPLOY
+  IN_REPAIR
+  RETIRED
+}
+
 model Item {
-  id                         String         @id @default(cuid())
+  id                         String            @id @default(cuid())
   make                       String
   model                      String
   // A device's identity. citext + unique: case-insensitive, so the same physical
   // device can't be logged twice (incl. "ABC123" vs "abc123"). Mirrors User.email.
-  serialNumber               String         @unique @db.Citext
+  serialNumber               String            @unique @db.Citext
   homeUnit                   String?
   // Unit Identification Code (UIC) of the unit the device is issued to. Importable
   // and editable-via-import; a change is logged to ItemEdit like deviceName. Not a
@@ -85,7 +95,7 @@ model Item {
   // signed custody record and is never edited here. @map keeps the physical
   // column name ("currentUser") so renaming the field for clarity needs no
   // migration — the DB column is unchanged.
-  currentUserEmail           String?        @map("currentUser")
+  currentUserEmail           String?           @map("currentUser")
   currentPosition            String?
   // MDM telemetry, imported from the asset/MDM CSV export and refreshed on each
   // import. Stored as-is (plain text — no date parsing). Nullable; blank on import
@@ -94,12 +104,19 @@ model Item {
   lastLogonDate              String?
   enrollmentDate             String?
   compliance                 String?
-  status                     ItemStatus     @default(ACTIVE)
-  createdBy                  User           @relation("CreatedItems", fields: [createdById], references: [id])
+  status                     ItemStatus        @default(ACTIVE)
+  // Operational readiness (Day 1 sprint). isAccountedFor defaults true (assume
+  // present until an audit says otherwise). deployableStatus is intentionally
+  // nullable with NO default: existing rows stay "unknown" until triaged, and an
+  // open hand receipt does NOT imply DEPLOYED (a device may be turned in for
+  // service), so there is deliberately no automatic backfill.
+  isAccountedFor             Boolean           @default(true)
+  deployableStatus           DeployableStatus?
+  createdBy                  User              @relation("CreatedItems", fields: [createdById], references: [id])
   createdById                String
   transferItems              TransferItem[]
-  createdAt                  DateTime       @default(now())
-  updatedAt                  DateTime       @updatedAt
+  createdAt                  DateTime          @default(now())
+  updatedAt                  DateTime          @updatedAt
   // Denormalized MAX(ItemAudit.createdAt), maintained by recordAudit. Lets the
   // /items list ORDER BY audit recency (= audit-status severity) server-side:
   // auditState itself is derived/time-dependent and not stored, so it can't be an

@@ -3,6 +3,14 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-07-27
+
+### Added
+- Operational-readiness tracking on inventory items: each item now carries an `isAccountedFor` flag (defaults to accounted-for) and a `deployableStatus` state — one of `DEPLOYED`, `READY_TO_DEPLOY`, `IN_REPAIR`, or `RETIRED`. These back the upcoming analytics dashboard and inventory grouping and are not yet surfaced in the UI.
+
+### Notes
+- Migration `20260727120000_item_operational_readiness` adds two columns to `Item`: `isAccountedFor` (`BOOLEAN NOT NULL DEFAULT true` — a metadata-only change on Postgres 11+, so safe on the large table) and `deployableStatus` (nullable `DeployableStatus` enum, no default). Existing rows are left with `deployableStatus = NULL` ("unknown") on purpose — there is deliberately no backfill from hand-receipt state, since an open receipt can mean a device was turned in for service rather than deployed. Apply with `npx prisma migrate deploy`; prod is hand-applied via the standard manual process.
+
 ## 2026-07-23
 
 ### Added

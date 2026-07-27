@@ -17,7 +17,7 @@ When instructed to execute a specific Day, follow these rules strictly:
 ## Day 1: Foundation & Data
 - [x] **CI/CD Pipeline:** Create a GitHub Actions workflow in `.github/workflows/ci.yml`. It must install dependencies, run a standard Semgrep SAST scan, and verify the Next.js app compiles with `npm run build`.
 - [ ] **Baseline SAST Scan:** Run `/plugin install claude-security@claude-plugins-official` (if not installed) and execute `/claude-security scan codebase`. Ensure the codebase is clean before writing new features.
-- [ ] **Prisma Schema Update:** Update `prisma/schema.prisma` to track operational readiness. 
+- [x] **Prisma Schema Update:** Update `prisma/schema.prisma` to track operational readiness. 
     - Add an `isAccountedFor` boolean (default `true`) to the `items` model.
     - Add a `deployableStatus` enum with states: `DEPLOYED`, `READY_TO_DEPLOY`, `IN_REPAIR`, and `RETIRED`. Add this field to the `items` model.
     - Generate the migration, apply it locally, and ensure TypeScript types update.
