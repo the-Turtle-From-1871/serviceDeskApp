@@ -11,6 +11,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 - The **Sort by** control on `/items` now offers every column the table displays. Readiness was previously the only exception.
 
+### Fixed
+- **Blanks on `/items` now follow the sort direction instead of being pinned to the bottom.** Sorting by **Device Name** descending used to open on a screen of dashes, and reversing a sort left part of the list sitting still — which reads as the sort being broken. Empty values now sort as a value: they gather at one end and swap ends when you reverse, so reversing a sort reverses the whole list. This applies to every sortable column, including **Unit (UIC)**, **Category** and **Audit**, and behaves the same whether or not Readiness is one of your sort keys.
+- **The tables on `/admin/analytics` are ruled consistently.** The **Fleet status** and **Unit allocation** tables drew a heavy 3px frame down their sides and between rows, while the final row was left with no closing line at all — so the bottom of each table trailed off and did not match the rows above it. Every divider, including the one under the last row, is now the same 1px ledger hairline. The **View as table** mode on each chart is ruled the same way.
+
 ### Notes
 - No schema change and no new column: readiness is still worked out from live signals at query time. Sorting by it runs a different query behind the scenes; searching and the Unit (UIC) filter behave identically either way, and a test asserts that by comparing both paths row for row.
 

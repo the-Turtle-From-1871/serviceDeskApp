@@ -40,12 +40,15 @@ function TableHeader({ className, ...props }: React.ComponentProps<"thead">) {
   return (
     <thead
       data-slot="table-header"
-      // The row rule itself comes from TableRow; this only has to make sure a
-      // header row still gets one if a caller passes a bare <tr>.
-      className={cn(
-        "[&_tr]:border-x-0 [&_tr]:border-t-0 [&_tr]:border-b [&_tr]:border-solid",
-        className,
-      )}
+      // No border rules here on purpose. Upstream shadcn carries
+      // `[&_tr]:border-b`, but a `[&_tr]:` variant compiles to a descendant
+      // selector — specificity (0,1,1) — which outranks TableRow's own (0,1,0)
+      // utilities in the same layer. It would silently beat a `border-b-0`
+      // passed to a TableRow, and it duplicates what TableRow already applies to
+      // every header row (all three call sites wrap one). A bare <tr> keeps the
+      // initial `border-style: none`, so dropping these paints nothing rather
+      // than a wrong-coloured `currentColor` rule.
+      className={cn(className)}
       {...props}
     />
   );
