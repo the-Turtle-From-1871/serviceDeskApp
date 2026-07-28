@@ -19,8 +19,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Chart PNG exports now include the colour key.** Exporting a chart to PNG left the legend out of the image, so the **DA Form 2062 volume** export was a stack of bars with nothing naming the series. The exported image still excludes the card's menu button.
 - **The recipient type-ahead on the hand-receipt builder no longer offers a contact that does not match what you typed.** Clearing the name box and typing something new could briefly list the previous search's contact against the new text, and a slow reply for a name you had already deleted could surface after the fact. Suggestions are now tied to the exact text that fetched them.
 
+### Security
+- **Deactivating an account now signs it out everywhere immediately.** Deactivation already blocked the account from reading or changing anything on its very next request, but the sign-in it already had was left alive until it expired on its own — up to 30 days. In practice that meant a deactivated account still counted as "signed in" for the shared public-access PIN, so someone who had just been offboarded could keep browsing the public item and receipt pages without being asked for it. Deactivating now revokes the existing sign-in outright, the same way a password change does. Reactivating an account requires the person to sign in again.
+
 ### Notes
 - No schema change and no new column: readiness is still worked out from live signals at query time. Sorting by it runs a different query behind the scenes; searching and the Unit (UIC) filter behave identically either way, and a test asserts that by comparing both paths row for row.
+- The deactivation fix reuses the existing `User.passwordChangedAt` revocation stamp — no migration and nothing to apply to the database. Anyone deactivated *before* this ships keeps their old session until it expires; deactivate and reactivate them once to cut it off now.
 
 ## 2026-07-27
 

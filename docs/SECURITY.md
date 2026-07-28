@@ -56,6 +56,27 @@ reveals whether an address is registered. `src/app/actions/auth.ts` → `loginAc
 `jwt` callback returns `null`, which clears the session cookies. Deleted accounts
 revoke the same way. `src/auth.ts`
 
+**Deactivation revokes the token too, not just the authz check.**
+`setUserActive` stamps `passwordChangedAt` alongside `deactivatedAt` when an
+account goes inactive, so the account's live JWT is revoked on its next request
+via the path above. `src/modules/users/users.service.ts`
+
+> Why it isn't enough to rely on `requireUser`: the `jwt` callback checks
+> `passwordChangedAt` and account existence — **not `isActive`**. Authz was never
+> the exposure (`src/lib/authz.ts` re-reads `isActive` every request, so a
+> deactivated holder can neither read nor mutate), but the token still satisfied
+> the coarse `!!req.auth` login check in `src/proxy.ts`, and with it the
+> logged-in **bypass of the public PIN gate** ([§3](#3-public-surface--the-pin-gate))
+> — for the JWT's full remaining life, up to the Auth.js default of 30 days.
+> Reactivation deliberately does **not** clear the stamp: revocation only fires
+> while the DB stamp is non-null, so clearing it would restore the tokens the
+> deactivation just killed. The user signs in again instead. The column name is
+> about passwords; its real meaning is "tokens issued before this instant are no
+> longer trusted" — if a UI ever surfaces "password last changed", split it into
+> a dedicated `sessionsRevokedAt` column rather than dropping the stamp.
+> Accounts deactivated before this shipped keep their old session until it
+> expires; deactivate + reactivate once to cut it off.
+
 > Two deliberate softenings of that check: tokens issued *before* the claim
 > existed are **seeded, not revoked**, and the DB read is wrapped in try/catch so
 > a transient error returns the token unchanged rather than mass-logging-out

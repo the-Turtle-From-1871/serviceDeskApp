@@ -23,6 +23,7 @@ const SKIP_TOKEN = "[skip security-doc]";
 const WATCHED = [
   [/^src\/lib\/authz\.ts$/, "authorization checks (§2)"],
   [/^src\/auth\.ts$/, "authentication + session revocation (§1)"],
+  [/^src\/modules\/users\/users\.service\.ts$/, "deactivation revokes live tokens (§1)"],
   [/^src\/proxy\.ts$/, "the login gate and public PIN gate (§2, §3)"],
   [/^src\/lib\/password\.ts$/, "password hashing (§1)"],
   [/^src\/lib\/password-reset\.ts$/, "password-reset tokens (§4)"],
