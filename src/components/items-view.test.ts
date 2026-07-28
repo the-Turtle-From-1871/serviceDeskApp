@@ -9,7 +9,10 @@ import {
   SORTABLE_COLUMNS,
   type ItemRow,
 } from "./items-view";
-import { ITEM_SORT_COLUMNS } from "@/modules/items/items.service";
+// From the LEAF module, not items.service: that file is `server-only` and boots
+// a Prisma client at import time, which has no business inside a client-component
+// unit test just to read nine strings.
+import { ITEM_SORT_COLUMNS } from "@/modules/items/sort-keys";
 
 const row = (over: Partial<ItemRow>): ItemRow => ({
   id: over.id ?? Math.random().toString(),

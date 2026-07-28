@@ -32,7 +32,12 @@ const card = (extra?: Partial<React.ComponentProps<typeof ChartCard>>) => (
  * exported image. That regression shipped once and no test could see it.
  */
 describe("ChartCard", () => {
-  const capture = () => document.querySelector("[data-slot=card-content] > div.bg-card");
+  // Bound to the capture element itself, not to a styling class it happens to
+  // carry: a `div.bg-card` selector would break on any background change (three
+  // tests failing for an unrelated reason) and, worse, could match a wrapper
+  // that contains the legend while captureRef no longer does — passing while
+  // the PNG silently loses its colour key again.
+  const capture = () => document.querySelector("[data-slot=chart-capture]");
 
   it("renders the legend INSIDE the captured subtree, so PNG exports keep the colour key", () => {
     render(card());

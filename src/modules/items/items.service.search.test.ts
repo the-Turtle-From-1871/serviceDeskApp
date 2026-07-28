@@ -105,17 +105,33 @@ describe("listItems", () => {
   // non-readiness ORDER BY branch deleted. `i."col" ASC` appears only where the
   // sort term is actually emitted.
   it.each(PRISMA_PATH_KEYS)("orders by the mapped column on the raw readiness path (%s)", async (sortKey) => {
-    vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
-    await listItems({ sort: `readiness,${sortKey}`, dir: "asc" });
+    // BOTH directions. Asserting only ASC left the direction unchecked on this
+    // path: hard-coding `Prisma.raw("ASC")` in readinessOrderedItemIds passed
+    // every case, while the release notes claim the two paths behave alike
+    // whichever keys you sort by.
+    for (const [dir, sql] of [
+      ["asc", "ASC"],
+      ["desc", "DESC"],
+    ] as const) {
+      vi.mocked(prisma.$queryRaw).mockClear();
+      vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
+      await listItems({ sort: `readiness,${sortKey}`, dir });
 
-    const [sql] = vi.mocked(prisma.$queryRaw).mock.calls[0] as unknown as [{ strings: string[] }];
-    const text = sql.strings.join("");
-    const orderBy = text.slice(text.lastIndexOf("ORDER BY"));
-    expect(orderBy).toContain(`i."${EXPECTED_COLUMN[sortKey]}" ASC`);
+      const [emitted] = vi.mocked(prisma.$queryRaw).mock.calls[0] as unknown as [
+        { strings: string[] },
+      ];
+      const text = emitted.strings.join("");
+      const orderBy = text.slice(text.lastIndexOf("ORDER BY"));
+      expect(orderBy).toContain(`i."${EXPECTED_COLUMN[sortKey]}" ${sql}`);
+    }
   });
 
   it("maps the derived auditState sort to lastAuditedAt in both directions", async () => {
-    vi.mocked(prisma.item.count).mockResolvedValue(100);
+    // ...Once, not a persistent implementation: `clearAllMocks` wipes call
+    // records but NOT implementations, so a sticky mockResolvedValue here would
+    // silently set count=100 for every test declared after this one and make
+    // declaration order load-bearing for anything that reads totalPages.
+    vi.mocked(prisma.item.count).mockResolvedValueOnce(100).mockResolvedValueOnce(100);
 
     // auditState is derived and time-dependent, so it rides the denormalized
     // lastAuditedAt column. Never-audited rows (null) sort as a value like any

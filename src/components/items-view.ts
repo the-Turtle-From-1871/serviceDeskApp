@@ -6,17 +6,15 @@ export type { SortDir };
 
 /** Columns the SERVER can order by. Most map to a stored column; `auditState`
  *  and `readiness` are derived and route through listItems' own mappings (a
- *  denormalized column and a raw-SQL ORDER BY respectively). */
-export type SortField =
-  | "deviceName"
-  | "make"
-  | "model"
-  | "serialNumber"
-  | "status"
-  | "auditState"
-  | "deviceUIC"
-  | "deviceCategory"
-  | "readiness";
+ *  denormalized column and a raw-SQL ORDER BY respectively).
+ *
+ *  Re-exported from the leaf module the SERVER derives its allowlist from, so
+ *  the two cannot drift: a column offered here that parseSortKeys does not
+ *  accept is now a compile error rather than a sort that silently falls back to
+ *  the default order. `sort-keys` imports nothing, so this pulls no Prisma into
+ *  the client bundle. */
+export type { SortField } from "@/modules/items/sort-keys";
+import type { SortField } from "@/modules/items/sort-keys";
 
 /** Every column the table can render. Identical to SortField: the table shows
  *  nothing it cannot also sort. Kept as its own name because the two lists are

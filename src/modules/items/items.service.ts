@@ -46,58 +46,29 @@ export function getItemWithCreator(id: string) {
   });
 }
 
-/** Physical column each NON-derived sort key orders by — the ONE mapping, used
- *  by both sort paths and by the allowlist below.
- *
- *  This is an ALLOWLIST guarding a SQL-identifier interpolation, the same job
- *  UPDATABLE_ITEM_COLUMNS does for the importer: the column name is spliced
- *  into the ORDER BY (values never are), so nothing outside this map may reach
- *  it. `auditState` is DERIVED and has no like-named column — it resolves to
- *  the denormalized `lastAuditedAt`. A key shared by both paths must sort
- *  identically on both, or adding readiness to a compound sort would quietly
- *  change what the other keys mean, which is why both read it from here. */
-export const SORT_COLUMN: Readonly<Record<string, string>> = Object.freeze({
-  deviceName: "deviceName",
-  make: "make",
-  model: "model",
-  serialNumber: "serialNumber",
-  status: "status",
-  auditState: "lastAuditedAt",
-  deviceUIC: "deviceUIC",
-  deviceCategory: "deviceCategory",
-});
+// The sort vocabulary lives in the leaf module `./sort-keys` so the client
+// table can share ONE definition without importing this server-only file (and
+// with it a Prisma client). Re-exported for existing importers.
+import { SORT_COLUMN, ITEM_SORT_COLUMNS } from "./sort-keys";
+export { SORT_COLUMN, ITEM_SORT_COLUMNS };
 
 /** Resolve a sort key to its physical column, or refuse.
  *
  *  `Object.hasOwn`, not a truthiness check on `SORT_COLUMN[key]`: a plain object
  *  literal inherits `toString`/`constructor`/`valueOf`, so a key of "toString"
  *  would return an inherited FUNCTION, sail past `if (!column)`, and be spliced
- *  into the ORDER BY. `parseSortKeys` gates on a Set today so nothing reaches
- *  here unvetted, but this is the SQL-identifier boundary and the docblock above
- *  promises it holds for "a future caller that builds SortKeys some other way".
- *  The map is also frozen at runtime, so `Readonly` is not merely a
- *  compile-time claim an importer could `Object.assign` around. */
+ *  into the ORDER BY. `parseSortKeys` gates on ITEM_SORT_COLUMNS today so
+ *  nothing reaches here unvetted — but that Set is only compile-time readonly
+ *  (contents are internal slots, so neither the type nor Object.freeze stops
+ *  `.add`). THIS check is the actual runtime guard on the SQL-identifier
+ *  boundary, and the only one that holds for a caller that builds SortKeys some
+ *  other way. */
 function columnForKey(key: string): string {
   if (!Object.hasOwn(SORT_COLUMN, key)) {
     throw new ItemError("INVALID", `Refusing to sort by unknown column: ${key}`);
   }
   return SORT_COLUMN[key];
 }
-
-/** Server-sortable sort keys: everything SORT_COLUMN can resolve, plus
- *  `readiness`, which has no column at all and sends the whole query down the
- *  raw-SQL path.
- *
- *  DERIVED, not hand-listed, on purpose. These were two parallel lists, and a
- *  key added to this one but not to SORT_COLUMN was a 500 on the raw path —
- *  reachable only via `?sort=readiness,<key>`, so every single-key test missed
- *  it. Deriving makes that desync unrepresentable rather than merely tested for.
- *  `ReadonlySet` because this gates what may reach a SQL-identifier splice; a
- *  mutable export would let any importer widen the injection boundary. */
-export const ITEM_SORT_COLUMNS: ReadonlySet<string> = new Set([
-  ...Object.keys(SORT_COLUMN),
-  "readiness",
-]);
 
 export const ITEMS_PAGE_SIZE = 50;
 

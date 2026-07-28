@@ -106,9 +106,6 @@ describe("ContactCombobox", () => {
 
     expect(screen.queryByRole("option")).toBeNull();
 
-    searchContactsAction.mockReturnValue(new Promise<ContactOption[]>(() => {}));
-    await userEvent.type(input, "z");
-    expect(screen.queryByRole("option")).toBeNull();
   });
 
   it("does not offer the previous query's contacts while a new query is pending", async () => {
@@ -131,7 +128,7 @@ describe("ContactCombobox", () => {
     expect(screen.queryByRole("option")).toBeNull();
   });
 
-  it("closes the list on pick and does not reopen it with the picked contact", async () => {
+  it("drops the old query's suggestions the moment a pick rewrites the field", async () => {
     searchContactsAction.mockResolvedValue([ALVAREZ]);
     render(<Harness />);
 
@@ -139,9 +136,15 @@ describe("ContactCombobox", () => {
     await userEvent.type(input, "alv");
     await userEvent.click(await screen.findByRole("option", { name: /Alvarez/ }));
 
-    // onPick rewrote the field to the full name, so the query changed and the
-    // suggestions no longer belong to it. Nothing should be listed until the
-    // search for the NEW text lands.
+    // onPick rewrote the field to the full name, so the suggestions fetched for
+    // "alv" no longer belong to the query and must not be listed against it.
+    //
+    // Scoped deliberately to that instant. The list does NOT stay empty: the
+    // field now reads "Rosa Alvarez", the effect re-keys, and ~200ms later the
+    // search for that name returns the same contact — so refocusing reopens the
+    // list showing what was just picked. That is pre-existing behaviour and is
+    // NOT asserted here; naming this test "does not reopen" would certify
+    // something the component does not do.
     expect((input as HTMLInputElement).value).toBe("Rosa Alvarez");
     expect(screen.queryByRole("option")).toBeNull();
   });

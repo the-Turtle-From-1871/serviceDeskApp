@@ -125,7 +125,10 @@ export function ChartCard({
             legend is the only thing naming the series, so the PNG was a stack
             of unlabelled bars, exactly what the palette relief rule in the
             docblock above forbids. */}
-        <div ref={captureRef} className="bg-card">
+        {/* data-slot names the element the PNG export rasterizes, so a test can
+            bind to the capture ITSELF rather than to whatever styling class it
+            happens to carry. */}
+        <div ref={captureRef} data-slot="chart-capture" className="bg-card">
           {asTable ? (
             <DataTable columns={exportColumns} rows={exportRows} />
           ) : exportRows.length === 0 ? (

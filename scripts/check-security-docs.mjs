@@ -31,6 +31,13 @@ const WATCHED = [
   [/^src\/app\/actions\/auth\.ts$/, "login + reset actions, anti-enumeration (§1, §4)"],
   [/^src\/lib\/public-access(-cookie)?\.ts$/, "the public PIN gate (§3)"],
   [/^src\/lib\/crypto\.ts$/, "the Ed25519 receipt seal (§7)"],
+  // Deliberately the leaf allowlist, NOT the whole of items.service.ts: adding a
+  // key here widens what may be spliced into a raw ORDER BY, which is a security
+  // event, whereas the service file changes constantly for reasons that are not
+  // — watching it would train people to reach for [skip security-doc] and blunt
+  // the guardrail. UPDATABLE_ITEM_COLUMNS still lives in the service file and is
+  // not covered; see the note in docs/SECURITY.md.
+  [/^src\/modules\/items\/sort-keys\.ts$/, "the ORDER BY SQL-identifier allowlist (§2)"],
   [/^src\/app\/api\/cron\//, "cron authentication (§8)"],
   [/^src\/lib\/email\.ts$/, "outbound email escaping (§4, §6)"],
   [/^next\.config\.ts$/, "security response headers (§4)"],
