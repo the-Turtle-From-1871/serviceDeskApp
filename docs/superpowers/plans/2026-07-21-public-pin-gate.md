@@ -1,5 +1,12 @@
 # Public-access PIN Gate Implementation Plan
 
+> **SUPERSEDED IN PART (2026-07-28):** this plan was written against a **7-day**
+> unlock window. The shipped duration is **12 hours**, and `verifyUnlockValue`
+> now carries a ceiling check that retires longer-lived cookies already issued.
+> Every "7 days" below is historical; `UNLOCK_MAX_AGE_SECONDS` in
+> `src/lib/public-access-cookie.ts` is the source of truth, and the current
+> controls are inventoried in `docs/SECURITY.md` §3.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Gate the public surface (`/`, `/i/*`, `/receipts/*`) behind a shared, admin-settable 8-digit PIN for logged-out visitors, while logged-in staff bypass and recipients stay unlocked for 7 days.

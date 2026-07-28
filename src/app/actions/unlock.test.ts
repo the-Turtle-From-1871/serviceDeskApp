@@ -9,6 +9,7 @@ vi.mock("next/headers", () => ({ cookies: async () => ({ set: (...a: unknown[]) 
 vi.mock("next/navigation", () => ({ redirect: (u: string) => redirect(u) }));
 
 import { unlockAction } from "./unlock";
+import { UNLOCK_MAX_AGE_SECONDS } from "@/lib/public-access-cookie";
 
 function fd(entries: Record<string, string>) {
   const f = new FormData();
@@ -42,8 +43,29 @@ describe("unlockAction", () => {
     expect(cookieSet).toHaveBeenCalledTimes(1);
     const [name, value, opts] = cookieSet.mock.calls[0];
     expect(name).toBe("pub_unlock"); // NODE_ENV is "test" -> not secure
+    // Kept: `String(value)` below would coerce a non-string away, so the type
+    // needs pinning separately.
     expect(typeof value).toBe("string");
-    expect(opts).toMatchObject({ httpOnly: true, sameSite: "lax", path: "/", maxAge: 604800 });
+    expect(opts).toMatchObject({
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: UNLOCK_MAX_AGE_SECONDS,
+    });
+
+    // Decode the SIGNED expiry rather than only checking the cookie's maxAge
+    // against the same constant the action writes — that comparison is true by
+    // construction and cannot fail, so setting UNLOCK_MAX_AGE_SECONDS to 60
+    // would keep the suite green while every unlock lasted a minute. This pins
+    // the actual duration AND that the browser-side lifetime matches the signed
+    // one, which is the invariant the old comment claimed but never asserted.
+    const signedExpMs = Number(String(value).split(".")[0]);
+    expect(Number.isFinite(signedExpMs)).toBe(true);
+    expect(signedExpMs - Date.now()).toBeGreaterThan(UNLOCK_MAX_AGE_SECONDS * 1000 - 5_000);
+    expect(signedExpMs - Date.now()).toBeLessThanOrEqual(UNLOCK_MAX_AGE_SECONDS * 1000);
+    // 12 hours, spelled out: a literal here is the independent oracle. Without
+    // it both sides of every other assertion move together when the constant does.
+    expect(UNLOCK_MAX_AGE_SECONDS).toBe(12 * 60 * 60);
   });
 
   it("redirects to / when next is an open-redirect attempt", async () => {

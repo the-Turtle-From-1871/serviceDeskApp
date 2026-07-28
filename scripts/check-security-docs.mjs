@@ -30,6 +30,8 @@ const WATCHED = [
   [/^src\/lib\/reset-token\.ts$/, "reset-token generation/hashing (§4)"],
   [/^src\/app\/actions\/auth\.ts$/, "login + reset actions, anti-enumeration (§1, §4)"],
   [/^src\/lib\/public-access(-cookie)?\.ts$/, "the public PIN gate (§3)"],
+  [/^src\/app\/actions\/unlock\.ts$/, "the unlock action + cookie flags, anti-guessing delay (§3)"],
+  [/^src\/app\/admin\/actions\/public-access\.ts$/, "setting/rotating the public PIN (§3)"],
   [/^src\/lib\/crypto\.ts$/, "the Ed25519 receipt seal (§7)"],
   // Deliberately the leaf allowlist, NOT the whole of items.service.ts: adding a
   // key here widens what may be spliced into a raw ORDER BY, which is a security
