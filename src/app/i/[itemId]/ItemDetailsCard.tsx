@@ -124,7 +124,12 @@ export function ItemDetailsCard({ item, isAdmin, units, categories, dateLogged, 
             )}
             <div className="field">
               <label className="label" htmlFor="ed-currentUserEmail">Current user email</label>
-              <input id="ed-currentUserEmail" className="input" type="email" name="currentUserEmail" defaultValue={item.currentUserEmail ?? ""} placeholder="e.g. jane.doe@unit.mil" />
+              {/* inputMode, NOT type="email" — CSV-imported rows hold names like
+                  "SGT Smith" in this column (import.ts copies `assignedUser`
+                  verbatim), and a browser-side email constraint would block
+                  saving the OTHER fields on this form. The server schema does
+                  not validate an address either. */}
+              <input id="ed-currentUserEmail" className="input" inputMode="email" name="currentUserEmail" defaultValue={item.currentUserEmail ?? ""} placeholder="e.g. jane.doe@unit.mil" />
             </div>
             <div className="field">
               <label className="label" htmlFor="ed-currentPosition">Current position</label>

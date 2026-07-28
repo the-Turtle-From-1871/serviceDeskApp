@@ -46,7 +46,17 @@ export function EditItemForm({ item, categories = [] }: { item: ItemValues; cate
               id={name}
               className="input"
               name={name}
-              type={name === "currentUserEmail" ? "email" : undefined}
+              // NOT type="email", deliberately. The CSV importer copies
+              // `assignedUser` into currentUserEmail verbatim with no email
+              // validation (import.ts), so plenty of live rows hold a name like
+              // "SGT Smith". type="email" makes the browser refuse to submit a
+              // non-blank invalid value, which would block saving Device Name,
+              // UIC, Category or Notes on exactly the badly-imported rows this
+              // page exists to clean up. The server schema is `clearable` and
+              // does not validate an address either — the client must not be
+              // stricter than the thing that stores it. inputMode still gets
+              // the right keyboard on a phone.
+              inputMode={name === "currentUserEmail" ? "email" : undefined}
               placeholder={name === "currentUserEmail" ? "e.g. jane.doe@unit.mil" : undefined}
               required={req}
               defaultValue={item[name] ?? ""}

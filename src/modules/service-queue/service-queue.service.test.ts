@@ -1,8 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/prisma", () => {
+  // ONE serviceQueueItem delegate shared by the client and the transaction
+  // stub. upsertServiceRequest now runs inside $transaction (it resets a
+  // COMPLETED row before upserting), so a test asserting on
+  // `prisma.serviceQueueItem.upsert` and the code calling
+  // `tx.serviceQueueItem.upsert` must observe the SAME mock — otherwise the
+  // assertions silently watch a delegate nothing calls.
+  const serviceQueueItem = {
+    findMany: vi.fn(async () => []),
+    findUnique: vi.fn(),
+    update: vi.fn(),
+    upsert: vi.fn(async () => ({ id: "sq1", status: "PENDING" })),
+    updateMany: vi.fn(async () => ({ count: 1 })),
+    delete: vi.fn(async () => ({})),
+  };
   const tx = {
-    serviceQueueItem: { findUnique: vi.fn(), update: vi.fn(), upsert: vi.fn() },
+    serviceQueueItem,
     // Completing a queue item also stamps the ITEM's markedReadyAt in the same
     // transaction, so the stub needs the item delegate too.
     item: { updateMany: vi.fn(async () => ({ count: 1 })) },
@@ -11,13 +25,7 @@ vi.mock("@/lib/prisma", () => {
   return {
     default: {
       $transaction: vi.fn(async (fn: (tx: Tx) => unknown) => fn(tx)),
-      serviceQueueItem: {
-        findMany: vi.fn(async () => []),
-        findUnique: vi.fn(),
-        upsert: vi.fn(async () => ({ id: "sq1", status: "PENDING" })),
-        updateMany: vi.fn(async () => ({ count: 1 })),
-        delete: vi.fn(async () => ({})),
-      },
+      serviceQueueItem,
     },
     __tx: tx,
   };
@@ -46,6 +54,33 @@ describe("upsertServiceRequest", () => {
     expect(arg.where).toEqual({ itemId: "i1" });
     expect(arg.create).toMatchObject({ itemId: "i1", serviceType: "REPAIR", transferId: "t1", status: "PENDING", serviceNote: null });
     expect(arg.update).toMatchObject({ serviceType: "REPAIR", transferId: "t1", status: "PENDING", serviceNote: null });
+  });
+
+  // Regression guard. `completeServiceItem` leaves the finished round's dueAt
+  // and overdueAlertedAt on the row, and the UPDATE branch writes neither when
+  // days are blank — so without this reset, flagging a device that broke a
+  // SECOND time inherited the first job's deadline (opening as "Overdue 17d")
+  // and its alert stamp, which the sweep's `overdueAlertedAt: null` filter turns
+  // into "this new lapse can never alert".
+  it("wipes a COMPLETED row's deadline and alert before re-flagging it", async () => {
+    await upsertServiceRequest({ itemId: "i1", serviceType: "REPAIR" });
+    const reset = vi.mocked(prisma.serviceQueueItem.updateMany).mock.calls[0][0];
+    expect(reset.where).toEqual({ itemId: "i1", status: "COMPLETED" });
+    expect(reset.data).toEqual({ dueAt: null, overdueAlertedAt: null });
+    // ...and it happens BEFORE the upsert, or the upsert's own writes would be
+    // overwritten by the reset.
+    const order = vi.mocked(prisma.serviceQueueItem.updateMany).mock.invocationCallOrder[0];
+    expect(order).toBeLessThan(vi.mocked(prisma.serviceQueueItem.upsert).mock.invocationCallOrder[0]);
+  });
+
+  it("leaves an already-PENDING row's deadline alone (the reset is COMPLETED-scoped)", async () => {
+    await upsertServiceRequest({ itemId: "i1", serviceType: "REPAIR" });
+    // The reset cannot touch a pending row, and the upsert's UPDATE branch still
+    // omits dueAt entirely for a blank day count — so re-saving a note on a live
+    // request is still exactly stable.
+    const arg = vi.mocked(prisma.serviceQueueItem.upsert).mock.calls[0][0];
+    expect("dueAt" in arg.update).toBe(false);
+    expect("overdueAlertedAt" in arg.update).toBe(false);
   });
 
   it("rejects OTHER without a note", async () => {
@@ -192,7 +227,10 @@ describe("setServiceDeadline", () => {
   it("clears the deadline for a null day count", async () => {
     await setServiceDeadline("i1", null);
     const arg = vi.mocked(prisma.serviceQueueItem.updateMany).mock.calls[0][0];
-    expect(arg.where).toEqual({ itemId: "i1" });
+    // Scoped to PENDING: a deadline on COMPLETED work measures nothing, and the
+    // form is only rendered for a pending request — so a completed row reaching
+    // here could only be a crafted POST editing finished work.
+    expect(arg.where).toEqual({ itemId: "i1", status: "PENDING" });
     expect(arg.data.dueAt).toBeNull();
     expect(arg.data.overdueAlertedAt).toBeNull();
   });
@@ -264,19 +302,21 @@ describe("reopenServiceItem side effects", () => {
 });
 
 describe("reopenServiceItem", () => {
-  it("COMPLETED -> PENDING keeping the existing deadline when no days are given, but always clearing the alert", async () => {
+  it("COMPLETED -> PENDING starts a NEW round: blank days clears the finished round's deadline and alert", async () => {
     vi.mocked(__tx.serviceQueueItem.findUnique).mockResolvedValueOnce({ id: "sq1", status: "COMPLETED", serviceType: "REPAIR" });
     vi.mocked(__tx.serviceQueueItem.update).mockResolvedValueOnce({ id: "sq1", status: "PENDING" });
     const r = await reopenServiceItem("sq1");
     const arg = vi.mocked(__tx.serviceQueueItem.update).mock.calls[0][0];
     expect(arg.where).toEqual({ id: "sq1" });
     expect(arg.data.status).toBe("PENDING");
-    // Blank days on reopen leaves the stored deadline alone — the reopen form's
-    // input is blank by default, so blank must not be a decision to discard it.
-    // (Removing it is the deadline control's job, deliberately.)
-    expect("dueAt" in arg.data).toBe(false);
-    // Cleared regardless: reopening is a new round of service, so the previous
-    // round's alert must not suppress the next one.
+    // dueAt IS written, and to null. Reopen does not inherit the finished
+    // round's date: a job you reopen is typically one that ran late, so its old
+    // deadline is in the past — carrying it over made the reopened item read
+    // "Overdue Nd" the instant it reopened, and (because overdueAlertedAt is
+    // cleared below) re-sent the overdue email for a deadline that had already
+    // alerted. This is the regression guard for that pair; do not relax it back
+    // to "blank leaves the deadline alone".
+    expect(arg.data.dueAt).toBeNull();
     expect(arg.data.overdueAlertedAt).toBeNull();
     expect(r.status).toBe("PENDING");
   });

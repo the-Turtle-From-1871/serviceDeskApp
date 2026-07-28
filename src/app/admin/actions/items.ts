@@ -51,15 +51,24 @@ export async function updateItemAction(_prev: unknown, formData: FormData) {
   const data = { ...parsed.data, deviceCategory: normalizeCategoryName(parsed.data.deviceCategory) };
   try {
     await updateItemFields(id, data, { id: admin.id, name: admin.name });
-    // A category typed directly into the form joins the vocabulary, so the
-    // managed list keeps reflecting what is actually in the fleet.
-    if (data.deviceCategory) await learnCategories([data.deviceCategory]);
   } catch (e) {
     if (e instanceof ItemError && e.code === "NOT_FOUND") {
       return { error: "That item no longer exists." };
     }
     console.error("[updateItemAction] unexpected error:", e);
     return { error: "Something went wrong saving your changes. Please try again." };
+  }
+  // A category typed directly into the form joins the vocabulary, so the managed
+  // list keeps reflecting what is actually in the fleet. Outside the try, and
+  // swallowing its own failure, because it is a SEPARATE transaction that runs
+  // after the item write has committed — see the fuller note in
+  // src/app/actions/items.ts.
+  if (data.deviceCategory) {
+    try {
+      await learnCategories([data.deviceCategory]);
+    } catch (e) {
+      console.error("[updateItemAction] learnCategories failed (item edit already saved):", e);
+    }
   }
   revalidatePath("/items");
   revalidatePath(`/i/${id}`);

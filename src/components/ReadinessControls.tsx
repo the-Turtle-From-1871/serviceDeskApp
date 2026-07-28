@@ -96,7 +96,13 @@ export function ReadinessControls({
   const [category, setCategory] = useState("");
   const [readinessMsg, setReadinessMsg] = useState<Msg>(null);
   const [categoryMsg, setCategoryMsg] = useState<Msg>(null);
-  const [pending, startTransition] = useTransition();
+  // TWO transitions, not one. These are independent operations sharing a row,
+  // and the component deliberately keeps the selection so both can be applied in
+  // one pass — with a single `pending` flag, applying a category disabled the
+  // readiness select and relabelled ITS button "Applying…", which on a slow bulk
+  // write over a large selection points the busy state at the wrong control.
+  const [readinessPending, startReadiness] = useTransition();
+  const [categoryPending, startCategory] = useTransition();
 
   const none = itemIds.length === 0;
 
@@ -106,7 +112,7 @@ export function ReadinessControls({
     fd.set("itemIds", itemIds.join(","));
     fd.set("target", target);
 
-    startTransition(async () => {
+    startReadiness(async () => {
       const res = await setReadinessAction(fd);
       if ("error" in res && res.error) {
         setReadinessMsg({ ok: false, text: res.error });
@@ -132,7 +138,7 @@ export function ReadinessControls({
     fd.set("itemIds", itemIds.join(","));
     fd.set("category", category);
 
-    startTransition(async () => {
+    startCategory(async () => {
       const res = await setItemsCategoryAction(fd);
       if ("error" in res && res.error) {
         setCategoryMsg({ ok: false, text: res.error });
@@ -181,7 +187,7 @@ export function ReadinessControls({
             <select
               className="select toolbar__control"
               value={target}
-              disabled={pending || none}
+              disabled={readinessPending || none}
               onChange={(e) => setTarget(e.target.value)}
               title="Readiness is derived from live signals. An open hand receipt, an MDM logon, or a service-queue entry outranks what you set here — marking an item on hand while it is still on an open receipt will leave it reading Deployed."
             >
@@ -199,11 +205,11 @@ export function ReadinessControls({
           <button
             type="button"
             className="btn btn-secondary"
-            disabled={pending || none || !target}
+            disabled={readinessPending || none || !target}
             onClick={applyReadiness}
             title="Apply this readiness to the selected items"
           >
-            {pending ? "Applying…" : "Apply"}
+            {readinessPending ? "Applying…" : "Apply"}
           </button>
         </div>
 
@@ -213,7 +219,7 @@ export function ReadinessControls({
             <select
               className="select toolbar__control"
               value={category}
-              disabled={pending || none || categories.length === 0}
+              disabled={categoryPending || none || categories.length === 0}
               onChange={(e) => setCategory(e.target.value)}
             >
               <option value="">Choose…</option>
@@ -225,11 +231,11 @@ export function ReadinessControls({
           <button
             type="button"
             className="btn btn-secondary"
-            disabled={pending || none || !category}
+            disabled={categoryPending || none || !category}
             onClick={applyCategory}
             title="Assign this category to the selected items"
           >
-            {pending ? "Applying…" : "Apply"}
+            {categoryPending ? "Applying…" : "Apply"}
           </button>
         </div>
       </div>

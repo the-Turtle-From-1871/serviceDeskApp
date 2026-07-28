@@ -36,15 +36,30 @@ export async function updateItemDetailsAction(_prev: unknown, formData: FormData
 
   try {
     await updateItemFields(id, data, { id: user.id, name: user.name });
-    // A category typed straight into the card joins the vocabulary, so the
-    // managed list keeps reflecting what is actually in the fleet.
-    if (category) await learnCategories([category]);
   } catch (e) {
     if (e instanceof ItemError && e.code === "NOT_FOUND") {
       return { error: "That item no longer exists." };
     }
     console.error("[updateItemDetailsAction] unexpected error:", e);
     return { error: "Something went wrong saving your changes. Please try again." };
+  }
+
+  // A category typed straight into the card joins the vocabulary, so the managed
+  // list keeps reflecting what is actually in the fleet.
+  //
+  // DELIBERATELY outside the try above, and swallowing its own failure. This is
+  // a SEPARATE transaction from the item write, which has already committed by
+  // the time it runs. Reporting its failure as "Something went wrong saving your
+  // changes" would tell the admin their edit did not land when it did — and they
+  // would re-submit a save that already happened. The worst case here is a
+  // category missing from the picker until the next write or import teaches it,
+  // which `learnCategories` is built to do idempotently.
+  if (category) {
+    try {
+      await learnCategories([category]);
+    } catch (e) {
+      console.error("[updateItemDetailsAction] learnCategories failed (item edit already saved):", e);
+    }
   }
 
   revalidatePath(`/i/${id}`);

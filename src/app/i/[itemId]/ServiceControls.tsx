@@ -132,9 +132,9 @@ export function ServiceControls({ itemId, request }: Props) {
                 name="overrideDays"
                 inputMode="numeric"
                 pattern="[0-9]*"
-                placeholder="days (blank keeps current)"
-                aria-label="New deadline in days on reopen (blank keeps the current one)"
-                title={`Optional whole number 1–3650 of days from now, restarting the clock. Leave blank to keep the current deadline (${request.dueAtLabel ?? "none"}).`}
+                placeholder="days (blank = no deadline)"
+                aria-label="Deadline in days for the reopened round (blank for no deadline)"
+                title="Optional whole number 1–3650 of days from now. Reopening starts a NEW round of service, so it does not carry the finished round's deadline over — leave blank for no deadline, or set one here."
               />
               <button type="submit" className="btn btn-secondary btn-sm">Reopen</button>
             </form>
