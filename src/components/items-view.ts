@@ -4,8 +4,9 @@ import { READINESS_LABEL, type ReadinessState } from "@/modules/items/readiness"
 
 export type { SortDir };
 
-/** Columns the SERVER can order by — every one maps to a stored column (see
- *  listItems). Readiness is deliberately absent; see COLUMN_KEY below. */
+/** Columns the SERVER can order by. Most map to a stored column; `auditState`
+ *  and `readiness` are derived and route through listItems' own mappings (a
+ *  denormalized column and a raw-SQL ORDER BY respectively). */
 export type SortField =
   | "deviceName"
   | "make"
@@ -14,14 +15,14 @@ export type SortField =
   | "status"
   | "auditState"
   | "deviceUIC"
-  | "deviceCategory";
+  | "deviceCategory"
+  | "readiness";
 
-/** Every column the table can render. A superset of SortField: `readiness` is
- *  DISPLAY-ONLY. It is derived from four signals across three tables
- *  (modules/items/readiness.ts), so there is no column to ORDER BY — offering
- *  it in the Sort control would either need a stored duplicate that drifts or
- *  a per-page sort that lies about the other 1,100 rows. */
-export type ColumnKey = SortField | "readiness";
+/** Every column the table can render. Identical to SortField: the table shows
+ *  nothing it cannot also sort. Kept as its own name because the two lists are
+ *  used for different things (visibility vs. ordering) and only one of them has
+ *  to grow if a display-only column is ever added. */
+export type ColumnKey = SortField;
 
 /* Readiness labels have ONE definition, in modules/items/readiness.ts, next to
    the function that derives them. Re-exported here so the table imports its
@@ -59,16 +60,20 @@ export const ITEM_COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: "auditState", label: "Audit" },
 ];
 
-/** The Sort control's options: every column except the display-only ones. */
-export const SORTABLE_COLUMNS: { key: SortField; label: string }[] = ITEM_COLUMNS.filter(
-  (c): c is { key: SortField; label: string } => c.key !== "readiness",
-);
+/** The Sort control's options. Every displayed column is server-sortable —
+ *  readiness included, since listItems orders it in SQL (READINESS_RANK) rather
+ *  than needing a column of its own. */
+export const SORTABLE_COLUMNS: { key: SortField; label: string }[] = ITEM_COLUMNS;
 
 const SORT_FIELDS = new Set<string>(SORTABLE_COLUMNS.map((c) => c.key));
-// Column visibility covers EVERY column, sortable or not — a readiness column
-// you cannot sort is still one you can hide.
+// Visibility and sortability are separate sets on purpose, even while they hold
+// the same keys: hiding a column must never imply you cannot sort by it.
 const COLUMN_KEYS = new Set<string>(ITEM_COLUMNS.map((c) => c.key));
 
+/** Client-side ordering of rows already in hand. The /items table does NOT use
+ *  it — sorting there is server-side so it acts over the whole catalogue, not
+ *  one page — so note that this orders `readiness` by its raw state string,
+ *  which is not the operational sequence listItems sorts by (READINESS_ORDER). */
 export function sortItemRows(items: ItemRow[], field: SortField | null, dir: SortDir): ItemRow[] {
   return sortRows(items, field, dir);
 }

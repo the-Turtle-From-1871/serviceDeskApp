@@ -7,7 +7,7 @@ import type { ReadinessState } from "@/modules/items/readiness";
 import {
   READINESS_CASE,
   READINESS_JOINS,
-  readinessScope,
+  itemScopeSql,
 } from "@/modules/items/readiness.sql";
 
 /* ============================================================
@@ -23,8 +23,9 @@ import {
    database does the classifying; the parity test keeps that SQL and the
    TypeScript readinessState() answering identically.
 
-   Every widget honours the same optional `deviceUIC` filter, so the
-   global Select at the top of the page re-scopes the entire view.
+   Every widget honours the same optional unit scope (`ItemScope`: a
+   `deviceUIC` and/or a `homeUnit`), so the global Select at the top of the
+   page and the unit-allocation table both re-scope the entire view.
    ============================================================ */
 
 import {
@@ -33,8 +34,9 @@ import {
   AUDIT_STATE_ORDER,
   type AuditReadinessSlice,
   type CategoryKpi,
+  type GroupByKey,
+  type ItemScope,
   type RangeKey,
-  type UicFilter,
   type UnitAllocation,
   type VelocityPoint,
 } from "./analytics.types";
@@ -55,10 +57,18 @@ export * from "./analytics.types";
  * NOTE the two different RETIREDs: `Item.status` is the ACTIVE/RETIRED
  * lifecycle filtered here; the derived readiness state "RETIRED" is what that
  * lifecycle looks like from the readiness side (see readiness.ts).
+ *
+ * THE ONE PLACE the global filter is expressed for Prisma queries — the raw
+ * aggregates use its SQL twin, `itemScopeSql`. Both dimensions are optional and
+ * compose with AND, so a `?unit=` picked from the allocation table and a `?uic=`
+ * picked from the header Select narrow the page together instead of one
+ * silently replacing the other. Exported so the scoping rule is directly
+ * testable rather than only observable through a query.
  */
-const itemWhere = (uic: UicFilter): Prisma.ItemWhereInput => ({
+export const itemWhere = (scope: ItemScope): Prisma.ItemWhereInput => ({
   status: "ACTIVE",
-  ...(uic ? { deviceUIC: uic } : {}),
+  ...(scope.uic ? { deviceUIC: scope.uic } : {}),
+  ...(scope.unit ? { homeUnit: scope.unit } : {}),
 });
 
 /* ------------------------------------------------------------
@@ -93,19 +103,21 @@ export function listUnitOptions(limit = 200): Promise<string[]> {
  * must stay one bounded query. `auditCutoff` keeps the period rule shared with
  * the per-row `auditState` badge instead of restating "1 year" here.
  */
-export async function getAuditReadiness(uic: UicFilter): Promise<AuditReadinessSlice[]> {
+export async function getAuditReadiness(scope: ItemScope): Promise<AuditReadinessSlice[]> {
   const cutoff = auditCutoff(new Date());
   // Parameterized $queryRaw — never string interpolation (CLAUDE.md §2).
+  // Aliased `i` only so it can share the one scope fragment with the readiness
+  // aggregates; this query derives no readiness of its own.
   const rows = await prisma.$queryRaw<{ state: AuditState; count: number }[]>(Prisma.sql`
     SELECT CASE
-             WHEN "lastAuditedAt" IS NULL          THEN 'never'
-             WHEN "lastAuditedAt" > ${cutoff}      THEN 'compliant'
-             ELSE                                       'overdue'
+             WHEN i."lastAuditedAt" IS NULL          THEN 'never'
+             WHEN i."lastAuditedAt" > ${cutoff}      THEN 'compliant'
+             ELSE                                         'overdue'
            END AS state,
            COUNT(*)::int AS count
-    FROM "Item"
-    WHERE "status" = 'ACTIVE'
-      AND (${uic}::text IS NULL OR "deviceUIC" = ${uic}::text)
+    FROM "Item" i
+    WHERE i."status" = 'ACTIVE'
+      AND ${itemScopeSql(scope)}
     GROUP BY 1
   `);
   // Always emit all three slices so the legend is stable and the wedges sum to
@@ -132,7 +144,7 @@ type CategoryReadinessRow = { category: string | null; readiness: ReadinessState
  * never by fetching rows and classifying them here. The group count is at most
  * categories x 5 states regardless of fleet size.
  */
-export async function getFleetKpis(uic: UicFilter): Promise<{
+export async function getFleetKpis(scope: ItemScope): Promise<{
   totalDeployed: number;
   totalReady: number;
   byCategory: CategoryKpi[];
@@ -146,7 +158,7 @@ export async function getFleetKpis(uic: UicFilter): Promise<{
     FROM "Item" i
     ${READINESS_JOINS}
     WHERE i."status" = 'ACTIVE'
-      AND ${readinessScope(uic)}
+      AND ${itemScopeSql(scope)}
     GROUP BY 1, 2
   `);
 
@@ -208,7 +220,7 @@ type VelocityRow = { month: Date; category: string | null; count: number };
  * of the range selected. Surfaced in the UI rather than hidden.
  */
 export async function getTransferVelocity(
-  uic: UicFilter,
+  scope: ItemScope,
   range: RangeKey,
 ): Promise<{ points: VelocityPoint[]; categories: string[] }> {
   const { days } = RANGES[range];
@@ -226,7 +238,7 @@ export async function getTransferVelocity(
       AND t."closedAt" IS NOT NULL
       AND t."closedAt" >= ${start}::timestamptz
       AND i."status" = 'ACTIVE'
-      AND (${uic}::text IS NULL OR i."deviceUIC" = ${uic}::text)
+      AND ${itemScopeSql(scope)}
     GROUP BY 1, 2
     ORDER BY 1
   `);
@@ -263,11 +275,34 @@ export async function getTransferVelocity(
    Widget 4 — Unit allocation leaderboard.
    ------------------------------------------------------------ */
 
-type UnitReadinessRow = { uic: string; readiness: ReadinessState; count: number };
+type AllocationTotalRow = { value: string | null; total: number };
+type AllocationReadinessRow = { value: string | null; readiness: ReadinessState; count: number };
 
 /**
- * Per-UIC totals. TWO grouped queries regardless of how many units exist —
- * never one per unit.
+ * The two dimensions the leaderboard can group by, as SQL expressions over the
+ * `i` alias.
+ *
+ * Picked from this frozen map BY KEY, so no part of the querystring ever
+ * reaches the SQL text — an unknown `?groupBy` has already fallen back to the
+ * default before this is indexed.
+ *
+ * `NULLIF(btrim(...), '')` folds a blank string into NULL so `""`, `"   "` and
+ * a real NULL land in ONE Unassigned bucket rather than splitting into
+ * indistinguishable look-alike rows.
+ */
+const GROUP_EXPR: Record<GroupByKey, Prisma.Sql> = {
+  unit: Prisma.sql`NULLIF(btrim(i."homeUnit"), '')`,
+  uic: Prisma.sql`NULLIF(btrim(i."deviceUIC"), '')`,
+};
+
+/**
+ * Per-unit totals, grouped by whichever dimension the table is showing. TWO
+ * grouped queries regardless of how many units exist — never one per unit.
+ *
+ * WHY THE DIMENSION IS A REAL `GROUP BY` AND NOT A RELABEL: `deviceUIC` and
+ * `homeUnit` are not 1:1 in the catalogue (see GROUP_BY in analytics.types.ts),
+ * so there is no name to display per UIC — the fleet genuinely partitions
+ * differently under each, and both partitions are legitimate views.
  *
  * Why not one query grouping by (unit, readiness) with a `take`: a cap bounds
  * the number of GROUPS, and each unit produces up to one group per readiness
@@ -276,55 +311,79 @@ type UnitReadinessRow = { uic: string; readiness: ReadinessState; count: number 
  * truncation. So: pick the top N units first (query 1), then derive the
  * readiness breakdown for exactly those units (query 2).
  *
- * Deliberately NOT filtered by the global UIC filter: the leaderboard is how
- * a user picks a unit, so it must keep listing every unit while one is
- * selected.
+ * Items with NO value in the chosen dimension are kept as the Unassigned
+ * bucket instead of being filtered out. They are real inventory: drop them and
+ * the Total column stops summing to the fleet count in the page header, which
+ * reads as missing equipment rather than as unlabelled equipment.
+ *
+ * Deliberately NOT filtered by the global unit scope: the leaderboard is how a
+ * user picks a unit, so it must keep listing every unit while one is selected.
  */
-export async function getUnitAllocations(limit = 200): Promise<{
-  rows: UnitAllocation[];
-  truncated: boolean;
-}> {
-  const totals = await prisma.item.groupBy({
-    by: ["deviceUIC"],
-    where: { status: "ACTIVE", deviceUIC: { not: null } },
-    _count: { _all: true },
-    orderBy: { _count: { deviceUIC: "desc" } },
-    // Fetch one extra to detect truncation without a second COUNT query.
-    take: limit + 1,
-  });
+export async function getUnitAllocations(
+  groupBy: GroupByKey,
+  limit = 200,
+): Promise<{ rows: UnitAllocation[]; truncated: boolean }> {
+  const dimension = GROUP_EXPR[groupBy];
+
+  // Raw rather than prisma.groupBy: only SQL can normalise blank-to-NULL before
+  // grouping, and only an explicit ORDER BY can place the NULL bucket
+  // deterministically. Fetch one extra row to detect truncation without a
+  // second COUNT query.
+  //
+  // The cap is BOUND, not spliced, and the `::int` on it is not decoration:
+  // LIMIT demands an integer, and a bare bind whose type the driver reports as
+  // numeric/double is rejected outright by Postgres.
+  const totals = await prisma.$queryRaw<AllocationTotalRow[]>(Prisma.sql`
+    SELECT ${dimension} AS value,
+           COUNT(*)::int AS total
+    FROM "Item" i
+    WHERE i."status" = 'ACTIVE'
+    GROUP BY 1
+    ORDER BY total DESC, value ASC NULLS LAST
+    LIMIT ${limit + 1}::int
+  `);
 
   const truncated = totals.length > limit;
   const page = totals.slice(0, limit);
-  const uics = page.map((t) => t.deviceUIC).filter((u): u is string => u !== null);
-  if (uics.length === 0) return { rows: [], truncated: false };
+  if (page.length === 0) return { rows: [], truncated: false };
+
+  const values = page.map((t) => t.value).filter((v): v is string => v !== null);
+  const hasUnassigned = page.some((t) => t.value === null);
+  // Values are bound as parameters via Prisma.join, never spliced. `IN ()` is
+  // not valid SQL, so the no-named-groups case (only the Unassigned bucket
+  // survived the cap) degrades to FALSE instead of emitting a broken query.
+  const named =
+    values.length > 0 ? Prisma.sql`${dimension} IN (${Prisma.join(values)})` : Prisma.sql`FALSE`;
+  const unassigned = hasUnassigned ? Prisma.sql` OR ${dimension} IS NULL` : Prisma.empty;
 
   // MUST carry the same status = 'ACTIVE' scope as the totals query above.
   // Without it the Deployed/Ready columns count lifecycle-retired kit that
   // Total excludes, so a unit with retired items could show Deployed + Ready
-  // greater than its Total. The UIC list is bound as parameters, never spliced.
-  const breakdown = await prisma.$queryRaw<UnitReadinessRow[]>(Prisma.sql`
-    SELECT i."deviceUIC" AS uic,
+  // greater than its Total.
+  const breakdown = await prisma.$queryRaw<AllocationReadinessRow[]>(Prisma.sql`
+    SELECT ${dimension} AS value,
            ${READINESS_CASE} AS readiness,
            COUNT(*)::int AS count
     FROM "Item" i
     ${READINESS_JOINS}
     WHERE i."status" = 'ACTIVE'
-      AND i."deviceUIC" IN (${Prisma.join(uics)})
+      AND (${named}${unassigned})
     GROUP BY 1, 2
   `);
 
-  const byUic = new Map<string, UnitAllocation>(
-    page
-      .filter((t): t is typeof t & { deviceUIC: string } => t.deviceUIC !== null)
-      .map((t) => [t.deviceUIC, { uic: t.deviceUIC, total: t._count._all, deployed: 0, ready: 0 }]),
+  // Keyed by the raw value — `null` is a perfectly good Map key, so the
+  // Unassigned bucket needs no sentinel string that a real unit could collide
+  // with. Insertion order is the SQL order, so the rows need no second sort.
+  const byValue = new Map<string | null, UnitAllocation>(
+    page.map((t) => [t.value, { value: t.value, total: Number(t.total), deployed: 0, ready: 0 }]),
   );
   for (const r of breakdown) {
-    const entry = byUic.get(r.uic);
+    const entry = byValue.get(r.value);
     if (!entry) continue;
     if (r.readiness === "DEPLOYED") entry.deployed += Number(r.count);
     if (r.readiness === "READY_TO_DEPLOY") entry.ready += Number(r.count);
   }
-  return { rows: [...byUic.values()].sort((a, b) => b.total - a.total), truncated };
+  return { rows: [...byValue.values()], truncated };
 }
 
 /* ------------------------------------------------------------
@@ -333,15 +392,15 @@ export async function getUnitAllocations(limit = 200): Promise<{
 
 export type DashboardData = Awaited<ReturnType<typeof getDashboard>>;
 
-export async function getDashboard(uic: UicFilter, range: RangeKey) {
+export async function getDashboard(scope: ItemScope, range: RangeKey, groupBy: GroupByKey) {
   const [units, auditReadiness, kpis, velocity, allocations, fleetTotal, vocabulary] =
     await Promise.all([
       listUnitOptions(),
-      getAuditReadiness(uic),
-      getFleetKpis(uic),
-      getTransferVelocity(uic, range),
-      getUnitAllocations(),
-      prisma.item.count({ where: itemWhere(uic) }),
+      getAuditReadiness(scope),
+      getFleetKpis(scope),
+      getTransferVelocity(scope, range),
+      getUnitAllocations(groupBy),
+      prisma.item.count({ where: itemWhere(scope) }),
       // The full category vocabulary, in a stable order. Deliberately NOT
       // scoped by the UIC filter: it is the chart's COLOUR KEY, so it must be
       // identical whichever unit is selected, or series get repainted.

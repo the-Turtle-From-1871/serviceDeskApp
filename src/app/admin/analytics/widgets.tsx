@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button";
 import { ChartCard } from "./ChartCard";
 import { DonutChart, StackedBarChart } from "./charts";
-import { RangeToggle, useSetParam } from "./Filters";
+import { GroupByFilter, RangeToggle, useSetParam } from "./Filters";
 import {
   AUDIT_STATE_COLOR,
   OTHER_COLOR,
@@ -15,8 +15,13 @@ import {
 } from "./palette";
 import {
   AUDIT_STATE_ORDER,
+  GROUP_BY,
+  UNASSIGNED,
+  scopeLabel,
   type AuditReadinessSlice,
   type CategoryKpi,
+  type GroupByKey,
+  type ItemScope,
   type RangeKey,
   type UnitAllocation,
   type VelocityPoint,
@@ -55,12 +60,12 @@ const AUDIT_STATE_UI = {
 
 export function AuditReadinessWidget({
   data,
-  uic,
+  scope,
 }: {
   data: AuditReadinessSlice[];
   // Deliberately takes no `range`: this donut is a point-in-time snapshot of
   // the current fleet and does not read the time filter at all.
-  uic: string | null;
+  scope: ItemScope;
 }) {
   const countOf = (state: (typeof AUDIT_STATE_ORDER)[number]) =>
     data.find((d) => d.state === state)?.count ?? 0;
@@ -88,7 +93,7 @@ export function AuditReadinessWidget({
       exportBase="audit-readiness"
       // No range in the filename: this donut is a point-in-time snapshot and
       // ignores the time range entirely, so tagging the file "90d" would lie.
-      exportParts={[uic ?? "all-units"]}
+      exportParts={[scopeLabel(scope)]}
       exportColumns={["Status", "Items"]}
       exportRows={rows}
     >
@@ -224,7 +229,7 @@ export function VelocityWidget({
   categories,
   vocabulary,
   range,
-  uic,
+  scope,
 }: {
   points: VelocityPoint[];
   /** Present in the current result, ordered by volume desc (folding order). */
@@ -234,7 +239,7 @@ export function VelocityWidget({
    *  which categories happen to have data. */
   vocabulary: string[];
   range: RangeKey;
-  uic: string | null;
+  scope: ItemScope;
 }) {
   // Past 8 categories the palette is not extended — the tail folds into
   // "Other" rather than inventing hues that would fail CVD separation.
@@ -274,7 +279,7 @@ export function VelocityWidget({
       controls={<RangeToggle value={range} />}
       legend={series.map((s) => ({ label: s.label, color: s.color }))}
       exportBase="transfer-velocity"
-      exportParts={[range, uic ?? "all-units"]}
+      exportParts={[range, scopeLabel(scope)]}
       exportColumns={["Month", ...series.map((s) => s.label)]}
       exportRows={rows}
     >
@@ -290,34 +295,49 @@ export function VelocityWidget({
 export function UnitLeaderboardWidget({
   rows,
   truncated,
+  groupBy,
   selected,
 }: {
   rows: UnitAllocation[];
   truncated: boolean;
+  /** Which dimension the server grouped by — drives the header, the wording,
+   *  and which URL param a row click writes. */
+  groupBy: GroupByKey;
+  /** The active filter value FOR THIS DIMENSION (`?unit=` or `?uic=`). The
+   *  other dimension's filter may also be set; it just highlights nothing. */
   selected: string | null;
 }) {
   const { setParam, pending } = useSetParam();
+  const { column, noun, param } = GROUP_BY[groupBy];
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Unit allocation</CardTitle>
-        <CardDescription>
-          Items assigned per UIC. Select a unit to scope the whole dashboard.
-          {truncated && " Showing the largest units only."}
-        </CardDescription>
+      <CardHeader className="flex flex-row items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <CardTitle>Unit allocation</CardTitle>
+          <CardDescription>
+            Items assigned per {noun}. Select a row to scope the whole dashboard.
+            {truncated && " Showing the largest units only."}
+          </CardDescription>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="text-sm text-muted-foreground max-sm:sr-only">Group by</span>
+          <GroupByFilter value={groupBy} />
+        </div>
       </CardHeader>
       <CardContent>
+        {/* Items with no value in this dimension are their own row, so an empty
+            table now means an empty catalogue — not "nothing is labelled". */}
         {rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No items have a UIC yet. Import a CSV with a <code>UIC</code> column to populate this.
+            No active items in the catalogue yet.
           </p>
         ) : (
           <div className="max-h-[320px] overflow-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Unit (UIC)</TableHead>
+                  <TableHead>{column}</TableHead>
                   <TableHead className="text-right">Total</TableHead>
                   <TableHead className="text-right">Deployed</TableHead>
                   <TableHead className="text-right">Ready</TableHead>
@@ -325,26 +345,39 @@ export function UnitLeaderboardWidget({
               </TableHeader>
               <TableBody>
                 {rows.map((r) => {
-                  const isSelected = r.uic === selected;
+                  const isSelected = r.value !== null && r.value === selected;
                   return (
-                    <TableRow key={r.uic} data-state={isSelected ? "selected" : undefined}>
+                    <TableRow
+                      key={r.value ?? UNASSIGNED}
+                      data-state={isSelected ? "selected" : undefined}
+                    >
                       <TableCell>
-                        {/* A button, not a row click: the action must be
-                            keyboard reachable and announced as a control. */}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={pending}
-                          aria-pressed={isSelected}
-                          onClick={() => setParam("uic", isSelected ? null : r.uic)}
-                          // h-auto deliberately overrides the button's height
-                          // so the row stays compact on desktop; the coarse-
-                          // pointer floor is restored explicitly, or this ends
-                          // up a 22px tap target on a phone.
-                          className="h-auto px-1 py-0.5 font-medium pointer-coarse:min-h-11 pointer-coarse:px-3 max-md:min-h-11 max-md:px-3"
-                        >
-                          {r.uic}
-                        </Button>
+                        {r.value === null ? (
+                          // Counted and shown so the Total column still sums to
+                          // the fleet, but NOT a control: "no unit" is the
+                          // absence of a filter value, so there is nothing for a
+                          // click to put in the URL.
+                          <span className="px-1 font-medium italic text-muted-foreground">
+                            {UNASSIGNED}
+                          </span>
+                        ) : (
+                          /* A button, not a row click: the action must be
+                             keyboard reachable and announced as a control. */
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={pending}
+                            aria-pressed={isSelected}
+                            onClick={() => setParam(param, isSelected ? null : r.value)}
+                            // h-auto deliberately overrides the button's height
+                            // so the row stays compact on desktop; the coarse-
+                            // pointer floor is restored explicitly, or this ends
+                            // up a 22px tap target on a phone.
+                            className="h-auto px-1 py-0.5 text-left font-medium whitespace-normal pointer-coarse:min-h-11 pointer-coarse:px-3 max-md:min-h-11 max-md:px-3"
+                          >
+                            {r.value}
+                          </Button>
+                        )}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">{r.total}</TableCell>
                       <TableCell className="text-right tabular-nums">{r.deployed}</TableCell>

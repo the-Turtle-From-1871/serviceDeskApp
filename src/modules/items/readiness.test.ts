@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { readinessState, parseLastLogonAt, type ReadinessSignals } from "./readiness";
+import {
+  readinessState,
+  parseLastLogonAt,
+  READINESS_ORDER,
+  READINESS_LABEL,
+  type ReadinessSignals,
+} from "./readiness";
 
 const base: ReadinessSignals = {
   status: "ACTIVE",
@@ -13,6 +19,17 @@ const s = (over: Partial<ReadinessSignals> = {}): ReadinessSignals => ({ ...base
 
 const JAN = new Date("2026-01-01T00:00:00Z");
 const JUN = new Date("2026-06-01T00:00:00Z");
+
+describe("READINESS_ORDER", () => {
+  it("ranks every state exactly once", () => {
+    // The /items readiness sort turns this list into a SQL rank with no ELSE
+    // branch (READINESS_RANK). A state missing here would rank NULL and dump
+    // that whole bucket at one end of the table; a duplicate would give two
+    // states the same rank. READINESS_LABEL is a Record over ReadinessState, so
+    // its keys are the complete set by construction.
+    expect([...READINESS_ORDER].sort()).toEqual(Object.keys(READINESS_LABEL).sort());
+  });
+});
 
 describe("readinessState", () => {
   it("reports UNTRIAGED when nothing is known", () => {

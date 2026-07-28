@@ -1,0 +1,226 @@
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import prisma from "@/lib/prisma";
+import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
+import { listItems } from "./items.service";
+import { readinessForItems } from "./readiness.query";
+import { READINESS_ORDER, type ReadinessState } from "./readiness";
+
+/**
+ * `/items` now has TWO query paths. A sort that involves readiness cannot be a
+ * Prisma `orderBy` (readiness is derived from four signals across three
+ * tables), so it is ordered by raw SQL and hydrated by id; every other sort
+ * stays on the Prisma path. Both must apply the SAME `?q=` and `?uic=` filter.
+ *
+ * TWO FILTER IMPLEMENTATIONS DRIFT — and a drifted filter is invisible: the
+ * table simply shows a different catalogue depending on which column you sorted
+ * by. This is the test that stops it, in the spirit of readiness.parity.test.ts.
+ *
+ * HOW IT COMPARES TWO PATHS THAT SORT DIFFERENTLY: each case asks the Prisma
+ * path for an order ending in `serialNumber` (unique, so a total order), then
+ * asks for the SAME order with `readiness` appended as a final key. The extra
+ * key can never fire — there are no ties left to break — so the raw path must
+ * return the identical id sequence. Any difference is the filter, the
+ * nulls-ordering, or the tie-break diverging, which is exactly what we fear.
+ */
+
+const PREFIX = "SORTPAR-";
+const JAN = new Date("2026-01-01T00:00:00Z");
+const JUN = new Date("2026-06-01T00:00:00Z");
+
+type Seed = {
+  serial: string;
+  make: string;
+  model: string;
+  deviceName: string | null;
+  uic: string | null;
+  category: string | null;
+  lastAuditedAt: Date | null;
+  expected: ReadinessState;
+  retired?: boolean;
+  flagged?: boolean;
+  onOpenReceipt?: boolean;
+  lastLogonAt?: Date | null;
+  lastLogonUser?: string | null;
+  markedReadyAt?: Date | null;
+};
+
+/* Every row is chosen for two jobs at once: it lands in a readiness bucket
+   (all five are represented, several more than once, so the rank has real
+   groups to order) and it sits on one side of a filter boundary. The search
+   term "delta" is reachable through EACH of the four searched columns —
+   serial, make, model, device name — including one lower-case serial, because
+   serialNumber is citext and the raw path has to cast it to text to match the
+   Prisma path (and to use the trigram index). Duplicate make/model/category
+   values exist so the non-unique sort keys actually tie. */
+const SEEDS: Seed[] = [
+  { serial: `${PREFIX}DELTA-01`, make: "Dell", model: "5540", deviceName: "Node one", uic: "W1AAAA", category: "Laptop", lastAuditedAt: JAN, markedReadyAt: JUN, expected: "READY_TO_DEPLOY" },
+  { serial: `${PREFIX}02`, make: "Delta Systems", model: "X1", deviceName: "Node two", uic: "W1AAAA", category: null, lastAuditedAt: null, flagged: true, expected: "IN_REPAIR" },
+  { serial: `${PREFIX}03`, make: "HP", model: "Delta-9", deviceName: null, uic: "W2BBBB", category: "Switch", lastAuditedAt: JUN, onOpenReceipt: true, expected: "DEPLOYED" },
+  { serial: `${PREFIX}04`, make: "HP", model: "Z9", deviceName: "delta gateway", uic: null, category: null, lastAuditedAt: null, expected: "UNTRIAGED" },
+  { serial: `${PREFIX.toLowerCase()}delta-05`, make: "Cisco", model: "C1", deviceName: "Node five", uic: "W1AAAA", category: "Switch", lastAuditedAt: JAN, retired: true, expected: "RETIRED" },
+  { serial: `${PREFIX}06`, make: "Cisco", model: "C2", deviceName: "Node six", uic: "W1AAAA", category: "Laptop", lastAuditedAt: null, lastLogonUser: "a@b.mil", expected: "DEPLOYED" },
+  { serial: `${PREFIX}07`, make: "Apple", model: "M3", deviceName: null, uic: "W2BBBB", category: null, lastAuditedAt: JUN, markedReadyAt: JAN, lastLogonAt: JUN, lastLogonUser: "c@d.mil", expected: "DEPLOYED" },
+  { serial: `${PREFIX}08`, make: "Apple", model: "M4", deviceName: "Node eight", uic: null, category: "Printer", lastAuditedAt: null, markedReadyAt: JUN, lastLogonAt: JAN, lastLogonUser: "e@f.mil", expected: "READY_TO_DEPLOY" },
+  { serial: `${PREFIX}09`, make: "Zebra", model: "ZT", deviceName: "Node nine", uic: "W1AAAA", category: "Printer", lastAuditedAt: JAN, flagged: true, onOpenReceipt: true, expected: "IN_REPAIR" },
+  { serial: `${PREFIX}10`, make: "Zebra", model: "ZQ", deviceName: "Node ten", uic: "W2BBBB", category: null, lastAuditedAt: null, retired: true, lastLogonUser: "g@h.mil", expected: "RETIRED" },
+  { serial: `${PREFIX}11`, make: "Dell", model: "5540", deviceName: "Node eleven", uic: "W1AAAA", category: "Laptop", lastAuditedAt: JUN, expected: "UNTRIAGED" },
+  { serial: `${PREFIX}12`, make: "Dell", model: "5540", deviceName: "Node twelve", uic: "W1AAAA", category: "Laptop", lastAuditedAt: JAN, onOpenReceipt: true, expected: "DEPLOYED" },
+  { serial: `${PREFIX}DELTA-13`, make: "Dell", model: "5540", deviceName: null, uic: "W1AAAA", category: null, lastAuditedAt: null, markedReadyAt: JAN, expected: "READY_TO_DEPLOY" },
+  { serial: `${PREFIX}14`, make: "Delta Systems", model: "X1", deviceName: "Node fourteen", uic: "W2BBBB", category: "Switch", lastAuditedAt: JUN, lastLogonUser: "i@j.mil", expected: "DEPLOYED" },
+];
+
+/** The filter combinations the two paths must agree on. `size` is asserted so a
+ *  filter that quietly matched everything (or nothing) could not pass parity
+ *  by being equally broken on both sides. */
+const FILTERS: { name: string; opts: { search?: string; uic?: string }; size: number }[] = [
+  { name: "no filter", opts: {}, size: SEEDS.length },
+  { name: "search term", opts: { search: "delta" }, size: 7 },
+  { name: "uic filter", opts: { uic: "W1AAAA" }, size: 8 },
+  { name: "search + uic", opts: { search: "delta", uic: "W1AAAA" }, size: 4 },
+];
+
+/** Each ends in the unique `serialNumber`, so appending `readiness` adds a key
+ *  with no tie left to break. Covers the two nulls-last keys (deviceUIC,
+ *  deviceCategory), a nullable key on Postgres's default nulls ordering
+ *  (deviceName), the derived audit key (which maps to lastAuditedAt on BOTH
+ *  paths), and an enum key whose ordering is the enum's, not alphabetical. */
+const ORDER_CASES = [
+  "serialNumber",
+  "deviceUIC,serialNumber",
+  "deviceCategory,serialNumber",
+  "deviceName,serialNumber",
+  "auditState,serialNumber",
+  "status,serialNumber",
+];
+
+beforeAll(async () => {
+  migrateTestDb();
+  await resetDb();
+  const admin = await prisma.user.create({
+    data: { name: "Sort Parity", email: "sort-parity@x.co", passwordHash: "x", role: "ADMIN" },
+  });
+
+  for (const [i, s] of SEEDS.entries()) {
+    const item = await prisma.item.create({
+      data: {
+        make: s.make, model: s.model, serialNumber: s.serial, deviceName: s.deviceName,
+        deviceUIC: s.uic, deviceCategory: s.category, lastAuditedAt: s.lastAuditedAt,
+        createdById: admin.id,
+        status: s.retired ? "RETIRED" : "ACTIVE",
+        lastLogonAt: s.lastLogonAt ?? null,
+        lastLogonUserPrincipalName: s.lastLogonUser ?? null,
+        markedReadyAt: s.markedReadyAt ?? null,
+      },
+    });
+    if (s.flagged) {
+      await prisma.serviceQueueItem.create({
+        data: { itemId: item.id, serviceType: "REPAIR", status: "PENDING" },
+      });
+    }
+    if (s.onOpenReceipt) {
+      await prisma.transfer.create({
+        data: {
+          receiptNumber: `${PREFIX}R${i}`, itemSummary: "x",
+          senderName: "s", receiverName: "r", receiverSignature: "", status: "OPEN",
+          lines: {
+            create: [{
+              lineNo: 1, make: s.make, model: s.model, qtyAuth: 1, qtyIssued: 1,
+              items: { create: [{ itemId: item.id, serialNumber: s.serial }] },
+            }],
+          },
+        },
+      });
+    }
+  }
+});
+
+afterAll(async () => {
+  await resetDb();
+});
+
+const idsOf = async (opts: Parameters<typeof listItems>[0]) =>
+  (await listItems({ pageSize: 100, ...opts })).items.map((it) => it.id);
+
+describe("readiness sort / Prisma sort filter parity", () => {
+  for (const filter of FILTERS) {
+    for (const dir of ["asc", "desc"] as const) {
+      it(`returns the same rows in the same order for ${filter.name} (${dir})`, async () => {
+        const mismatches: string[] = [];
+        for (const sort of ORDER_CASES) {
+          const viaPrisma = await idsOf({ ...filter.opts, sort, dir });
+          const viaRaw = await idsOf({ ...filter.opts, sort: `${sort},readiness`, dir });
+          if (viaPrisma.length !== filter.size) {
+            mismatches.push(`${sort}: Prisma path matched ${viaPrisma.length} rows, expected ${filter.size}`);
+          }
+          if (viaRaw.join() !== viaPrisma.join()) {
+            mismatches.push(`${sort}: raw path returned [${viaRaw}], Prisma path [${viaPrisma}]`);
+          }
+        }
+        expect(mismatches).toEqual([]);
+      });
+    }
+  }
+
+  it("reports the same total on both paths", async () => {
+    for (const filter of FILTERS) {
+      const viaPrisma = await listItems({ ...filter.opts, sort: "serialNumber", dir: "asc" });
+      const viaRaw = await listItems({ ...filter.opts, sort: "readiness", dir: "asc" });
+      expect([filter.name, viaRaw.total]).toEqual([filter.name, viaPrisma.total]);
+      expect(viaRaw.total).toBe(filter.size);
+    }
+  });
+});
+
+describe("readiness ordering", () => {
+  const rankOf = async (ids: string[]) => {
+    const states = await readinessForItems(ids);
+    return ids.map((id) => READINESS_ORDER.indexOf(states.get(id) ?? "UNTRIAGED"));
+  };
+
+  it("walks the states in READINESS_ORDER, not alphabetically", async () => {
+    const ids = await idsOf({ sort: "readiness", dir: "asc" });
+    const ranks = await rankOf(ids);
+    expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
+    // Every bucket is represented, so the assertion above is about a real
+    // sequence rather than a table that happens to hold one state.
+    expect(new Set(ranks).size).toBe(READINESS_ORDER.length);
+    // Alphabetically, IN_REPAIR would precede READY_TO_DEPLOY. Operationally it
+    // must not — READY_TO_DEPLOY sits second, beside DEPLOYED.
+    const states = await readinessForItems(ids);
+    const order = [...new Set(ids.map((id) => states.get(id)))];
+    expect(order).toEqual([...READINESS_ORDER]);
+  });
+
+  it("reverses cleanly for desc", async () => {
+    const ranks = await rankOf(await idsOf({ sort: "readiness", dir: "desc" }));
+    expect(ranks).toEqual([...ranks].sort((a, b) => b - a));
+  });
+
+  it("pages a readiness sort without dropping or duplicating a row", async () => {
+    // The id tie-break is what makes this hold: readiness has five values
+    // across the whole table, so without a total order a row can land on two
+    // pages or on none.
+    const paged: string[] = [];
+    for (let page = 1; page <= 3; page++) {
+      paged.push(...(await listItems({ sort: "readiness", dir: "asc", page, pageSize: 5 })).items.map((it) => it.id));
+    }
+    expect(new Set(paged).size).toBe(SEEDS.length);
+    expect(paged).toEqual(await idsOf({ sort: "readiness", dir: "asc" }));
+  });
+
+  it("keeps the keys that follow readiness working, in the order given", async () => {
+    // Compared against the PRISMA path rather than a JS re-sort, so Postgres's
+    // own collation decides the make/serial order on both sides — a JS
+    // localeCompare would be asserting Node's collation, not the database's.
+    const byMake = await idsOf({ sort: "make,serialNumber", dir: "asc" });
+    const states = await readinessForItems(byMake);
+    // A STABLE sort by readiness rank alone: whatever the raw path does with
+    // the trailing keys must reproduce the make/serial order within each group.
+    const expected = [...byMake].sort(
+      (a, b) =>
+        READINESS_ORDER.indexOf(states.get(a) ?? "UNTRIAGED") -
+        READINESS_ORDER.indexOf(states.get(b) ?? "UNTRIAGED"),
+    );
+    expect(await idsOf({ sort: "readiness,make,serialNumber", dir: "asc" })).toEqual(expected);
+  });
+});

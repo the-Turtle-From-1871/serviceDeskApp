@@ -3,7 +3,14 @@ import { useState } from "react";
 import Link from "next/link";
 import { analyzeImportAction, commitImportAction } from "@/app/admin/actions/items";
 
-const TEMPLATE = "make,model,serialNumber,deviceName,homeUnit,deviceUIC,notes,assignedUser,lastLogonUserPrincipalName,lastLogonDate,enrollmentDate,compliance\n";
+// Header row for the downloadable starter file. Uses the canonical spelling of
+// each column; the parser also accepts the fleet export's own names (e.g.
+// DeviceOwnershipUIC for deviceUIC) — see HEADER_MAP in modules/items/csv.ts.
+// A second row of examples is included because `deviceType` is new and a blank
+// template gives no hint of what belongs in it.
+export const TEMPLATE =
+  "make,model,serialNumber,deviceName,deviceType,homeUnit,deviceUIC,notes,assignedUser,lastLogonUserPrincipalName,lastLogonDate,enrollmentDate,compliance\n" +
+  "Dell Inc.,Latitude 5540,ABC1234,NGHINB-EXAMPLE-01,Laptop,A CO 1-234 IN,W6BTAA,,soldier@army.mil,soldier@army.mil,7/25/2026 1:40:21 AM,5/1/2025 2:23:41 AM,compliant\n";
 // A CSV of items is small; anything larger is almost certainly a mistake — and the
 // two-step analyze→commit flow uploads the file twice, so bound it up front.
 const MAX_CSV_BYTES = 5 * 1024 * 1024; // 5 MB
@@ -176,7 +183,40 @@ export function ImportItemsForm() {
               setFile(f);
             }}
           />
-          <p className="subtle">Only <strong>serialNumber</strong> is required. Columns (any order, case-insensitive): make, model, serialNumber, deviceName, homeUnit, deviceUIC, notes, assignedUser, lastLogonUserPrincipalName, lastLogonDate, enrollmentDate, compliance. A row whose serial already exists updates its device name, device UIC, assigned user and telemetry; make/model are required only for new items. Blank cells are left unchanged on existing items.</p>
+          <div className="subtle stack-sm">
+            <p>
+              Only <strong>serialNumber</strong> is required. Column order and capitalisation
+              don&apos;t matter, and spaces or underscores in a header are ignored
+              (<code>Device Type</code> and <code>deviceType</code> are the same column).
+              Unrecognised columns are skipped.
+            </p>
+            <p>
+              <strong>Columns:</strong> make, model, serialNumber, deviceName,{" "}
+              <strong>deviceType</strong> (the device category — &ldquo;Laptop&rdquo;,
+              &ldquo;Switch&rdquo;; also accepts <code>deviceCategory</code> or{" "}
+              <code>category</code>), homeUnit, deviceUIC (also accepts{" "}
+              <code>UIC</code> or <code>DeviceOwnershipUIC</code>, the fleet export&apos;s
+              name for it), notes, assignedUser, lastLogonUserPrincipalName, lastLogonDate,
+              enrollmentDate, compliance.
+            </p>
+            <p>
+              A row whose serial already exists <strong>updates</strong> that item; a new
+              serial creates one. make and model are required only for new items, and are
+              never overwritten on an existing one. Blank cells leave the stored value
+              untouched — clearing a field needs the item&apos;s edit page.
+            </p>
+            <p>
+              Changes to device name, category, UIC and assigned user are recorded in the
+              item&apos;s history; MDM telemetry updates silently. A category the file
+              introduces is added to{" "}
+              <Link href="/admin/categories">the managed category list</Link> automatically.
+            </p>
+            <p>
+              A generic <code>type</code> column is <strong>deliberately ignored</strong> —
+              MDM exports use it for the operating system, which would overwrite every
+              device&apos;s category. Use <code>deviceType</code>.
+            </p>
+          </div>
         </div>
         {error && <p role="alert" className="alert-error">{error}</p>}
         <div className="row">

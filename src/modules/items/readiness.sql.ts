@@ -1,5 +1,6 @@
 import "server-only";
 import { Prisma } from "@prisma/client";
+import { READINESS_ORDER } from "./readiness";
 
 /* ============================================================
    The SQL twin of readinessState() in readiness.ts.
@@ -57,8 +58,45 @@ export const READINESS_CASE = Prisma.sql`
   END
 `;
 
-/** `WHERE` fragment applying the dashboard's UIC filter. Lifecycle-retired
- *  items are NOT excluded here — unlike the other aggregates, readiness has a
- *  RETIRED bucket of its own, so filtering them out would silently empty it. */
-export const readinessScope = (uic: string | null) =>
-  Prisma.sql`(${uic}::text IS NULL OR i."deviceUIC" = ${uic}::text)`;
+/**
+ * READINESS_CASE as an integer, so a query can ORDER BY readiness.
+ *
+ * WHY A RANK AND NOT THE TEXT: sorting the CASE's own strings would order them
+ * alphabetically — 'DEPLOYED', 'IN_REPAIR', 'READY_TO_DEPLOY', 'RETIRED',
+ * 'UNTRIAGED' — which reads as nonsense to an operator and puts "Deployed" and
+ * "Ready to deploy" (the two states people compare) at opposite ends of the
+ * list. The rank is built FROM `READINESS_ORDER`, the same worst-to-best,
+ * untriaged-last sequence the analytics chart stacks and the docs describe, so
+ * an ascending `/items` sort walks the states in the order the rest of the UI
+ * already presents them. Adding a state to the enum and to READINESS_ORDER is
+ * all it takes; there is no second list here to forget.
+ *
+ * There is deliberately no ELSE: a state missing from READINESS_ORDER must not
+ * be quietly ranked last, it must be noticed. `readiness.test.ts` asserts the
+ * order lists every ReadinessState, so the gap fails a test rather than sorting
+ * a whole bucket to the end of the table.
+ *
+ * State names and ranks are BOUND parameters, never interpolated (CLAUDE.md §2).
+ */
+export const READINESS_RANK = Prisma.sql`(CASE ${READINESS_CASE} ${Prisma.join(
+  READINESS_ORDER.map((state, rank) => Prisma.sql`WHEN ${state}::text THEN ${rank}::int`),
+  " ",
+)} END)`;
+
+/**
+ * `WHERE` fragment applying the dashboard's global unit scope, over the `i`
+ * alias. The raw-SQL twin of `itemWhere()` in analytics.service.ts, so the
+ * aggregates that must run as `$queryRaw` filter identically to the Prisma ones.
+ *
+ * Both dimensions are optional and compose with AND — the unit-allocation table
+ * can group by either `homeUnit` or `deviceUIC` (they are not 1:1 in the
+ * catalogue), so each has its own param. A null passes everything through.
+ * Values are BOUND, never interpolated (CLAUDE.md §2).
+ *
+ * Lifecycle-retired items are NOT excluded here — unlike the other aggregates,
+ * readiness has a RETIRED bucket of its own, so filtering them out would
+ * silently empty it.
+ */
+export const itemScopeSql = (scope: { uic: string | null; unit: string | null }) =>
+  Prisma.sql`(${scope.uic}::text IS NULL OR i."deviceUIC" = ${scope.uic}::text)
+      AND (${scope.unit}::text IS NULL OR i."homeUnit" = ${scope.unit}::text)`;

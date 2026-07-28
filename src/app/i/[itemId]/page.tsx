@@ -37,6 +37,10 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
     // an item they already handed back. getHoldingTransfer checks this item's
     // own returnedAt.
     getHoldingTransfer(itemId),
+    // Fetched for everyone even though only admins render it (below). Moving it
+    // behind the role check would serialise it after getCurrentUser and slow the
+    // admin path, to save a call that is memoized across requests and deploys
+    // (unstable_cache in qr.ts) — the QR for an item id never changes.
     itemQrDataUrl(itemId).catch((e) => { console.error("[item-page] QR generation failed:", e); return ""; }),
     getServiceRequestForItem(itemId),
     listUnits(),
@@ -204,7 +208,12 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
           </div>
         )}
 
-        {qr && (
+        {/* ADMIN-ONLY. The QR block is a property-book tool — it exists to
+            print and stick a label on hardware — so it is noise for everyone
+            who reaches this page by scanning that label or looking a serial up.
+            Admins keep it here; the bulk QR sheet at /admin/items/qr-sheet is
+            unaffected. */}
+        {isAdmin && qr && (
           <div className="card stack-sm" style={{ textAlign: "center" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={qr} alt={`QR code for ${item.make} ${item.model}`} width={220} height={220} style={{ margin: "0 auto" }} />
@@ -214,11 +223,9 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
                 sheet). A PDF — not window.print() — because iOS/WKWebView silently
                 ignores window.print(); a PDF opens in the native viewer for
                 Share -> Print / Save on mobile, and prints on desktop. */}
-            {loggedIn && (
-              <a className="btn btn-primary no-print" href={`/i/${item.id}/qr/pdf`} target="_blank" rel="noopener">
-                Print QR
-              </a>
-            )}
+            <a className="btn btn-primary no-print" href={`/i/${item.id}/qr/pdf`} target="_blank" rel="noopener">
+              Print QR
+            </a>
           </div>
         )}
 
