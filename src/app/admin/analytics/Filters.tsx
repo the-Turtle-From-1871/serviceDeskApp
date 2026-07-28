@@ -4,7 +4,13 @@ import { useCallback, useTransition } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { RANGES, type RangeKey } from "./analytics.types";
+import {
+  GROUP_BY,
+  DEFAULT_GROUP_BY,
+  RANGES,
+  type GroupByKey,
+  type RangeKey,
+} from "./analytics.types";
 
 /** Sentinel for "All Units". Radix Select forbids an empty-string item value,
  *  and the URL drops the param entirely for the default, so the two states
@@ -55,6 +61,39 @@ export function UnitFilter({ units, value }: { units: string[]; value: string | 
         {units.map((u) => (
           <SelectItem key={u} value={u}>
             {u}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+/**
+ * Chooses the dimension the unit-allocation table groups by.
+ *
+ * Lives in the URL like every other dashboard control, so the SERVER re-queries
+ * with a different `GROUP BY` — this is not a client-side relabel of the rows
+ * already fetched. A UIC and a unit name do not describe the same partition of
+ * the fleet (see GROUP_BY), so the data genuinely differs between the two.
+ */
+export function GroupByFilter({ value }: { value: GroupByKey }) {
+  const { setParam, pending } = useSetParam();
+
+  return (
+    <Select
+      value={value}
+      // The default drops the param entirely rather than writing `?groupBy=unit`,
+      // so a shared link carries only the state that differs from the default.
+      onValueChange={(v) => setParam("groupBy", v === DEFAULT_GROUP_BY ? null : v)}
+      disabled={pending}
+    >
+      <SelectTrigger className="w-[150px]" aria-label="Group unit allocation by">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {(Object.keys(GROUP_BY) as GroupByKey[]).map((k) => (
+          <SelectItem key={k} value={k}>
+            {GROUP_BY[k].label}
           </SelectItem>
         ))}
       </SelectContent>

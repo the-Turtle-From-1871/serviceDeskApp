@@ -3,12 +3,24 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-07-28
+
+### Added
+- **Sort the `/items` table by Readiness.** It was the one column you could see but not order by. Picking it groups the catalogue into **Deployed → Ready to deploy → In repair → Retired → Untriaged** (the same sequence the analytics chart uses, so the two read alike), with the arrow reversing it. It works as a secondary key too — "sort by Unit, then by Readiness" — and the ordering acts over the whole catalogue, not just the page you are looking at.
+
+### Changed
+- The **Sort by** control on `/items` now offers every column the table displays. Readiness was previously the only exception.
+
+### Notes
+- No schema change and no new column: readiness is still worked out from live signals at query time. Sorting by it runs a different query behind the scenes; searching and the Unit (UIC) filter behave identically either way, and a test asserts that by comparing both paths row for row.
+
 ## 2026-07-27
 
 ### Added
 - **Operational readiness on inventory items**, shown on `/items` and each item page as **Deployed**, **Ready to deploy**, **In repair**, **Retired**, or **Untriaged**. It is worked out from what the app already knows — whether the item is flagged for service, whether it is out on an unreturned hand receipt, when it was last logged into per the MDM export, and when someone last marked it back on the shelf — so it reflects reality without anyone maintaining a status field.
 - **"Mark as on hand"** (admin only) on `/items` (for the current selection) and on an item's page: records that the device is physically back in our possession. That reads as *Ready to deploy* until something contradicts it — the device gets issued out, gets flagged for service, or shows an MDM logon dated after the marking. Completing a service-queue item marks it on hand automatically, since the device is on the bench at that moment.
 - **Readiness analytics dashboard** at `/admin/analytics` (admin-only, linked from the admin hub). A global **Unit (UIC)** filter at the top re-scopes every widget on the page: audit readiness (audited / overdue / never audited), fleet KPIs (in-service vs ready, broken down by category), DA Form 2062 velocity, and a unit-allocation leaderboard whose rows set the global filter. The velocity chart offers 30d / 90d / 6m / 1y ranges, and every chart can be exported to PNG or CSV or switched to a **table view** from its actions menu.
+- **Group the unit-allocation table by unit name or UIC.** A **Group by** dropdown on that card counts the fleet under either **Unit name** (the default) or **UIC**, and the column header follows. These are genuinely different pictures of the same fleet — a single UIC covers as many as 46 different unit names in the catalogue, and plenty of items carry one without the other — so the dropdown re-runs the query rather than relabelling the same rows. Clicking a row scopes the whole dashboard by whichever dimension is on screen (`?unit=` or `?uic=`); if both filters end up set they narrow the page together, and the header line says so. Items with no value in the chosen dimension are now shown as an **Unassigned** row instead of being left out, so Total adds up to the item count in the page header.
 - **Device category** on items (`Laptop`, `Switch`, …). Importable via CSV — the importer fills it from a **`deviceType`** column (also accepts `deviceCategory` or `category`; spacing and casing are ignored, so `Device Type` works) — and a change is logged to item history like `deviceUIC`. A category the import introduces is registered in the managed list automatically. Backfill the existing catalogue by re-importing with a `deviceType` column.
 - **Admin management of device categories** at `/admin/categories` (linked from the admin hub). Admins can add a category and remove one, with a live count of how many items use each. Removing a category that is still assigned to items is **refused** (in the UI and on the server) with the count, so a device can never be left holding a category that no longer appears in any picker. Category names are case-insensitively unique, so "Laptops" and "laptops" cannot both exist, and surrounding/repeated whitespace is normalised on save. A CSV import carrying an unrecognised category **registers it automatically** rather than failing — the same "learn as you go" behaviour the unit list already has. The item edit form now offers the managed list (and also accepts a new name typed directly).
 - **Inventory table upgrades** on `/items`: new **UIC**, **Category**, and **Readiness** columns, a **Unit (UIC)** filter, and **compound sorting** ("sort by Make, then by Serial").

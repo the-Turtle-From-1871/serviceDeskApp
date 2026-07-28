@@ -9,6 +9,7 @@ import { planImport, type SkippedRow, type UnresolvedRow, type ExistingItem, typ
 import { loadUnitMap, learnUnits, type UnitResolution } from "./units.service";
 import { diffItemFields, type ItemLoggedFields } from "./item-diff";
 import { learnCategories } from "./categories.service";
+import { READINESS_JOINS, READINESS_RANK } from "./readiness.sql";
 import { ItemError } from "./items.errors";
 
 export async function createItem(input: NewItemInput, createdById: string): Promise<Item> {
@@ -45,10 +46,11 @@ export function getItemWithCreator(id: string) {
   });
 }
 
-// Server-sortable sort keys. `auditState` (the derived, time-dependent badge)
-// is NOT itself an ORDER BY — it maps to the denormalized `lastAuditedAt` column
-// (see the orderBy below), which sorts items by audit recency = audit-status
-// severity. The rest map straight to their like-named Item columns.
+// Server-sortable sort keys. Two of them are DERIVED and have no like-named
+// column: `auditState` maps to the denormalized `lastAuditedAt` (audit recency
+// IS audit-status severity), and `readiness` has no column at all — it sends
+// the whole query down the raw-SQL path below. The rest map straight to their
+// like-named Item columns.
 const ITEM_SORT_COLUMNS = new Set([
   "deviceName",
   "make",
@@ -58,6 +60,7 @@ const ITEM_SORT_COLUMNS = new Set([
   "auditState",
   "deviceUIC",
   "deviceCategory",
+  "readiness",
 ]);
 
 export const ITEMS_PAGE_SIZE = 50;
@@ -118,6 +121,111 @@ function orderClauseFor({ key, dir }: SortKey): Prisma.ItemOrderByWithRelationIn
   return { [key]: dir } as Prisma.ItemOrderByWithRelationInput;
 }
 
+/** Physical column each NON-derived sort key orders by on the raw path.
+ *
+ *  This is an ALLOWLIST guarding a SQL-identifier interpolation, the same job
+ *  UPDATABLE_ITEM_COLUMNS does for the importer: the column name is spliced
+ *  into the ORDER BY (values never are), so nothing outside this map may reach
+ *  it. `auditState` resolves to `lastAuditedAt` exactly as orderClauseFor does
+ *  — a key shared by both paths must sort identically on both, or adding
+ *  readiness to a compound sort would quietly change what the other keys mean. */
+const SORT_COLUMN: Record<string, string> = {
+  deviceName: "deviceName",
+  make: "make",
+  model: "model",
+  serialNumber: "serialNumber",
+  status: "status",
+  auditState: "lastAuditedAt",
+  deviceUIC: "deviceUIC",
+  deviceCategory: "deviceCategory",
+};
+
+/** Keys whose empties sort last in BOTH directions, mirroring orderClauseFor's
+ *  `nulls: "last"`. Every other key is left to Postgres's default (NULLS LAST
+ *  ascending, NULLS FIRST descending) — which is exactly what a bare Prisma
+ *  `{ column: dir }` emits, so the two paths agree without saying so twice. */
+const NULLS_LAST_SORT_KEYS = new Set(["auditState", "deviceUIC", "deviceCategory"]);
+
+/** The raw-SQL twin of listItems' Prisma `where`.
+ *
+ *  WHY THIS IS THE RISKY PART: two filter implementations drift, and a drifted
+ *  filter shows a different catalogue depending on which column you sorted by.
+ *  `items.readiness-sort.parity.test.ts` seeds real rows and asserts both paths
+ *  return the same ids in the same order for the same filters, so a change made
+ *  here and not there fails a test rather than a user.
+ *
+ *  `"serialNumber"::text ILIKE` is not stylistic: the column is citext, whose
+ *  own ILIKE operator the text pg_trgm GIN index cannot serve (see
+ *  searchItemsBySerial). LIKE metacharacters are deliberately NOT escaped here
+ *  — Prisma's `contains` does not escape them either, and matching the path
+ *  this stands in for matters more than tightening one of the two.
+ *
+ *  Values are BOUND, never interpolated (CLAUDE.md §2); the `::text IS NULL`
+ *  guards let one statement serve every filter combination, as itemScopeSql
+ *  does for the dashboard. */
+function itemFilterSql(search: string | null, uic: string | null): Prisma.Sql {
+  const pattern = search ? `%${search}%` : null;
+  return Prisma.sql`
+    (${pattern}::text IS NULL
+      OR i."deviceName" ILIKE ${pattern}::text
+      OR i."make" ILIKE ${pattern}::text
+      OR i."model" ILIKE ${pattern}::text
+      OR i."serialNumber"::text ILIKE ${pattern}::text)
+    AND (${uic}::text IS NULL OR i."deviceUIC" = ${uic}::text)`;
+}
+
+/**
+ * ONE page of item ids, ordered by a sort that involves readiness.
+ *
+ * Readiness has no column for Prisma to `orderBy` — but Postgres can derive it
+ * inline from the same CASE the badge and the dashboard read, ranked by
+ * READINESS_RANK. Selecting ids ONLY keeps this cheap and lets getItemsByIds
+ * hydrate the page: two bounded queries for the whole list, never a derivation
+ * per row.
+ *
+ * LIMIT/OFFSET carry the page-size cap over from the Prisma path, and the `id`
+ * tie-break is repeated for the reason it exists there — readiness has five
+ * distinct values across 1,200+ rows, so without a total order a row could
+ * appear on two pages or on none.
+ */
+async function readinessOrderedItemIds(opts: {
+  search: string | null;
+  uic: string | null;
+  sortKeys: SortKey[];
+  skip: number;
+  take: number;
+}): Promise<string[]> {
+  const terms: Prisma.Sql[] = [];
+  for (const { key, dir } of opts.sortKeys) {
+    const direction = Prisma.raw(dir === "asc" ? "ASC" : "DESC");
+    if (key === "readiness") {
+      terms.push(Prisma.sql`${READINESS_RANK} ${direction}`);
+      continue;
+    }
+    const column = SORT_COLUMN[key];
+    // parseSortKeys already dropped anything unknown; this re-checks at the SQL
+    // boundary so a future caller that builds SortKeys some other way cannot
+    // splice an identifier of its own choosing into the ORDER BY.
+    if (!column) throw new ItemError("INVALID", `Refusing to sort by unknown column: ${key}`);
+    const ref = Prisma.raw(`i."${column}"`);
+    terms.push(
+      NULLS_LAST_SORT_KEYS.has(key)
+        ? Prisma.sql`${ref} ${direction} NULLS LAST`
+        : Prisma.sql`${ref} ${direction}`,
+    );
+  }
+  terms.push(Prisma.sql`i."id" ASC`);
+
+  const rows = await prisma.$queryRaw<{ id: string }[]>(Prisma.sql`
+    SELECT i."id"
+    FROM "Item" i
+    ${READINESS_JOINS}
+    WHERE ${itemFilterSql(opts.search, opts.uic)}
+    ORDER BY ${Prisma.join(terms, ", ")}
+    LIMIT ${opts.take} OFFSET ${opts.skip}`);
+  return rows.map((r) => r.id);
+}
+
 // Paginated, sorted item list. Bounds the fetch and the RSC payload (the table was
 // previously unbounded — every row shipped to the client on each load). Sort and
 // paging are server-side so they act over the whole result set, not just one page.
@@ -151,25 +259,39 @@ export async function listItems(opts: {
 
   const sortKeys = parseSortKeys(opts.sort, opts.dir);
 
-  // The chosen sort is the whole ORDER BY.
-  //
-  // Readiness is deliberately NOT sortable here: it is derived from four
-  // signals across three tables (see readiness.ts), so there is no column to
-  // ORDER BY and faking one would mean either a stored duplicate that drifts
-  // or a per-row sort that breaks pagination. Fleet readiness composition is
-  // the analytics dashboard's job; this table sorts on stored facts.
-  const orderBy: Prisma.ItemOrderByWithRelationInput[] = [];
-  for (const k of sortKeys) orderBy.push(orderClauseFor(k));
-  // Newest-first is the historical default; keep it when nothing else orders.
-  if (sortKeys.length === 0) orderBy.push({ createdAt: "desc" });
-  // Secondary key by id so rows with equal sort values keep a stable order across
-  // pages (otherwise the same row can appear on two pages or none).
-  orderBy.push({ id: "asc" });
+  // Readiness sorts through a SEPARATE, raw-SQL path — not because it is
+  // special, but because it is derived from four signals across three tables
+  // (readiness.ts) and so has no column for a Prisma `orderBy` to name. The two
+  // alternatives were worse: a stored copy on Item is the `deployableStatus`
+  // column that was deliberately dropped for drifting, and sorting a fetched
+  // page in JavaScript would order 50 rows while claiming to order 1,200.
+  // Postgres CAN order it — the same CASE the badge and the dashboard read —
+  // so a sort that involves readiness selects its ids in SQL and hydrates them,
+  // and every other sort stays on the untouched Prisma path below.
+  const sortsByReadiness = sortKeys.some((k) => k.key === "readiness");
 
+  // The chosen sort is the whole ORDER BY.
+  const orderBy: Prisma.ItemOrderByWithRelationInput[] = [];
+  if (!sortsByReadiness) {
+    for (const k of sortKeys) orderBy.push(orderClauseFor(k));
+    // Newest-first is the historical default; keep it when nothing else orders.
+    if (sortKeys.length === 0) orderBy.push({ createdAt: "desc" });
+    // Secondary key by id so rows with equal sort values keep a stable order across
+    // pages (otherwise the same row can appear on two pages or none).
+    orderBy.push({ id: "asc" });
+  }
+
+  // `total` comes from the Prisma count on BOTH paths, so the row count and the
+  // pager can never disagree about which filter was applied.
   const total = await prisma.item.count({ where });
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const page = Math.min(Math.max(1, Math.floor(opts.page ?? 1)), totalPages);
-  const items = await prisma.item.findMany({ where, orderBy, skip: (page - 1) * pageSize, take: pageSize });
+  const skip = (page - 1) * pageSize;
+  const items = sortsByReadiness
+    ? await getItemsByIds(
+        await readinessOrderedItemIds({ search: search ?? null, uic, sortKeys, skip, take: pageSize }),
+      )
+    : await prisma.item.findMany({ where, orderBy, skip, take: pageSize });
 
   return {
     items,

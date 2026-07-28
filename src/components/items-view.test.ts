@@ -66,11 +66,11 @@ describe("parseSortPref", () => {
     expect(parseSortPref(JSON.stringify({ field: "hacker", dir: "asc" }))).toEqual({ field: null, dir: "asc" });
   });
 
-  it("rejects readiness — it is a rendered column, not a sortable one", () => {
-    // Readiness is derived from four signals across three tables, so there is
-    // no column to ORDER BY. A stored preference naming it (or a hand-crafted
-    // one) must fall back to the default rather than reaching the server.
-    expect(parseSortPref(JSON.stringify({ field: "readiness", dir: "asc" }))).toEqual({ field: null, dir: "asc" });
+  it("accepts readiness — listItems orders it in SQL", () => {
+    // Readiness has no stored column, but it is server-sortable all the same:
+    // listItems ranks the derived state in raw SQL. A stored preference naming
+    // it is therefore a real preference, not something to discard.
+    expect(parseSortPref(JSON.stringify({ field: "readiness", dir: "asc" }))).toEqual({ field: "readiness", dir: "asc" });
   });
 
   it("rejects an unknown direction", () => {
@@ -83,13 +83,15 @@ describe("parseSortPref", () => {
 });
 
 describe("columns", () => {
-  it("offers readiness as a column but not as a sort key", () => {
+  it("offers readiness both as a column and as a sort key", () => {
     expect(ITEM_COLUMNS.map((c) => c.key)).toContain("readiness");
-    expect(SORTABLE_COLUMNS.map((c) => c.key)).not.toContain("readiness");
+    expect(SORTABLE_COLUMNS.map((c) => c.key)).toContain("readiness");
   });
 
-  it("keeps every other column sortable", () => {
-    expect(SORTABLE_COLUMNS).toHaveLength(ITEM_COLUMNS.length - 1);
+  it("makes every displayed column sortable", () => {
+    // The Sort control must not silently omit a column the table renders — a
+    // header you can see and cannot order by reads as a bug.
+    expect(SORTABLE_COLUMNS.map((c) => c.key)).toEqual(ITEM_COLUMNS.map((c) => c.key));
   });
 });
 
@@ -98,9 +100,9 @@ describe("parseHiddenCols", () => {
     expect(parseHiddenCols(JSON.stringify(["make", "bogus", "status"]))).toEqual(["make", "status"]);
   });
 
-  it("can hide readiness even though it cannot be sorted", () => {
-    // Column visibility covers every rendered column, sortable or not — the
-    // two lists are separate on purpose.
+  it("can hide readiness, which is sortable too", () => {
+    // Visibility and sortability stay separate lists: hiding a column must
+    // never imply anything about whether the server can order by it.
     expect(parseHiddenCols(JSON.stringify(["readiness"]))).toEqual(["readiness"]);
   });
 

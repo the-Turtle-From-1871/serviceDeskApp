@@ -84,13 +84,28 @@ describe("listItems", () => {
     expect(orderOf()).toEqual([{ make: "asc" }, { id: "asc" }]);
   });
 
-  it("refuses to sort by readiness — it is derived, with no column to order by", async () => {
+  it("sends a readiness sort down the raw path instead of Prisma's orderBy", async () => {
     // Readiness comes from four signals across three tables (readiness.ts), so
-    // there is nothing to ORDER BY. A crafted ?sort=readiness must fall back to
-    // the default order rather than reach Prisma with a non-existent column.
+    // there is no column for a Prisma orderBy to name — it is ordered in SQL
+    // and the page is hydrated by id. Prisma must therefore never be handed a
+    // `readiness` orderBy: this asserts the ordering query is the raw one.
     vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
     await listItems({ sort: "readiness", dir: "desc" });
-    expect(orderOf()).toEqual([{ createdAt: "desc" }, { id: "asc" }]);
+    const arg = vi.mocked(prisma.$queryRaw).mock.calls[0][0] as unknown as { sql: string; values: unknown[] };
+    expect(arg.sql).toMatch(/ORDER BY[\s\S]*DESC/i);
+
+    // The rank's comparisons are BOUND, not spliced: every WHEN compares
+    // against a placeholder.
+    //
+    // Note the statement DOES contain the state names as literals — they are
+    // the THEN outputs of READINESS_CASE, hardcoded in our own source. That is
+    // not the risk; the risk would be a value flowing from the querystring into
+    // the text, so this asserts the comparison side specifically.
+    expect(arg.sql).not.toMatch(/WHEN\s+'(DEPLOYED|READY_TO_DEPLOY|IN_REPAIR|RETIRED|UNTRIAGED)'/);
+    expect(arg.values).toContain("READY_TO_DEPLOY");
+    // The mock returns no ids, so no page is hydrated — Prisma is never handed
+    // an orderBy for this sort at all.
+    expect(vi.mocked(prisma.item.findMany)).not.toHaveBeenCalled();
   });
 
   it("orders a compound sort in the order the keys were given", async () => {
