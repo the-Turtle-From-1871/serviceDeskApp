@@ -80,10 +80,12 @@ const FILTERS: { name: string; opts: { search?: string; uic?: string }; size: nu
 ];
 
 /** Each ends in the unique `serialNumber`, so appending `readiness` adds a key
- *  with no tie left to break. Covers the two nulls-last keys (deviceUIC,
- *  deviceCategory), a nullable key on Postgres's default nulls ordering
- *  (deviceName), the derived audit key (which maps to lastAuditedAt on BOTH
- *  paths), and an enum key whose ordering is the enum's, not alphabetical. */
+ *  with no tie left to break. No key pins its blanks — every one rides
+ *  Postgres's default nulls ordering on both paths — so the coverage that
+ *  matters is the SHAPE of each key: three nullable columns (deviceUIC,
+ *  deviceCategory, deviceName), the derived audit key (which maps to
+ *  lastAuditedAt on BOTH paths), and an enum key whose ordering is the enum's,
+ *  not alphabetical. */
 const ORDER_CASES = [
   "serialNumber",
   "deviceUIC,serialNumber",

@@ -52,6 +52,35 @@ test("setUserActive toggles the flag", async () => {
   expect(off.isActive).toBe(false);
 });
 
+// Deactivation has to revoke the account's already-issued JWT, not just fail the
+// per-request authz check — otherwise the stale token still passes the coarse
+// login gate in src/proxy.ts and keeps its bypass of the public PIN gate.
+// auth.ts's jwt callback revokes on passwordChangedAt, so deactivating stamps it.
+test("setUserActive stamps passwordChangedAt on deactivation to revoke live tokens", async () => {
+  const u = await createUser({ name: "Pat", email: "pat@x.co", password: "password123", role: "USER", ...base });
+  expect(u.passwordChangedAt).toBeNull();
+
+  const before = Date.now();
+  const off = await setUserActive(u.id, false);
+
+  expect(off.passwordChangedAt).not.toBeNull();
+  expect(off.passwordChangedAt!.getTime()).toBeGreaterThanOrEqual(before - 1000);
+  // Same instant as deactivatedAt: one transition, one timestamp.
+  expect(off.passwordChangedAt!.getTime()).toBe(off.deactivatedAt!.getTime());
+});
+
+// Clearing the stamp on reactivation would un-revoke the tokens the
+// deactivation killed (auth.ts only revokes while the DB stamp is non-null).
+test("setUserActive keeps passwordChangedAt when reactivating", async () => {
+  const u = await createUser({ name: "Pat", email: "pat@x.co", password: "password123", role: "USER", ...base });
+  const off = await setUserActive(u.id, false);
+  const on = await setUserActive(u.id, true);
+
+  expect(on.isActive).toBe(true);
+  expect(on.deactivatedAt).toBeNull();
+  expect(on.passwordChangedAt?.getTime()).toBe(off.passwordChangedAt!.getTime());
+});
+
 test("setUserRole promotes to ADMIN", async () => {
   const u = await createUser({ name: "Pat", email: "pat@x.co", password: "password123", role: "USER", ...base });
   const admin = await setUserRole(u.id, "ADMIN");

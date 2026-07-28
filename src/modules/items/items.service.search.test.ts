@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("@/lib/prisma", () => ({ default: { item: { findMany: vi.fn(async () => []), findUnique: vi.fn(async () => null), count: vi.fn(async () => 0) }, $queryRaw: vi.fn(async () => []) } }));
 import prisma from "@/lib/prisma";
-import { searchItemsBySerial, getItemWithCreator, listItems } from "./items.service";
+import {
+  searchItemsBySerial,
+  getItemWithCreator,
+  listItems,
+  ITEM_SORT_COLUMNS,
+  SORT_COLUMN,
+} from "./items.service";
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -52,29 +58,80 @@ describe("listItems", () => {
     expect(orderOf()).toEqual([{ make: "asc" }, { id: "asc" }]);
   });
 
-  // Blanks sort as a VALUE — they gather at one end and swap ends when the
-  // direction is reversed, so reversing a sort reverses the WHOLE list. No
-  // column pins them, and that must stay uniform: a single pinned column would
-  // leave part of the list unmoved on reverse and read as a broken sort.
-  it.each([
-    ["deviceName", "deviceName"],
-    ["deviceUIC", "deviceUIC"],
-    ["deviceCategory", "deviceCategory"],
-    ["auditState", "lastAuditedAt"],
-    ["make", "make"],
-    ["status", "status"],
-  ])("orders %s without pinning empties to a fixed end", async (sortKey, column) => {
+  /** The expected physical column per sort key, written out INDEPENDENTLY.
+   *
+   *  Deliberately not `SORT_COLUMN[key]`. Deriving the expectation from the map
+   *  under test makes a wrong entry unfalsifiable: the implementation and the
+   *  assertion both read the same value, so `make: "model"` would satisfy both
+   *  and /items would silently order by the wrong column. A test needs an
+   *  oracle the implementation cannot supply. The exhaustiveness check below
+   *  keeps this table from falling behind the allowlist. */
+  const EXPECTED_COLUMN: Record<string, string> = {
+    deviceName: "deviceName",
+    make: "make",
+    model: "model",
+    serialNumber: "serialNumber",
+    status: "status",
+    auditState: "lastAuditedAt",
+    deviceUIC: "deviceUIC",
+    deviceCategory: "deviceCategory",
+  };
+  const PRISMA_PATH_KEYS = [...ITEM_SORT_COLUMNS].filter((k) => k !== "readiness");
+
+  it("pins an expected column for every key the server accepts", () => {
+    expect(Object.keys(EXPECTED_COLUMN).sort()).toEqual([...PRISMA_PATH_KEYS].sort());
+    // And the map under test agrees with the independent table.
+    for (const key of PRISMA_PATH_KEYS) expect(SORT_COLUMN[key]).toBe(EXPECTED_COLUMN[key]);
+  });
+
+  // Every clause is a bare `{ column: dir }` and never `{ sort, nulls }`, so a
+  // nullable column's blanks sort as a VALUE: they swap ends with the direction
+  // and reversing a sort reverses the WHOLE list. Asserted for every key, not
+  // just the nullable ones — the rule is that NO key pins, and a pin added to a
+  // non-null column today is a pin waiting for that column to become nullable.
+  it.each(PRISMA_PATH_KEYS)("maps %s to a bare { column: dir }, no nulls override", async (sortKey) => {
     for (const dir of ["asc", "desc"] as const) {
       vi.mocked(prisma.item.findMany).mockClear();
       vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
       await listItems({ sort: sortKey, dir });
-      // A bare `{ column: dir }` — never `{ sort, nulls }`.
-      expect(orderOf()).toEqual([{ [column]: dir }, { id: "asc" }]);
+      expect(orderOf()).toEqual([{ [EXPECTED_COLUMN[sortKey]]: dir }, { id: "asc" }]);
+    }
+  });
+
+  // Asserted against the ORDER BY ALONE, and with the direction attached.
+  // Matching the whole statement was vacuous: itemFilterSql names deviceName,
+  // make, model, serialNumber and deviceUIC in its WHERE, and READINESS_CASE
+  // names status — so six of these eight keys "passed" even with the entire
+  // non-readiness ORDER BY branch deleted. `i."col" ASC` appears only where the
+  // sort term is actually emitted.
+  it.each(PRISMA_PATH_KEYS)("orders by the mapped column on the raw readiness path (%s)", async (sortKey) => {
+    // BOTH directions. Asserting only ASC left the direction unchecked on this
+    // path: hard-coding `Prisma.raw("ASC")` in readinessOrderedItemIds passed
+    // every case, while the release notes claim the two paths behave alike
+    // whichever keys you sort by.
+    for (const [dir, sql] of [
+      ["asc", "ASC"],
+      ["desc", "DESC"],
+    ] as const) {
+      vi.mocked(prisma.$queryRaw).mockClear();
+      vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
+      await listItems({ sort: `readiness,${sortKey}`, dir });
+
+      const [emitted] = vi.mocked(prisma.$queryRaw).mock.calls[0] as unknown as [
+        { strings: string[] },
+      ];
+      const text = emitted.strings.join("");
+      const orderBy = text.slice(text.lastIndexOf("ORDER BY"));
+      expect(orderBy).toContain(`i."${EXPECTED_COLUMN[sortKey]}" ${sql}`);
     }
   });
 
   it("maps the derived auditState sort to lastAuditedAt in both directions", async () => {
-    vi.mocked(prisma.item.count).mockResolvedValue(100);
+    // ...Once, not a persistent implementation: `clearAllMocks` wipes call
+    // records but NOT implementations, so a sticky mockResolvedValue here would
+    // silently set count=100 for every test declared after this one and make
+    // declaration order load-bearing for anything that reads totalPages.
+    vi.mocked(prisma.item.count).mockResolvedValueOnce(100).mockResolvedValueOnce(100);
 
     // auditState is derived and time-dependent, so it rides the denormalized
     // lastAuditedAt column. Never-audited rows (null) sort as a value like any
@@ -86,6 +143,27 @@ describe("listItems", () => {
     await listItems({ sort: "auditState", dir: "desc" });
     expect(orderOf()).toEqual([{ lastAuditedAt: "desc" }, { id: "asc" }]);
   });
+
+  // The raw path is the OTHER half of the no-pinning rule, and the parity test
+  // cannot see it: that test compares the two paths against each other, so
+  // reinstating NULLS LAST on BOTH would keep it green while reverting the fix.
+  // This asserts the emitted SQL directly.
+  it.each(["asc", "desc"] as const)(
+    "emits no NULLS override on the raw readiness path (%s)",
+    async (dir) => {
+      vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
+      await listItems({ sort: "readiness,deviceUIC", dir });
+
+      const [sql] = vi.mocked(prisma.$queryRaw).mock.calls[0] as unknown as [
+        { strings: string[] },
+      ];
+      const text = sql.strings.join(" ");
+      expect(text).toMatch(/ORDER BY/i);
+      expect(text).not.toMatch(/NULLS/i);
+      // The readiness key must not have quietly fallen back to the Prisma path.
+      expect(prisma.item.findMany).not.toHaveBeenCalled();
+    },
+  );
 
   it("ignores an unknown sort key, falling back to the default order", async () => {
     vi.mocked(prisma.item.count).mockResolvedValueOnce(100);

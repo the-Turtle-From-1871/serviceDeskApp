@@ -90,6 +90,8 @@ export function AuditReadinessWidget({
         total ? `${pct}% of ${total} items audited within the last year` : "No items in scope"
       }
       legend={slices.map((s) => ({ label: s.label, color: s.color }))}
+      // Matches the icon+count row above it, which is centred under the donut.
+      legendAlign="center"
       exportBase="audit-readiness"
       // No range in the filename: this donut is a point-in-time snapshot and
       // ignores the time range entirely, so tagging the file "90d" would lie.
@@ -272,13 +274,13 @@ export function VelocityWidget({
 
   return (
     <ChartCard
-      title="DA Form 2062 velocity"
+      title="DA Form 2062 volume"
       // Says exactly what is counted — see the note in analytics.service.ts on
       // why this is items, not receipts.
       description="Items transferred on completed hand receipts, per month. Closed receipts are purged after 90 days, so earlier months may under-report."
       controls={<RangeToggle value={range} />}
       legend={series.map((s) => ({ label: s.label, color: s.color }))}
-      exportBase="transfer-velocity"
+      exportBase="transfer-volume"
       exportParts={[range, scopeLabel(scope)]}
       exportColumns={["Month", ...series.map((s) => s.label)]}
       exportRows={rows}

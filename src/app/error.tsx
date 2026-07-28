@@ -33,6 +33,14 @@ export default function Error({
           <button type="button" className="btn btn-primary" onClick={() => unstable_retry()}>
             Try again
           </button>
+          {/* A DELIBERATE hard navigation, not a `<Link>`. This is the root
+              error boundary's last-resort escape hatch: the React tree and
+              router cache it would reuse are the ones that just failed, so a
+              soft navigation can leave the user stuck on the error screen with
+              no way out but a manual reload. A plain anchor always produces a
+              clean document load. `unstable_retry` above is the soft-recovery
+              path; this is the one that must not depend on the broken runtime. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
           <a className="btn btn-ghost" href="/">Back to search</a>
         </div>
       </div>

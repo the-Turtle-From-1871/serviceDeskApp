@@ -10,13 +10,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - The **Sort by** control on `/items` now offers every column the table displays. Readiness was previously the only exception.
+- The **DA Form 2062 velocity** chart on `/admin/analytics` is now called **DA Form 2062 volume**. Its CSV and PNG exports are named `transfer-volume-…` accordingly; what the chart counts is unchanged.
+- The colour key under the **Audit readiness** donut is centred, matching the count row directly above it. Both rows now sit under the middle of the donut instead of the key hanging off to the left.
 
 ### Fixed
 - **Blanks on `/items` now follow the sort direction instead of being pinned to the bottom.** Sorting by **Device Name** descending used to open on a screen of dashes, and reversing a sort left part of the list sitting still — which reads as the sort being broken. Empty values now sort as a value: they gather at one end and swap ends when you reverse, so reversing a sort reverses the whole list. This applies to every sortable column, including **Unit (UIC)**, **Category** and **Audit**, and behaves the same whether or not Readiness is one of your sort keys.
 - **The tables on `/admin/analytics` are ruled consistently.** The **Fleet status** and **Unit allocation** tables drew a heavy 3px frame down their sides and between rows, while the final row was left with no closing line at all — so the bottom of each table trailed off and did not match the rows above it. Every divider, including the one under the last row, is now the same 1px ledger hairline. The **View as table** mode on each chart is ruled the same way.
+- **Chart PNG exports now include the colour key.** Exporting a chart to PNG left the legend out of the image, so the **DA Form 2062 volume** export was a stack of bars with nothing naming the series. The exported image still excludes the card's menu button.
+- **The recipient type-ahead on the hand-receipt builder no longer offers a contact that does not match what you typed.** Clearing the name box and typing something new could briefly list the previous search's contact against the new text, and a slow reply for a name you had already deleted could surface after the fact. Suggestions are now tied to the exact text that fetched them.
+
+### Security
+- **Deactivating an account now signs it out everywhere immediately.** Deactivation already blocked the account from reading or changing anything on its very next request, but the sign-in it already had was left alive until it expired on its own — up to 30 days. In practice that meant a deactivated account still counted as "signed in" for the shared public-access PIN, so someone who had just been offboarded could keep browsing the public item and receipt pages without being asked for it. Deactivating now revokes the existing sign-in outright, the same way a password change does. Reactivating an account requires the person to sign in again.
 
 ### Notes
 - No schema change and no new column: readiness is still worked out from live signals at query time. Sorting by it runs a different query behind the scenes; searching and the Unit (UIC) filter behave identically either way, and a test asserts that by comparing both paths row for row.
+- The deactivation fix reuses the existing `User.passwordChangedAt` revocation stamp — no migration and nothing to apply to the database. Anyone deactivated *before* this ships keeps their old session until it expires; deactivate and reactivate them once to cut it off now.
 
 ## 2026-07-27
 

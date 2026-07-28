@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 import { downloadCsv, downloadPng, exportName } from "./export";
 
 export type LegendEntry = { label: string; color: string };
@@ -24,6 +25,11 @@ type Props = {
   controls?: React.ReactNode;
   /** ≥2 series always get a legend; identity is never colour alone. */
   legend?: LegendEntry[];
+  /** Centre the legend under the plot. Defaults to start-aligned, which lines
+   *  the swatches up with the y-axis of a cartesian chart. A donut has no axis
+   *  to align to and is itself centred, so a start-aligned legend reads as
+   *  detached from it — see AuditReadinessWidget. */
+  legendAlign?: "start" | "center";
   /** Raw rows behind the chart. Powers both the CSV export and the table view. */
   exportColumns: string[];
   exportRows: Array<Record<string, unknown>>;
@@ -47,6 +53,7 @@ export function ChartCard({
   description,
   controls,
   legend,
+  legendAlign = "start",
   exportColumns,
   exportRows,
   exportParts,
@@ -111,8 +118,17 @@ export function ChartCard({
       </CardHeader>
 
       <CardContent className="flex-1">
-        {/* Only the plot is captured, so the exported PNG has no menu button in it. */}
-        <div ref={captureRef} className="bg-card">
+        {/* The capture covers the plot AND its legend, but not the card chrome,
+            so the exported PNG carries no menu button — and never loses the
+            colour key. The legend USED to sit outside this div, which meant
+            every exported chart shipped without one: for the volume chart the
+            legend is the only thing naming the series, so the PNG was a stack
+            of unlabelled bars, exactly what the palette relief rule in the
+            docblock above forbids. */}
+        {/* data-slot names the element the PNG export rasterizes, so a test can
+            bind to the capture ITSELF rather than to whatever styling class it
+            happens to carry. */}
+        <div ref={captureRef} data-slot="chart-capture" className="bg-card">
           {asTable ? (
             <DataTable columns={exportColumns} rows={exportRows} />
           ) : exportRows.length === 0 ? (
@@ -120,22 +136,27 @@ export function ChartCard({
           ) : (
             children
           )}
-        </div>
 
-        {legend && legend.length > 1 && !asTable && (
-          <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
-            {legend.map((l) => (
-              <li key={l.label} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span
-                  aria-hidden="true"
-                  className="size-2.5 shrink-0 rounded-[2px]"
-                  style={{ background: l.color }}
-                />
-                {l.label}
-              </li>
-            ))}
-          </ul>
-        )}
+          {legend && legend.length > 1 && !asTable && (
+            <ul
+              className={cn(
+                "mt-3 flex flex-wrap gap-x-4 gap-y-1.5",
+                legendAlign === "center" && "justify-center",
+              )}
+            >
+              {legend.map((l) => (
+                <li key={l.label} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <span
+                    aria-hidden="true"
+                    className="size-2.5 shrink-0 rounded-[2px]"
+                    style={{ background: l.color }}
+                  />
+                  {l.label}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

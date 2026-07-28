@@ -135,9 +135,12 @@ model Item {
   createdAt                  DateTime          @default(now())
   updatedAt                  DateTime          @updatedAt
   // Denormalized MAX(ItemAudit.createdAt), maintained by recordAudit. Lets the
-  // /items list ORDER BY audit recency (= audit-status severity) server-side:
+  // /items list ORDER BY audit recency server-side:
   // auditState itself is derived/time-dependent and not stored, so it can't be an
-  // ORDER BY, but this column can. Null = never audited (sorts last, both dirs).
+  // ORDER BY, but this column can. Null = never audited — and it is ordered as
+  // a VALUE, not pinned: no sort key pins its blanks, so nulls swap ends with
+  // the direction (see orderClauseFor). The Audit sort is therefore by recency,
+  // not by badge severity.
   lastAuditedAt              DateTime?
 
   serviceQueueItem ServiceQueueItem?
@@ -151,7 +154,7 @@ model Item {
   // filters feeding groupBy — a plain B-tree serves them.
   @@index([deviceCategory])
   @@index([deviceUIC])
-  // Audit-status sort on /items: ORDER BY lastAuditedAt (nulls last).
+  // Audit-status sort on /items: a bare ORDER BY lastAuditedAt, no nulls override.
   @@index([lastAuditedAt])
   // Readiness derivation reads these two on every dashboard aggregate and on
   // the /items readiness sort. Both are nullable and mostly-null today, so a
