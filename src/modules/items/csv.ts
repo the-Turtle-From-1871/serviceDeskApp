@@ -29,6 +29,11 @@ const HEADER_MAP: Record<string, keyof Omit<RawRow, "row">> = {
   homeunit: "homeUnit",
   deviceuic: "deviceUIC",
   uic: "deviceUIC",
+  // The MDM fleet export's own name for it. Without this the column falls
+  // through as an unknown header and is silently ignored — a full import then
+  // reports success while leaving every UIC empty.
+  deviceownershipuic: "deviceUIC",
+  ownershipuic: "deviceUIC",
   // Category headers. `deviceType` is the column the fleet export carries
   // ("Laptop", "Switch"), and it fills the device category.
   //

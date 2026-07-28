@@ -12,6 +12,24 @@ describe("parseItemsCsv", () => {
     });
   });
 
+  it("maps the fleet export's DeviceOwnershipUIC column to the UIC", () => {
+    // The real MDM export names it this. It previously fell through as an
+    // unknown header, so a 1,000-row import reported success while leaving
+    // every UIC empty.
+    const csv = 'SerialNumber,DeviceOwnershipUIC\nA1,W6BTAA\n';
+    const { rows, error } = parseItemsCsv(csv);
+    expect(error).toBeUndefined();
+    expect(rows[0].deviceUIC).toBe("W6BTAA");
+  });
+
+  it("accepts every UIC header spelling", () => {
+    for (const header of ["UIC", "deviceUIC", "DeviceOwnershipUIC", "Device Ownership UIC", "OwnershipUIC"]) {
+      const { rows, error } = parseItemsCsv(`SerialNumber,${header}\nA1,W6BTAA\n`);
+      expect(error, header).toBeUndefined();
+      expect(rows[0].deviceUIC, header).toBe("W6BTAA");
+    }
+  });
+
   it("fills the device category from a deviceType column", () => {
     const csv = "SerialNumber,deviceType\nA1,Laptop\nA2,Switch\n";
     const { rows, error } = parseItemsCsv(csv);
