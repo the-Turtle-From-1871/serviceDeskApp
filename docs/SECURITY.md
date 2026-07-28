@@ -124,11 +124,12 @@ them; `userItemDetailsSchema` stays separately and deliberately narrow.
 action.** `itemIdentitySchema` → `updateItemIdentityAction`, reachable only from
 the admin edit page. It is deliberately NOT part of `editableItemFields`, so
 these three can never be reached from the item detail card or by a `USER` — an
-ordinary edit POST carrying them is stripped by `z.object()`. Changing a serial
-alters what existing signed hand receipts appear to describe, so the form warns
-at the point of edit. A collision on the citext-unique `serialNumber` surfaces
-as Prisma `P2002` and is returned as a specific message; the Prisma detail is
-logged server-side only.
+ordinary edit POST carrying them is stripped by `z.object()`. Existing signed
+hand receipts are NOT rewritten by a serial correction: `TransferItem.serialNumber`
+is a snapshot taken at receipt creation and rendered as-is, so past receipts keep
+the serial they were issued with. The form warns at the point of edit. A collision
+on the citext-unique `serialNumber` surfaces as Prisma `P2002` and is returned as
+a specific message; the Prisma detail is logged server-side only.
 
 **Readiness edits live in their own admin-only actions** rather than being folded
 into `updateItemDetailsAction` — that keeps the USER-editable field set exactly

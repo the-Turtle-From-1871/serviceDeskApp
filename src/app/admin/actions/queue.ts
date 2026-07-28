@@ -116,12 +116,14 @@ export async function completeServiceAction(formData: FormData): Promise<void> {
   if (itemId) revalidatePath(`/i/${itemId}`);
 }
 
-// Reopen a completed item back into the queue (from the item page). An optional
-// days value restarts the clock at now + days; a blank or malformed one reopens
-// with the item's EXISTING deadline untouched (parseOverrideDays → undefined →
-// serviceDueAtUpdate writes nothing). Either way the reopen always proceeds — it
-// never silently no-ops on a bad days value. To reopen with no deadline at all,
-// reopen and then clear it with the deadline control.
+// Reopen a completed item back into the queue (from the item page). Reopening
+// starts a NEW ROUND of service, so the deadline is always written fresh: a days
+// value sets now + days, and a blank or malformed one reopens with NO deadline.
+// It deliberately does not carry the finished round's date over — that inherited
+// a lapsed deadline (the reopened item read "Overdue Nd" immediately) and, since
+// the alert stamp is cleared here, re-sent an overdue email for a deadline that
+// had already alerted. Either way the reopen always proceeds — it never silently
+// no-ops on a bad days value.
 export async function reopenServiceAction(formData: FormData): Promise<void> {
   await requireAdmin();
   const parsed = idSchema.safeParse({ id: String(formData.get("id") ?? "") });

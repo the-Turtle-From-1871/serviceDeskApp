@@ -104,7 +104,7 @@ Items needing work are tracked per-item (`ServiceQueueItem`, unique `itemId`; `m
 
 - **Flagging.** An item is flagged "needs service" either per-serial on the receipt builder or from the item detail page, with a **service type** — `REIMAGE`, `REPAIR`, or `OTHER` (free-text `serviceNote`). The entry may carry the `transferId` it was flagged on.
 - **State.** `PENDING` entries appear on `/admin/queue`; marking one done sets it `COMPLETED` (retained and reversible — reopenable to `PENDING` from the item page). All queue mutations are **admin-only**.
-- **SLA timer.** Each entry gets a completion deadline (`dueAt`) defaulting by type — **REIMAGE 3d, REPAIR 7d, OTHER 5d** from when flagged (`sla.ts`), overridable per item.
+- **Completion deadline.** `dueAt` is optional and comes **only** from a days value a human typed — blank means *no deadline*, and there is **no per-service-type default** (the old REIMAGE 3d / REPAIR 7d / OTHER 5d table was removed: an invisible default produced overdue alerts for work nobody had dated). Setting or clearing a deadline on a live request is its own control on the item page (`setServiceDeadline`); editing a request's type or note leaves the stored deadline untouched. A **new round** — re-flagging or reopening a `COMPLETED` entry — always resets the deadline and the alert stamp rather than inheriting the finished round's. See `sla.ts` and the Service & Ticket Lifecycles section of `CLAUDE.md`.
 
 ## Timers & overdue alerts
 
@@ -113,7 +113,7 @@ Two independent deadlines, both built on `modules/timers/due.ts`:
 - **Return timer** — an optional `Transfer.dueAt` for bringing items back.
 - **Service SLA** — the `ServiceQueueItem.dueAt` above.
 
-`dueState` classifies a deadline as `ontrack` / `soon` (within `DUE_SOON_DAYS` = 3) / `overdue`. The **admin dashboard** (`/admin`, `getTimerDashboard`) lists overdue + due-soon receipts and service items. A nightly sweep emails a **single** overdue alert per lapsed deadline to `ADMIN_INBOX_EMAIL`; `overdueAlertedAt` marks it sent so the same lapse is never emailed twice (editing the deadline forward clears it, re-arming a fresh alert).
+`dueState` classifies a deadline as `ontrack` / `soon` (within `DUE_SOON_DAYS` = 3) / `overdue`. The **admin dashboard** (`/admin`, `getTimerDashboard`) lists overdue + due-soon receipts and service items. A nightly sweep emails a **single** overdue alert per lapsed deadline to `ADMIN_INBOX_EMAIL`; `overdueAlertedAt` marks it sent so the same lapse is never emailed twice. It is re-armed only when the deadline is actually rewritten — via the receipt/service deadline controls, or when a service entry starts a new round — so editing a service item's type or note cannot re-alert an unchanged deadline.
 
 ## Retention & purge
 
