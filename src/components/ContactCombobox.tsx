@@ -31,12 +31,21 @@ export function ContactCombobox({
   const [matches, setMatches] = useState<ContactOption[]>([]);
   const reqId = useRef(0);
   const listId = useId();
+  const q = value.trim();
+  // Suggestions belong to the CURRENT query. Deriving them rather than clearing
+  // `matches` on every keystroke means a late response for text the user has
+  // since deleted can never surface.
+  const options = q ? matches : [];
 
   // Debounced server search. Keyed on the current input; a race guard drops
   // out-of-order responses so an earlier query can't overwrite a later one.
   useEffect(() => {
-    const q = value.trim();
-    if (!q) { setMatches([]); return; }
+    // No `setMatches([])` here: clearing state synchronously in an effect costs
+    // a second render pass, and it was never what made an empty box show
+    // nothing — `options` below derives that. It also left a hole, since an
+    // in-flight response for the deleted text still resolved and repopulated
+    // `matches`, briefly listing suggestions for an empty input.
+    if (!q) return;
     const id = ++reqId.current;
     const timer = setTimeout(async () => {
       try {
@@ -47,11 +56,12 @@ export function ContactCombobox({
       }
     }, 200);
     return () => clearTimeout(timer);
-  }, [value]);
+    // Keyed on the TRIMMED query, so adding a trailing space is not a new search.
+  }, [q]);
 
-  const show = open && matches.length > 0;
-  // Clamp: `matches` can shrink under a stale `active` between renders.
-  const activeIndex = active === null ? null : Math.min(active, Math.max(matches.length - 1, 0));
+  const show = open && options.length > 0;
+  // Clamp: `options` can shrink under a stale `active` between renders.
+  const activeIndex = active === null ? null : Math.min(active, Math.max(options.length - 1, 0));
 
   const pick = (c: ContactOption) => {
     onPick(c);
@@ -63,13 +73,13 @@ export function ContactCombobox({
     if (!show) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setActive((i) => (i === null ? 0 : (Math.min(i, matches.length - 1) + 1) % matches.length));
+      setActive((i) => (i === null ? 0 : (Math.min(i, options.length - 1) + 1) % options.length));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setActive((i) =>
         i === null
-          ? matches.length - 1
-          : (Math.min(i, matches.length - 1) - 1 + matches.length) % matches.length
+          ? options.length - 1
+          : (Math.min(i, options.length - 1) - 1 + options.length) % options.length
       );
     } else if (e.key === "Enter") {
       // Only swallow Enter while a suggestion is genuinely highlighted (the user
@@ -78,7 +88,7 @@ export function ContactCombobox({
       // typed — a recipient not in the contact book must stay fully submittable.
       if (activeIndex === null) return;
       e.preventDefault();
-      pick(matches[activeIndex]);
+      pick(options[activeIndex]);
     } else if (e.key === "Escape") {
       // Clearing `active` is load-bearing, not hygiene. Escape only closes the
       // list, and onFocus reopens it — so without this, focusing away and back
@@ -129,7 +139,7 @@ export function ContactCombobox({
           // click then lands on the option with focus still on the input.
           onMouseDown={(e) => e.preventDefault()}
         >
-          {matches.map((c, i) => (
+          {options.map((c, i) => (
             <li
               key={c.id}
               id={`${listId}-${i}`}
@@ -155,7 +165,7 @@ export function ContactCombobox({
       {/* The list is visible, so this is for screen readers only. Mirrors the
           aria-live idiom in HomeSearch.tsx. */}
       <div aria-live="polite" role="status" className="sr-only">
-        {show ? `${matches.length} contact${matches.length === 1 ? "" : "s"} available.` : ""}
+        {show ? `${options.length} contact${options.length === 1 ? "" : "s"} available.` : ""}
       </div>
     </div>
   );

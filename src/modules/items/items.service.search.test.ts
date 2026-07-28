@@ -56,12 +56,18 @@ describe("listItems", () => {
   // direction is reversed, so reversing a sort reverses the WHOLE list. No
   // column pins them, and that must stay uniform: a single pinned column would
   // leave part of the list unmoved on reverse and read as a broken sort.
+  // Every key ITEM_SORT_COLUMNS allows onto the Prisma path — `readiness` is the
+  // one exception and is covered separately below, since it leaves this path
+  // entirely. Keep this table exhaustive: a key added to the allowlist but not
+  // here is a key whose nulls behaviour nothing checks.
   it.each([
     ["deviceName", "deviceName"],
     ["deviceUIC", "deviceUIC"],
     ["deviceCategory", "deviceCategory"],
     ["auditState", "lastAuditedAt"],
     ["make", "make"],
+    ["model", "model"],
+    ["serialNumber", "serialNumber"],
     ["status", "status"],
   ])("orders %s without pinning empties to a fixed end", async (sortKey, column) => {
     for (const dir of ["asc", "desc"] as const) {
@@ -86,6 +92,27 @@ describe("listItems", () => {
     await listItems({ sort: "auditState", dir: "desc" });
     expect(orderOf()).toEqual([{ lastAuditedAt: "desc" }, { id: "asc" }]);
   });
+
+  // The raw path is the OTHER half of the no-pinning rule, and the parity test
+  // cannot see it: that test compares the two paths against each other, so
+  // reinstating NULLS LAST on BOTH would keep it green while reverting the fix.
+  // This asserts the emitted SQL directly.
+  it.each(["asc", "desc"] as const)(
+    "emits no NULLS override on the raw readiness path (%s)",
+    async (dir) => {
+      vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
+      await listItems({ sort: "readiness,deviceUIC", dir });
+
+      const [sql] = vi.mocked(prisma.$queryRaw).mock.calls[0] as unknown as [
+        { strings: string[] },
+      ];
+      const text = sql.strings.join(" ");
+      expect(text).toMatch(/ORDER BY/i);
+      expect(text).not.toMatch(/NULLS/i);
+      // The readiness key must not have quietly fallen back to the Prisma path.
+      expect(prisma.item.findMany).not.toHaveBeenCalled();
+    },
+  );
 
   it("ignores an unknown sort key, falling back to the default order", async () => {
     vi.mocked(prisma.item.count).mockResolvedValueOnce(100);

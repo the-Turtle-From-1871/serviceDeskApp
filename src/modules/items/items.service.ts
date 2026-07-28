@@ -110,17 +110,24 @@ export function parseSortKeys(sort: string | null | undefined, dir: string | nul
   return keys;
 }
 
-/** Map one sort key to a Prisma orderBy clause. `auditState` is derived and
- *  time-dependent, so it rides the denormalized `lastAuditedAt` column; the
- *  two nullable columns sort their empties last in BOTH directions, so an
- *  untriaged/unassigned row never outranks a real value. */
+/**
+ * Map one sort key to a Prisma orderBy clause.
+ *
+ * NO KEY PINS ITS BLANKS. Every clause is a bare `{ column: dir }`, never
+ * `{ sort, nulls }`, so empties sort as a VALUE: they gather at one end and
+ * swap ends when the direction is reversed, and reversing a sort reverses the
+ * whole list. Pinning even one column would leave part of the list unmoved on
+ * reverse, which reads as a broken sort — and it has to hold on BOTH paths, or
+ * a sort would mean different things depending on whether `readiness` happens
+ * to be among the keys (see readinessOrderedItemIds, which says the same).
+ *
+ * Consequence worth knowing: a null `lastAuditedAt` encodes "never audited", so
+ * the Audit sort orders by recency rather than by badge severity.
+ */
 function orderClauseFor({ key, dir }: SortKey): Prisma.ItemOrderByWithRelationInput {
   // `auditState` is derived and time-dependent, so it rides the denormalized
   // lastAuditedAt column rather than being an ORDER BY of its own.
   const column = key === "auditState" ? "lastAuditedAt" : key;
-  // No `nulls:` override — see the note above: blanks sort as a value and swap
-  // ends with the direction, matching the raw path, which emits a bare
-  // `ORDER BY <col> <dir>` for the same reason.
   return { [column]: dir } as Prisma.ItemOrderByWithRelationInput;
 }
 

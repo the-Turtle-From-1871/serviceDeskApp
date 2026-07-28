@@ -1,6 +1,7 @@
 "use client"; // Error boundaries must be Client Components.
 
 import { useEffect } from "react";
+import Link from "next/link";
 
 // Root error boundary: catches unexpected runtime errors thrown by any Server
 // Component / Server Action render below the root layout, so a failure shows a
@@ -33,7 +34,7 @@ export default function Error({
           <button type="button" className="btn btn-primary" onClick={() => unstable_retry()}>
             Try again
           </button>
-          <a className="btn btn-ghost" href="/">Back to search</a>
+          <Link className="btn btn-ghost" href="/">Back to search</Link>
         </div>
       </div>
     </main>
