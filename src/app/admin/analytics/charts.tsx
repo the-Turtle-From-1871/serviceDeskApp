@@ -51,22 +51,41 @@ export function DonutChart({
   data: Array<{ label: string; value: number; color: string }>;
 }) {
   const total = data.reduce((sum, d) => sum + d.value, 0);
+
+  // Only slices with a value are drawn. A zero-value slice is invisible but
+  // still consumes a paddingAngle slot, so leaving them in cuts gaps into the
+  // ring where nothing actually is. The legend is rendered separately from the
+  // full list, so an empty category is still named — identity is not lost.
+  const slices = data.filter((d) => d.value > 0);
+
+  // The 2px surface gap belongs BETWEEN segments. With a single arc there is no
+  // boundary to mark, and both the padding and the surface-coloured stroke
+  // instead carve a visible notch at the seam (the top, given startAngle 90) —
+  // a "100% accounted for" ring appeared broken. Applied only when there are
+  // two or more arcs to separate.
+  const separated = slices.length > 1;
+
   return (
     <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
       <PieChart>
         <Pie
-          data={data}
+          data={slices}
           dataKey="value"
           nameKey="label"
           innerRadius="58%"
           outerRadius="82%"
-          paddingAngle={2}
+          paddingAngle={separated ? 2 : 0}
           startAngle={90}
           endAngle={-270}
           isAnimationActive={false}
         >
-          {data.map((d) => (
-            <Cell key={d.label} fill={d.color} stroke={CHROME.surface} strokeWidth={2} />
+          {slices.map((d) => (
+            <Cell
+              key={d.label}
+              fill={d.color}
+              stroke={separated ? CHROME.surface : "none"}
+              strokeWidth={separated ? 2 : 0}
+            />
           ))}
         </Pie>
         <Tooltip
