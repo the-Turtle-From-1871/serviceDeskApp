@@ -6,6 +6,7 @@ import {
   shouldAllowPublic,
   unlockCookieName,
   UNLOCK_TTL_MS,
+  UNLOCK_CLOCK_SKEW_MS,
 } from "./public-access-cookie";
 
 const SECRET = "test-secret-abc";
@@ -20,6 +21,28 @@ describe("unlock cookie sign/verify", () => {
   it("rejects an expired value", async () => {
     const now = 1_000_000;
     const value = await signUnlockValue(now - 1, SECRET);
+    expect(await verifyUnlockValue(value, SECRET, now)).toBe(false);
+  });
+
+  it("rejects a validly-signed value that outlives the current TTL", async () => {
+    // A cookie minted under the old 7-day window: signature is genuine, expiry
+    // is still in the future, but it claims far more life than the TTL allows.
+    const now = 1_000_000;
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    const value = await signUnlockValue(now + sevenDaysMs, SECRET);
+    expect(await verifyUnlockValue(value, SECRET, now)).toBe(false);
+  });
+
+  it("tolerates clock skew between the signing and verifying instance", async () => {
+    // Signed on an instance running ahead of the verifier: still legitimate.
+    const now = 1_000_000;
+    const value = await signUnlockValue(now + UNLOCK_TTL_MS + UNLOCK_CLOCK_SKEW_MS - 1, SECRET);
+    expect(await verifyUnlockValue(value, SECRET, now)).toBe(true);
+  });
+
+  it("rejects a value beyond the TTL plus the skew allowance", async () => {
+    const now = 1_000_000;
+    const value = await signUnlockValue(now + UNLOCK_TTL_MS + UNLOCK_CLOCK_SKEW_MS + 1, SECRET);
     expect(await verifyUnlockValue(value, SECRET, now)).toBe(false);
   });
 

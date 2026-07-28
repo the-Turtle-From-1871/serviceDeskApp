@@ -48,7 +48,13 @@ export const proxy = auth(async (req) => {
     }
     const url = new URL("/unlock", req.url);
     url.searchParams.set("next", sanitizeNext(pathname + search));
-    return NextResponse.redirect(url);
+    const res = NextResponse.redirect(url);
+    // Expire whatever cookie was rejected. Without this a refused cookie — most
+    // often one issued under a longer TTL and retired by the ceiling check — is
+    // resent on every request to the public surface until its own expiry, which
+    // can be days after it stopped working.
+    res.cookies.delete(unlockCookieName(secure));
+    return res;
   }
 
   // Existing coarse login gate for all other matched routes.

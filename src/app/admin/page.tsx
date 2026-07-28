@@ -88,7 +88,7 @@ export default async function AdminHome() {
         <p className="subtle">
           Logged-out visitors must enter this 8-digit PIN to search or view hand receipts and item
           records (when the gate is enabled). Rotating it stops new unlocks immediately; visitors
-          already unlocked stay in for up to 7 days.
+          already unlocked stay in for up to 12 hours.
         </p>
         <p className="subtle">
           {pinMeta

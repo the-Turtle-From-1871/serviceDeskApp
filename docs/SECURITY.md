@@ -156,8 +156,21 @@ when. `src/lib/public-access.ts`
 
 **The unlock cookie is HMAC-SHA-256 signed** — value is
 `<expMs>.<hmac(AUTH_SECRET, expMs)>`, self-contained so the proxy verifies it
-with no DB lookup. 7-day TTL, `__Secure-` prefix over HTTPS.
+with no DB lookup. 12-hour TTL, `__Secure-` prefix over HTTPS.
 `src/lib/public-access-cookie.ts`
+
+**The TTL is a ceiling, not just a stamp** — `verifyUnlockValue` refuses a cookie
+whose signed expiry is further out than `UNLOCK_TTL_MS` (plus a 60s
+`UNLOCK_CLOCK_SKEW_MS` allowance, since signer and verifier are different
+instances) from now, so shortening the TTL retires already-issued longer-lived
+cookies instead of letting them run out their old window. It bites only while a
+cookie claims more life than the current TTL — it is not a revocation lever, and
+does not make PIN rotation retroactive (see Known gaps). `verifyUnlockValue()`
+
+**A refused cookie is expired in the browser** — the proxy attaches a
+`cookies.delete()` to the `/unlock` redirect, so a cookie the ceiling retired is
+not resent on every subsequent request until its own longer expiry.
+`src/proxy.ts`
 
 **The signature compare is constant-time** — length-checked, no early exit, so it
 leaks no timing information. `safeEqual()`
@@ -433,7 +446,8 @@ is on. See [§3](#3-public-surface--the-pin-gate).
 See [§4](#4-password-reset).
 
 **4. The public gate is one shared org-wide PIN,** not per-person, and rotating
-it is non-retroactive — existing 7-day cookies stay valid.
+it is non-retroactive — existing unlock cookies stay valid until they lapse
+(≤12 hours).
 
 **5. JWT freshness costs one DB read per authenticated request.** *Accepted* to
 keep revocation working without a session table.

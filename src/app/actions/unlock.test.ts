@@ -9,6 +9,7 @@ vi.mock("next/headers", () => ({ cookies: async () => ({ set: (...a: unknown[]) 
 vi.mock("next/navigation", () => ({ redirect: (u: string) => redirect(u) }));
 
 import { unlockAction } from "./unlock";
+import { UNLOCK_MAX_AGE_SECONDS } from "@/lib/public-access-cookie";
 
 function fd(entries: Record<string, string>) {
   const f = new FormData();
@@ -43,7 +44,14 @@ describe("unlockAction", () => {
     const [name, value, opts] = cookieSet.mock.calls[0];
     expect(name).toBe("pub_unlock"); // NODE_ENV is "test" -> not secure
     expect(typeof value).toBe("string");
-    expect(opts).toMatchObject({ httpOnly: true, sameSite: "lax", path: "/", maxAge: 604800 });
+    // maxAge tracks the constant — the cookie's own lifetime and the signed
+    // expiry must not drift apart when the TTL is next changed.
+    expect(opts).toMatchObject({
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: UNLOCK_MAX_AGE_SECONDS,
+    });
   });
 
   it("redirects to / when next is an open-redirect attempt", async () => {

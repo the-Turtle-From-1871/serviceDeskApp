@@ -3,8 +3,16 @@
 // in Next 16) and Node server actions alike.
 // Web Crypto only — do NOT import bcrypt, Prisma, node:crypto, or server-only here.
 
-export const UNLOCK_MAX_AGE_SECONDS = 7 * 24 * 60 * 60; // 7 days
+export const UNLOCK_MAX_AGE_SECONDS = 12 * 60 * 60; // 12 hours
 export const UNLOCK_TTL_MS = UNLOCK_MAX_AGE_SECONDS * 1000;
+
+// The cookie is SIGNED on one serverless instance and VERIFIED on another, so
+// their clocks need not agree to the millisecond. Without leeway the ceiling
+// check below would refuse a just-minted cookie whenever the signing instance
+// runs ahead, bouncing the visitor back to /unlock forever — a correct PIN
+// would never stick. 60s is far below the gap the ceiling exists to catch (an
+// old cookie sits 6.5 days past it), so leeway costs the check nothing.
+export const UNLOCK_CLOCK_SKEW_MS = 60 * 1000;
 
 // Mirror Auth.js's cookie-prefix convention: __Secure- over HTTPS.
 export function unlockCookieName(secure: boolean): string {
@@ -58,6 +66,19 @@ export async function verifyUnlockValue(
   if (!sig) return false;
   const expMs = Number(expStr);
   if (!Number.isFinite(expMs) || expMs <= nowMs) return false;
+  // Ceiling check, not just an expiry check: the lifetime is baked into the
+  // SIGNED value at unlock time, so shortening UNLOCK_TTL_MS would otherwise
+  // leave every already-issued cookie running on its old, longer window. A
+  // cookie claiming more life than the current TTL allows is refused outright,
+  // which retires the old ones the moment the shorter TTL ships. Legitimately
+  // minted cookies never trip this — they are signed at exactly now + TTL, and
+  // the skew allowance covers the clock gap between signer and verifier.
+  //
+  // Note what this does NOT do: it only bites while a cookie claims MORE life
+  // than the current TTL, so it retires long cookies when the TTL is shortened
+  // and does nothing otherwise. It is not a revocation lever — PIN rotation
+  // stays non-retroactive (see docs/SECURITY.md, Known gaps).
+  if (expMs - nowMs > UNLOCK_TTL_MS + UNLOCK_CLOCK_SKEW_MS) return false;
   const expected = await hmac(secret, expStr);
   return safeEqual(sig, expected);
 }

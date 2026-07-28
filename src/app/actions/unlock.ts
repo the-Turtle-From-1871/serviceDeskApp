@@ -13,7 +13,7 @@ import {
 
 // PUBLIC BY DESIGN: this is the one server action with no requireUser — it gates
 // on the PIN itself. Verifies the 8-digit PIN against the bcrypt hash, then mints
-// a 7-day HMAC-signed unlock cookie the edge proxy can self-verify.
+// a 12-hour HMAC-signed unlock cookie the edge proxy can self-verify.
 const schema = z.object({ pin: z.string().regex(/^\d{8}$/), next: z.string().optional() });
 
 export async function unlockAction(_prev: unknown, formData: FormData) {
