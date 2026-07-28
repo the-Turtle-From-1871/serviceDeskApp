@@ -2,7 +2,7 @@ import type { Prisma, ServiceQueueItem, ServiceType } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { canComplete, canReopen } from "./service-queue.status";
 import { ServiceQueueError } from "./service-queue.errors";
-import { computeServiceDueAt } from "./sla";
+import { computeServiceDueAt, serviceDueAtUpdate } from "./sla";
 
 // Trimmed fields the queue list and item card render — never pull unrelated PII.
 const queueItemSelect = { serialNumber: true, deviceName: true, homeUnit: true } satisfies Prisma.ItemSelect;
@@ -35,15 +35,56 @@ function normalizeNote(serviceType: ServiceType, note: string | null | undefined
 // Create or update the item's single service request, (re)setting it to PENDING.
 // `async` so the normalizeNote NOTE_REQUIRED throw surfaces as a rejected promise
 // (a sync throw would escape callers' `.rejects`/try-await handling).
+//
+// `overrideDays` is asymmetric between the two branches, on purpose:
+//   * CREATE — blank/absent writes dueAt = NULL. A brand-new flag has no
+//     deadline unless one was typed, and there is still no per-type default
+//     substituted behind the user's back (see sla.ts).
+//   * UPDATE — blank/absent writes NOTHING: the stored deadline is left exactly
+//     as it is (serviceDueAtUpdate). Re-saving an already-flagged item to fix a
+//     typo in the note or switch Repair→Reimage used to wipe its deadline,
+//     because the days input renders blank and blank meant "none". A save that
+//     says nothing about the deadline must not be a decision about it.
+// Clearing a deadline is therefore NOT reachable from here — it belongs to
+// setServiceDeadline below.
+//
+// `overdueAlertedAt` follows the same rule: it is re-armed only when dueAt is
+// actually written. An overdue alert is per-deadline, so an unchanged deadline
+// that already alerted must not re-alert because someone edited the note.
 export async function upsertServiceRequest(input: UpsertInput): Promise<ServiceQueueItem> {
   const serviceNote = normalizeNote(input.serviceType, input.note);
   const transferId = input.transferId ?? null;
-  const dueAt = computeServiceDueAt(input.serviceType, new Date(), input.overrideDays);
+  const now = new Date();
   return prisma.serviceQueueItem.upsert({
     where: { itemId: input.itemId },
-    create: { itemId: input.itemId, serviceType: input.serviceType, serviceNote, transferId, status: "PENDING", dueAt, overdueAlertedAt: null },
-    update: { serviceType: input.serviceType, serviceNote, transferId, status: "PENDING", dueAt, overdueAlertedAt: null },
+    create: {
+      itemId: input.itemId, serviceType: input.serviceType, serviceNote, transferId, status: "PENDING",
+      dueAt: computeServiceDueAt(now, input.overrideDays), overdueAlertedAt: null,
+    },
+    update: {
+      serviceType: input.serviceType, serviceNote, transferId, status: "PENDING",
+      ...serviceDueAtUpdate(input.overrideDays, now),
+    },
   });
+}
+
+// Set or CLEAR the item's service deadline — the one write that can remove one,
+// and the only reason blank is allowed to mean "no deadline" on an existing row.
+// It is a separate, single-purpose operation for the same reason the hand-receipt
+// return timer is (setReceiptDueAtAction / ReceiptDueAtControls): when the
+// deadline has its own form, pressing its button is always an explicit decision
+// about the deadline, and every OTHER save — service type, note, reopen — can
+// leave the stored instant untouched instead of guessing.
+//
+// `days = null` clears; a day count sets `now + days` and re-arms the overdue
+// alert. updateMany (not update) so a missing row is a `count` of 0 rather than a
+// Prisma P2025 the action layer would have to sniff for.
+export async function setServiceDeadline(itemId: string, days: number | null, now: Date = new Date()): Promise<void> {
+  const res = await prisma.serviceQueueItem.updateMany({
+    where: { itemId },
+    data: { dueAt: computeServiceDueAt(now, days), overdueAlertedAt: null },
+  });
+  if (res.count === 0) throw new ServiceQueueError("NOT_FOUND");
 }
 
 // Unflag: remove the item's service request entirely.
@@ -72,14 +113,19 @@ export function completeServiceItem(id: string): Promise<ServiceQueueItem> {
   );
 }
 
-// COMPLETED -> PENDING (reopen from the item detail page). Restarts the SLA
-// clock: recomputes dueAt from now (the service type's default, or an optional
-// per-reopen override) and clears overdueAlertedAt so a fresh lapse can alert
-// again — reopening means "service this again," not "undo the completion."
-// Guarded; never resurrects a missing or non-COMPLETED row.
+// COMPLETED -> PENDING (reopen from the item detail page). An optional per-reopen
+// days value restarts the SLA clock at `now + days`; blank LEAVES THE STORED
+// DEADLINE ALONE (serviceDueAtUpdate) rather than wiping it, so reopening to
+// resume a job does not silently discard the date it was working to. Clearing is
+// a separate, deliberate press of the deadline control.
+//
+// overdueAlertedAt is cleared either way — unlike upsertServiceRequest, because
+// reopening genuinely starts a new round of service and the previous round's
+// alert must not suppress the next one. Guarded; never resurrects a missing or
+// non-COMPLETED row.
 export function reopenServiceItem(id: string, overrideDays?: number | null): Promise<ServiceQueueItem> {
-  return transition(id, canReopen, "PENDING", (current) => ({
-    dueAt: computeServiceDueAt(current.serviceType, new Date(), overrideDays),
+  return transition(id, canReopen, "PENDING", () => ({
+    ...serviceDueAtUpdate(overrideDays),
     overdueAlertedAt: null,
   }));
 }

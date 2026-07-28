@@ -7,6 +7,7 @@ import {
   clearServiceRequest,
   completeServiceItem,
   reopenServiceItem,
+  setServiceDeadline,
 } from "@/modules/service-queue/service-queue.service";
 import { getCurrentOpenTransferId } from "@/modules/transfers/transfers.service";
 import { ServiceQueueError } from "@/modules/service-queue/service-queue.errors";
@@ -25,7 +26,14 @@ function revalidateItem(itemId: string) {
 }
 
 // Flag/update an item's service request from the item detail page. Ties it to the
-// item's current open receipt (if any). Returns a generic error string to the UI.
+// item's current open receipt (if any).
+//
+// `overrideDays` is only ever posted when the item is NOT yet flagged — the flag
+// form drops the field once a request exists, and the deadline moves to its own
+// control (setServiceDeadlineAction). So on a new flag a blank field means no
+// deadline (dueAt null, never a default), and updating an existing request sends
+// nothing about the deadline and therefore cannot move it. Returns a generic
+// error string to the UI.
 export async function setServiceAction(_prev: unknown, formData: FormData): Promise<{ error?: string; ok?: true }> {
   await requireAdmin();
   const parsed = setSchema.safeParse(Object.fromEntries(formData));
@@ -42,6 +50,41 @@ export async function setServiceAction(_prev: unknown, formData: FormData): Prom
     return { error: "Something went wrong. Please try again." };
   }
   revalidateItem(parsed.data.itemId);
+  return { ok: true };
+}
+
+// Set or clear an already-flagged item's completion deadline, from its own
+// single-purpose form on the item page. This is the ONLY write that can remove a
+// deadline — the whole point of separating it (see setServiceDeadline).
+//
+// Validation deliberately mirrors setReceiptDueAtAction rather than the graceful
+// collapse the other service entry points use: blank clears, but a non-blank
+// value that is not a whole 1–3650 is REJECTED with a message instead of being
+// treated as blank. This control is destructive, so "3650000" must not read as
+// "wipe it". parseOverrideDays keeps doing the range check; only the blank case
+// is distinguished before calling it, and the non-destructive surfaces (receipt
+// builder, flag, reopen) keep its never-throw/never-block behavior untouched.
+export async function setServiceDeadlineAction(_prev: unknown, formData: FormData): Promise<{ error?: string; ok?: true }> {
+  await requireAdmin();
+  const itemId = String(formData.get("itemId") ?? "");
+  if (!itemId) return { error: "Invalid input." };
+  const raw = String(formData.get("overrideDays") ?? "").trim();
+  let days: number | null = null;
+  if (raw) {
+    const parsed = parseOverrideDays(raw);
+    if (parsed === undefined) return { error: "Enter a whole number of days between 1 and 3650." };
+    days = parsed;
+  }
+  try {
+    await setServiceDeadline(itemId, days);
+  } catch (e) {
+    if (e instanceof ServiceQueueError && e.code === "NOT_FOUND") {
+      return { error: "This item is not flagged for service." };
+    }
+    console.error("[setServiceDeadlineAction] unexpected error:", e);
+    return { error: "Something went wrong. Please try again." };
+  }
+  revalidateItem(itemId);
   return { ok: true };
 }
 
@@ -73,10 +116,12 @@ export async function completeServiceAction(formData: FormData): Promise<void> {
   if (itemId) revalidatePath(`/i/${itemId}`);
 }
 
-// Reopen a completed item back into the queue (from the item page). Restarts the
-// SLA clock; an optional override days sets a custom new deadline. A blank or
-// malformed override falls back to the type default (parseOverrideDays) so the
-// reopen always proceeds — it never silently no-ops on a bad days value.
+// Reopen a completed item back into the queue (from the item page). An optional
+// days value restarts the clock at now + days; a blank or malformed one reopens
+// with the item's EXISTING deadline untouched (parseOverrideDays → undefined →
+// serviceDueAtUpdate writes nothing). Either way the reopen always proceeds — it
+// never silently no-ops on a bad days value. To reopen with no deadline at all,
+// reopen and then clear it with the deadline control.
 export async function reopenServiceAction(formData: FormData): Promise<void> {
   await requireAdmin();
   const parsed = idSchema.safeParse({ id: String(formData.get("id") ?? "") });

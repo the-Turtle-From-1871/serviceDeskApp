@@ -381,9 +381,10 @@ model ServiceQueueItem {
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
 
-  // Completion SLA timer. dueAt defaults from the service type (see sla.ts) when
-  // the item is flagged, overridable per item. Null = no timer. overdueAlertedAt
-  // mirrors Transfer's — one alert per lapse, reset when the item is re-flagged.
+  // Completion SLA timer. dueAt is set ONLY from the days value entered on the
+  // flag/reopen UI — a blank one leaves it NULL = no deadline (there is no
+  // per-service-type default; see sla.ts). overdueAlertedAt mirrors Transfer's —
+  // one alert per lapse, reset when the item is re-flagged.
   dueAt            DateTime?
   overdueAlertedAt DateTime?
 

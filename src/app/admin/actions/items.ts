@@ -11,7 +11,12 @@ import {
   MAX_BULK_ITEMS,
 } from "@/modules/items/items.service";
 import { ItemError } from "@/modules/items/items.errors";
-import { newItemSchema, adminItemEditSchema } from "@/modules/items/items.schema";
+import {
+  newItemSchema,
+  adminItemEditSchema,
+  itemIdentitySchema,
+} from "@/modules/items/items.schema";
+import { Prisma } from "@prisma/client";
 import { learnCategories, normalizeCategoryName } from "@/modules/items/categories.service";
 import { z } from "zod";
 import { resolutionSchema, type UnitResolution } from "@/modules/items/units.service";
@@ -27,9 +32,12 @@ export async function createItemAction(_prev: unknown, formData: FormData) {
   return { itemId: item.id };
 }
 
-// Admin edit of an item's identity fields. Routes through the SAME
-// updateItemFields as the user-level action so admin changes land in the same
-// ItemEdit history rather than bypassing it.
+// Admin edit of an item's seven editable fields (see `editableItemFields` in
+// items.schema.ts). make/model/serialNumber are NOT among them — identity is
+// corrected through its own form and its own action below
+// (updateItemIdentityAction). Routes through the SAME updateItemFields as the
+// user-level action so admin changes land in the same ItemEdit history rather
+// than bypassing it.
 export async function updateItemAction(_prev: unknown, formData: FormData) {
   const admin = await requireAdmin();
   const id = String(formData.get("id"));
@@ -40,10 +48,7 @@ export async function updateItemAction(_prev: unknown, formData: FormData) {
   // Categories are stored on the item in the SAME canonical form the managed
   // vocabulary uses, or the two drift and the in-use count silently misses
   // (which would let an admin delete a category that is still assigned).
-  const data = { ...parsed.data };
-  if (data.deviceCategory !== undefined) {
-    data.deviceCategory = normalizeCategoryName(data.deviceCategory);
-  }
+  const data = { ...parsed.data, deviceCategory: normalizeCategoryName(parsed.data.deviceCategory) };
   try {
     await updateItemFields(id, data, { id: admin.id, name: admin.name });
     // A category typed directly into the form joins the vocabulary, so the
@@ -58,6 +63,68 @@ export async function updateItemAction(_prev: unknown, formData: FormData) {
   }
   revalidatePath("/items");
   revalidatePath(`/i/${id}`);
+  return { ok: true };
+}
+
+// Correct an item's IDENTITY — make / model / serialNumber.
+//
+// Its own action, its own schema and its own form on /admin/items/[id]/edit,
+// deliberately NOT folded into adminItemEditSchema's seven editable fields.
+// A mistyped serial has to be correctable without a CSV round-trip, but the
+// serial is the identity existing signed hand receipts refer to, so correcting
+// one changes what those receipts appear to describe — that belongs behind a
+// separate, deliberate submit rather than in the form you tab through to update
+// a phone number.
+//
+// ADMIN-ONLY, enforced here on the server, and the ONLY surface that exposes
+// these three: the item detail card (updateItemDetailsAction) still cannot
+// touch them for any role, because editableItemFields does not declare them and
+// z.object() strips what it does not declare.
+//
+// Routes through the SAME updateItemFields as every other edit, so the change
+// is diffed and recorded in ItemEdit history rather than bypassing it.
+export async function updateItemIdentityAction(_prev: unknown, formData: FormData) {
+  const admin = await requireAdmin();
+  const id = String(formData.get("id") ?? "").trim();
+  if (!id) return { error: "Missing item." };
+
+  const parsed = itemIdentitySchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  }
+
+  try {
+    await updateItemFields(id, parsed.data, { id: admin.id, name: admin.name });
+  } catch (e) {
+    if (e instanceof ItemError && e.code === "NOT_FOUND") {
+      return { error: "That item no longer exists." };
+    }
+    // P2002 = unique-constraint violation. Item has exactly ONE unique column —
+    // serialNumber, which is @db.Citext — so a P2002 from this write can only
+    // mean another item already holds that serial, in some casing ("abc123"
+    // collides with "ABC123"). A case-only correction of THIS item's own serial
+    // does not collide: it is the same row, so the index entry it would clash
+    // with is its own, which the update replaces.
+    //
+    // Leaned on rather than pre-checked with a findUnique, which would race.
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      console.error("[updateItemIdentityAction] serial collision:", e);
+      return {
+        error: `Serial number "${parsed.data.serialNumber}" is already on another item. Serial numbers are unique and ignore case, so open that item instead — or correct its serial first.`,
+      };
+    }
+    console.error("[updateItemIdentityAction] unexpected error:", e);
+    return { error: "Something went wrong saving your changes. Please try again." };
+  }
+
+  revalidatePath("/items");
+  revalidatePath(`/i/${id}`);
+  // ALSO the edit page itself, unlike the other item actions. This is the only
+  // action whose fields are echoed in that page's own header ("Make Model · SN
+  // …", rendered server-side as read-only identification). Without this the
+  // header still shows the OLD serial directly above a form that just reported
+  // saving the new one, which reads as the save having failed.
+  revalidatePath(`/admin/items/${id}/edit`);
   return { ok: true };
 }
 
