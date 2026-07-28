@@ -174,22 +174,39 @@ spells out `secure`/`httpOnly`/`sameSite` explicitly: `cookies.delete(name)`
 emits no `Secure` attribute, and a `Set-Cookie` whose name carries the
 `__Secure-` prefix without it is rejected outright by browsers — which made the
 deletion a silent no-op in production, the only environment that uses the
-prefix. It fires only when a cookie was actually presented, so a request in
-flight from another tab cannot wipe a cookie a correct PIN just minted.
+prefix. It fires only for a cookie whose signature verified as ours and which
+is expired or over the ceiling — so a transient blank or mid-rotation
+`AUTH_SECRET` cannot destroy every genuine cookie in the wild, and that outage
+stays self-healing. **Known narrow race:** a slow request already carrying the
+stale cookie can still land its expiry after the visitor unlocks in another
+tab, clearing the fresh cookie and costing them one re-entry of the PIN. A
+deletion names a cookie, not a value, so HTTP cannot express "only if it still
+equals X"; accepted rather than papered over.
 `src/proxy.ts`, covered by `src/proxy.test.ts`
 
-**The gate fails CLOSED with no signing key** — `verifyUnlockValue()` returns
-false when the secret is empty and `signUnlockValue()` throws. Both call sites
-read `process.env.AUTH_SECRET ?? ""`, so a missing or blank secret would
-otherwise make the expected MAC `hmac("", exp)` — reproducible offline by
-anyone, admitting forged cookies to the entire public surface.
+**With no signing key the gate refuses cleanly** — `verifyUnlockValue()`
+returns `{valid:false}` when the secret is empty and `signUnlockValue()` throws
+a message naming the variable. This is **robustness, not a bypass fix**: Web
+Crypto rejects a zero-length HMAC key (`DOMException: Zero-length key is not
+supported`), so a blank `AUTH_SECRET` never produced `hmac("", exp)` — it threw
+out of the proxy and 500'd every public page. The gate was already closed; it
+is now closed without an outage. `src/lib/public-access-cookie.ts`
+
+**A cookie is only retired if we signed it** — `verifyUnlockValue()` checks the
+HMAC *before* the expiry and ceiling rules, and reports `retire` only for a
+value that verified. Otherwise any anonymous visitor could trigger the
+browser-side deletion and the ceiling warning by pasting arbitrary cookie text,
+which is unauthenticated log amplification and makes the one signal that
+distinguishes a clock-skew lockout from a wrong PIN spoofable.
 `src/lib/public-access-cookie.ts`
 
 **The signature compare is constant-time** — length-checked, no early exit, so it
 leaks no timing information. `safeEqual()`
 
 **The HMAC verify is skipped when it can't change the outcome** — it runs only
-when the flag is on *and* the user isn't logged in. `src/proxy.ts:42`
+when the flag is on *and* the user isn't logged in. `src/proxy.ts` (the
+`flagEnabled && !loggedIn` guard on the verify call — named rather than
+line-numbered, since anchors rot on the first edit above them)
 
 **The `?next=` redirect param is hardened against open redirects.**
 `sanitizeNext()` rejects control characters (including tab/newline/CR),

@@ -49,7 +49,7 @@ This is a **deliberate feature change**, not a security auto-remediation — the
 |---|---|
 | What the PIN gates | **Everything public**: `/`, `/i/*`, `/receipts/*` (pages, PDF route, and the home search server actions). Logged-in users bypass entirely. |
 | PIN storage | **DB-stored, bcrypt-hashed**, admin-settable in-app (no redeploy to rotate). |
-| Unlock duration | **7 days**, fixed at unlock time (not rolling/refreshed per visit). |
+| Unlock duration | ~~**7 days**~~ → **SUPERSEDED (2026-07-28): 12 hours**, fixed at unlock time (not rolling/refreshed per visit). A ceiling check in `verifyUnlockValue` retires longer-lived cookies already in the wild. Other mentions of "7 days" in this spec and its plan are historical — `UNLOCK_MAX_AGE_SECONDS` in `src/lib/public-access-cookie.ts` is the source of truth. |
 | Enforcement mechanism | **Next.js 16 proxy** (`src/proxy.ts`) — single choke point over the public routes. |
 | Brute-force protection | **Lightweight**: bcrypt compare + a small fixed delay on failed attempts. No lockout table. |
 

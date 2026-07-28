@@ -41,8 +41,11 @@ export const proxy = auth(async (req) => {
     // (flag on AND not already logged in) — off/ logged-in skip the crypto.
     const cookieName = unlockCookieName(secure);
     const presented = req.cookies.get(cookieName)?.value;
-    const unlockValid =
-      flagEnabled && !loggedIn ? await verifyUnlockValue(presented, secret, Date.now()) : false;
+    const check =
+      flagEnabled && !loggedIn
+        ? await verifyUnlockValue(presented, secret, Date.now())
+        : { valid: false, retire: false };
+    const unlockValid = check.valid;
     if (shouldAllowPublic({ flagEnabled, loggedIn, unlockValid })) {
       return NextResponse.next();
     }
@@ -64,12 +67,24 @@ export const proxy = auth(async (req) => {
     //    pass but not load-bearing: Next's normalizeCookie already defaults it
     //    to "/", which matches how unlock.ts sets the cookie.)
     //
-    // 2. Only delete when a cookie was presented. Firing unconditionally means a
-    //    request already in flight from another tab — one that legitimately
-    //    carries no cookie yet — returns an expiry that lands AFTER a cookie the
-    //    user just minted with a correct PIN, wiping it and bouncing them back
-    //    to /unlock with nothing to explain why.
-    if (presented !== undefined) {
+    // 2. Only delete on `retire` — a cookie whose signature verified as ours but
+    //    which is expired or over the TTL ceiling. A bare "was a cookie sent?"
+    //    guard is not enough: the population this feature targets is exactly the
+    //    one holding a stale cookie, so a slow request from another tab carrying
+    //    the old value would still land its expiry after the user unlocked in a
+    //    second tab. Keying on `retire` stops a transient blank or mid-rotation
+    //    AUTH_SECRET from destroying every genuine cookie in the wild — that
+    //    refusal is not a retirement, and the outage stays self-healing once the
+    //    config is fixed.
+    //
+    //    NOT fixed, because HTTP cannot express it: a slow request already
+    //    carrying the STALE cookie can still land its expiry after the user
+    //    unlocks in another tab, clearing the fresh cookie and sending them back
+    //    to /unlock once. A deletion names a cookie, not a value, so there is no
+    //    "delete only if it still equals X". The window is one request, only for
+    //    someone holding a retired cookie, and the cost is re-entering the PIN;
+    //    accepted rather than papered over. See docs/SECURITY.md, Known gaps.
+    if (check.retire) {
       res.cookies.delete({ name: cookieName, path: "/", secure, httpOnly: true, sameSite: "lax" });
     }
     return res;

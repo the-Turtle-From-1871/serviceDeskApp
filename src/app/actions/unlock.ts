@@ -35,7 +35,18 @@ export async function unlockAction(_prev: unknown, formData: FormData) {
 
   const secret = process.env.AUTH_SECRET ?? "";
   const secure = process.env.NODE_ENV === "production";
-  const value = await signUnlockValue(Date.now() + UNLOCK_TTL_MS, secret);
+  // Signing throws with no AUTH_SECRET (and Web Crypto throws on a zero-length
+  // key regardless). Caught so a misconfigured deploy shows the form's error
+  // text instead of rejecting the action's promise, which useActionState cannot
+  // render — it escalates to the error boundary and the page breaks with a
+  // digest. Detail stays server-side (CLAUDE.md §5).
+  let value: string;
+  try {
+    value = await signUnlockValue(Date.now() + UNLOCK_TTL_MS, secret);
+  } catch (e) {
+    console.error("[unlockAction] could not sign the unlock cookie:", e);
+    return { error: "Something went wrong. Please try again." };
+  }
   const store = await cookies();
   store.set(unlockCookieName(secure), value, {
     httpOnly: true,

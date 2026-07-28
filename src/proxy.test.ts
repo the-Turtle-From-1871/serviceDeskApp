@@ -51,6 +51,20 @@ describe("proxy — public PIN gate", () => {
     expect(res.headers.get("set-cookie")).toBeNull();
   });
 
+  it("lets a validly unlocked visitor through IN PRODUCTION, reading the __Secure- cookie", async () => {
+    // The accept path under the prefix had no coverage, and its failure mode is
+    // invisible: if the prod cookie name or read path regressed, every unlocked
+    // visitor would be redirected to /unlock forever — the same outcome the
+    // refusal test expects, so the suite would stay green. Prod-only,
+    // prefix-related blind spots are exactly what this branch already shipped
+    // once.
+    vi.stubEnv("NODE_ENV", "production");
+    const value = await signUnlockValue(Date.now() + UNLOCK_TTL_MS, SECRET);
+    const res = await run(request({ cookie: value, secure: true }));
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.headers.get("set-cookie")).toBeNull();
+  });
+
   it("redirects an anonymous visitor to /unlock", async () => {
     const res = await run(request());
     expect(res.headers.get("location")).toContain("/unlock");

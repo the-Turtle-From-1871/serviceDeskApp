@@ -43,6 +43,9 @@ describe("unlockAction", () => {
     expect(cookieSet).toHaveBeenCalledTimes(1);
     const [name, value, opts] = cookieSet.mock.calls[0];
     expect(name).toBe("pub_unlock"); // NODE_ENV is "test" -> not secure
+    // Kept: `String(value)` below would coerce a non-string away, so the type
+    // needs pinning separately.
+    expect(typeof value).toBe("string");
     expect(opts).toMatchObject({
       httpOnly: true,
       sameSite: "lax",
