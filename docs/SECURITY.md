@@ -3,7 +3,7 @@
 A living inventory of every security control in this app — what it does, where
 it lives, and why. **Maintained over time**; see [Keeping this current](#keeping-this-current).
 
-**Last reviewed: 2026-07-27**
+**Last reviewed: 2026-07-28**
 
 Related: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`../CLAUDE.md`](../CLAUDE.md) · [`password-reset-hardening.md`](./password-reset-hardening.md)
 
@@ -19,6 +19,7 @@ Related: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`../CLAUDE.md`](../CLAUDE.md
 | Secrets | All via env; sensitive modules marked `server-only` |
 | Database | RLS deny-all, but **app-layer is the real boundary** |
 | CI | Semgrep SAST + build, both required to merge to `main` |
+| Accountability | Receipts sealed + attributed; **server-attested, not user non-repudiation** |
 | Biggest gap | **No IP-based rate limiting** |
 
 Jump to: [1 Authentication](#1-authentication) · [2 Authorization](#2-authorization) ·
@@ -272,6 +273,22 @@ receipt *unsealed* rather than blocking a handoff, but verification throws
 `CryptoKeyUnavailableError` — so "can't verify" is never silently reported as
 "verified". Genuine tampering returns `false`.
 
+**The acting technician's id is inside the signed bytes.** The manifest binds
+`sealedByUserId` (`src/modules/transfers/seal.ts`) — deliberately the immutable
+plain-text snapshot rather than the `ON DELETE SET NULL` `createdByUserId` FK, so
+deleting the technician's account cannot turn an intact receipt into a false
+TAMPERED.
+
+**What the seal proves — and what it does not.** The private key is a single
+app-wide `SIGNING_PRIVATE_KEY`; no key material is held by the technician. So the
+seal is **tamper evidence plus an attribution claim**, not a signature *by* the
+named person: it proves *a process holding the app's key asserted that user X
+created this receipt, and the record is unaltered since*. It does not prove X
+consented, because anyone holding the key can mint a valid seal naming any
+`sealedByUserId`. Describe it as "tamper-evident and attributed", not as
+user-level non-repudiation — see
+[Known gaps #6](#known-gaps--accepted-risks).
+
 ---
 
 ## 8. Background jobs (cron)
@@ -399,6 +416,42 @@ it is non-retroactive — existing 7-day cookies stay valid.
 
 **5. JWT freshness costs one DB read per authenticated request.** *Accepted* to
 keep revocation working without a session table.
+
+**6. There is no user-level non-repudiation — only server-attested attribution.**
+⚠️ *Owed to a human, if the requirement is ever real.*
+The receipt seal signs the acting technician's id ([§7](#7-cryptographic-receipt-seal)),
+but the only private key is the server's `SIGNING_PRIVATE_KEY`. A valid seal is
+therefore forgeable along **two** paths without the named person doing anything:
+compromise of their credentials/JWT (the id is taken from the session), or
+possession of the signing key — which means anyone with Vercel env access, a
+compromised deploy, or the database plus that key can write a row and seal it
+under any `sealedByUserId`. The second path is the load-bearing one: it is held
+by whoever administers the deploy, so in a genuine dispute ("I never issued that
+laptop") the technician's defence is not "someone stole my password" but "an
+admin could have created that record", and no verification we can run rules it
+out. Closing it requires a keypair whose private half never reaches the server —
+WebAuthn/passkey in the device secure element, or PIV/CAC (scratched as
+un-hostable on Vercel, see the CAC decision). Until then, **do not claim
+non-repudiation** in UI copy, docs, or briefings; claim tamper-evidence and
+attribution.
+
+**7. Most privileged mutations record no actor, and there is no authentication
+event log.** ⚠️ *Owed to a human.*
+Receipts (`Transfer.createdByUserId`/`sealedByUserId`), returns
+(`ReturnTransaction.processedBy*`), item field edits (`ItemEdit.editedBy*`) and
+possession audits (`ItemAudit.auditedBy*`) all record who acted and survive that
+account's deletion. Nothing else does: `markItemsReadyAction` and
+`toggleItemStatusAction` (`src/app/admin/actions/items.ts`), all three
+service-queue actions (`.../queue.ts`), receipt timers (`.../receipt-timer.ts`)
+and the user management actions (`.../users.ts`) each `await requireAdmin()` and
+then discard the identity — so *who retired this device*, *who closed that
+ticket*, and *who promoted this account to ADMIN* are unanswerable. Separately
+there is no log of logins, failed attempts, lockouts, resets, or PIN unlocks, and
+no IP/user-agent capture anywhere, so account-compromise claims cannot be
+corroborated. Note also that only receipts are sealed: `ItemEdit`, `ItemAudit`
+and `ReturnTransaction` are ordinary mutable rows with no hash chain, and the app
+connects on a privileged role that bypasses RLS ([§10](#10-database-posture)), so
+DB-level history rewriting leaves no trace.
 
 ---
 

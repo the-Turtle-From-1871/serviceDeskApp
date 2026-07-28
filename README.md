@@ -72,7 +72,7 @@ create it once with `CREATE DATABASE handreceipt_test;`.
 | `AUTH_SECRET`  | Signs Auth.js JWTs. Generate with `npx auth secret`.               |
 | `PUBLIC_ACCESS_PIN_ENABLED` | `"true"` gates the public surface (`/`, `/i/*`, `/receipts/*`) behind the admin-set 8-digit PIN for logged-out users. Absent/`false` = open access. Also the kill-switch. |
 | `APP_URL`      | Absolute base URL, used to build scannable QR links.               |
-| `SIGNING_PRIVATE_KEY` | Ed25519 PKCS#8 PEM that signs each receipt's non-repudiation seal. Best-effort — unset means receipts are created unsealed. Verification (admin-only) derives the public key from it; no separate public-key var. |
+| `SIGNING_PRIVATE_KEY` | Ed25519 PKCS#8 PEM that signs each receipt's tamper-evidence seal. Best-effort — unset means receipts are created unsealed. Verification (admin-only) derives the public key from it; no separate public-key var. The key is server-held, so the seal attests attribution rather than proving user-level non-repudiation — see [`docs/SECURITY.md` §7](docs/SECURITY.md#7-cryptographic-receipt-seal) and Known gaps #6. |
 | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | Optional overrides for the seeded admin. |
 
 `.env*` is git-ignored except `.env.example`.
