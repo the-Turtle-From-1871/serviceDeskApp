@@ -52,21 +52,39 @@ describe("listItems", () => {
     expect(orderOf()).toEqual([{ make: "asc" }, { id: "asc" }]);
   });
 
-  it("maps the derived auditState sort to lastAuditedAt, nulls last, in both directions", async () => {
+  // Blanks sort as a VALUE — they gather at one end and swap ends when the
+  // direction is reversed, so reversing a sort reverses the WHOLE list. No
+  // column pins them, and that must stay uniform: a single pinned column would
+  // leave part of the list unmoved on reverse and read as a broken sort.
+  it.each([
+    ["deviceName", "deviceName"],
+    ["deviceUIC", "deviceUIC"],
+    ["deviceCategory", "deviceCategory"],
+    ["auditState", "lastAuditedAt"],
+    ["make", "make"],
+    ["status", "status"],
+  ])("orders %s without pinning empties to a fixed end", async (sortKey, column) => {
+    for (const dir of ["asc", "desc"] as const) {
+      vi.mocked(prisma.item.findMany).mockClear();
+      vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
+      await listItems({ sort: sortKey, dir });
+      // A bare `{ column: dir }` — never `{ sort, nulls }`.
+      expect(orderOf()).toEqual([{ [column]: dir }, { id: "asc" }]);
+    }
+  });
+
+  it("maps the derived auditState sort to lastAuditedAt in both directions", async () => {
     vi.mocked(prisma.item.count).mockResolvedValue(100);
 
+    // auditState is derived and time-dependent, so it rides the denormalized
+    // lastAuditedAt column. Never-audited rows (null) sort as a value like any
+    // other blank — they swap ends with the direction rather than being pinned.
     await listItems({ sort: "auditState", dir: "asc" });
-    expect(orderOf()).toEqual([
-      { lastAuditedAt: { sort: "asc", nulls: "last" } },
-      { id: "asc" },
-    ]);
+    expect(orderOf()).toEqual([{ lastAuditedAt: "asc" }, { id: "asc" }]);
 
     vi.mocked(prisma.item.findMany).mockClear();
     await listItems({ sort: "auditState", dir: "desc" });
-    expect(orderOf()).toEqual([
-      { lastAuditedAt: { sort: "desc", nulls: "last" } },
-      { id: "asc" },
-    ]);
+    expect(orderOf()).toEqual([{ lastAuditedAt: "desc" }, { id: "asc" }]);
   });
 
   it("ignores an unknown sort key, falling back to the default order", async () => {
