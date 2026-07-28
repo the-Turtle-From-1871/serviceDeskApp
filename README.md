@@ -12,11 +12,11 @@ receipt PDF.
 
 ## Features
 
-- **Item registry** — make, model, serial number (**unique, case-insensitive**), device name, home unit, issuing unit (UIC), device category, current-holder email/position, notes; ACTIVE/RETIRED status. The list is **server-paginated, filterable (by UIC), and compound-sortable**.
+- **Item registry** — make, model, serial number (**unique, case-insensitive**), device name, home unit, issuing unit (UIC), device category, current-holder email/position, notes; ACTIVE/RETIRED status. The list is **server-paginated, filterable (by UIC), and compound-sortable on every column** — including derived readiness, which is ordered in SQL rather than by a stored column.
 - **Device categories** — admins curate the list of device classes ("Laptop", "Switch") at `/admin/categories`; removing one that items still use is refused. CSV import fills the category from a **`deviceType`** column and registers any new value automatically.
-- **Operational readiness** — each item carries a *deployable status* (`DEPLOYED` / `READY_TO_DEPLOY` / `IN_REPAIR` / `RETIRED`, or untriaged). Admins can set it on many items at once from the items table, and every change is recorded to a readiness history. **Accountability is not a separate flag** — an item counts as accounted for when an audit says so, from its most recent audit date.
+- **Operational readiness** — **derived, never stored.** An item reads `Retired` (lifecycle) → `In repair` (flagged for service) → `Deployed` (on an open hand receipt, used since it was shelved, or carrying an MDM last-logon user) → `Ready to deploy` (marked on hand) → `Untriaged`, in that precedence. The one thing an operator sets by hand is **"Mark as on hand"** — available on the items table, the item page, and automatically when a service-queue item is completed. It stamps a timestamp rather than a flag, so a later logon supersedes it and the marking **expires on its own** instead of going stale. **Accountability is not a separate flag either** — an item counts as accounted for when an audit says so, from its most recent audit date.
 - **Readiness analytics** (`/admin/analytics`, admin-only) — audit readiness (audited / overdue / never audited), fleet KPIs by category, DA 2062 velocity, and a unit-allocation leaderboard. Readiness is derived live from service flags, open receipts, MDM last-logon, and the "Mark as on hand" stamp. One **Unit (UIC)** filter re-scopes the whole page; charts export to PNG/CSV or switch to a table view. The leaderboard groups by **unit name** (default) or **UIC** — two different partitions of the fleet, not two labels for one — and items with neither value show as **Unassigned** so the totals reconcile.
-- **QR codes** — each item has a public read-only page (`/i/[itemId]`); QR is printable and downloadable as a PDF.
+- **QR codes** — each item has a public read-only page (`/i/[itemId]`) reachable by scanning its label. The QR image and its printable PDF are shown to **admins only** on that page (labelling is a property-book task); admins can also print a whole sheet of labels from the items list or `/admin/items/qr-sheet`.
 - **Signed custody chain** — holder initiates a transfer, recipient draws a signature to accept; custody moves only on signature.
 - **Admin console** — create/edit/retire items, manage users (create, set role, activate/deactivate), process property returns, work the service queue, full audit log.
 - **DA Form 2062 hand receipt** — every completed transfer exports a filled, flattened DA 2062 PDF with a vertical recipient signature + date in the quantity column and a custody-record page.
@@ -88,7 +88,7 @@ create it once with `CREATE DATABASE handreceipt_test;`.
 | `npm run db:migrate` | `prisma migrate dev` (local)               |
 | `npm run db:deploy`  | `prisma migrate deploy` (prod)             |
 | `npm run db:seed`    | Seed the admin account                     |
-| `npm run db:seed:analytics` | **Dev only.** Populate categories, UICs, readiness states, back-dated history + demo closed receipts so the analytics dashboard renders locally. Overwrites readiness fields; refuses to run with `NODE_ENV=production`. |
+| `npm run db:seed:analytics` | **Dev only.** Populate categories, UICs, readiness *signals* (service flags, on-hand marks, MDM last-logon) and demo closed receipts so the analytics dashboard renders locally. Overwrites those fields, so it **refuses any non-local `DATABASE_URL`** — a `NODE_ENV` check alone would not have stopped it, since `tsx` leaves that unset. |
 | `npm run db:reset`   | Reset the local dev DB                     |
 | `npm run lint`    | ESLint                                        |
 
@@ -99,13 +99,18 @@ src/
   app/                 # App Router routes
     actions/           # user-facing server actions (auth, transfers, account)
     admin/             # admin console + admin/actions server actions
-    i/[itemId]/        # public read-only item page
-    transfers/[id]/    # sign screen + receipt PDF route handler
+    i/[itemId]/        # public read-only item page (+ QR PDF route)
+    items/             # signed-in inventory list
+    receipts/          # receipt builder, public receipt page, PDF + return flows
+    unlock/            # public-access PIN gate
     api/auth/          # Auth.js route handlers
+    api/cron/          # nightly purge + alert worker (CRON_SECRET)
   components/          # shared UI (server + client components)
+    ui/                # shadcn/ui primitives (new UI only — see CLAUDE.md styling)
   lib/                 # prisma, authz, password, datetime helpers
   modules/             # domain services
-    items/  transfers/  users/  receipts/
+    items/  transfers/  receipts/  returns/  service-queue/
+    audit/  users/  contacts/  signatures/  timers/  auth/
   auth.ts              # Auth.js config
   proxy.ts             # coarse auth gate (Next 16 middleware, Node runtime)
 prisma/                # schema, migrations, seed
