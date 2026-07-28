@@ -53,18 +53,24 @@ export function DonutChart({
   const total = data.reduce((sum, d) => sum + d.value, 0);
 
   // Only slices with a value are drawn. A zero-value slice is invisible but
-  // still consumes a paddingAngle slot, so leaving them in cuts gaps into the
-  // ring where nothing actually is. The legend is rendered separately from the
-  // full list, so an empty category is still named — identity is not lost.
+  // would still occupy a slot, splitting the ring where nothing actually is.
+  // The legend is rendered separately from the FULL list, so an empty category
+  // is still named — dropping the slice does not lose identity.
   const slices = data.filter((d) => d.value > 0);
 
-  // The 2px surface gap belongs BETWEEN segments. With a single arc there is no
-  // boundary to mark, and both the padding and the surface-coloured stroke
-  // instead carve a visible notch at the seam (the top, given startAngle 90) —
-  // a "100% accounted for" ring appeared broken. Applied only when there are
-  // two or more arcs to separate.
-  const separated = slices.length > 1;
-
+  // CONTINUOUS RING — no paddingAngle, no surface stroke.
+  //
+  // The mark spec's "2px surface gap between segments" was being applied twice
+  // here: paddingAngle={2} is 2 DEGREES (~3px of arc at this radius), and the
+  // 2px surface stroke straddled every edge on top of it, so segments were
+  // separated by ~5px of white rather than a hairline. Rather than tune two
+  // mechanisms against each other, the ring is drawn solid.
+  //
+  // Safe to drop the separator here because hue alone is not carrying the
+  // distinction: the palette's adjacent pairs are validated well clear of the
+  // separation floors (worst adjacent CVD ΔE 9.1, normal-vision 19.6), and each
+  // slice is additionally named in the legend, in the icon+label row beneath,
+  // and in the tooltip. See palette.ts.
   return (
     <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
       <PieChart>
@@ -74,18 +80,13 @@ export function DonutChart({
           nameKey="label"
           innerRadius="58%"
           outerRadius="82%"
-          paddingAngle={separated ? 2 : 0}
+          paddingAngle={0}
           startAngle={90}
           endAngle={-270}
           isAnimationActive={false}
         >
           {slices.map((d) => (
-            <Cell
-              key={d.label}
-              fill={d.color}
-              stroke={separated ? CHROME.surface : "none"}
-              strokeWidth={separated ? 2 : 0}
-            />
+            <Cell key={d.label} fill={d.color} stroke="none" strokeWidth={0} />
           ))}
         </Pie>
         <Tooltip
