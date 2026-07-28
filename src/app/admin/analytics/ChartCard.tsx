@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 import { downloadCsv, downloadPng, exportName } from "./export";
 
 export type LegendEntry = { label: string; color: string };
@@ -24,6 +25,11 @@ type Props = {
   controls?: React.ReactNode;
   /** ≥2 series always get a legend; identity is never colour alone. */
   legend?: LegendEntry[];
+  /** Centre the legend under the plot. Defaults to start-aligned, which lines
+   *  the swatches up with the y-axis of a cartesian chart. A donut has no axis
+   *  to align to and is itself centred, so a start-aligned legend reads as
+   *  detached from it — see AuditReadinessWidget. */
+  legendAlign?: "start" | "center";
   /** Raw rows behind the chart. Powers both the CSV export and the table view. */
   exportColumns: string[];
   exportRows: Array<Record<string, unknown>>;
@@ -47,6 +53,7 @@ export function ChartCard({
   description,
   controls,
   legend,
+  legendAlign = "start",
   exportColumns,
   exportRows,
   exportParts,
@@ -123,7 +130,12 @@ export function ChartCard({
         </div>
 
         {legend && legend.length > 1 && !asTable && (
-          <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
+          <ul
+            className={cn(
+              "mt-3 flex flex-wrap gap-x-4 gap-y-1.5",
+              legendAlign === "center" && "justify-center",
+            )}
+          >
             {legend.map((l) => (
               <li key={l.label} className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <span

@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - The **Sort by** control on `/items` now offers every column the table displays. Readiness was previously the only exception.
+- The **DA Form 2062 velocity** chart on `/admin/analytics` is now called **DA Form 2062 volume**. Its CSV and PNG exports are named `transfer-volume-…` accordingly; what the chart counts is unchanged.
+- The colour key under the **Audit readiness** donut is centred, matching the count row directly above it. Both rows now sit under the middle of the donut instead of the key hanging off to the left.
 
 ### Fixed
 - **Blanks on `/items` now follow the sort direction instead of being pinned to the bottom.** Sorting by **Device Name** descending used to open on a screen of dashes, and reversing a sort left part of the list sitting still — which reads as the sort being broken. Empty values now sort as a value: they gather at one end and swap ends when you reverse, so reversing a sort reverses the whole list. This applies to every sortable column, including **Unit (UIC)**, **Category** and **Audit**, and behaves the same whether or not Readiness is one of your sort keys.
