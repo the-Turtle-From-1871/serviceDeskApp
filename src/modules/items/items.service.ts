@@ -56,7 +56,7 @@ export function getItemWithCreator(id: string) {
  *  the denormalized `lastAuditedAt`. A key shared by both paths must sort
  *  identically on both, or adding readiness to a compound sort would quietly
  *  change what the other keys mean, which is why both read it from here. */
-export const SORT_COLUMN: Readonly<Record<string, string>> = {
+export const SORT_COLUMN: Readonly<Record<string, string>> = Object.freeze({
   deviceName: "deviceName",
   make: "make",
   model: "model",
@@ -65,7 +65,24 @@ export const SORT_COLUMN: Readonly<Record<string, string>> = {
   auditState: "lastAuditedAt",
   deviceUIC: "deviceUIC",
   deviceCategory: "deviceCategory",
-};
+});
+
+/** Resolve a sort key to its physical column, or refuse.
+ *
+ *  `Object.hasOwn`, not a truthiness check on `SORT_COLUMN[key]`: a plain object
+ *  literal inherits `toString`/`constructor`/`valueOf`, so a key of "toString"
+ *  would return an inherited FUNCTION, sail past `if (!column)`, and be spliced
+ *  into the ORDER BY. `parseSortKeys` gates on a Set today so nothing reaches
+ *  here unvetted, but this is the SQL-identifier boundary and the docblock above
+ *  promises it holds for "a future caller that builds SortKeys some other way".
+ *  The map is also frozen at runtime, so `Readonly` is not merely a
+ *  compile-time claim an importer could `Object.assign` around. */
+function columnForKey(key: string): string {
+  if (!Object.hasOwn(SORT_COLUMN, key)) {
+    throw new ItemError("INVALID", `Refusing to sort by unknown column: ${key}`);
+  }
+  return SORT_COLUMN[key];
+}
 
 /** Server-sortable sort keys: everything SORT_COLUMN can resolve, plus
  *  `readiness`, which has no column at all and sends the whole query down the
@@ -144,12 +161,11 @@ export function parseSortKeys(sort: string | null | undefined, dir: string | nul
  * the Audit sort orders by recency rather than by badge severity.
  */
 function orderClauseFor({ key, dir }: SortKey): Prisma.ItemOrderByWithRelationInput {
-  // Read from SORT_COLUMN, the same map the raw path uses, so the two can never
+  // Resolved through the same helper the raw path uses, so the two can never
   // disagree about what a key means (`auditState` -> the denormalized
-  // `lastAuditedAt`). listItems sends readiness sorts down the raw path before
-  // reaching here, so every key that arrives resolves.
-  const column = SORT_COLUMN[key];
-  return { [column]: dir } as Prisma.ItemOrderByWithRelationInput;
+  // `lastAuditedAt`), and an unmapped key raises a typed ItemError instead of
+  // producing `{ undefined: dir }` and a generic Prisma failure.
+  return { [columnForKey(key)]: dir } as Prisma.ItemOrderByWithRelationInput;
 }
 
 /*
@@ -223,12 +239,10 @@ async function readinessOrderedItemIds(opts: {
       terms.push(Prisma.sql`${READINESS_RANK} ${direction}`);
       continue;
     }
-    const column = SORT_COLUMN[key];
-    // parseSortKeys already dropped anything unknown; this re-checks at the SQL
-    // boundary so a future caller that builds SortKeys some other way cannot
-    // splice an identifier of its own choosing into the ORDER BY.
-    if (!column) throw new ItemError("INVALID", `Refusing to sort by unknown column: ${key}`);
-    const ref = Prisma.raw(`i."${column}"`);
+    // parseSortKeys already dropped anything unknown; columnForKey re-checks at
+    // the SQL boundary so a future caller that builds SortKeys some other way
+    // cannot splice an identifier of its own choosing into the ORDER BY.
+    const ref = Prisma.raw(`i."${columnForKey(key)}"`);
     // Bare ordering, no NULLS override — blanks swap ends with the direction,
     // exactly as the Prisma path's `{ column: dir }` does. Keeping these two in
     // step is what stops a sort behaving differently depending on whether

@@ -9,6 +9,7 @@ import {
   SORTABLE_COLUMNS,
   type ItemRow,
 } from "./items-view";
+import { ITEM_SORT_COLUMNS } from "@/modules/items/items.service";
 
 const row = (over: Partial<ItemRow>): ItemRow => ({
   id: over.id ?? Math.random().toString(),
@@ -92,6 +93,17 @@ describe("columns", () => {
     // The Sort control must not silently omit a column the table renders — a
     // header you can see and cannot order by reads as a bug.
     expect(SORTABLE_COLUMNS.map((c) => c.key)).toEqual(ITEM_COLUMNS.map((c) => c.key));
+  });
+
+  it("offers exactly the sort keys the server accepts", () => {
+    // The third copy of the sort-key list. This module cannot import
+    // items.service (that would pull Prisma into the client bundle), so the two
+    // are hand-maintained and only this assertion ties them together. Offer a
+    // column the server does not know and parseSortKeys drops it silently: the
+    // user picks a sort, the table reorders into the DEFAULT order, and nothing
+    // errors. Kept beside the other column-list invariants rather than in the
+    // service suite, so all three live in one place.
+    expect(SORTABLE_COLUMNS.map((c) => c.key).sort()).toEqual([...ITEM_SORT_COLUMNS].sort());
   });
 });
 

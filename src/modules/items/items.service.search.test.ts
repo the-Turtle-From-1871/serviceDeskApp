@@ -8,7 +8,6 @@ import {
   ITEM_SORT_COLUMNS,
   SORT_COLUMN,
 } from "./items.service";
-import { SORTABLE_COLUMNS } from "@/components/items-view";
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -59,11 +58,31 @@ describe("listItems", () => {
     expect(orderOf()).toEqual([{ make: "asc" }, { id: "asc" }]);
   });
 
-  // Derived from the REAL allowlist, not a hand-copied list: a key added to
-  // ITEM_SORT_COLUMNS is automatically covered here rather than quietly
-  // escaping. `readiness` is excluded because it leaves the Prisma path
-  // entirely — it gets its own cases below.
+  /** The expected physical column per sort key, written out INDEPENDENTLY.
+   *
+   *  Deliberately not `SORT_COLUMN[key]`. Deriving the expectation from the map
+   *  under test makes a wrong entry unfalsifiable: the implementation and the
+   *  assertion both read the same value, so `make: "model"` would satisfy both
+   *  and /items would silently order by the wrong column. A test needs an
+   *  oracle the implementation cannot supply. The exhaustiveness check below
+   *  keeps this table from falling behind the allowlist. */
+  const EXPECTED_COLUMN: Record<string, string> = {
+    deviceName: "deviceName",
+    make: "make",
+    model: "model",
+    serialNumber: "serialNumber",
+    status: "status",
+    auditState: "lastAuditedAt",
+    deviceUIC: "deviceUIC",
+    deviceCategory: "deviceCategory",
+  };
   const PRISMA_PATH_KEYS = [...ITEM_SORT_COLUMNS].filter((k) => k !== "readiness");
+
+  it("pins an expected column for every key the server accepts", () => {
+    expect(Object.keys(EXPECTED_COLUMN).sort()).toEqual([...PRISMA_PATH_KEYS].sort());
+    // And the map under test agrees with the independent table.
+    for (const key of PRISMA_PATH_KEYS) expect(SORT_COLUMN[key]).toBe(EXPECTED_COLUMN[key]);
+  });
 
   // Every clause is a bare `{ column: dir }` and never `{ sort, nulls }`, so a
   // nullable column's blanks sort as a VALUE: they swap ends with the direction
@@ -75,23 +94,24 @@ describe("listItems", () => {
       vi.mocked(prisma.item.findMany).mockClear();
       vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
       await listItems({ sort: sortKey, dir });
-      expect(orderOf()).toEqual([{ [SORT_COLUMN[sortKey]]: dir }, { id: "asc" }]);
+      expect(orderOf()).toEqual([{ [EXPECTED_COLUMN[sortKey]]: dir }, { id: "asc" }]);
     }
   });
 
-  // ITEM_SORT_COLUMNS is now derived from SORT_COLUMN, so a MISSING entry is
-  // unrepresentable. A WRONG one is not: `make: "model"` is a plausible typo
-  // that still resolves, so asserting "did not throw" would pass while
-  // ?sort=make and ?sort=readiness,make ordered by different columns. Assert the
-  // emitted ORDER BY actually names the mapped column on the raw path too.
+  // Asserted against the ORDER BY ALONE, and with the direction attached.
+  // Matching the whole statement was vacuous: itemFilterSql names deviceName,
+  // make, model, serialNumber and deviceUIC in its WHERE, and READINESS_CASE
+  // names status — so six of these eight keys "passed" even with the entire
+  // non-readiness ORDER BY branch deleted. `i."col" ASC` appears only where the
+  // sort term is actually emitted.
   it.each(PRISMA_PATH_KEYS)("orders by the mapped column on the raw readiness path (%s)", async (sortKey) => {
     vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
     await listItems({ sort: `readiness,${sortKey}`, dir: "asc" });
 
     const [sql] = vi.mocked(prisma.$queryRaw).mock.calls[0] as unknown as [{ strings: string[] }];
-    const text = sql.strings.join(" ");
-    // The physical column, quoted, as readinessOrderedItemIds splices it.
-    expect(text).toContain(`i."${SORT_COLUMN[sortKey]}"`);
+    const text = sql.strings.join("");
+    const orderBy = text.slice(text.lastIndexOf("ORDER BY"));
+    expect(orderBy).toContain(`i."${EXPECTED_COLUMN[sortKey]}" ASC`);
   });
 
   it("maps the derived auditState sort to lastAuditedAt in both directions", async () => {
@@ -128,16 +148,6 @@ describe("listItems", () => {
       expect(prisma.item.findMany).not.toHaveBeenCalled();
     },
   );
-
-  // The THIRD list. The Sort-by control on /items is built from SORTABLE_COLUMNS,
-  // which the server never consults: offer a column there that the server
-  // allowlist doesn't know and parseSortKeys silently drops it, so the user picks
-  // a sort, the table visibly reorders into the DEFAULT order, and nothing errors.
-  // Drift in that direction (UI first) is the likely one, and it is invisible to
-  // every test that iterates the server allowlist.
-  it("offers exactly the sort keys the server accepts", () => {
-    expect([...SORTABLE_COLUMNS.map((c) => c.key)].sort()).toEqual([...ITEM_SORT_COLUMNS].sort());
-  });
 
   it("ignores an unknown sort key, falling back to the default order", async () => {
     vi.mocked(prisma.item.count).mockResolvedValueOnce(100);

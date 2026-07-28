@@ -16,7 +16,14 @@ afterEach(cleanup);
 // resetAllMocks, not clearAllMocks: `clear` wipes call records but LEAVES the
 // implementation, so the never-auto-resolving promise one test installs would
 // leak into every test appended after it and hang on findByRole.
-beforeEach(() => vi.resetAllMocks());
+beforeEach(() => {
+  vi.resetAllMocks();
+  // Baseline implementation. resetAllMocks drops implementations as well as
+  // call records, so without this any call past a test's `...Once` values
+  // returns undefined, `items: undefined` lands in state, and the component
+  // throws a TypeError instead of failing an assertion readably.
+  searchContactsAction.mockResolvedValue([]);
+});
 
 const ALVAREZ: ContactOption = {
   id: "c1",
@@ -27,12 +34,20 @@ const ALVAREZ: ContactOption = {
   unit: "HHC",
 } as ContactOption;
 
-/** The real consumer (ReceiptBuilderForm) owns the text, so mirror that here —
- *  the combobox is controlled and cannot clear its own input. */
+/** Mirrors the real consumer: the combobox is controlled, so the parent owns the
+ *  text, and ReceiptBuilderForm's onPick REWRITES it to the chosen contact's
+ *  name. That rewrite is load-bearing for behaviour under test — a no-op onPick
+ *  leaves the query unchanged after a pick and quietly hides anything that
+ *  depends on the post-pick refetch. */
 function Harness() {
   const [value, setValue] = useState("");
   return (
-    <ContactCombobox name="receiverName" value={value} onValueChange={setValue} onPick={() => {}} />
+    <ContactCombobox
+      name="receiverName"
+      value={value}
+      onValueChange={setValue}
+      onPick={(c) => setValue(`${c.firstName} ${c.lastName}`)}
+    />
   );
 }
 
@@ -91,67 +106,43 @@ describe("ContactCombobox", () => {
 
     expect(screen.queryByRole("option")).toBeNull();
 
-    // THE ASSERTION THAT MATTERS. An empty box hiding the stale result is not
-    // the same as the stale result being discarded: if it is merely hidden, it
-    // comes straight back the moment there is any query again. Type one new
-    // character and the abandoned "alv" contact must NOT be offered as a
-    // suggestion for "z" — not even for the debounce window.
     searchContactsAction.mockReturnValue(new Promise<ContactOption[]>(() => {}));
     await userEvent.type(input, "z");
     expect(screen.queryByRole("option")).toBeNull();
   });
 
-  it("does not let a search still in flight repopulate the list after a pick", async () => {
-    // Picking clears the fetched contacts so the address book's PII does not
-    // linger in client state. That clear only sticks if the request in flight at
-    // the moment of the pick is invalidated too — otherwise it resolves a beat
-    // later, passes the race guard, and writes every matched person straight
-    // back in. Assert through the UI: reopening must offer nothing.
-    // Getting a request in flight WHILE options are on screen takes a query that
-    // leaves and returns: "alv" answers and is displayed, "alve" never answers
-    // (so the displayed "alv" results stand), and deleting back to "alv" starts a
-    // fresh request for a query whose old results are still showing. The pick
-    // then happens with that third request outstanding.
-    let release!: (v: ContactOption[]) => void;
+  it("does not offer the previous query's contacts while a new query is pending", async () => {
+    // The other half of the rule, and the one an empty-box check cannot reach:
+    // "alv" has ANSWERED and is on screen. Typing another character makes those
+    // results stale immediately — they describe "alv", not "alve" — so they must
+    // disappear at the keystroke, not linger through the 200ms debounce and the
+    // round-trip while the box reads "alve".
     searchContactsAction
-      .mockResolvedValueOnce([ALVAREZ]) // "alv"
-      .mockReturnValueOnce(new Promise<ContactOption[]>(() => {})) // "alve" — never lands
-      .mockReturnValueOnce(
-        new Promise<ContactOption[]>((resolve) => {
-          release = resolve;
-        }), // "alv" again — still in flight at pick time
-      );
+      .mockResolvedValueOnce([ALVAREZ])
+      .mockReturnValue(new Promise<ContactOption[]>(() => {})); // "alve" — pending
     render(<Harness />);
 
     const input = screen.getByRole("combobox");
-    // Each step waits for its request to actually dispatch. Without that the
-    // 200ms debounce cancels the middle one, the mocks shift by a position, and
-    // the test silently exercises a different sequence than it reads as.
     await userEvent.type(input, "alv");
-    await waitFor(() => expect(searchContactsAction).toHaveBeenCalledTimes(1));
-    await screen.findByRole("option", { name: /Alvarez/ });
+    expect(await screen.findByRole("option", { name: /Alvarez/ })).toBeDefined();
 
     await userEvent.type(input, "e");
-    await waitFor(() => expect(searchContactsAction).toHaveBeenCalledTimes(2));
+    expect((input as HTMLInputElement).value).toBe("alve");
+    expect(screen.queryByRole("option")).toBeNull();
+  });
 
-    await userEvent.type(input, "{Backspace}");
-    await waitFor(() => expect(searchContactsAction).toHaveBeenCalledTimes(3));
-    const option = await screen.findByRole("option", { name: /Alvarez/ });
+  it("closes the list on pick and does not reopen it with the picked contact", async () => {
+    searchContactsAction.mockResolvedValue([ALVAREZ]);
+    render(<Harness />);
 
-    await userEvent.click(option);
+    const input = screen.getByRole("combobox");
+    await userEvent.type(input, "alv");
+    await userEvent.click(await screen.findByRole("option", { name: /Alvarez/ }));
 
-    // The third request lands after the pick. Without invalidating it, this
-    // writes the contact book back into state.
-    await act(async () => {
-      release([ALVAREZ]);
-    });
-
-    // Blur first: the option list preventDefaults mousedown so the input keeps
-    // focus through a pick, and clicking an already-focused element fires no
-    // focus event — so without this the list never reopens and the assertion
-    // below passes for the wrong reason.
-    await userEvent.tab();
-    await userEvent.click(input); // refocus -> open
+    // onPick rewrote the field to the full name, so the query changed and the
+    // suggestions no longer belong to it. Nothing should be listed until the
+    // search for the NEW text lands.
+    expect((input as HTMLInputElement).value).toBe("Rosa Alvarez");
     expect(screen.queryByRole("option")).toBeNull();
   });
 

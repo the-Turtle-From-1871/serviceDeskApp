@@ -80,15 +80,14 @@ export function ContactCombobox({
     onPick(c);
     setOpen(false);
     setActive(null);
-    // Drop the fetched contacts once one is chosen. This is an event handler,
-    // not an effect, so clearing here costs no extra render pass — and the book
-    // is other people's PII, which should not sit in client state for the life
-    // of the form. Bumping reqId is what makes the clear stick: without it, a
-    // search still in flight when the user clicks an option resolves a moment
-    // later, passes the race guard, and writes every matched person's details
-    // straight back in.
-    reqId.current++;
-    setMatches({ q: "", items: [] });
+    // NOTE: deliberately does NOT clear `matches` to purge the contact book.
+    // That was tried and the privacy claim was false: the real consumer's
+    // onPick rewrites the field to the chosen name (ReceiptBuilderForm), so the
+    // query changes, the effect re-runs, and 200ms later the search puts the
+    // contacts straight back. Clearing also broke the case where onPick leaves
+    // the text alone — state emptied, effect not re-keyed, so the list could
+    // never reopen for that text. Purging properly means suppressing the
+    // post-pick refetch, which is a real change, not a one-liner here.
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
