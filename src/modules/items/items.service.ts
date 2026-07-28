@@ -46,22 +46,39 @@ export function getItemWithCreator(id: string) {
   });
 }
 
-// Server-sortable sort keys. Two of them are DERIVED and have no like-named
-// column: `auditState` maps to the denormalized `lastAuditedAt` (audit recency
-// IS audit-status severity), and `readiness` has no column at all — it sends
-// the whole query down the raw-SQL path below. The rest map straight to their
-// like-named Item columns.
-// Exported so the tests can drive themselves off the real allowlist instead of
-// a hand-copied duplicate that silently falls behind it.
-export const ITEM_SORT_COLUMNS = new Set([
-  "deviceName",
-  "make",
-  "model",
-  "serialNumber",
-  "status",
-  "auditState",
-  "deviceUIC",
-  "deviceCategory",
+/** Physical column each NON-derived sort key orders by — the ONE mapping, used
+ *  by both sort paths and by the allowlist below.
+ *
+ *  This is an ALLOWLIST guarding a SQL-identifier interpolation, the same job
+ *  UPDATABLE_ITEM_COLUMNS does for the importer: the column name is spliced
+ *  into the ORDER BY (values never are), so nothing outside this map may reach
+ *  it. `auditState` is DERIVED and has no like-named column — it resolves to
+ *  the denormalized `lastAuditedAt`. A key shared by both paths must sort
+ *  identically on both, or adding readiness to a compound sort would quietly
+ *  change what the other keys mean, which is why both read it from here. */
+export const SORT_COLUMN: Readonly<Record<string, string>> = {
+  deviceName: "deviceName",
+  make: "make",
+  model: "model",
+  serialNumber: "serialNumber",
+  status: "status",
+  auditState: "lastAuditedAt",
+  deviceUIC: "deviceUIC",
+  deviceCategory: "deviceCategory",
+};
+
+/** Server-sortable sort keys: everything SORT_COLUMN can resolve, plus
+ *  `readiness`, which has no column at all and sends the whole query down the
+ *  raw-SQL path.
+ *
+ *  DERIVED, not hand-listed, on purpose. These were two parallel lists, and a
+ *  key added to this one but not to SORT_COLUMN was a 500 on the raw path —
+ *  reachable only via `?sort=readiness,<key>`, so every single-key test missed
+ *  it. Deriving makes that desync unrepresentable rather than merely tested for.
+ *  `ReadonlySet` because this gates what may reach a SQL-identifier splice; a
+ *  mutable export would let any importer widen the injection boundary. */
+export const ITEM_SORT_COLUMNS: ReadonlySet<string> = new Set([
+  ...Object.keys(SORT_COLUMN),
   "readiness",
 ]);
 
@@ -127,30 +144,13 @@ export function parseSortKeys(sort: string | null | undefined, dir: string | nul
  * the Audit sort orders by recency rather than by badge severity.
  */
 function orderClauseFor({ key, dir }: SortKey): Prisma.ItemOrderByWithRelationInput {
-  // `auditState` is derived and time-dependent, so it rides the denormalized
-  // lastAuditedAt column rather than being an ORDER BY of its own.
-  const column = key === "auditState" ? "lastAuditedAt" : key;
+  // Read from SORT_COLUMN, the same map the raw path uses, so the two can never
+  // disagree about what a key means (`auditState` -> the denormalized
+  // `lastAuditedAt`). listItems sends readiness sorts down the raw path before
+  // reaching here, so every key that arrives resolves.
+  const column = SORT_COLUMN[key];
   return { [column]: dir } as Prisma.ItemOrderByWithRelationInput;
 }
-
-/** Physical column each NON-derived sort key orders by on the raw path.
- *
- *  This is an ALLOWLIST guarding a SQL-identifier interpolation, the same job
- *  UPDATABLE_ITEM_COLUMNS does for the importer: the column name is spliced
- *  into the ORDER BY (values never are), so nothing outside this map may reach
- *  it. `auditState` resolves to `lastAuditedAt` exactly as orderClauseFor does
- *  — a key shared by both paths must sort identically on both, or adding
- *  readiness to a compound sort would quietly change what the other keys mean. */
-const SORT_COLUMN: Record<string, string> = {
-  deviceName: "deviceName",
-  make: "make",
-  model: "model",
-  serialNumber: "serialNumber",
-  status: "status",
-  auditState: "lastAuditedAt",
-  deviceUIC: "deviceUIC",
-  deviceCategory: "deviceCategory",
-};
 
 /*
  * NOTE ON EMPTIES: nothing here pins NULLs to a fixed end.

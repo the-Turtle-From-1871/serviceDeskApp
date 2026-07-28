@@ -48,15 +48,11 @@ export function ContactCombobox({
   // Debounced server search. Keyed on the trimmed query; a race guard drops
   // out-of-order responses so an earlier query can't overwrite a later one.
   useEffect(() => {
-    // Nothing to search for with an empty box, and nothing worth searching for
-    // while the list is closed. The latter is what stops a pick from firing a
-    // pointless round-trip: `onPick` rewrites `value` to the chosen name, which
-    // changes the query, but the list has just been closed — so the old code
-    // searched the server for the name it had only just filled in, twice per
-    // receipt (sender + recipient). Typing reopens the list in the same event,
-    // so a real keystroke always searches.
-    if (!q || !open) return;
+    // Bump BEFORE the empty-query bail-out, so clearing the box orphans any
+    // response still in flight instead of letting it resolve and write a set of
+    // contacts nobody asked for back into state.
     const id = ++reqId.current;
+    if (!q) return;
     const timer = setTimeout(async () => {
       try {
         const res = await searchContactsAction(q);
@@ -66,8 +62,15 @@ export function ContactCombobox({
       }
     }, 200);
     return () => clearTimeout(timer);
-    // Keyed on the TRIMMED query, so adding a trailing space is not a new search.
-  }, [q, open]);
+    // Keyed on the TRIMMED query ONLY. `open` deliberately is NOT a dependency:
+    // gating the fetch on the list being visible looks like it saves the
+    // redundant search after a pick, but it re-runs the effect on every focus
+    // change, so a query is re-fetched once per focus cycle rather than once
+    // ever — and worse, blurring inside the 200ms debounce cancels the timer
+    // without scheduling a replacement, so typing a name and tabbing straight
+    // out searches for nothing at all. One redundant request per pick is the
+    // cheaper trade.
+  }, [q]);
 
   const show = open && options.length > 0;
   // Clamp: `options` can shrink under a stale `active` between renders.
@@ -80,7 +83,11 @@ export function ContactCombobox({
     // Drop the fetched contacts once one is chosen. This is an event handler,
     // not an effect, so clearing here costs no extra render pass — and the book
     // is other people's PII, which should not sit in client state for the life
-    // of the form.
+    // of the form. Bumping reqId is what makes the clear stick: without it, a
+    // search still in flight when the user clicks an option resolves a moment
+    // later, passes the race guard, and writes every matched person's details
+    // straight back in.
+    reqId.current++;
     setMatches({ q: "", items: [] });
   };
 
