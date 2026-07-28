@@ -25,11 +25,15 @@ describe("unlock cookie sign/verify", () => {
   });
 
   it("rejects a validly-signed value that outlives the current TTL", async () => {
-    // A cookie minted under the old 7-day window: signature is genuine, expiry
-    // is still in the future, but it claims far more life than the TTL allows.
+    // A cookie minted under a longer window: signature is genuine, expiry is
+    // still in the future, but it claims far more life than the TTL allows.
+    //
+    // Expressed RELATIVE to the constant. Hard-coding the previous 7-day window
+    // would make this test fail on correct code the moment anyone raises the
+    // TTL — a red suite in a security file for a case the boundary test below
+    // already covers exactly.
     const now = 1_000_000;
-    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
-    const value = await signUnlockValue(now + sevenDaysMs, SECRET);
+    const value = await signUnlockValue(now + UNLOCK_TTL_MS * 2, SECRET);
     expect(await verifyUnlockValue(value, SECRET, now)).toBe(false);
   });
 
@@ -44,6 +48,22 @@ describe("unlock cookie sign/verify", () => {
     const now = 1_000_000;
     const value = await signUnlockValue(now + UNLOCK_TTL_MS + UNLOCK_CLOCK_SKEW_MS + 1, SECRET);
     expect(await verifyUnlockValue(value, SECRET, now)).toBe(false);
+  });
+
+  it("FAILS CLOSED when the secret is missing, and refuses to mint without one", async () => {
+    // With a blank key the expected MAC is hmac("", exp) — reproducible offline
+    // by anyone, so a gate that verified against it would admit forged cookies
+    // to the whole public PII surface. A keyless gate must refuse everyone.
+    const now = 1_000_000;
+    const genuine = await signUnlockValue(now + UNLOCK_TTL_MS, SECRET);
+    expect(await verifyUnlockValue(genuine, "", now)).toBe(false);
+
+    // Even a value forged with the empty key — what an attacker would actually
+    // present — is refused rather than matching.
+    const forged = `${now + UNLOCK_TTL_MS}.${"x".repeat(43)}`;
+    expect(await verifyUnlockValue(forged, "", now)).toBe(false);
+
+    await expect(signUnlockValue(now + UNLOCK_TTL_MS, "")).rejects.toThrow(/AUTH_SECRET/);
   });
 
   it("rejects a tampered signature", async () => {

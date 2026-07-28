@@ -167,10 +167,23 @@ cookies instead of letting them run out their old window. It bites only while a
 cookie claims more life than the current TTL — it is not a revocation lever, and
 does not make PIN rotation retroactive (see Known gaps). `verifyUnlockValue()`
 
-**A refused cookie is expired in the browser** — the proxy attaches a
-`cookies.delete()` to the `/unlock` redirect, so a cookie the ceiling retired is
-not resent on every subsequent request until its own longer expiry.
-`src/proxy.ts`
+**A refused cookie is expired in the browser** — the proxy attaches a cookie
+deletion to the `/unlock` redirect, so a cookie the ceiling retired is not
+resent on every subsequent request until its own longer expiry. The deletion
+spells out `secure`/`httpOnly`/`sameSite` explicitly: `cookies.delete(name)`
+emits no `Secure` attribute, and a `Set-Cookie` whose name carries the
+`__Secure-` prefix without it is rejected outright by browsers — which made the
+deletion a silent no-op in production, the only environment that uses the
+prefix. It fires only when a cookie was actually presented, so a request in
+flight from another tab cannot wipe a cookie a correct PIN just minted.
+`src/proxy.ts`, covered by `src/proxy.test.ts`
+
+**The gate fails CLOSED with no signing key** — `verifyUnlockValue()` returns
+false when the secret is empty and `signUnlockValue()` throws. Both call sites
+read `process.env.AUTH_SECRET ?? ""`, so a missing or blank secret would
+otherwise make the expected MAC `hmac("", exp)` — reproducible offline by
+anyone, admitting forged cookies to the entire public surface.
+`src/lib/public-access-cookie.ts`
 
 **The signature compare is constant-time** — length-checked, no early exit, so it
 leaks no timing information. `safeEqual()`

@@ -39,21 +39,39 @@ export const proxy = auth(async (req) => {
     const secure = process.env.NODE_ENV === "production";
     // Only the async HMAC verify runs when it can actually change the outcome
     // (flag on AND not already logged in) — off/ logged-in skip the crypto.
+    const cookieName = unlockCookieName(secure);
+    const presented = req.cookies.get(cookieName)?.value;
     const unlockValid =
-      flagEnabled && !loggedIn
-        ? await verifyUnlockValue(req.cookies.get(unlockCookieName(secure))?.value, secret, Date.now())
-        : false;
+      flagEnabled && !loggedIn ? await verifyUnlockValue(presented, secret, Date.now()) : false;
     if (shouldAllowPublic({ flagEnabled, loggedIn, unlockValid })) {
       return NextResponse.next();
     }
     const url = new URL("/unlock", req.url);
     url.searchParams.set("next", sanitizeNext(pathname + search));
     const res = NextResponse.redirect(url);
-    // Expire whatever cookie was rejected. Without this a refused cookie — most
-    // often one issued under a longer TTL and retired by the ceiling check — is
-    // resent on every request to the public surface until its own expiry, which
-    // can be days after it stopped working.
-    res.cookies.delete(unlockCookieName(secure));
+    // Expire the cookie that was actually REFUSED. Without this a rejected
+    // cookie — most often one issued under a longer TTL and retired by the
+    // ceiling check — is resent on every request to the public surface until its
+    // own expiry, which can be days after it stopped working.
+    //
+    // Two details this depends on, both of which silently no-op if dropped:
+    //
+    // 1. The attributes must be spelled out. `cookies.delete(name)` expands to
+    //    `set({name, value:"", expires:0})` with NO Secure and NO Path, and a
+    //    Set-Cookie whose name carries the `__Secure-` prefix without the Secure
+    //    attribute is rejected outright by browsers — so in PRODUCTION, the only
+    //    place the prefix is used, the deletion never happened. (Path is safe to
+    //    pass but not load-bearing: Next's normalizeCookie already defaults it
+    //    to "/", which matches how unlock.ts sets the cookie.)
+    //
+    // 2. Only delete when a cookie was presented. Firing unconditionally means a
+    //    request already in flight from another tab — one that legitimately
+    //    carries no cookie yet — returns an expiry that lands AFTER a cookie the
+    //    user just minted with a correct PIN, wiping it and bouncing them back
+    //    to /unlock with nothing to explain why.
+    if (presented !== undefined) {
+      res.cookies.delete({ name: cookieName, path: "/", secure, httpOnly: true, sameSite: "lax" });
+    }
     return res;
   }
 

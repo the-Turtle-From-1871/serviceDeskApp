@@ -49,6 +49,12 @@ function safeEqual(a: string, b: string): boolean {
 // Cookie value = "<expMs>.<hmac(secret, expMs)>". Self-contained so the edge
 // proxy can verify it with no DB lookup.
 export async function signUnlockValue(expMs: number, secret: string): Promise<string> {
+  // Refuse to mint with no key. Both call sites read `process.env.AUTH_SECRET ??
+  // ""`, so a missing or blank secret would otherwise sign with the EMPTY key —
+  // a MAC anyone can reproduce offline in one line. Throwing here turns a
+  // misconfigured deploy into a failed unlock instead of a gate that appears to
+  // work while accepting forged cookies.
+  if (!secret) throw new Error("AUTH_SECRET is required to sign a public-access unlock cookie");
   const sig = await hmac(secret, String(expMs));
   return `${expMs}.${sig}`;
 }
@@ -58,6 +64,12 @@ export async function verifyUnlockValue(
   secret: string,
   nowMs: number,
 ): Promise<boolean> {
+  // FAIL CLOSED on a missing key. Without this, an unset or blank AUTH_SECRET
+  // makes the expected MAC `hmac("", expMs)`, which an attacker computes offline
+  // and sets as their own cookie — bypassing the PIN entirely and reaching the
+  // whole public PII surface (/i/*, /receipts/*, holder emails, signatures).
+  // A gate with no key must refuse everyone, not admit everyone.
+  if (!secret) return false;
   if (!value) return false;
   const dot = value.indexOf(".");
   if (dot <= 0) return false;
@@ -78,7 +90,17 @@ export async function verifyUnlockValue(
   // than the current TTL, so it retires long cookies when the TTL is shortened
   // and does nothing otherwise. It is not a revocation lever — PIN rotation
   // stays non-retroactive (see docs/SECURITY.md, Known gaps).
-  if (expMs - nowMs > UNLOCK_TTL_MS + UNLOCK_CLOCK_SKEW_MS) return false;
+  if (expMs - nowMs > UNLOCK_TTL_MS + UNLOCK_CLOCK_SKEW_MS) {
+    // Logged because this branch cannot fire for a correctly-minted cookie under
+    // healthy clocks: it means either a cookie from a longer TTL (expected, the
+    // retirement working) or skew beyond the allowance — and the latter locks
+    // every logged-out visitor into a redirect loop that is otherwise
+    // indistinguishable from a wrong PIN. No secret is logged, only the margin.
+    console.warn(
+      `[public-access] refused unlock cookie claiming ${Math.round((expMs - nowMs) / 1000)}s of life; ceiling is ${(UNLOCK_TTL_MS + UNLOCK_CLOCK_SKEW_MS) / 1000}s`,
+    );
+    return false;
+  }
   const expected = await hmac(secret, expStr);
   return safeEqual(sig, expected);
 }
