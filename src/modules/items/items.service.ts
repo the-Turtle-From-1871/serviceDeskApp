@@ -51,7 +51,9 @@ export function getItemWithCreator(id: string) {
 // IS audit-status severity), and `readiness` has no column at all — it sends
 // the whole query down the raw-SQL path below. The rest map straight to their
 // like-named Item columns.
-const ITEM_SORT_COLUMNS = new Set([
+// Exported so the tests can drive themselves off the real allowlist instead of
+// a hand-copied duplicate that silently falls behind it.
+export const ITEM_SORT_COLUMNS = new Set([
   "deviceName",
   "make",
   "model",

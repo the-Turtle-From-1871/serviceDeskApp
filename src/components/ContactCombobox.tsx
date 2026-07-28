@@ -28,36 +28,46 @@ export function ContactCombobox({
   // hovered an option yet. Distinct from index 0, so a first Enter press while
   // merely typing doesn't get mistaken for "a suggestion is highlighted".
   const [active, setActive] = useState<number | null>(null);
-  const [matches, setMatches] = useState<ContactOption[]>([]);
+  // Results are stored WITH the query that produced them. Storing a bare array
+  // and asking "is the box non-empty?" is not enough: after clearing the field
+  // and typing something new, the previous query's results are still in state
+  // and would be listed against the new text for the whole debounce plus the
+  // round-trip. Comparing the stored query to the current one means a result
+  // can only ever be shown for the exact text that fetched it — which also
+  // makes a response that lands after the user moved on inert, with no
+  // synchronous clear (and its extra render) inside the effect.
+  const [matches, setMatches] = useState<{ q: string; items: ContactOption[] }>({
+    q: "",
+    items: [],
+  });
   const reqId = useRef(0);
   const listId = useId();
   const q = value.trim();
-  // Suggestions belong to the CURRENT query. Deriving them rather than clearing
-  // `matches` on every keystroke means a late response for text the user has
-  // since deleted can never surface.
-  const options = q ? matches : [];
+  const options = q && matches.q === q ? matches.items : [];
 
-  // Debounced server search. Keyed on the current input; a race guard drops
+  // Debounced server search. Keyed on the trimmed query; a race guard drops
   // out-of-order responses so an earlier query can't overwrite a later one.
   useEffect(() => {
-    // No `setMatches([])` here: clearing state synchronously in an effect costs
-    // a second render pass, and it was never what made an empty box show
-    // nothing — `options` below derives that. It also left a hole, since an
-    // in-flight response for the deleted text still resolved and repopulated
-    // `matches`, briefly listing suggestions for an empty input.
-    if (!q) return;
+    // Nothing to search for with an empty box, and nothing worth searching for
+    // while the list is closed. The latter is what stops a pick from firing a
+    // pointless round-trip: `onPick` rewrites `value` to the chosen name, which
+    // changes the query, but the list has just been closed — so the old code
+    // searched the server for the name it had only just filled in, twice per
+    // receipt (sender + recipient). Typing reopens the list in the same event,
+    // so a real keystroke always searches.
+    if (!q || !open) return;
     const id = ++reqId.current;
     const timer = setTimeout(async () => {
       try {
         const res = await searchContactsAction(q);
-        if (id === reqId.current) setMatches(res);
+        if (id === reqId.current) setMatches({ q, items: res });
       } catch {
-        if (id === reqId.current) setMatches([]);
+        if (id === reqId.current) setMatches({ q, items: [] });
       }
     }, 200);
     return () => clearTimeout(timer);
     // Keyed on the TRIMMED query, so adding a trailing space is not a new search.
-  }, [q]);
+  }, [q, open]);
 
   const show = open && options.length > 0;
   // Clamp: `options` can shrink under a stale `active` between renders.
@@ -67,6 +77,11 @@ export function ContactCombobox({
     onPick(c);
     setOpen(false);
     setActive(null);
+    // Drop the fetched contacts once one is chosen. This is an event handler,
+    // not an effect, so clearing here costs no extra render pass — and the book
+    // is other people's PII, which should not sit in client state for the life
+    // of the form.
+    setMatches({ q: "", items: [] });
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {

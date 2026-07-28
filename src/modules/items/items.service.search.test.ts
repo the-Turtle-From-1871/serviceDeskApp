@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("@/lib/prisma", () => ({ default: { item: { findMany: vi.fn(async () => []), findUnique: vi.fn(async () => null), count: vi.fn(async () => 0) }, $queryRaw: vi.fn(async () => []) } }));
 import prisma from "@/lib/prisma";
-import { searchItemsBySerial, getItemWithCreator, listItems } from "./items.service";
+import {
+  searchItemsBySerial,
+  getItemWithCreator,
+  listItems,
+  ITEM_SORT_COLUMNS,
+} from "./items.service";
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -52,31 +57,37 @@ describe("listItems", () => {
     expect(orderOf()).toEqual([{ make: "asc" }, { id: "asc" }]);
   });
 
-  // Blanks sort as a VALUE — they gather at one end and swap ends when the
-  // direction is reversed, so reversing a sort reverses the WHOLE list. No
-  // column pins them, and that must stay uniform: a single pinned column would
-  // leave part of the list unmoved on reverse and read as a broken sort.
-  // Every key ITEM_SORT_COLUMNS allows onto the Prisma path — `readiness` is the
-  // one exception and is covered separately below, since it leaves this path
-  // entirely. Keep this table exhaustive: a key added to the allowlist but not
-  // here is a key whose nulls behaviour nothing checks.
-  it.each([
-    ["deviceName", "deviceName"],
-    ["deviceUIC", "deviceUIC"],
-    ["deviceCategory", "deviceCategory"],
-    ["auditState", "lastAuditedAt"],
-    ["make", "make"],
-    ["model", "model"],
-    ["serialNumber", "serialNumber"],
-    ["status", "status"],
-  ])("orders %s without pinning empties to a fixed end", async (sortKey, column) => {
+  // Derived from the REAL allowlist, not a hand-copied list: a key added to
+  // ITEM_SORT_COLUMNS is automatically covered here rather than quietly
+  // escaping. `readiness` is excluded because it leaves the Prisma path
+  // entirely — it gets its own cases below.
+  const PRISMA_PATH_KEYS = [...ITEM_SORT_COLUMNS].filter((k) => k !== "readiness");
+  // Only `auditState` is not its own column name.
+  const columnFor = (key: string) => (key === "auditState" ? "lastAuditedAt" : key);
+
+  // Every clause is a bare `{ column: dir }` and never `{ sort, nulls }`, so a
+  // nullable column's blanks sort as a VALUE: they swap ends with the direction
+  // and reversing a sort reverses the WHOLE list. Asserted for every key, not
+  // just the nullable ones — the rule is that NO key pins, and a pin added to a
+  // non-null column today is a pin waiting for that column to become nullable.
+  it.each(PRISMA_PATH_KEYS)("maps %s to a bare { column: dir }, no nulls override", async (sortKey) => {
     for (const dir of ["asc", "desc"] as const) {
       vi.mocked(prisma.item.findMany).mockClear();
       vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
       await listItems({ sort: sortKey, dir });
-      // A bare `{ column: dir }` — never `{ sort, nulls }`.
-      expect(orderOf()).toEqual([{ [column]: dir }, { id: "asc" }]);
+      expect(orderOf()).toEqual([{ [columnFor(sortKey)]: dir }, { id: "asc" }]);
     }
+  });
+
+  // The raw path resolves each key through SORT_COLUMN and THROWS on a miss, so
+  // a key allowed onto the Prisma path but absent from that map is a 500 on
+  // /items?sort=readiness,<key> — reachable only through the readiness combo,
+  // which is why it survives every single-key test. Driving this off the same
+  // allowlist makes the two maps impossible to desynchronise silently.
+  it.each(PRISMA_PATH_KEYS)("resolves %s on the raw readiness path too", async (sortKey) => {
+    vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
+    await expect(listItems({ sort: `readiness,${sortKey}`, dir: "asc" })).resolves.toBeDefined();
+    expect(prisma.$queryRaw).toHaveBeenCalled();
   });
 
   it("maps the derived auditState sort to lastAuditedAt in both directions", async () => {

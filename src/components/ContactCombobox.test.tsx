@@ -13,7 +13,10 @@ import { ContactCombobox } from "./ContactCombobox";
 import type { ContactOption } from "@/modules/contacts/contact-match";
 
 afterEach(cleanup);
-beforeEach(() => vi.clearAllMocks());
+// resetAllMocks, not clearAllMocks: `clear` wipes call records but LEAVES the
+// implementation, so the never-auto-resolving promise one test installs would
+// leak into every test appended after it and hang on findByRole.
+beforeEach(() => vi.resetAllMocks());
 
 const ALVAREZ: ContactOption = {
   id: "c1",
@@ -86,6 +89,15 @@ describe("ContactCombobox", () => {
       release([ALVAREZ]);
     });
 
+    expect(screen.queryByRole("option")).toBeNull();
+
+    // THE ASSERTION THAT MATTERS. An empty box hiding the stale result is not
+    // the same as the stale result being discarded: if it is merely hidden, it
+    // comes straight back the moment there is any query again. Type one new
+    // character and the abandoned "alv" contact must NOT be offered as a
+    // suggestion for "z" — not even for the debounce window.
+    searchContactsAction.mockReturnValue(new Promise<ContactOption[]>(() => {}));
+    await userEvent.type(input, "z");
     expect(screen.queryByRole("option")).toBeNull();
   });
 

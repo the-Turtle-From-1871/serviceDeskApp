@@ -118,7 +118,13 @@ export function ChartCard({
       </CardHeader>
 
       <CardContent className="flex-1">
-        {/* Only the plot is captured, so the exported PNG has no menu button in it. */}
+        {/* The capture covers the plot AND its legend, but not the card chrome,
+            so the exported PNG carries no menu button — and never loses the
+            colour key. The legend USED to sit outside this div, which meant
+            every exported chart shipped without one: for the volume chart the
+            legend is the only thing naming the series, so the PNG was a stack
+            of unlabelled bars, exactly what the palette relief rule in the
+            docblock above forbids. */}
         <div ref={captureRef} className="bg-card">
           {asTable ? (
             <DataTable columns={exportColumns} rows={exportRows} />
@@ -127,27 +133,27 @@ export function ChartCard({
           ) : (
             children
           )}
-        </div>
 
-        {legend && legend.length > 1 && !asTable && (
-          <ul
-            className={cn(
-              "mt-3 flex flex-wrap gap-x-4 gap-y-1.5",
-              legendAlign === "center" && "justify-center",
-            )}
-          >
-            {legend.map((l) => (
-              <li key={l.label} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span
-                  aria-hidden="true"
-                  className="size-2.5 shrink-0 rounded-[2px]"
-                  style={{ background: l.color }}
-                />
-                {l.label}
-              </li>
-            ))}
-          </ul>
-        )}
+          {legend && legend.length > 1 && !asTable && (
+            <ul
+              className={cn(
+                "mt-3 flex flex-wrap gap-x-4 gap-y-1.5",
+                legendAlign === "center" && "justify-center",
+              )}
+            >
+              {legend.map((l) => (
+                <li key={l.label} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <span
+                    aria-hidden="true"
+                    className="size-2.5 shrink-0 rounded-[2px]"
+                    style={{ background: l.color }}
+                  />
+                  {l.label}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
