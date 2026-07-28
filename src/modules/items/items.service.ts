@@ -115,10 +115,13 @@ export function parseSortKeys(sort: string | null | undefined, dir: string | nul
  *  two nullable columns sort their empties last in BOTH directions, so an
  *  untriaged/unassigned row never outranks a real value. */
 function orderClauseFor({ key, dir }: SortKey): Prisma.ItemOrderByWithRelationInput {
-  if (key === "auditState") return { lastAuditedAt: { sort: dir, nulls: "last" } };
-  if (key === "deviceUIC") return { deviceUIC: { sort: dir, nulls: "last" } };
-  if (key === "deviceCategory") return { deviceCategory: { sort: dir, nulls: "last" } };
-  return { [key]: dir } as Prisma.ItemOrderByWithRelationInput;
+  // `auditState` is derived and time-dependent, so it rides the denormalized
+  // lastAuditedAt column rather than being an ORDER BY of its own.
+  const column = key === "auditState" ? "lastAuditedAt" : key;
+  // No `nulls:` override — see the note above: blanks sort as a value and swap
+  // ends with the direction, matching the raw path, which emits a bare
+  // `ORDER BY <col> <dir>` for the same reason.
+  return { [column]: dir } as Prisma.ItemOrderByWithRelationInput;
 }
 
 /** Physical column each NON-derived sort key orders by on the raw path.
@@ -140,11 +143,20 @@ const SORT_COLUMN: Record<string, string> = {
   deviceCategory: "deviceCategory",
 };
 
-/** Keys whose empties sort last in BOTH directions, mirroring orderClauseFor's
- *  `nulls: "last"`. Every other key is left to Postgres's default (NULLS LAST
- *  ascending, NULLS FIRST descending) — which is exactly what a bare Prisma
- *  `{ column: dir }` emits, so the two paths agree without saying so twice. */
-const NULLS_LAST_SORT_KEYS = new Set(["auditState", "deviceUIC", "deviceCategory"]);
+/*
+ * NOTE ON EMPTIES: nothing here pins NULLs to a fixed end.
+ *
+ * Blanks sort as a VALUE, so they gather at one end and swap ends when the
+ * direction is reversed — Postgres's default (NULLS LAST ascending, NULLS FIRST
+ * descending), which is what a bare Prisma `{ column: dir }` emits on both
+ * paths. Reversing a sort therefore reverses the whole list, blanks included.
+ *
+ * Some of these columns previously carried `nulls: "last"`, pinning empties to
+ * the bottom in both directions. That was deliberately removed: it made
+ * reversing a sort leave part of the list unmoved, which reads as the sort
+ * being broken. Do not reintroduce it for one column without doing so for every
+ * nullable sortable column — the inconsistency is worse than either rule.
+ */
 
 /** The raw-SQL twin of listItems' Prisma `where`.
  *
@@ -208,11 +220,11 @@ async function readinessOrderedItemIds(opts: {
     // splice an identifier of its own choosing into the ORDER BY.
     if (!column) throw new ItemError("INVALID", `Refusing to sort by unknown column: ${key}`);
     const ref = Prisma.raw(`i."${column}"`);
-    terms.push(
-      NULLS_LAST_SORT_KEYS.has(key)
-        ? Prisma.sql`${ref} ${direction} NULLS LAST`
-        : Prisma.sql`${ref} ${direction}`,
-    );
+    // Bare ordering, no NULLS override — blanks swap ends with the direction,
+    // exactly as the Prisma path's `{ column: dir }` does. Keeping these two in
+    // step is what stops a sort behaving differently depending on whether
+    // readiness happens to be among the keys.
+    terms.push(Prisma.sql`${ref} ${direction}`);
   }
   terms.push(Prisma.sql`i."id" ASC`);
 

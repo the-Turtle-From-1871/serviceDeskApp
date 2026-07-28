@@ -8,6 +8,15 @@ import { cn } from "@/lib/utils";
  * `separate` with 2px spacing) and `th`'s alignment/weight (UA default is
  * bold + centered). Border widths also need `border-solid`, since the
  * `border-*` utilities only set width.
+ *
+ * ⚠️ THE COROLLARY, which is easy to get wrong: `border-solid` sets the style on
+ * ALL FOUR sides, but a single-side width utility (`border-b`, `border-t`) sets
+ * ONE. With no preflight, the other three sides keep the CSS initial width —
+ * `medium`, i.e. **3px** — and a style of `solid` makes them paint. Pairing
+ * `border-b border-solid` therefore draws a 3px box, not a 1px underline. So
+ * every rule below zeroes the sides it does not want explicitly
+ * (`border-x-0 border-t-0 border-b`). Elsewhere in `components/ui` the pairing
+ * is the all-sides `border` + `border-solid`, which is why only tables hit this.
  */
 function Table({ className, ...props }: React.ComponentProps<"table">) {
   return (
@@ -31,20 +40,28 @@ function TableHeader({ className, ...props }: React.ComponentProps<"thead">) {
   return (
     <thead
       data-slot="table-header"
-      className={cn("[&_tr]:border-b [&_tr]:border-solid", className)}
+      // The row rule itself comes from TableRow; this only has to make sure a
+      // header row still gets one if a caller passes a bare <tr>.
+      className={cn(
+        "[&_tr]:border-x-0 [&_tr]:border-t-0 [&_tr]:border-b [&_tr]:border-solid",
+        className,
+      )}
       {...props}
     />
   );
 }
 
+/**
+ * Deliberately NOT stock shadcn: upstream strips the last row's bottom border
+ * (`[&_tr:last-child]:border-0`), which assumes the table's container draws the
+ * closing line — the way `globals.css` does it, where `.table` sits inside a
+ * bordered `.table-wrap`. These tables sit in a plain scroll div inside a Card,
+ * so with that rule the final row simply lost its rule and the table trailed off
+ * unterminated. Every body row keeps its divider; don't "restore" upstream here
+ * without also giving the container a border.
+ */
 function TableBody({ className, ...props }: React.ComponentProps<"tbody">) {
-  return (
-    <tbody
-      data-slot="table-body"
-      className={cn("[&_tr:last-child]:border-0", className)}
-      {...props}
-    />
-  );
+  return <tbody data-slot="table-body" className={cn(className)} {...props} />;
 }
 
 function TableFooter({ className, ...props }: React.ComponentProps<"tfoot">) {
@@ -52,7 +69,9 @@ function TableFooter({ className, ...props }: React.ComponentProps<"tfoot">) {
     <tfoot
       data-slot="table-footer"
       className={cn(
-        "border-t border-solid border-border bg-surface-2 font-medium [&>tr]:last:border-b-0",
+        // Keeps the last footer row's border for the same reason as TableBody.
+        "border-x-0 border-b-0 border-t border-solid border-border",
+        "bg-surface-2 font-medium",
         className,
       )}
       {...props}
@@ -65,7 +84,7 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
     <tr
       data-slot="table-row"
       className={cn(
-        "border-b border-solid border-border transition-colors",
+        "border-x-0 border-t-0 border-b border-solid border-border transition-colors",
         "hover:bg-surface-2 data-[state=selected]:bg-accent",
         className,
       )}
