@@ -3,7 +3,10 @@
 import { Prisma } from "@prisma/client";
 import type { Item, ItemStatus } from "@prisma/client";
 import prisma from "@/lib/prisma";
-import { newItemSchema, type NewItemInput } from "./items.schema";
+// normalizeCategoryName comes from the PURE schema module, not categories.service
+// (which is `server-only`): every write path must apply the same canonical form
+// or an item's stored string and its vocabulary row drift apart.
+import { newItemSchema, normalizeCategoryName, type NewItemInput } from "./items.schema";
 import { parseItemsCsv } from "./csv";
 import { planImport, type SkippedRow, type UnresolvedRow, type ExistingItem, type ItemUpdate } from "./import";
 import { loadUnitMap, learnUnits, type UnitResolution } from "./units.service";
@@ -414,6 +417,146 @@ export async function markItemsReady(
     data: { markedReadyAt: now },
   });
   return { updated: res.count };
+}
+
+/**
+ * Clear the hand-set readiness signal — the exact inverse of markItemsReady.
+ *
+ * This is what "Set readiness → Untriaged" does. It does NOT store an
+ * "UNTRIAGED" value anywhere: readiness stays derived (readiness.ts), and
+ * removing the only hand-set signal is what makes a device fall back through
+ * the precedence chain to Untriaged (assuming no receipt / service flag / MDM
+ * logon is speaking for it — if one is, it keeps reading Deployed or In repair,
+ * which is correct: those are facts, not opinions).
+ *
+ * NO `status: "ACTIVE"` filter — and that asymmetry with markItemsReady is
+ * deliberate, not an oversight. markItemsReady excludes retired kit because
+ * ASSERTING "this is back on my shelf" about a device that has left the fleet
+ * is meaningless. Clearing RETRACTS an assertion, and a retired row can still be
+ * carrying a stale stamp from before it was retired; reactivate it later and it
+ * would read "Ready to deploy" off a marking nobody ever re-checked. A
+ * retraction must be able to reach every row the admin selected.
+ *
+ * Only rows that actually hold a stamp are written, so `updated` is a truthful
+ * "how many were cleared" rather than "how many were selected".
+ *
+ * Enforces NO permissions — the calling Server Action owns the admin guard.
+ */
+export async function clearItemsReady(itemIds: string[]): Promise<{ updated: number }> {
+  const ids = [...new Set(itemIds.filter((id) => id.trim() !== ""))];
+  if (ids.length === 0) return { updated: 0 };
+  if (ids.length > MAX_BULK_ITEMS) throw new ItemError("TOO_MANY");
+
+  const res = await prisma.item.updateMany({
+    where: { id: { in: ids }, markedReadyAt: { not: null } },
+    data: { markedReadyAt: null },
+  });
+  return { updated: res.count };
+}
+
+/**
+ * Bulk lifecycle change — the many-row sibling of setItemStatus.
+ *
+ * `status` is the LIFECYCLE column (ACTIVE / RETIRED), not a readiness state.
+ * It happens to be the top of the readiness precedence chain (a RETIRED item
+ * reads RETIRED regardless of every other signal), which is why the readiness
+ * selector can offer "Retired" and "Active" without storing a readiness value.
+ *
+ * Skips rows already at the target status so `updated` counts real changes.
+ * Writes no ItemEdit: status is not one of ItemLoggedFields, and the
+ * single-item path (setItemStatus) records none either — keeping them
+ * consistent matters more than adding history on one surface only.
+ *
+ * Enforces NO permissions — the calling Server Action owns the admin guard.
+ */
+export async function setItemsStatus(
+  itemIds: string[],
+  status: ItemStatus,
+): Promise<{ updated: number }> {
+  const ids = [...new Set(itemIds.filter((id) => id.trim() !== ""))];
+  if (ids.length === 0) return { updated: 0 };
+  if (ids.length > MAX_BULK_ITEMS) throw new ItemError("TOO_MANY");
+
+  const res = await prisma.item.updateMany({
+    where: { id: { in: ids }, status: { not: status } },
+    data: { status },
+  });
+  return { updated: res.count };
+}
+
+/**
+ * Assign one category to many items, logging an ItemEdit per item that changed.
+ *
+ * THREE queries total, regardless of selection size — never one per item:
+ *   1. ONE findMany for the before-values (only `id` + `deviceCategory`; never
+ *      the whole row, which would drag notes and holder PII through memory);
+ *   2. ONE updateMany over just the ids whose value actually differs;
+ *   3. ONE createMany of the history rows.
+ * Plus learnCategories' single skipDuplicates insert. All in ONE transaction, so
+ * the fleet and its history can never be left disagreeing. Looping
+ * updateItemFields would have been N transactions and 3N queries.
+ *
+ * The change payload is built by the SAME diffItemFields the single-item edit
+ * path uses, so a bulk row and a hand-edited row are indistinguishable to
+ * anything reading ItemEdit.changes. Items already holding the value get no
+ * history row at all.
+ *
+ * NO status filter: re-categorizing retired kit is legitimate data cleanup, and
+ * unlike readiness the category says nothing about whether the device is usable.
+ *
+ * Enforces NO permissions and trusts `editor` — the calling Server Action owns
+ * the admin guard.
+ */
+export async function setItemsCategory(
+  itemIds: string[],
+  rawCategory: string,
+  editor: ItemEditor,
+): Promise<{ updated: number; unchanged: number }> {
+  const ids = [...new Set(itemIds.filter((id) => id.trim() !== ""))];
+  if (ids.length === 0) return { updated: 0, unchanged: 0 };
+  if (ids.length > MAX_BULK_ITEMS) throw new ItemError("TOO_MANY");
+
+  const deviceCategory = normalizeCategoryName(rawCategory);
+  if (!deviceCategory) throw new ItemError("INVALID", "Choose a category.");
+
+  return prisma.$transaction(async (tx) => {
+    const before = await tx.item.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, deviceCategory: true },
+    });
+
+    // Pure, in-memory diff — no query in this map.
+    const edits = before
+      .map((row) => ({
+        id: row.id,
+        changes: diffItemFields({ deviceCategory: row.deviceCategory }, { deviceCategory }),
+      }))
+      .filter((e) => e.changes.length > 0);
+
+    if (edits.length === 0) return { updated: 0, unchanged: before.length };
+
+    const res = await tx.item.updateMany({
+      where: { id: { in: edits.map((e) => e.id) } },
+      data: { deviceCategory },
+    });
+    await tx.itemEdit.createMany({
+      data: edits.map((e) => ({
+        itemId: e.id,
+        editedById: editor.id,
+        editedByName: editor.name,
+        changes: e.changes as unknown as Prisma.InputJsonValue,
+      })),
+    });
+
+    // Closes the race where the picked category is deleted between the page
+    // render and this write: deletion is only refused while a category is IN
+    // USE, and these items were not using it yet. Re-registering keeps the
+    // value visible in the picker instead of stranding the devices on a string
+    // no admin can select again. ONE skipDuplicates insert.
+    await learnCategories([deviceCategory], tx);
+
+    return { updated: res.count, unchanged: before.length - edits.length };
+  });
 }
 
 /** Update an item's loggable fields and record ONE ItemEdit describing the diff,

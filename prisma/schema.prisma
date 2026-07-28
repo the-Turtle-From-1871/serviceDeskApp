@@ -381,9 +381,17 @@ model ServiceQueueItem {
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
 
-  // Completion SLA timer. dueAt defaults from the service type (see sla.ts) when
-  // the item is flagged, overridable per item. Null = no timer. overdueAlertedAt
-  // mirrors Transfer's — one alert per lapse, reset when the item is re-flagged.
+  // Completion SLA timer. dueAt is set ONLY from a days value a human entered —
+  // blank leaves it NULL = no deadline, and there is no per-service-type default
+  // substituted behind the user's back (see sla.ts).
+  //
+  // Both columns follow one rule: a NEW ROUND of service resets them, an edit to
+  // a LIVE request does not. So re-flagging or reopening a COMPLETED row clears
+  // both first (service-queue.service.ts), while re-saving a PENDING row's type
+  // or note writes neither — an overdue alert is per-deadline, so an unchanged
+  // deadline that already alerted must not re-alert, and a new job must not
+  // inherit the finished one's date or its "already alerted" stamp. Changing the
+  // deadline itself (setServiceDeadline) always re-arms the alert.
   dueAt            DateTime?
   overdueAlertedAt DateTime?
 

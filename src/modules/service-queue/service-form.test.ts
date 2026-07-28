@@ -58,6 +58,7 @@ describe("parseServiceMap", () => {
     expect(sel?.overrideDays).toBe(2);
   });
 
+  // Blank days = no deadline downstream (dueAt null), NOT a per-type default.
   it("leaves overrideDays null when the days field is absent or blank", () => {
     const fd = new FormData();
     fd.set("service[i1][needs]", "on");
@@ -75,14 +76,14 @@ describe("parseServiceMap", () => {
     expect(sel?.overrideDays).toBeNull();
   });
 
-  it("falls back to null (type default) when days exceeds the 1..3650 bound", () => {
+  it("yields null (no deadline) when days exceeds the 1..3650 bound", () => {
     const fd = new FormData();
     fd.set("service[i1][needs]", "on");
     fd.set("service[i1][type]", "REPAIR");
     fd.set("service[i1][days]", "99999999");
     const sel = parseServiceMap(fd).get("i1");
     // Out-of-range must not reach computeServiceDueAt (would be an Invalid Date
-    // the best-effort enqueue silently drops) — it falls back to the default SLA.
+    // the best-effort enqueue silently drops) — it means no deadline instead.
     expect(sel?.overrideDays).toBeNull();
   });
 
@@ -113,7 +114,9 @@ describe("parseOverrideDays", () => {
     expect(parseOverrideDays("3650")).toBe(3650);
     expect(parseOverrideDays(" 7 ")).toBe(7); // trimmed
   });
-  it("returns undefined (→ type default) for blank, malformed, or out-of-range", () => {
+  // Blank and invalid deliberately collapse to the same answer: undefined, which
+  // every caller resolves to dueAt = null (no deadline). Never throws.
+  it("returns undefined (→ no deadline) for blank, malformed, or out-of-range", () => {
     for (const bad of ["", "   ", "0", "3651", "99999999", "12.9", "12abc", "-5", "abc", null, undefined]) {
       expect(parseOverrideDays(bad)).toBeUndefined();
     }

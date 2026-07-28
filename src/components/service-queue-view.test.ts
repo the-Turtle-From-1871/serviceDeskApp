@@ -41,6 +41,13 @@ describe("sortQueueRows by due", () => {
     const out = sortQueueRows(rows, "due", "asc").map((r) => r.id);
     expect(out).toEqual(["c", "b", "a"]);
   });
+
+  it("keeps deadline-less rows last when reversed — no deadline is never 'most overdue'", () => {
+    // Blank SLA now stores dueAt = null, so these are the common case: they must
+    // never float to the top of a queue sorted by how overdue things are.
+    const rows = [mk("a", null), mk("b", "2026-07-20T00:00:00.000Z"), mk("c", "2026-07-10T00:00:00.000Z")];
+    expect(sortQueueRows(rows, "due", "desc").map((r) => r.id)).toEqual(["b", "c", "a"]);
+  });
 });
 
 describe("filterQueueRows", () => {

@@ -7,6 +7,7 @@ export type ItemDetailsValues = {
   deviceName: string | null;
   homeUnit: string | null;
   deviceUIC: string | null;
+  deviceCategory: string | null;
   currentUserEmail: string | null;
   currentPosition: string | null;
   notes: string | null;
@@ -20,6 +21,9 @@ type Props = {
   item: ItemDetailsValues;
   isAdmin: boolean;
   units: { abbreviation: string; fullName: string }[];
+  // The MANAGED device-category vocabulary, for the picker below. Suggestions
+  // only — Item.deviceCategory stays free text on purpose.
+  categories: string[];
   // Pre-formatted on the server so this component stays free of date/party logic.
   dateLogged: string;
   loggedBy: string;
@@ -29,7 +33,7 @@ type Props = {
 
 const dash = <span className="subtle">—</span>;
 
-export function ItemDetailsCard({ item, isAdmin, units, dateLogged, loggedBy, handReceiptHolder, lastEdited }: Props) {
+export function ItemDetailsCard({ item, isAdmin, units, categories, dateLogged, loggedBy, handReceiptHolder, lastEdited }: Props) {
   const [editing, setEditing] = useState(false);
   const [state, action, pending] = useActionState(updateItemDetailsAction, undefined);
 
@@ -67,9 +71,11 @@ export function ItemDetailsCard({ item, isAdmin, units, dateLogged, loggedBy, ha
         <form action={action} className="stack-sm">
           <input type="hidden" name="id" value={item.id} />
           <div className="form-grid">
-            {/* deviceName + homeUnit are ADMIN-only. A standard USER edits only the
-                current holder email and position, so these inputs are not rendered
-                for them — and updateItemDetailsAction re-enforces this server-side. */}
+            {/* deviceName, homeUnit, deviceUIC, deviceCategory and notes are
+                ADMIN-only. A standard USER edits only the current holder email
+                and position, so these inputs are not rendered for them — and
+                updateItemDetailsAction re-enforces this server-side by picking
+                userItemDetailsSchema, which strips them. */}
             {isAdmin && (
               <>
                 <div className="field">
@@ -91,16 +97,50 @@ export function ItemDetailsCard({ item, isAdmin, units, dateLogged, loggedBy, ha
                     {units.map((u) => <option key={u.abbreviation} value={u.fullName}>{u.abbreviation}</option>)}
                   </datalist>
                 </div>
+                <div className="field">
+                  <label className="label" htmlFor="ed-deviceUIC">Unit (UIC)</label>
+                  <input id="ed-deviceUIC" className="input" name="deviceUIC" defaultValue={item.deviceUIC ?? ""} />
+                </div>
+                <div className="field">
+                  <label className="label" htmlFor="ed-deviceCategory">Category</label>
+                  {/* Same shape as Home unit: free text with the managed
+                      vocabulary as SUGGESTIONS, never a locked <select> — an
+                      unregistered category must stay typeable (it is learned
+                      into the list on save). */}
+                  <input
+                    id="ed-deviceCategory"
+                    className="input"
+                    name="deviceCategory"
+                    list="ed-categories"
+                    autoComplete="off"
+                    placeholder="e.g. Laptop"
+                    defaultValue={item.deviceCategory ?? ""}
+                  />
+                  <datalist id="ed-categories">
+                    {categories.map((c) => <option key={c} value={c} />)}
+                  </datalist>
+                </div>
               </>
             )}
             <div className="field">
               <label className="label" htmlFor="ed-currentUserEmail">Current user email</label>
-              <input id="ed-currentUserEmail" className="input" type="email" name="currentUserEmail" defaultValue={item.currentUserEmail ?? ""} placeholder="e.g. jane.doe@unit.mil" />
+              {/* inputMode, NOT type="email" — CSV-imported rows hold names like
+                  "SGT Smith" in this column (import.ts copies `assignedUser`
+                  verbatim), and a browser-side email constraint would block
+                  saving the OTHER fields on this form. The server schema does
+                  not validate an address either. */}
+              <input id="ed-currentUserEmail" className="input" inputMode="email" name="currentUserEmail" defaultValue={item.currentUserEmail ?? ""} placeholder="e.g. jane.doe@unit.mil" />
             </div>
             <div className="field">
               <label className="label" htmlFor="ed-currentPosition">Current position</label>
               <input id="ed-currentPosition" className="input" name="currentPosition" defaultValue={item.currentPosition ?? ""} placeholder="e.g. Supply Sergeant" />
             </div>
+            {isAdmin && (
+              <div className="field col-span-2">
+                <label className="label" htmlFor="ed-notes">Notes</label>
+                <textarea id="ed-notes" className="textarea" name="notes" defaultValue={item.notes ?? ""} />
+              </div>
+            )}
           </div>
           {state && "error" in state && state.error && <p role="alert" className="alert-error">{state.error}</p>}
           <div className="row">
@@ -120,6 +160,8 @@ export function ItemDetailsCard({ item, isAdmin, units, dateLogged, loggedBy, ha
           <dd>{item.homeUnit || dash}</dd>
           <dt>Device UIC</dt>
           <dd>{item.deviceUIC || dash}</dd>
+          <dt>Category</dt>
+          <dd>{item.deviceCategory || dash}</dd>
           <dt>Current user email</dt>
           <dd>{item.currentUserEmail || dash}</dd>
           <dt>Current position</dt>

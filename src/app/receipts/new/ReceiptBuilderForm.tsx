@@ -168,8 +168,12 @@ function ServiceControls({ itemId }: { itemId: string }) {
   // Lifted (rather than left uncontrolled on the conditionally-rendered input)
   // so a typed note survives unchecking/rechecking "Needs service?".
   const [note, setNote] = useState("");
-  // Optional per-serial SLA override, in days from when the receipt is filed.
-  // Blank leaves parseServiceMap to fall back to the type default (sla.ts).
+  // Optional per-serial completion deadline, in days from when the receipt is
+  // filed. Blank means NO deadline (parseServiceMap → null → dueAt null); there
+  // is no per-type default substituted server-side (sla.ts). This surface only
+  // ever CREATES flags, so days-from-now is the right unit and needs no prefill;
+  // in the rare case the serial is already in the queue, blank leaves that
+  // existing deadline alone rather than wiping it (see upsertServiceRequest).
   const [days, setDays] = useState("");
   // One horizontal row, not a stack-sm column: the checkbox, the type, and the
   // note sit inline so an item occupies a single table row on a desktop. `.row`
@@ -205,8 +209,9 @@ function ServiceControls({ itemId }: { itemId: string }) {
             name={`service[${itemId}][days]`}
             inputMode="numeric"
             pattern="[0-9]*"
-            placeholder="SLA days (default by type)"
-            aria-label="SLA override days"
+            placeholder="Deadline days (optional)"
+            aria-label="Service deadline in days (blank for no deadline)"
+            title="Optional whole number 1–3650 of days from now. Leave blank for no completion deadline (an existing one is left unchanged)."
             value={days}
             onChange={(e) => setDays(e.target.value.replace(/[^0-9]/g, ""))}
           />

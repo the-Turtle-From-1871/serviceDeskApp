@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const requireAdmin = vi.fn();
 const upsertServiceRequest = vi.fn();
 const reopenServiceItem = vi.fn();
+const setServiceDeadline = vi.fn();
 const getCurrentOpenTransferId = vi.fn();
 const revalidatePath = vi.fn();
 
@@ -12,13 +13,15 @@ vi.mock("@/modules/service-queue/service-queue.service", () => ({
   clearServiceRequest: vi.fn(),
   completeServiceItem: vi.fn(),
   reopenServiceItem: (id: string, days?: unknown) => reopenServiceItem(id, days),
+  setServiceDeadline: (itemId: string, days: number | null) => setServiceDeadline(itemId, days),
 }));
 vi.mock("@/modules/transfers/transfers.service", () => ({
   getCurrentOpenTransferId: (itemId: string) => getCurrentOpenTransferId(itemId),
 }));
 vi.mock("next/cache", () => ({ revalidatePath: (p: string) => revalidatePath(p) }));
 
-import { setServiceAction, reopenServiceAction } from "./queue";
+import { setServiceAction, reopenServiceAction, setServiceDeadlineAction } from "./queue";
+import { ServiceQueueError } from "@/modules/service-queue/service-queue.errors";
 
 const ADMIN = { id: "admin-1", role: "ADMIN" as const, name: "Admin", email: "a@x.mil" };
 
@@ -34,6 +37,7 @@ beforeEach(() => {
   getCurrentOpenTransferId.mockResolvedValue(null);
   upsertServiceRequest.mockResolvedValue({ id: "sq1" });
   reopenServiceItem.mockResolvedValue({ id: "sq1", status: "PENDING" });
+  setServiceDeadline.mockResolvedValue(undefined);
 });
 
 describe("setServiceAction overrideDays coercion", () => {
@@ -64,7 +68,7 @@ describe("setServiceAction overrideDays coercion", () => {
     expect(upsertServiceRequest.mock.calls[0][0].overrideDays).toBe(5);
   });
 
-  it("succeeds (no error) with an out-of-range override, falling back to the default", async () => {
+  it("succeeds (no error) with an out-of-range override, yielding no deadline", async () => {
     const res = await setServiceAction(
       undefined,
       fd({ itemId: "i1", serviceType: "REPAIR", overrideDays: "5000" }),
@@ -74,8 +78,55 @@ describe("setServiceAction overrideDays coercion", () => {
   });
 });
 
+// The dedicated deadline control — the ONE place a blank field clears an
+// existing deadline, and therefore the one place a malformed value must be
+// rejected rather than gracefully collapsed to blank.
+describe("setServiceDeadlineAction", () => {
+  it("clears the deadline on a blank field (blank still means no deadline, deliberately)", async () => {
+    const res = await setServiceDeadlineAction(undefined, fd({ itemId: "i1", overrideDays: "" }));
+    expect(res).toEqual({ ok: true });
+    expect(setServiceDeadline).toHaveBeenCalledWith("i1", null);
+  });
+
+  it("clears the deadline when the field is absent entirely", async () => {
+    const res = await setServiceDeadlineAction(undefined, fd({ itemId: "i1" }));
+    expect(res).toEqual({ ok: true });
+    expect(setServiceDeadline).toHaveBeenCalledWith("i1", null);
+  });
+
+  it("sets an explicit day count", async () => {
+    const res = await setServiceDeadlineAction(undefined, fd({ itemId: "i1", overrideDays: "9" }));
+    expect(res).toEqual({ ok: true });
+    expect(setServiceDeadline).toHaveBeenCalledWith("i1", 9);
+  });
+
+  it("REJECTS a malformed or out-of-range value instead of treating it as a clear", async () => {
+    // parseOverrideDays' graceful collapse is right for the non-destructive
+    // surfaces, but here it would turn a typo into a wiped deadline. Mirrors
+    // setReceiptDueAtAction, which errors on the same inputs.
+    for (const bad of ["0", "-5", "3651", "99999999", "12.9", "12abc"]) {
+      setServiceDeadline.mockClear();
+      const res = await setServiceDeadlineAction(undefined, fd({ itemId: "i1", overrideDays: bad }));
+      expect(res.error).toBeTruthy();
+      expect(setServiceDeadline).not.toHaveBeenCalled();
+    }
+  });
+
+  it("reports a friendly error when the item is not flagged for service", async () => {
+    setServiceDeadline.mockRejectedValueOnce(new ServiceQueueError("NOT_FOUND"));
+    const res = await setServiceDeadlineAction(undefined, fd({ itemId: "i1", overrideDays: "3" }));
+    expect(res.error).toBe("This item is not flagged for service.");
+  });
+
+  it("returns a generic message (not the stack) on an unexpected failure", async () => {
+    setServiceDeadline.mockRejectedValueOnce(new Error("db exploded"));
+    const res = await setServiceDeadlineAction(undefined, fd({ itemId: "i1", overrideDays: "3" }));
+    expect(res.error).toBe("Something went wrong. Please try again.");
+  });
+});
+
 describe("reopenServiceAction overrideDays coercion", () => {
-  it("reopens with a blank overrideDays, threading undefined (type-default clock)", async () => {
+  it("reopens with a blank overrideDays, threading undefined (keep the existing deadline)", async () => {
     await reopenServiceAction(fd({ id: "sq1", itemId: "i1", overrideDays: "" }));
     expect(reopenServiceItem).toHaveBeenCalledTimes(1);
     expect(reopenServiceItem.mock.calls[0][0]).toBe("sq1");
@@ -99,7 +150,7 @@ describe("reopenServiceAction overrideDays coercion", () => {
       reopenServiceItem.mockClear();
       await reopenServiceAction(fd({ id: "sq1", itemId: "i1", overrideDays: bad }));
       expect(reopenServiceItem).toHaveBeenCalledTimes(1); // reopen proceeds
-      expect(reopenServiceItem.mock.calls[0][1]).toBeUndefined(); // with the type-default clock
+      expect(reopenServiceItem.mock.calls[0][1]).toBeUndefined(); // leaving the deadline as it stands
     }
   });
 });

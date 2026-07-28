@@ -40,6 +40,15 @@ const WATCHED = [
   // the guardrail. UPDATABLE_ITEM_COLUMNS still lives in the service file and is
   // not covered; see the note in docs/SECURITY.md.
   [/^src\/modules\/items\/sort-keys\.ts$/, "the ORDER BY SQL-identifier allowlist (§2)"],
+  // Same reasoning as sort-keys.ts, and the same shape: a small leaf file whose
+  // job IS an allowlist. Its readiness target enum deliberately omits DEPLOYED
+  // and IN_REPAIR so those two cannot be asserted by hand — widening it would
+  // let a POST forge "this is issued out" / "this is in repair", which is a
+  // security event even though the file reads like ordinary feature code.
+  // NOTE the contrast with admin/actions/items.ts, which is NOT watched: that
+  // file churns for unrelated reasons, and watching it would train people to
+  // reach for [skip security-doc].
+  [/^src\/app\/admin\/actions\/readiness\.ts$/, "the hand-settable readiness allowlist (§2)"],
   [/^src\/app\/api\/cron\//, "cron authentication (§8)"],
   [/^src\/lib\/email\.ts$/, "outbound email escaping (§4, §6)"],
   [/^next\.config\.ts$/, "security response headers (§4)"],

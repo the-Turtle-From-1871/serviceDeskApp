@@ -113,14 +113,42 @@ deactivation take effect on the *next request* instead of at token expiry.
 
 **Field-level restriction is enforced server-side, not hidden in the UI.** A
 `USER` may edit only an item's current-holder email and current position;
-`deviceName` / `homeUnit` / `notes` are admin-only. `updateItemDetailsAction`
-**picks the Zod schema by role**, so a crafted POST can't widen the field set.
+`deviceName` / `homeUnit` / `deviceUIC` / `notes` / `deviceCategory` are
+admin-only. `updateItemDetailsAction` **picks the Zod schema by role**, so a
+crafted POST can't widen the field set. Both edit surfaces (the item card and
+`/admin/items/<id>/edit`) now share ONE field definition — `editableItemFields`
+in `src/modules/items/items.schema.ts` — so the admin set cannot drift between
+them; `userItemDetailsSchema` stays separately and deliberately narrow.
 
-**Readiness edits live in their own admin-only action** (`markItemsReadyAction`,
-the "Mark as on hand" button) rather than being folded into
-`updateItemDetailsAction` — that keeps the USER-editable field set exactly as
-narrow as it was. It stamps `markedReadyAt` and nothing else; readiness itself
-is derived, so there is no state a POST could assert.
+**Item identity (`make` / `model` / `serialNumber`) is a separate admin-only
+action.** `itemIdentitySchema` → `updateItemIdentityAction`, reachable only from
+the admin edit page. It is deliberately NOT part of `editableItemFields`, so
+these three can never be reached from the item detail card or by a `USER` — an
+ordinary edit POST carrying them is stripped by `z.object()`. Existing signed
+hand receipts are NOT rewritten by a serial correction: `TransferItem.serialNumber`
+is a snapshot taken at receipt creation and rendered as-is, so past receipts keep
+the serial they were issued with. The form warns at the point of edit. A collision
+on the citext-unique `serialNumber` surfaces as Prisma `P2002` and is returned as
+a specific message; the Prisma detail is logged server-side only.
+
+**Readiness edits live in their own admin-only actions** rather than being folded
+into `updateItemDetailsAction` — that keeps the USER-editable field set exactly
+as narrow as it was. `markItemsReadyAction` ("Mark as on hand",
+`src/app/admin/actions/items.ts`) stamps `markedReadyAt` and nothing else.
+`setReadinessAction` and `setItemsCategoryAction`
+(`src/app/admin/actions/readiness.ts`) back the `/items` selection-bar controls
+and the item page; both `requireAdmin()` first.
+
+**Readiness is derived, so there is no stored state a POST could assert.** The
+readiness selector writes only the underlying signals — `markedReadyAt` (set or
+clear) and the `Item.status` lifecycle column. Its Zod target enum is an
+allowlist of `READY_TO_DEPLOY` / `UNTRIAGED` / `RETIRED` / `ACTIVE`;
+**`DEPLOYED` and `IN_REPAIR` are deliberately absent, so a crafted POST asking
+for them is rejected rather than silently ignored.** Those two come from an open
+unreturned hand receipt / MDM logon and from a `PENDING` `ServiceQueueItem`
+respectively, and must stay unforgeable by hand. Widening that enum is a
+security change, not a feature toggle — which is why the file is on the
+`check-security-docs` watch list.
 
 **Admin-only capabilities:** returns, user management, named signatures,
 service-queue mutations, receipt timers, audits, analytics, category management.

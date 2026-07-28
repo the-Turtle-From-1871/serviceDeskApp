@@ -48,8 +48,20 @@ const PREFIX = "PARITY-";
 let adminId: string;
 
 beforeAll(async () => {
-  const admin = await prisma.user.findFirst({ where: { role: "ADMIN" }, select: { id: true } });
-  if (!admin) throw new Error("parity test needs an admin user in the test DB");
+  // Seed our OWN admin rather than borrowing whichever one happens to be in the
+  // shared test DB. `Item.createdById` is a required FK, so this test needs a
+  // user row — but it deliberately does NOT reset the database (its fixtures are
+  // PREFIX-scoped so it can run against a populated one). Reading an ambient
+  // admin made it pass or fail on FILE ORDER: any DB-backed test that ran
+  // earlier and called resetDb() truncated the user it was counting on, and the
+  // failure surfaced here rather than where the truncation happened. Upsert, so
+  // repeat runs and a leftover row from a previous run are both fine.
+  const admin = await prisma.user.upsert({
+    where: { email: "parity-fixture@example.invalid" },
+    update: {},
+    create: { name: "Parity Fixture", email: "parity-fixture@example.invalid", passwordHash: "x", role: "ADMIN" },
+    select: { id: true },
+  });
   adminId = admin.id;
 
   for (const [i, f] of FIXTURES.entries()) {

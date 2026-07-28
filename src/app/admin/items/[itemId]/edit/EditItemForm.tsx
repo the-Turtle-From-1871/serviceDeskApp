@@ -3,22 +3,21 @@ import { useActionState } from "react";
 import Link from "next/link";
 import { updateItemAction } from "@/app/admin/actions/items";
 
+// Exactly the fields `adminItemEditSchema` declares. make/model/serialNumber
+// are NOT editable here (or on the item detail card) — an item's identity is
+// set at creation or by CSV import only.
 type ItemValues = {
   id: string;
-  make: string;
-  model: string;
-  serialNumber: string;
   homeUnit: string | null;
   deviceUIC: string | null;
   deviceCategory: string | null;
   deviceName: string | null;
+  currentUserEmail: string | null;
+  currentPosition: string | null;
   notes: string | null;
 };
 
 const fields = [
-  ["make", "Make", true],
-  ["model", "Model", true],
-  ["serialNumber", "Serial number", true],
   ["deviceName", "Device Name", true],
   ["homeUnit", "Home unit", false],
   ["deviceUIC", "Unit (UIC)", false],
@@ -26,6 +25,8 @@ const fields = [
   // text so a new class of device needs no migration; the datalist below just
   // nudges toward existing spellings.
   ["deviceCategory", "Category", false],
+  ["currentUserEmail", "Current user email", false],
+  ["currentPosition", "Current position", false],
 ] as const;
 
 export function EditItemForm({ item, categories = [] }: { item: ItemValues; categories?: string[] }) {
@@ -45,6 +46,18 @@ export function EditItemForm({ item, categories = [] }: { item: ItemValues; cate
               id={name}
               className="input"
               name={name}
+              // NOT type="email", deliberately. The CSV importer copies
+              // `assignedUser` into currentUserEmail verbatim with no email
+              // validation (import.ts), so plenty of live rows hold a name like
+              // "SGT Smith". type="email" makes the browser refuse to submit a
+              // non-blank invalid value, which would block saving Device Name,
+              // UIC, Category or Notes on exactly the badly-imported rows this
+              // page exists to clean up. The server schema is `clearable` and
+              // does not validate an address either — the client must not be
+              // stricter than the thing that stores it. inputMode still gets
+              // the right keyboard on a phone.
+              inputMode={name === "currentUserEmail" ? "email" : undefined}
+              placeholder={name === "currentUserEmail" ? "e.g. jane.doe@unit.mil" : undefined}
               required={req}
               defaultValue={item[name] ?? ""}
               list={name === "deviceCategory" ? "device-category-options" : undefined}

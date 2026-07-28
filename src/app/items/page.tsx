@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/authz";
 import { listItems, listItemUics } from "@/modules/items/items.service";
+import { listCategoryNames } from "@/modules/items/categories.service";
 import { readinessForItems } from "@/modules/items/readiness.query";
 import { SiteHeader } from "@/components/SiteHeader";
 import { ItemSelectTable } from "@/components/ItemSelectTable";
@@ -30,8 +31,12 @@ export default async function ItemsListPage({
   // Server-side paginate + sort: only the current page is fetched and serialized to
   // the client (the list was previously unbounded). The audit-status badge and the
   // audit-status sort both read the denormalized Item.lastAuditedAt column.
-  // Two queries, both bounded: the page of rows, and the UIC filter's options.
-  const [result, uics] = await Promise.all([
+  // Three queries, all bounded and all independent of page size: the page of rows,
+  // the UIC filter's options, and — for admins only — the managed category
+  // vocabulary that backs the bulk "Change category" control. The vocabulary is a
+  // small curated list fetched ONCE per render, never per row. A standard USER
+  // never sees those controls, so they never pay for the query.
+  const [result, uics, categoryNames] = await Promise.all([
     listItems({
       search: q,
       sort: firstParam(sp.sort) ?? null,
@@ -40,6 +45,7 @@ export default async function ItemsListPage({
       uic: firstParam(sp.uic) ?? null,
     }),
     listItemUics(),
+    isAdmin ? listCategoryNames() : Promise.resolve<string[]>([]),
   ]);
   // Readiness is derived from signals in three tables, so it cannot ride along
   // on the item row. ONE extra query derives it for the whole page at once —
@@ -100,6 +106,7 @@ export default async function ItemsListPage({
             sortKeys={result.sortKeys}
             uic={result.uic}
             uics={uics}
+            categories={categoryNames.map((name) => ({ name }))}
           />
       </main>
     </>

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/StatusBadge";
 import { AuditLight } from "@/components/AuditLight";
 import { MarkReadyButton } from "@/components/MarkReadyButton";
+import { ReadinessControls } from "@/components/ReadinessControls";
 import { toggleItemStatusAction } from "@/app/admin/actions/items";
 import { MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW } from "@/modules/transfers/receipt-lines";
 import {
@@ -45,6 +46,7 @@ export function ItemSelectTable({
   sortKeys,
   uic,
   uics,
+  categories = [],
 }: {
   items: ItemRow[];
   isAdmin: boolean;
@@ -56,6 +58,10 @@ export function ItemSelectTable({
   sortKeys: SortKey[];
   uic: string | null;
   uics: string[];
+  /** The managed DeviceCategory vocabulary, fetched ONCE server-side by the page
+   *  and passed down — never a per-row lookup. Only used by the admin bulk
+   *  controls in the selection bar. */
+  categories?: { name: string }[];
 }) {
   const router = useRouter();
   const secondarySort = sortKeys[1] ?? null;
@@ -341,15 +347,36 @@ export function ItemSelectTable({
               ? <span role="alert" className="alert-error">Too many of one item ({maxGroupSize}). Max {MAX_ITEMS_PER_ROW} per row — split into two.</span>
               : <button className="btn btn-primary" onClick={create}>Create receipt from {selected.size} selected</button>}
           </div>
-          {/* The bulk "Set readiness" / "Set accountability" selects are gone.
-              Readiness is derived, not picked: the only thing left for a human
-              to assert is "these are back in my possession", and accountability
-              comes from audit evidence (record an audit instead). */}
+          {/* The bulk "Set accountability" select is gone for good —
+              accountability comes from audit evidence (record an audit
+              instead), never from a checkbox.
+
+              "Set readiness" is back, but it does NOT store a readiness value:
+              it writes the underlying signals readiness.ts derives from
+              (markedReadyAt, Item.status), and refuses the two states that are
+              observed rather than asserted. See ReadinessControls. The
+              one-click "Mark as on hand" stays as the fast path and routes
+              through the same markItemsReady service function. */}
+          {/* One wrapping row, NOT the card's default vertical stack: this bar is
+              sticky and overlays the table, so every line of height hides another
+              row of what you are selecting from. Stacked, it covered a phone
+              viewport entirely. `flex-end` bottom-aligns the one-click button
+              with the Apply buttons, whose selects carry a label above them. */}
           {isAdmin && (
-            <MarkReadyButton
-              itemIds={[...selected.keys()]}
-              onDone={() => setSelected(new Map())}
-            />
+            <div className="row" style={{ gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <MarkReadyButton
+                itemIds={[...selected.keys()]}
+                onDone={() => setSelected(new Map())}
+              />
+              {/* No onDone: unlike "Mark as on hand", these controls keep the
+                  selection so their outcome message survives (clearing it
+                  unmounts this whole bar), and so readiness and category can be
+                  applied in one pass. */}
+              <ReadinessControls
+                itemIds={[...selected.keys()]}
+                categories={categories}
+              />
+            </div>
           )}
         </div>
       )}

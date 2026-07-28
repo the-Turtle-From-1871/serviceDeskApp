@@ -4,6 +4,7 @@ import { getItemWithCreator } from "@/modules/items/items.service";
 import { readinessForItem } from "@/modules/items/readiness.query";
 import { READINESS_LABEL } from "@/modules/items/readiness";
 import { MarkReadyButton } from "@/components/MarkReadyButton";
+import { ReadinessControls } from "@/components/ReadinessControls";
 import { listReceiptsForItem, getHoldingTransfer } from "@/modules/transfers/transfers.service";
 import { formatParty } from "@/modules/transfers/party";
 import { itemQrDataUrl, itemUrl } from "@/modules/items/qr";
@@ -16,6 +17,7 @@ import { serviceTypeLabel } from "@/modules/service-queue/service-queue.status";
 import { ServiceControls } from "./ServiceControls";
 import prisma from "@/lib/prisma";
 import { listUnits } from "@/modules/items/units.service";
+import { listCategoryNames } from "@/modules/items/categories.service";
 import { ItemDetailsCard } from "./ItemDetailsCard";
 import { getAuditsForItem } from "@/modules/audit/audit.service";
 import { listSignatures } from "@/modules/signatures/signatures.service";
@@ -57,7 +59,14 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
   if (!item) notFound();
   const loggedIn = !!user && user.isActive;
   const isAdmin = user?.role === "ADMIN";
-  const signatures = isAdmin && item.status === "ACTIVE" ? await listSignatures(user!.id) : [];
+  // Both are admin-only inputs to the cards below, so neither query runs for
+  // anyone else; when they do run they run together, not one after the other.
+  const [signatures, categories] = await Promise.all([
+    isAdmin && item.status === "ACTIVE" ? listSignatures(user!.id) : [],
+    // The picker offers the MANAGED vocabulary, not whatever strings happen to
+    // be on items — same source as the admin edit page.
+    isAdmin ? listCategoryNames() : [],
+  ]);
   const now = new Date();
   const auditLightState = item.status === "RETIRED" ? null : auditState(audits[0]?.createdAt ?? null, now);
   return (
@@ -98,6 +107,7 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
               deviceName: item.deviceName,
               homeUnit: item.homeUnit,
               deviceUIC: item.deviceUIC,
+              deviceCategory: item.deviceCategory,
               currentUserEmail: item.currentUserEmail,
               currentPosition: item.currentPosition,
               // ItemDetailsCard is a client component, so its props are
@@ -114,6 +124,7 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
             }}
             isAdmin={isAdmin}
             units={isAdmin ? units : []}
+            categories={categories}
             dateLogged={formatDateTimeHST(item.createdAt)}
             loggedBy={item.createdBy ? formatParty({ isDcsim: false, name: item.createdBy.name, rank: item.createdBy.rank, unit: null }) : "—"}
             handReceiptHolder={
@@ -125,11 +136,19 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
           />
         )}
 
-        {/* Readiness is DERIVED and read-only — there is no state to pick.
-            The single admin control stamps markedReadyAt ("it's back on my
-            shelf"), which reads as Ready to deploy until something contradicts
-            it: an open receipt, a service flag, or an MDM logon dated after
-            the stamp. Logged-in only, like the Service and Audit cards. */}
+        {/* Readiness is DERIVED — the value above is computed, never stored, and
+            the admin controls below write the UNDERLYING SIGNALS rather than a
+            readiness column. MarkReadyButton stamps markedReadyAt ("it's back on
+            my shelf"), which reads as Ready to deploy until something contradicts
+            it: an open receipt, a service flag, or an MDM logon dated after the
+            stamp. ReadinessControls exposes the same stamp plus clearing it and
+            the lifecycle status; Deployed and In repair are deliberately absent
+            because nothing here can set them. Logged-in only, like the Service
+            and Audit cards.
+
+            The ReadinessControls guard omits `status === "ACTIVE"` on purpose:
+            un-retiring an item, and clearing a stale markedReadyAt left on one,
+            both have to stay reachable ON a retired item. */}
         {loggedIn && (
           <div className="card stack-sm">
             <div className="card__title">Readiness</div>
@@ -137,6 +156,9 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
               <strong>{READINESS_LABEL[readiness]}</strong>
             </div>
             {isAdmin && item.status === "ACTIVE" && <MarkReadyButton itemIds={[item.id]} />}
+            {isAdmin && (
+              <ReadinessControls itemIds={[item.id]} categories={categories.map((name) => ({ name }))} />
+            )}
           </div>
         )}
 
@@ -166,7 +188,22 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
             {isAdmin && (
               <ServiceControls
                 itemId={item.id}
-                request={service ? { id: service.id, serviceType: service.serviceType, serviceNote: service.serviceNote, status: service.status } : null}
+                request={
+                  service
+                    ? {
+                        id: service.id,
+                        serviceType: service.serviceType,
+                        serviceNote: service.serviceNote,
+                        status: service.status,
+                        // Formatted here, not in the client component: the
+                        // deadline control only ever DISPLAYS the stored
+                        // instant (the input it offers is days-from-now), so
+                        // the client never needs the raw date and cannot
+                        // disagree with the server about how to render it.
+                        dueAtLabel: service.dueAt ? formatDateTimeHST(service.dueAt) : null,
+                      }
+                    : null
+                }
               />
             )}
           </div>

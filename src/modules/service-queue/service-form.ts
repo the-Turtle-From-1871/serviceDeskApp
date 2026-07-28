@@ -8,18 +8,20 @@ export const SERVICE_TYPE_OPTIONS: { value: ServiceType; label: string }[] = [
   { value: "OTHER", label: "Other" },
 ];
 
-// Parse an optional per-item SLA override — the builder `service[<id>][days]`
+// Parse the optional per-item SLA days value — the builder `service[<id>][days]`
 // field or the item-page `overrideDays` field. Returns a whole 1..3650 day
-// count, or undefined for anything blank / non-integer / out-of-range, so the
-// caller falls back to the service type's default SLA. Deliberately graceful
-// (never throws, never yields 0) so one bad value can't block a receipt build,
-// a flag, or a reopen — every entry point clamps to the default identically.
+// count, or undefined for anything blank / non-integer / out-of-range, which
+// downstream means NO DEADLINE (`dueAt = null`, see sla.ts) — there is no
+// per-type default to fall back to. Blank and invalid deliberately collapse to
+// the same answer: this stays graceful (never throws, never yields 0) so one bad
+// value can't block a receipt build, a flag, or a reopen, and every entry point
+// resolves it identically.
 // Bound mirrors returnDays (transfers.schema) and setReceiptDueAtAction.
 export function parseOverrideDays(raw: unknown): number | undefined {
   const s = String(raw ?? "").trim();
-  if (!/^\d+$/.test(s)) return undefined; // blank, decimals ("12.9"), or garbage ("12abc") → default
+  if (!/^\d+$/.test(s)) return undefined; // blank, decimals ("12.9"), or garbage ("12abc") → no deadline
   const n = Number(s);
-  return n >= 1 && n <= 3650 ? n : undefined; // 0 or out-of-range → default
+  return n >= 1 && n <= 3650 ? n : undefined; // 0 or out-of-range → no deadline
 }
 
 const VALID_TYPES = new Set<string>(SERVICE_TYPE_OPTIONS.map((o) => o.value));
