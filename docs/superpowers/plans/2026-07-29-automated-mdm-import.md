@@ -417,13 +417,37 @@ git commit -m "feat(import): seed a non-loginable service account for automated 
 - Consumes: `hasValidBearerSecret` (Task 1), `commitImport` with `unresolved` (Task 2), `getImportActor` (Task 3).
 - Produces: `POST /api/items/import`.
 
-- [ ] **Step 1: Verify the proxy does not gate the new path**
+- [ ] **Step 1: Exclude the route from the proxy's login gate**
 
-`src/proxy.ts` coarse-login-gates `/items`, `/admin/*` and others, and PIN-gates the public surface. A machine POST carries no session cookie, so if `/api/items/import` falls inside a gated matcher it will be redirected to `/login` and never reach the handler — the failure looks like a broken secret.
+**This is a confirmed bug, not a check.** `src/proxy.ts`'s matcher excludes `api/auth` and `api/cron` but **not** `api/items`, so the proxy runs on this route, `isPublicPii` is false, and it falls to the coarse login gate at `proxy.ts:94`:
 
-Read `src/proxy.ts` and find the matcher/prefix list. Confirm whether `/api/items/import` is matched. If it is, add an explicit allowance for it **before** the login gate, with a comment saying the route authenticates by secret in the handler.
+```ts
+if (!loggedIn) {
+  return NextResponse.redirect(new URL("/login", req.url));
+}
+```
 
-Record the finding in the commit message either way.
+A machine POST has no session cookie, so it is redirected and the handler never runs — the secret is never even read. Worse, clients that follow redirects by default (including PowerShell's `Invoke-RestMethod`) turn the 302 into a GET of `/login` and receive **200 with login-page HTML**, so the scheduled job logs a success while importing nothing.
+
+Add `api/items` to the negative lookahead in `config.matcher`, mirroring the `api/cron` exclusion that exists for exactly this reason:
+
+```ts
+matcher: ["/((?!api/auth|api/cron|api/items|login|forgot-password|reset-password|privacy|terms|unlock|_next/static|_next/image|favicon.ico|wasm/).*)"],
+```
+
+Update the comment above `config` to say `api/items` is excluded because the import route authenticates itself by shared secret in the handler, the same as the cron routes.
+
+**Branch conflict warning:** `feat/day3-security-hardening` rewrites `src/proxy.ts` substantially (it adds a plain exported `proxy` with `/api/auth/*` rate limiting). Whichever branch merges second must re-apply this exclusion — check for it during the merge.
+
+- [ ] **Step 1b: Prove the gate is gone**
+
+After the matcher change, confirm with a manual request against the dev server that an unauthenticated POST reaches the handler and gets a **401 JSON body**, not a redirect:
+
+```bash
+curl -i -X POST http://localhost:3000/api/items/import -F file=@/dev/null
+```
+
+Expected: `HTTP/1.1 401` with `{"error":"Unauthorized"}`. If you see a `302` with a `location: /login` header, the matcher change did not take — restart the dev server, since matcher changes require it.
 
 - [ ] **Step 2: Write the failing test**
 

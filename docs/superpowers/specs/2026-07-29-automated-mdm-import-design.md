@@ -283,7 +283,21 @@ must not be run concurrently.
    on it. A 2000-row CSV is well under, but the technician should know the row cap
    exists and split larger exports.
 4. **Transaction budget vs. `maxDuration = 300`** — decide after measurement.
-5. **Rate limiting** — the route is secret-guarded and machine-driven; `/api/cron/purge`
+5. **Nightly imports overwrite hand edits — ACCEPTED (2026-07-29).** A matched row
+   takes the export's `deviceName`, `deviceUIC`, holder and category, so a manual
+   correction is reverted by the next run if Intune still holds the old value.
+   Intune is the source of truth for those fields. Every overwrite is logged to
+   `ItemEdit` and attributed, so it stays traceable. `make`, `model` and
+   `serialNumber` are never touched on a match.
+6. **The proxy matcher must exclude `/api/items/import` — CONFIRMED, not
+   hypothetical.** `src/proxy.ts`'s matcher excludes `api/auth` and `api/cron`
+   but not `api/items`, so the route falls through to the coarse login gate
+   (`proxy.ts:94`) and a session-less POST is redirected to `/login` before the
+   handler runs. Clients that follow redirects then receive 200 + login HTML, so
+   the job logs success and imports nothing. Add `api/items` to the negative
+   lookahead, mirroring `api/cron`. Note `feat/day3-security-hardening` rewrites
+   this file — whichever lands second re-applies the exclusion.
+7. **Rate limiting** — the route is secret-guarded and machine-driven; `/api/cron/purge`
    is not limited either. Decide during implementation whether a scope on the
    existing limiter is warranted, on volume grounds rather than auth grounds. Any
    limit must not refund on success (volume is the cost, per the
