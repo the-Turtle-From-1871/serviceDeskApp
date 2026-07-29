@@ -35,6 +35,25 @@ test("learnUnits accepts an empty array (no-op)", async () => {
   expect(await prisma.unit.count()).toBe(0);
 });
 
+// --- Unit.abbreviation is citext ------------------------------------------
+// An abbreviation is an identity, so "WABC01" and "wabc01" must be ONE unit.
+// Without citext the uppercasing in learnUnits is convention-only, and any
+// write site that forgets it forks the unit into a second row that resolves
+// differently.
+
+test("two casings of one abbreviation cannot both exist", async () => {
+  await prisma.unit.create({ data: { abbreviation: "CITEST01", fullName: "First" } });
+  await expect(
+    prisma.unit.create({ data: { abbreviation: "citest01", fullName: "Second" } })
+  ).rejects.toThrow();
+});
+
+test("a unit is found regardless of the casing looked up", async () => {
+  await prisma.unit.create({ data: { abbreviation: "CITEST01", fullName: "First" } });
+  const found = await prisma.unit.findUnique({ where: { abbreviation: "citest01" } });
+  expect(found?.fullName).toBe("First");
+});
+
 test("listUnits returns abbreviation + fullName ordered by fullName", async () => {
   await prisma.unit.create({ data: { abbreviation: "ZED", fullName: "Zulu Company" } });
   await prisma.unit.create({ data: { abbreviation: "ALP", fullName: "Alpha Company" } });
