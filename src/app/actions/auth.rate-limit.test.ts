@@ -165,9 +165,15 @@ describe("loginAction rate limiting", () => {
   it("does NOT refund on an unexpected server error", async () => {
     // A crash is not evidence the credentials were right. Refunding on any
     // non-AuthError throw would make "provoke an exception" a free retry loop.
+    // Returned as a generic form error, NOT re-thrown: with `redirect: false`
+    // there is no NEXT_REDIRECT left for signIn to raise, so a rethrow would
+    // only escalate a transient DB blip to the error boundary and replace the
+    // form with a digest.
     signIn.mockRejectedValue(new Error("database on fire"));
     for (let i = 0; i < AUTH_POLICY.limit; i++) {
-      await expect(loginAction(undefined, creds())).rejects.toThrow("database on fire");
+      expect(await loginAction(undefined, creds()), `try ${i + 1}`).toEqual({
+        error: "Something went wrong. Please try again.",
+      });
     }
     signIn.mockRejectedValue(new AuthError("CredentialsSignin"));
     const blocked = await loginAction(undefined, creds());

@@ -1,13 +1,20 @@
 import { ForgotPasswordForm } from "./ForgotPasswordForm";
 import { turnstileWidgetSiteKey } from "@/lib/turnstile";
 
-// Rendered per REQUEST, never prerendered. Today the root layout reads the
-// session, so every route is already dynamic — but if that ever changed, the
-// challenge's config gate would be evaluated at BUILD time while
-// `verifyTurnstile` still reads its secret per request. The two halves could
-// then disagree: a page built before the secret was added renders no widget and
-// submits no token, while the server has the secret and refuses every sign-in.
-// That is a total auth outage caused by deploy ORDER, so it is pinned here.
+// Rendered per REQUEST. Note this does NOT make the Turnstile SITE key
+// request-time: Next inlines `process.env.NEXT_PUBLIC_*` at build time into the
+// server bundle as well as the client one (`getNextPublicEnvironmentVariables`
+// in next/dist/build/define-env.js), so the site key is a literal baked at build
+// regardless of rendering mode.
+//
+// The consequence is operational, and DEPLOY.md now says so: adding the
+// Turnstile vars in Vercel WITHOUT triggering a new build leaves the running
+// server reading `undefined` for the site key — no widget renders,
+// `verifyTurnstile` returns "skipped", and the challenge is silently off with
+// nothing logged. Always redeploy after setting them.
+//
+// `force-dynamic` is kept for the SECRET half, which is read per request, and
+// so the page cannot be prerendered into a state that disagrees with it.
 export const dynamic = "force-dynamic";
 
 export default function ForgotPasswordPage() {

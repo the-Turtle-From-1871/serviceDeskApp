@@ -10,7 +10,7 @@ import { createPasswordResetToken, resetPasswordWithToken } from "@/lib/password
 import { sendPasswordResetEmail } from "@/modules/auth/send-password-reset-email";
 import { defaultBaseUrl } from "@/lib/base-url";
 import { authVelocityElevated, recordAuthFailure } from "@/lib/auth-velocity";
-import { TURNSTILE_FIELD, verifyTurnstile } from "@/lib/turnstile";
+import { TURNSTILE_FIELD, turnstileConfigured, verifyTurnstile } from "@/lib/turnstile";
 import { THROTTLED } from "@/app/actions/throttled";
 import {
   AUTH_POLICY,
@@ -80,8 +80,9 @@ async function spendAuthBudget(keys: { narrow: string; spray: string }) {
   return null;
 }
 
-/** Shown for a refused challenge. Deliberately not "you look like a bot". */
 /**
+ * Shown for a refused challenge — deliberately not "you look like a bot".
+ *
  * A FUNCTION, not a shared object — the identity has to change every time.
  *
  * `useActionState` hands the returned value to the form as `state`, and the
@@ -103,6 +104,17 @@ const CHALLENGE_FAILED = () => ({
     "Could not verify that this request came from a browser. If your network blocks " +
     "Cloudflare, this check cannot complete — contact the service desk.",
 });
+
+/**
+ * Is the challenge configured but the form carrying nothing?
+ *
+ * Deliberately does NOT verify — verifying spends the token, and a token may
+ * only be presented to Cloudflare once.
+ */
+function missingTurnstileToken(formData: FormData): boolean {
+  if (!turnstileConfigured()) return false;
+  return String(formData.get(TURNSTILE_FIELD) ?? "").trim() === "";
+}
 
 /**
  * Run the Turnstile check for one submission.
@@ -138,11 +150,37 @@ export async function loginAction(_prev: unknown, formData: FormData) {
   // writes under `api-auth-write`: sharing the scope meant 60 unauthenticated
   // `POST /api/auth/signout` calls could lock the whole desk out of sign-in.
   const email = String(formData.get("email") ?? "");
+
+  // Shape-check BEFORE spending anything.
+  //
+  // Ordering matters twice over. It keeps a malformed address away from the
+  // velocity detector (below), and — the sharper one — it stops 60 junk POSTs
+  // draining the shared per-network ceiling: every distinct junk value hashes
+  // to its own fresh narrow bucket, so all 60 sail past the per-account gate
+  // and charge the ceiling, locking every colleague behind that egress out of
+  // sign-in. Same whole-desk lockout as the shared-scope bug, reached through
+  // the one gate that was still upstream of the budget.
+  if (!emailField.safeParse(email).success) {
+    return { error: "Invalid email or password." };
+  }
+
+  // A submission carrying NO token at all is refused before the budget, not
+  // after — and by a presence check, NOT by running the challenge early. The
+  // token is single-use, so verifying it twice would spend it and make the
+  // second look forged.
+  //
+  // Free to detect, and charging for it would double-punish the one population
+  // that can never succeed: a visitor whose network blocks
+  // `challenges.cloudflare.com` produces no token on every attempt, so after
+  // five they would swap an unrecoverable challenge error for an unrecoverable
+  // 15-minute throttle — and burn the account's budget for everyone else on
+  // that egress. A token that exists but is wrong still pays.
+  if (missingTurnstileToken(formData)) return CHALLENGE_FAILED();
+
   const keys = await identityRateLimitKeys("login", email);
   const throttled = await spendAuthBudget(keys);
   if (throttled) return throttled;
 
-  // Shape-check the address HERE so a malformed one never reaches the detector.
   //
   // `authorize()` runs the same Zod check and returns null, which @auth/core
   // turns into a `CredentialsSignin` — indistinguishable below from a wrong
@@ -208,9 +246,16 @@ export async function loginAction(_prev: unknown, formData: FormData) {
       await recordAuthFailure("login");
       return { error: "Invalid email or password." };
     }
-    // An unexpected server error is not evidence the credentials were right, so
-    // it keeps its tokens — the safe direction.
-    throw error;
+    // Anything else is an unexpected server failure — a Postgres blip inside
+    // `authorize()`, say. It keeps its tokens (a crash is not evidence the
+    // credentials were right) but it must NOT be re-thrown: with
+    // `redirect: false` there is no NEXT_REDIRECT left for `signIn` to raise,
+    // so the only thing a rethrow can do now is escalate to the error boundary
+    // and replace the form with a digest. `unlockAction` and
+    // `resetPasswordAction` both return the generic message here; CLAUDE.md §5
+    // requires it.
+    console.error("[loginAction] sign-in failed unexpectedly:", error);
+    return { error: "Something went wrong. Please try again." };
   }
 
   // The other shape of failure: @auth/core returned an error URL instead of

@@ -50,6 +50,40 @@ describe("clientIp", () => {
     expect(clientIp(new Headers())).toBeNull();
   });
 
+  it("strips glob metacharacters, which would otherwise reach a Redis SCAN pattern", () => {
+    // `resetRateLimit` → Upstash `resetUsedTokens` builds `<prefix>:<id>:*` and
+    // runs `SCAN MATCH` on it, escaping nothing. Signing in successfully with
+    // `x-forwarded-for: *` would reset `…:auth:login:*:<hash>:*` — wiping that
+    // account's buckets across EVERY IP.
+    expect(clientIp(new Headers({ "x-forwarded-for": "*" }))).toBeNull();
+    expect(clientIp(new Headers({ "x-forwarded-for": "[a-z]" }))).toBe("a");
+    expect(clientIp(new Headers({ "x-forwarded-for": "1.2.?.4" }))).toBe("1.2..4");
+  });
+
+  it("strips the key delimiter, so a header cannot collide with another scope", () => {
+    // `rateLimitKey` joins on ":" without escaping, so an unsanitised
+    // "api-auth:1.2.3.4" would land on the `/api/auth` GET bucket for that IP.
+    // Colons are legal in IPv6, so they survive — but the letters that make a
+    // scope name do not.
+    expect(clientIp(new Headers({ "x-forwarded-for": "api-auth:1.2.3.4" }))).toBe("aa:1.2.3.4");
+  });
+
+  it("caps the length, so forged headers cannot grow the in-memory map without bound", () => {
+    const huge = clientIp(new Headers({ "x-forwarded-for": "1".repeat(10_000) }));
+    expect(huge).not.toBeNull();
+    expect(huge!.length).toBeLessThanOrEqual(45);
+  });
+
+  it("keeps real routable addresses intact", () => {
+    // A link-local zone id (`fe80::1%eth0`) is mangled by the allowlist, and
+    // that is fine: link-local addresses do not traverse a proxy, so one can
+    // only arrive forged — and a forged value being bucketed slightly
+    // differently costs nothing.
+    for (const ip of ["203.0.113.9", "2001:db8::8a2e:370:7334", "::ffff:192.0.2.1"]) {
+      expect(clientIp(new Headers({ "x-forwarded-for": ip })), ip).toBe(ip);
+    }
+  });
+
   it("skips a blank header instead of returning an empty identifier", () => {
     // An empty XFF would otherwise produce the key "auth:" — a second anonymous
     // bucket distinct from "unknown", i.e. a free extra five attempts.

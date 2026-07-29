@@ -167,9 +167,32 @@ export function clientIp(headers: Headers): string | null {
     if (!raw) continue;
     // XFF is a list: "client, proxy1, proxy2". The client is leftmost.
     const first = raw.split(",")[0]?.trim();
-    if (first) return first;
+    if (first) return sanitizeIp(first);
   }
   return null;
+}
+
+/**
+ * Reduce a header value to the characters an IP can contain, and cap its length.
+ *
+ * This value is attacker-supplied and ends up in two dangerous places: as part
+ * of a Redis KEY, and — through `resetRateLimit` → Upstash `resetUsedTokens` —
+ * inside a `SCAN MATCH` GLOB PATTERN. Unsanitised, `x-forwarded-for: *` makes a
+ * successful sign-in reset `…:auth:login:*:<hash>:*`, wiping that account's
+ * buckets across every IP; `[a-z]` and `?` widen it further. Nothing in the
+ * Upstash client escapes glob metacharacters.
+ *
+ * The allowlist also fixes two quieter problems: `:` is the key delimiter, so
+ * `x-forwarded-for: api-auth:1.2.3.4` could collide with another scope's
+ * bucket, and an unbounded value let one host grow the in-memory fallback's map
+ * without limit by rotating forged headers.
+ *
+ * Returns null when nothing usable is left, which callers treat as "no IP".
+ */
+function sanitizeIp(value: string): string | null {
+  // IPv4, IPv6 (including zone ids and IPv4-mapped forms) — nothing else.
+  const cleaned = value.replace(/[^0-9a-fA-F:.%]/g, "").slice(0, 45);
+  return cleaned || null;
 }
 
 /**

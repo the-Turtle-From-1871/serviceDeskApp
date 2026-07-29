@@ -20,7 +20,7 @@ Related: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`../CLAUDE.md`](../CLAUDE.md
 | Database | RLS deny-all, but **app-layer is the real boundary** |
 | CI | Semgrep SAST + build + security-docs check, all three required to merge to `main` |
 | Accountability | Receipts sealed + attributed; **server-attested, not user non-repudiation** |
-| Rate limiting | Composite `(IP, email)`: 5 auth failures / 15 min under a 60 / IP ceiling; 100 requests / min; global botnet detector |
+| Rate limiting | Composite `(IP, email)`: 5 auth failures / 15 min under a 60 / IP ceiling; 300 requests / min anonymous; global botnet detector |
 | Bot defence | Cloudflare Turnstile on login + reset (config-gated); anonymous non-browser agents refused |
 | Biggest gap | **No Redis provisioned yet**, so the limiter runs per-instance |
 
@@ -135,7 +135,7 @@ gate in `src/proxy.ts` redirects to `/login` — i.e. it forces re-authenticatio
 > accordingly. A technician back from lunch who clicks a bookmarked `/i/<id>`
 > now meets the recipient **PIN gate** ([§3](#3-public-surface--the-pin-gate)),
 > not `/login` — `/unlock` carries a "Staff? Log in instead" link for exactly
-> this — and that request spends the shared **anonymous** 100/min bucket
+> this — and that request spends the shared **anonymous** 300/min bucket
 > ([§12](#12-rate-limiting)) keyed on the desk's single egress IP, rather than
 > the signed-in exemption. Both are correct by design; both get more common as
 > sessions get shorter.
@@ -547,15 +547,15 @@ migration must be applied *before* the merge deploys. See [`../DEPLOY.md`](../DE
 
 ## 12. Rate limiting
 
-**Two policies, both keyed on client IP.** `src/lib/rate-limit.ts`
+**Five policies.** `src/lib/rate-limit.ts`
 
 | Policy | Budget | Keyed on | Applies to |
 |---|---|---|---|
 | `AUTH_POLICY` | **5 per 15 min** | scope + IP + **submitted email** | sign-in, password-reset request |
 | `AUTH_POLICY` | **5 per 15 min** | scope + IP + **reset-token hash** | reset submission |
-| `AUTH_POLICY` | **5 per 15 min** | scope + IP | PIN unlock — one org-wide secret, so no identity exists |
+| `UNLOCK_POLICY` | **20 per 15 min** | scope + IP | PIN unlock — one org-wide secret, so no identity exists and successes count |
 | `AUTH_SPRAY_POLICY` | **60 per 15 min** | scope + IP | the ceiling over the identity-keyed surfaces; separately, scope `api-auth-write` meters other `POST /api/auth/*` |
-| `API_POLICY` | **100 per min** | scope + IP | two buckets: `GET /api/auth/*`, and `/api/*` + the public PII surface (`/`, `/i/*`, `/receipts/*`) **for anonymous callers only** |
+| `API_POLICY` | **300 per min** | scope + IP | two buckets: `GET /api/auth/*`, and `/api/*` + the public PII surface (`/`, `/i/*`, `/receipts/*`) **for anonymous callers only** |
 | `AUTH_VELOCITY_POLICY` | **100 per 5 min** | one global key ×2 | the botnet detector — one bucket alerts on every surface, one escalates on sign-in only |
 
 **Auth buckets are composite: `(scope, network, account)`, under a per-network

@@ -82,7 +82,7 @@
 - Mark sensitive utility files with `import 'server-only'` to block accidental client-side bundling.
 
 ### 4a. Rate Limiting
-- **One module** — `src/lib/rate-limit.ts`: `AUTH_POLICY` (5/15min), `AUTH_SPRAY_POLICY` (60/15min), `API_POLICY` (100/min). Do not hand-roll another limiter; add a *scope* to `rateLimitKey` instead.
+- **One module** — `src/lib/rate-limit.ts`: `AUTH_POLICY` (5/15min), `AUTH_SPRAY_POLICY` (60/15min), `UNLOCK_POLICY` (20/15min), `API_POLICY` (300/min anonymous). Do not hand-roll another limiter; add a *scope* to `rateLimitKey` instead.
 - **Auth buckets are COMPOSITE `(scope, IP, hashed email)` under a per-IP ceiling, and both halves are required.** Per-IP alone locks the whole NAT-shared service desk out over one person's typos; composite alone is not a limit at all, because the email is attacker-supplied and rotating it mints a fresh bucket. Always hash the identity with `rateLimitIdentity` — a raw email must never become a Redis key or a log line.
 - **Never infer sign-in success from a thrown `NEXT_REDIRECT` without first refusing `X-Auth-Return-Redirect`.** `signIn()` forwards incoming request headers to `@auth/core`, which turns that header into "return the error instead of throwing it" — so a wrong password arrives as a redirect and reads as success.
 - **`src/lib/auth-velocity.ts` is the app-wide botnet detector** and must NOT be made to block: a global refusal is a global outage an attacker can trigger on purpose. It escalates (Turnstile goes strict) and alerts. Count only *genuinely failed credential checks* — never throttled, malformed or challenge-refused requests, or it measures our own filters.
@@ -98,7 +98,7 @@
 - **The velocity detector alerts on every surface but escalates on sign-in ONLY.** `/unlock` needs no account and carries no challenge, so letting it flip Turnstile to strict would be the attacker-triggerable global switch that module exists to avoid.
 - **Server Actions limit themselves; the proxy limits routes.** Never move an interactive form's limit into `src/proxy.ts` — a 429 to a Server Action POST cannot be rendered by `useActionState` and escalates to the error boundary. Return `{ error }` from the action instead.
 - **`/api/auth/*` is metered OUTSIDE the `auth()` wrapper**, in the plain exported `proxy`, and returns without delegating. The wrapper resolves the session *before* calling its handler, so delegating would add a second per-request DB read on the one path an unauthenticated attacker can hammer. Nothing placed inside the `auth()` handler can run "before the session read".
-- **The 100/min anti-scraping limit applies to ANONYMOUS callers only.** Next prefetches the `/i/<id>` links on `/items`, and the proxy runs on prefetches, so limiting signed-in staff would 429 the desk out of its own app.
+- **The 300/min anti-scraping limit applies to ANONYMOUS callers only.** Next prefetches the `/i/<id>` links on `/items`, and the proxy runs on prefetches, so limiting signed-in staff would 429 the desk out of its own app.
 - **It fails OPEN** on a store error, on purpose (availability of an internal tool over a lockout). Do not "fix" this to fail closed without an explicit decision; it is recorded in `docs/SECURITY.md` §12 and its Known gaps.
 
 ### 4b. Session Lifecycle
