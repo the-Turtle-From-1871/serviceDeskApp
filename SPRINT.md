@@ -40,7 +40,7 @@ When instructed to execute a specific Day, follow these rules strictly:
     - Implement global velocity tracking in Redis to detect sudden application-wide spikes in failed logins (indicating a distributed botnet).
     - Set general API scraping limits to 100 requests per minute per IP, and drop requests with suspicious or missing browser headers/User-Agents.
 - [x] **CAPTCHA Integration:** Integrate Cloudflare Turnstile into the authentication flow. Add the invisible widget to the login and `/forgot-password` pages to block automated headless scripts. Enforce token verification server-side in Next.js Server Actions.
-- [ ] **Session Freshness:** Update the Auth.js configuration and middleware to enforce a strict 10-hour workday lifecycle. Set absolute token expiration (`maxAge`) to 10 hours. Implement an idle timeout in middleware that forces re-authentication if the user's last activity was more than 4 hours ago.
+- [x] **Session Freshness:** Update the Auth.js configuration and middleware to enforce a strict 10-hour workday lifecycle. Set absolute token expiration (`maxAge`) to 10 hours. Implement an idle timeout in middleware that forces re-authentication if the user's last activity was more than 4 hours ago.
 
 
 ## Day 4: Final Polish & Documentation

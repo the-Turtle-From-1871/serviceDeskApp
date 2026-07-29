@@ -99,8 +99,8 @@
 ### 4b. Session Lifecycle
 - **10 hours absolute, 4 hours idle** — `src/lib/session-freshness.ts` (pure policy) enforced in the `jwt` callback of `src/auth.ts`.
 - **`session.maxAge` alone is NOT an absolute expiry.** Auth.js JWT sessions roll: every `auth()` call re-signs the token with a fresh `exp` and re-sets the cookie, so `maxAge` behaves as an idle timeout. The absolute bound is the `authAt` claim, stamped once at sign-in — **never move it**. `lastActiveAt` is the one that moves.
-- **Enforce it in the `jwt` callback, not the proxy.** The callback runs on every `auth()` call (Server Actions, Route Handlers, RSC), so a proxy-only check would leave a 9-hour-idle session able to POST an action.
-- **A missing claim seeds, it does not revoke** — same grandfathering as `pwdChangedAt`, or the deploy that adds a claim signs out every logged-in technician at once. Likewise a future-dated stamp is clock skew, not an expiry.
+- **Enforce it in the `jwt` callback, not the proxy.** The callback runs on every `auth()` call (Server Actions, Route Handlers, RSC), so a proxy-only check would leave a 9-hour-idle session able to POST an action. **But only the proxy WRITES the refreshed cookie** — bare `auth()` discards it — so the proxy matcher is part of this control. Narrowing it silently degrades the idle clock to "4 hours from sign-in"; `tests/e2e/auth.spec.ts` is the only thing that would notice.
+- **A missing claim is backfilled from the token's `iat`, NEVER from `now`.** Backfilling to `now` looks equivalent and is a replay hole: writing a new cookie cannot invalidate the old string, so a pre-deploy cookie could be re-pasted to mint a fresh 10-hour session for up to 30 days. Backfill each claim independently, or a half-present claim set restarts the absolute clock. A future-dated stamp is clock skew, not an expiry.
 
 ### 5. Error Handling
 - Catch exceptions gracefully in Server Actions. Return generic messages to the client (e.g., `"Something went wrong"`) and log detailed stack traces strictly on the server.

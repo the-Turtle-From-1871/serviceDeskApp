@@ -6,10 +6,13 @@
 Browser
   │
   ▼
-proxy.ts (Next 16 middleware, Node runtime)  ── coarse gate: redirect
-  │                                             unauthenticated users to /login
-  ▼                                             (excludes /api/auth, /login,
-Server Component / Server Action / Route Handler   /i/*, static assets)
+proxy.ts (Next 16 middleware, Node runtime)  ── anti-abuse, then a coarse
+  │                                             gate: refuse non-browser and
+  │                                             over-rate anonymous callers,
+  │                                             PIN-gate the public surface,
+  │                                             redirect the rest to /login
+  ▼                                             (excludes /login, /api/cron,
+Server Component / Server Action / Route Handler   static assets)
   │
   ├─ requireUser() / requireAdmin()  ── real authz; re-reads role + isActive
   │                                     from the DB each request
@@ -159,6 +162,18 @@ Admin-only (`requireAdmin`, which re-reads role + `isActive` from the DB per req
 - **Auth.js v5** (`next-auth`), **Credentials** provider, **JWT session strategy** (no DB session table).
 - `authorize()` validates input (Zod), looks up the user, rejects missing/inactive accounts, and verifies the password with bcrypt.
 - The JWT carries `id` + `role`, signed with `AUTH_SECRET`.
+- **Session lifetime**: 10 hours absolute, 4 hours idle. `session.maxAge` alone
+  would only be an idle bound (Auth.js re-signs the token on every `auth()`
+  call), so the absolute bound is an `authAt` claim stamped once at sign-in;
+  `lastActiveAt` carries the idle clock. Policy in `lib/session-freshness.ts`,
+  *enforced* in the `jwt` callback so it covers Server Actions and RSC, not just
+  proxy-matched routes — though the refreshed cookie is only *written* on the
+  proxy path, which makes the matcher load-bearing. See
+  [`SECURITY.md`](./SECURITY.md) §1.
+- **Anti-abuse**: IP+account rate limiting, a global failed-login velocity
+  detector, and an optional Cloudflare Turnstile challenge on the two
+  unauthenticated forms. `lib/rate-limit.ts`, `lib/auth-velocity.ts`,
+  `lib/turnstile.ts` — see [`SECURITY.md`](./SECURITY.md) §12–13.
 - **Freshness**: `requireUser`/`requireAdmin` (via `defaultGetSession` in `lib/authz.ts`) re-read `role` and `isActive` from the DB on each protected request. A demoted admin or deactivated user is rejected on their next request — not when the token expires.
 - **Self-lockout guards**: an admin cannot demote or deactivate their own account.
 - Full control inventory (including the public PIN gate, password-reset hardening, the Ed25519 receipt seal, RLS posture, and CI security gates): [`SECURITY.md`](./SECURITY.md).

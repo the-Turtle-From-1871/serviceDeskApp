@@ -20,7 +20,7 @@ Related: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`../CLAUDE.md`](../CLAUDE.md
 | Database | RLS deny-all, but **app-layer is the real boundary** |
 | CI | Semgrep SAST + build + security-docs check, all three required to merge to `main` |
 | Accountability | Receipts sealed + attributed; **server-attested, not user non-repudiation** |
-| Rate limiting | Composite `(IP, email)`: 5 auth failures / 15 min under a 20 / IP ceiling; 100 requests / min; global botnet detector |
+| Rate limiting | Composite `(IP, email)`: 5 auth failures / 15 min under a 60 / IP ceiling; 100 requests / min; global botnet detector |
 | Bot defence | Cloudflare Turnstile on login + reset (config-gated); anonymous non-browser agents refused |
 | Biggest gap | **No Redis provisioned yet**, so the limiter runs per-instance |
 
@@ -94,20 +94,51 @@ re-signs the token with a fresh `exp` and re-sets the cookie, so a tab left open
 would never expire. The absolute bound is therefore an **`authAt`** claim stamped
 at sign-in and never moved; a separate **`lastActiveAt`** claim moves on every
 request and enforces the 4-hour idle cut-off. Either lapsing returns `null` from
-the `jwt` callback, which clears the session cookies, and the coarse gate in
-`src/proxy.ts` then redirects to `/login` — i.e. it forces re-authentication.
+the `jwt` callback, so the session stops satisfying `!!req.auth` and the coarse
+gate in `src/proxy.ts` redirects to `/login` — i.e. it forces re-authentication.
 
 > Why the callback and not the proxy: the callback runs on EVERY `auth()` call —
 > Server Actions, Route Handlers and RSC included — not only the routes the
 > proxy matcher covers. A proxy-only check would leave a 9-hour-idle session
 > able to POST a Server Action.
 >
+> **But the WRITE rides the proxy, and that asymmetry is load-bearing.** Only
+> the middleware/route-handler wrapper copies the session action's `Set-Cookie`
+> onto the response (`handleAuth` in `next-auth/lib/index.js`); the bare
+> `auth()` used by RSC and `requireUser` re-signs a token and discards it. So
+> `lastActiveAt` advances because `src/proxy.ts` ran for the same request, which
+> makes its **matcher** part of this control: excluding an authenticated route
+> would leave users working there bounced 4 hours after their last *matched*
+> request, with the whole unit suite still green. `tests/e2e/auth.spec.ts`
+> asserts the cookie is re-issued across a navigation, because nothing else
+> can see it.
+>
 > Same grandfathering softening as `pwdChangedAt`: a token minted before these
-> claims existed is **seeded, not revoked**, so the deploy that adds them does
-> not sign every technician out at once. Cost: such a session gets a fresh 10
-> hours from first sight, once, at rollout. A stamp in the *future* (clock skew
-> between instances) is treated as fresh rather than expired — getting that
-> backwards fails in the one direction that logs people out.
+> claims existed is **backfilled, not revoked**, so the deploy that adds them
+> does not sign every technician out at once. The backfill is dated from the
+> token's own **`iat`**, never from `now`. That distinction is the whole of it:
+> Auth.js JWTs are stateless with no revocation list, so writing a new cookie
+> cannot invalidate the old string — dating from `now` would let a pre-deploy
+> cookie saved out of devtools be re-pasted over and over, minting another full
+> 10-hour session each time, until its own **30-day** expiry ran out. `iat` is
+> re-stamped on every roll, so a live session backfills to moments ago (nobody
+> is signed out) while a stale snapshot backfills to when it was last used and
+> fails these bounds immediately. Each claim is backfilled independently, so a
+> token carrying a real `authAt` never has its absolute clock restarted.
+>
+> A stamp in the *future* (clock skew between instances) is treated as fresh
+> rather than expired — getting that backwards fails in the one direction that
+> logs people out.
+
+> **Knock-on, worth knowing:** a shorter session means staff land in the
+> *logged-out* population more often, and the public surface treats them
+> accordingly. A technician back from lunch who clicks a bookmarked `/i/<id>`
+> now meets the recipient **PIN gate** ([§3](#3-public-surface--the-pin-gate)),
+> not `/login` — `/unlock` carries a "Staff? Log in instead" link for exactly
+> this — and that request spends the shared **anonymous** 100/min bucket
+> ([§12](#12-rate-limiting)) keyed on the desk's single egress IP, rather than
+> the signed-in exemption. Both are correct by design; both get more common as
+> sessions get shorter.
 
 **No public self-registration.** Removed by decision — accounts are provisioned
 only by an admin (`createUserAction` / `createUser`). `registerSchema` is
@@ -522,7 +553,7 @@ migration must be applied *before* the merge deploys. See [`../DEPLOY.md`](../DE
 |---|---|---|---|
 | `AUTH_POLICY` | **5 per 15 min** | scope + IP + **submitted email** | sign-in, password-reset request |
 | `AUTH_POLICY` | **5 per 15 min** | scope + IP | reset submission, PIN unlock, `POST /api/auth/*` (no identity available) |
-| `AUTH_SPRAY_POLICY` | **20 per 15 min** | scope + IP | the ceiling over the two identity-keyed surfaces above |
+| `AUTH_SPRAY_POLICY` | **60 per 15 min** | scope + IP | the ceiling over the two identity-keyed surfaces above |
 | `API_POLICY` | **100 per min** | IP | `GET /api/auth/*`, plus `/api/*` and the public PII surface (`/`, `/i/*`, `/receipts/*`) **for anonymous callers only** |
 | `AUTH_VELOCITY_POLICY` | **100 per 5 min** | one global key | every failed credential check, app-wide — the botnet detector |
 

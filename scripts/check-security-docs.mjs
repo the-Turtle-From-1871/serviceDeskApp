@@ -23,6 +23,10 @@ const SKIP_TOKEN = "[skip security-doc]";
 const WATCHED = [
   [/^src\/lib\/authz\.ts$/, "authorization checks (§2)"],
   [/^src\/auth\.ts$/, "authentication + session revocation (§1)"],
+  // Same leaf-file reasoning as sort-keys.ts: the 10h/4h numbers, the >= at
+  // both boundaries, and the backfill-from-iat rule ARE the posture, and they
+  // live outside auth.ts where nothing else would notice them changing.
+  [/^src\/lib\/session-freshness\.ts$/, "the session lifetime policy (§1)"],
   [/^src\/modules\/users\/users\.service\.ts$/, "deactivation revokes live tokens (§1)"],
   [/^src\/proxy\.ts$/, "the login gate and public PIN gate (§2, §3)"],
   [/^src\/lib\/password\.ts$/, "password hashing (§1)"],
