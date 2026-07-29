@@ -77,11 +77,23 @@ describe("readinessState", () => {
     );
   });
 
-  it("a logon AFTER the marking flips it back to DEPLOYED", () => {
-    // The self-expiring property — why markedReadyAt is a timestamp, not a bool.
+  it("a logon AFTER the marking does NOT flip it back to DEPLOYED", () => {
+    // The marking is a person stating they physically hold the device. A device
+    // on our own shelf still produces logons — imaging it, an MDM check-in, a
+    // test before reissue — and none of those mean it left. Only a deliberate
+    // act (service flag, open receipt, retirement) overrides the marking.
     expect(readinessState(s({ markedReadyAt: JAN, lastLogonAt: JUN, lastLogonUser: "a@b.mil" }))).toBe(
-      "DEPLOYED",
+      "READY_TO_DEPLOY",
     );
+  });
+
+  it("issuing it out on a hand receipt still overrides the marking", () => {
+    // The case removing the logon rule must NOT break: giving a device to
+    // someone is recorded as an open receipt, which outranks the marking and
+    // fires immediately rather than waiting for the next MDM import.
+    expect(
+      readinessState(s({ markedReadyAt: JUN, onOpenReceipt: true, lastLogonAt: JAN, lastLogonUser: "a@b.mil" })),
+    ).toBe("DEPLOYED");
   });
 
   it("keeps a marking when the logon instant is unparseable, even if a user is present", () => {
