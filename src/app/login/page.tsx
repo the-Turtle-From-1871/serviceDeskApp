@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { LoginForm } from "./LoginForm";
+import { turnstileWidgetSiteKey } from "@/lib/turnstile";
 
 export default function LoginPage() {
   return (
@@ -14,7 +15,7 @@ export default function LoginPage() {
           <h1 className="page-title" style={{ fontSize: 20 }}>Sign in</h1>
           <p className="subtle">Sign in to log items and create hand receipts.</p>
         </div>
-        <LoginForm />
+        <LoginForm turnstileSiteKey={turnstileWidgetSiteKey()} />
       </div>
     </div>
   );

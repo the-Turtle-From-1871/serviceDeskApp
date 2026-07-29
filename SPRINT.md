@@ -11,7 +11,8 @@ When instructed to execute a specific Day, follow these rules strictly:
    - Address any issues flagged by the reviewer sub-agent.
 4. **Verification:** Run `npm run build` or relevant tests to verify zero compilation or runtime errors.
 5. **Autonomy Loop:** If a build/test error occurs, attempt to fix it autonomously. If you fail 3 times on the same bug, pause and ask the user for help.
-6. **Commit & Check:** Once verified, commit the changes to git with a descriptive message, physically check the box by changing `- [ ]` to `- [x]` in this `SPRINT.md` file, and immediately proceed to the next task.
+6. **recommendations:** if you have recommendations regarding tweaks to the implementation, raise them.
+7. **Commit & Check:** Once verified, commit the changes to git with a descriptive message, physically check the box by changing `- [ ]` to `- [x]` in this `SPRINT.md` file, and immediately proceed to the next task.
 ---
 
 ## Day 1: Foundation & Data
@@ -34,12 +35,16 @@ When instructed to execute a specific Day, follow these rules strictly:
 - [x] **Sorting, Grouping, & Bulk Actions:** Update the main inventory table. Group items by `deployableStatus` by default. Add a new table column for `deviceUIC` and allow filtering by it. Implement compound sorting (e.g., Manufacturer then Serial Number). Add a bulk-action checkbox feature allowing admins to update the `deployableStatus` or `isAccountedFor` status for multiple items simultaneously.
 
 ## Day 3: Security & Auth Hardening
-- [ ] **Rate Limiting:** Implement IP-based rate limiting using Vercel KV (Redis) and Next.js middleware. Limit auth routes (`/api/auth`, login, reset) to 5 attempts per 15 minutes per IP. Limit general API routes to 100 requests per minute to prevent scraping.
-- [ ] **CAPTCHA Integration:** Integrate Cloudflare Turnstile into the authentication flow. Add the invisible widget to the login and `/forgot-password` pages. Enforce token verification server-side in the Next.js Server Actions.
+- [x] **Robust Rate Limiting & Botnet Defense:** Implement advanced rate limiting using Vercel KV (Redis) and Next.js middleware:
+    - Use composite keys (`IP + Target Email`) for auth routes to prevent shared base network lockouts (Max 5 failed attempts per rolling 15-min window).
+    - Implement global velocity tracking in Redis to detect sudden application-wide spikes in failed logins (indicating a distributed botnet).
+    - Set general API scraping limits to 100 requests per minute per IP, and drop requests with suspicious or missing browser headers/User-Agents.
+- [x] **CAPTCHA Integration:** Integrate Cloudflare Turnstile into the authentication flow. Add the invisible widget to the login and `/forgot-password` pages to block automated headless scripts. Enforce token verification server-side in Next.js Server Actions.
 - [ ] **Session Freshness:** Update the Auth.js configuration and middleware to enforce a strict 10-hour workday lifecycle. Set absolute token expiration (`maxAge`) to 10 hours. Implement an idle timeout in middleware that forces re-authentication if the user's last activity was more than 4 hours ago.
 
+
 ## Day 4: Final Polish & Documentation
-- [ ] **Final SAST Scan:** Run a final `/claude-security scan codebase` to verify the new UI, Auth, and Rate Limiting features did not introduce any vulnerabilities.
+- [ ] **Final SAST Scan:** Run a final `/claude-security scan codebase` to verify the new UI, Auth, and Rate Limiting features did not introduce any vulnerabilities. Create a 
 - [ ] **Security Handover Report:** Read the git history, Next.js API routes, Auth.js config, and SAST results. Generate a formal `SECURITY_REPORT.md` documenting: 1) Executive Summary, 2) Auth & Access Control logic, 3) Threat Mitigation (Rate Limiting/Turnstile specifics), and 4) Vulnerability Assessment.
-- [ ] **Global Documentation Sync:** Scan the entire repository for ALL existing Markdown files (including `README.md`, any files in a `docs/` folder, and root-level guides, but ignoring `agents.md`). Read them and update any outdated sections regarding the database schema, features, tech stack, or authentication to accurately reflect the Vercel KV, Turnstile, and analytics changes made during this sprint.
-- [ ] **Handoff & Changelog:** Read the full git history. Generate a `CHANGELOG.md` backdated to the repository's start, adhering to existing guardrails. Finally, generate a comprehensive `HANDOFF.md` document detailing the complete, updated architecture and operational state for leadership review.
+- [ ] **Global Documentation Sync:** Scan the entire repository for ALL existing Markdown files (including `README.md`, any files in a `docs/` folder, and root-level guides, but ignoring `agents.md`). Read them and update any outdated sections regarding the database schema, features, tech stack, or authentication to accurately reflect the Vercel KV, Turnstile, and analytics changes made during this sprint. Backdate the CHANGELOG.md to the start.
+- [ ] **Handoff & Changelog:** Read the full git history. Generate a `CHANGELOG.md` backdated to the repository's start, adhering to existing guardrails. Finally, generate a comprehensive `HANDOFF.md` document detailing the complete, updated architecture and operational state for leadership review. Include the problem and solution that our web app fixes.

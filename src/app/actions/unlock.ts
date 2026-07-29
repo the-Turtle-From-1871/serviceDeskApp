@@ -1,8 +1,16 @@
 "use server";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { verifyPin } from "@/lib/public-access";
+import {
+  AUTH_POLICY,
+  clientIp,
+  consumeRateLimit,
+  formatRetryAfter,
+  rateLimitKey,
+  resetRateLimit,
+} from "@/lib/rate-limit";
 import {
   signUnlockValue,
   unlockCookieName,
@@ -20,6 +28,22 @@ export async function unlockAction(_prev: unknown, formData: FormData) {
   const parsed = schema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: "Enter the 8-digit PIN." };
 
+  // 5 WRONG PINs per 15 minutes per IP, on top of the 400ms delay below. The
+  // delay alone only caps a SERIAL attacker; the limiter is what closes the
+  // parallel case. Spend-then-refund like login (see `consumeRateLimit`): the
+  // token is taken before the bcrypt compare so concurrent guesses cannot all
+  // read an untouched bucket, and given back on a correct PIN so a shared
+  // office IP is never locked out by people legitimately unlocking. This action
+  // is public by design and has no session to key on, so the IP is the only
+  // identifier available.
+  const rlKey = rateLimitKey(AUTH_POLICY, clientIp(await headers()), "unlock");
+  const gate = await consumeRateLimit(AUTH_POLICY, rlKey);
+  if (!gate.allowed) {
+    return {
+      error: `Too many attempts from this network. Try again ${formatRetryAfter(gate.retryAfterSeconds)}.`,
+    };
+  }
+
   let ok = false;
   try {
     ok = await verifyPin(parsed.data.pin);
@@ -32,6 +56,7 @@ export async function unlockAction(_prev: unknown, formData: FormData) {
     await new Promise((r) => setTimeout(r, 400));
     return { error: "Incorrect PIN." };
   }
+  await resetRateLimit(AUTH_POLICY, rlKey);
 
   const secret = process.env.AUTH_SECRET ?? "";
   const secure = process.env.NODE_ENV === "production";

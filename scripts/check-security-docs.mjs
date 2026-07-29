@@ -31,6 +31,23 @@ const WATCHED = [
   [/^src\/app\/actions\/auth\.ts$/, "login + reset actions, anti-enumeration (§1, §4)"],
   [/^src\/lib\/public-access(-cookie)?\.ts$/, "the public PIN gate (§3)"],
   [/^src\/app\/actions\/unlock\.ts$/, "the unlock action + cookie flags, anti-guessing delay (§3)"],
+  // The policy numbers (5/15min, 20/15min, 100/min), the composite key shape,
+  // the spend-then-refund split and the fail-OPEN behavior are all posture, not
+  // implementation detail — changing any of them changes what the app is
+  // protected against.
+  [/^src\/lib\/rate-limit\.ts$/, "the IP rate-limit policies and fail-open behavior (§12)"],
+  // The global botnet detector: its threshold, what counts as a failure, and
+  // the fact that it escalates rather than blocks are all posture.
+  [/^src\/lib\/auth-velocity\.ts$/, "the distributed-attack detector and what it escalates to (§12)"],
+  // The CAPTCHA gate, including the deliberate config-gate and the fail-open /
+  // fail-closed split between "Cloudflare said no" and "Cloudflare is down".
+  [/^src\/lib\/turnstile\.ts$/, "the Turnstile challenge and its failure posture (§13)"],
+  // WHETHER the challenge is rendered at all is as security-relevant as how it
+  // is verified: gating a page on the site key alone ships a widget nobody
+  // checks. The widget component owns the single-use reset and the script
+  // lifecycle, both of which can silently produce a tokenless form.
+  [/^src\/components\/TurnstileWidget\.tsx$/, "the CAPTCHA widget lifecycle (§13)"],
+  [/^src\/app\/(login|forgot-password)\/page\.tsx$/, "whether the CAPTCHA is rendered (§13)"],
   [/^src\/app\/admin\/actions\/public-access\.ts$/, "setting/rotating the public PIN (§3)"],
   [/^src\/lib\/crypto\.ts$/, "the Ed25519 receipt seal (§7)"],
   // Deliberately the leaf allowlist, NOT the whole of items.service.ts: adding a

@@ -3,7 +3,10 @@ import { expect, test } from "@playwright/test";
 test("unauthenticated visitor can view the public home page", async ({ page }) => {
   await page.goto("/");
   await expect(page).toHaveURL("/");
-  await expect(page.getByRole("heading", { name: "Find your hand receipt" })).toBeVisible();
+  // The heading was renamed when the home search stopped being receipt-only
+  // (2c373b5); this assertion was left behind and has been failing ever since.
+  // E2E does not run in CI, which is why nobody noticed.
+  await expect(page.getByRole("heading", { name: "Find an item or hand receipt" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Search" })).toBeVisible();
 });
 

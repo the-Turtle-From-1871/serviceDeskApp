@@ -2,11 +2,15 @@
 import Link from "next/link";
 import { useActionState } from "react";
 import { requestPasswordResetAction } from "@/app/actions/auth";
+import { TurnstileWidget } from "@/components/TurnstileWidget";
 
 // The interactive part of /forgot-password — it switches between the form and a
 // "check your email" confirmation based on the action result, so it owns both
 // views. The page shell around it stays a Server Component.
-export function ForgotPasswordForm() {
+//
+// `turnstileSiteKey` is null when Turnstile is not configured; see LoginForm
+// for why the page resolves it server-side.
+export function ForgotPasswordForm({ turnstileSiteKey }: { turnstileSiteKey: string | null }) {
   const [state, action, pending] = useActionState(requestPasswordResetAction, undefined);
 
   if (state && "ok" in state) {
@@ -33,6 +37,7 @@ export function ForgotPasswordForm() {
           <label className="label" htmlFor="email">Email</label>
           <input id="email" className="input" name="email" type="email" required autoComplete="email" />
         </div>
+        {turnstileSiteKey && <TurnstileWidget siteKey={turnstileSiteKey} resetOn={state} />}
         {state && "error" in state && state.error && <p role="alert" className="alert-error">{state.error}</p>}
         <button disabled={pending} type="submit" className="btn btn-primary btn-block">{pending ? "Sending…" : "Send reset link"}</button>
       </form>
