@@ -1,5 +1,11 @@
 import Link from "next/link";
 import { ResetPasswordForm } from "./ResetPasswordForm";
+import { turnstileWidgetSiteKey } from "@/lib/turnstile";
+
+// See login/page.tsx: rendered per request so the challenge config gate can
+// never be evaluated at build time while the server reads its secret per
+// request.
+export const dynamic = "force-dynamic";
 
 export default async function ResetPasswordPage({ searchParams }: { searchParams: Promise<{ token?: string }> }) {
   const { token } = await searchParams;
@@ -25,7 +31,7 @@ export default async function ResetPasswordPage({ searchParams }: { searchParams
           <h1 className="page-title" style={{ fontSize: 20 }}>Set a new password</h1>
           <p className="subtle">Choose a new password for your account.</p>
         </div>
-        <ResetPasswordForm token={token} />
+        <ResetPasswordForm token={token} turnstileSiteKey={turnstileWidgetSiteKey()} />
       </div>
     </div>
   );

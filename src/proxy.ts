@@ -11,6 +11,7 @@ import {
   AUTH_SPRAY_POLICY,
   clientIp,
   consumeRateLimit,
+  rateLimitDisabled,
   rateLimitKey,
   type RateLimitVerdict,
 } from "@/lib/rate-limit";
@@ -39,7 +40,9 @@ import {
 // themselves (`src/app/actions/auth.ts`, `src/app/actions/unlock.ts`), which can
 // return an ordinary form error. The credential endpoint that would otherwise
 // be a second door to the same capability is closed outright below, so there is
-// no second budget to keep in step with theirs.
+// no second budget to keep in step with theirs — and nothing metered here may
+// share their scope, or an unauthenticated caller could spend the desk's
+// sign-in budget without ever touching a password.
 
 /** 429 with the headers a well-behaved client needs to back off. */
 function tooManyRequests(verdict: RateLimitVerdict) {
@@ -104,15 +107,6 @@ const AUTOMATION_AGENTS = [
 ];
 
 /**
- * The same switch that turns the limiter off locally turns this off too.
- * Without it, `curl http://localhost:3000/i/<id>` against a dev server is a 403
- * with no way to opt out, and anything scripted has to spoof a browser.
- */
-function antiAbuseDisabled(): boolean {
-  return process.env.RATE_LIMIT_DISABLED === "true";
-}
-
-/**
  * True for a request that is not plausibly a browser.
  *
  * A MISSING User-Agent is the strong signal — every real browser sends one, and
@@ -158,7 +152,7 @@ const authGatedProxy = auth(async (req) => {
     // bucket. Scoped to anonymous callers on the public surface for the same
     // reason the limit is — a signed-in technician might be driving a script,
     // and that is their business.
-    if (!antiAbuseDisabled() && looksAutomated(req.headers.get("user-agent"))) {
+    if (!rateLimitDisabled() && looksAutomated(req.headers.get("user-agent"))) {
       return forbiddenAutomation();
     }
     const verdict = await consumeRateLimit(
@@ -284,12 +278,22 @@ export async function proxy(req: NextRequest, event: NextFetchEvent) {
     }
 
     // Any other mutation here (sign-out, and whatever Auth.js adds later) is
-    // metered on the per-network ceiling. No identity is available — the
-    // submitted email lives in the POST body, which the proxy must not consume
-    // because the route handler needs to read it.
+    // metered on its OWN bucket — scope `api-auth-write`, never `login`.
+    //
+    // Sharing the `login` scope with `loginAction` was a lockout waiting to
+    // happen: `POST /api/auth/signout` needs no CSRF token, no body and no
+    // session, so 60 of them from anywhere would fill the very bucket that
+    // gates sign-in and refuse every technician behind that egress IP for
+    // fifteen minutes, repeatably. That is the whole-desk lockout
+    // `spendAuthBudget`'s narrow-bucket-first ordering exists to prevent,
+    // reintroduced through a second door.
+    //
+    // The reason the scopes were shared is gone: it was to stop
+    // `POST /api/auth/callback/*` doubling the sign-in budget, and that path is
+    // now closed with a 404 above. There is no second door left to keep in step.
     const verdict = await consumeRateLimit(
       AUTH_SPRAY_POLICY,
-      rateLimitKey(AUTH_SPRAY_POLICY, ip, "login"),
+      rateLimitKey(AUTH_SPRAY_POLICY, ip, "api-auth-write"),
     );
     if (!verdict.allowed) return tooManyRequests(verdict);
     return NextResponse.next();

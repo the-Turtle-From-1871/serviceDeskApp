@@ -57,6 +57,9 @@ const WATCHED = [
   // one `disabled` expression reintroduces the bug the third commit fixed.
   [/^src\/app\/login\/LoginForm\.tsx$/, "the submit hold on the challenge (§13)"],
   [/^src\/app\/forgot-password\/ForgotPasswordForm\.tsx$/, "the submit hold on the challenge (§13)"],
+  // The reset form got the challenge last, and it is the surface where a
+  // correct guess is an account takeover rather than a step towards one.
+  [/^src\/app\/reset-password\/(page|ResetPasswordForm)\.tsx$/, "the CAPTCHA on the reset form (§13)"],
   [/^src\/app\/admin\/actions\/public-access\.ts$/, "setting/rotating the public PIN (§3)"],
   [/^src\/lib\/crypto\.ts$/, "the Ed25519 receipt seal (§7)"],
   // Deliberately the leaf allowlist, NOT the whole of items.service.ts: adding a

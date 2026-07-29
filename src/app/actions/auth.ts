@@ -2,6 +2,7 @@
 import { AuthError } from "next-auth";
 import { after } from "next/server";
 import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { signIn, signOut } from "@/auth";
 import prisma from "@/lib/prisma";
 import { emailField, passwordField } from "@/modules/users/users.schema";
@@ -10,12 +11,12 @@ import { sendPasswordResetEmail } from "@/modules/auth/send-password-reset-email
 import { defaultBaseUrl } from "@/lib/base-url";
 import { authVelocityElevated, recordAuthFailure } from "@/lib/auth-velocity";
 import { TURNSTILE_FIELD, verifyTurnstile } from "@/lib/turnstile";
+import { THROTTLED } from "@/app/actions/throttled";
 import {
   AUTH_POLICY,
   AUTH_SPRAY_POLICY,
   clientIp,
   consumeRateLimit,
-  formatRetryAfter,
   rateLimitIdentity,
   rateLimitKey,
   resetRateLimit,
@@ -53,9 +54,7 @@ async function identityRateLimitKeys(scope: string, email: string) {
   };
 }
 
-const THROTTLED = (retryAfterSeconds: number) => ({
-  error: `Too many attempts from this network. Try again ${formatRetryAfter(retryAfterSeconds)}.`,
-});
+
 
 /**
  * Spend one attempt from the pair of buckets, in the ONE order that is safe.
@@ -108,20 +107,6 @@ async function challenge(formData: FormData, ip: string | null) {
   return outcome.ok ? null : CHALLENGE_FAILED;
 }
 
-/**
- * Next signals a successful `redirect()` by throwing. The marker is the
- * `digest`, not the class — `signIn` re-throws Next's own error object, so
- * there is nothing to `instanceof`.
- */
-function isRedirect(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    typeof (error as { digest?: unknown }).digest === "string" &&
-    (error as { digest: string }).digest.startsWith("NEXT_REDIRECT")
-  );
-}
-
 // PUBLIC BY DESIGN: login/register are the unauthenticated entry to the auth
 // flow — they cannot require a session (reviewed exception to "auth-first").
 export async function loginAction(_prev: unknown, formData: FormData) {
@@ -133,8 +118,9 @@ export async function loginAction(_prev: unknown, formData: FormData) {
   // desk shares one NAT egress IP, so charging successful sign-ins would take
   // the whole desk offline after five people logged in.
   //
-  // Scope `"login"` is shared with the `/api/auth/*` mutation gate in
-  // `src/proxy.ts`: same capability, two surfaces, one budget.
+  // Scope `"login"` is this action's alone. The proxy meters `/api/auth/*`
+  // writes under `api-auth-write`: sharing the scope meant 60 unauthenticated
+  // `POST /api/auth/signout` calls could lock the whole desk out of sign-in.
   const email = String(formData.get("email") ?? "");
   const keys = await identityRateLimitKeys("login", email);
   const throttled = await spendAuthBudget(keys);
@@ -155,7 +141,7 @@ export async function loginAction(_prev: unknown, formData: FormData) {
   // the same as guessing.
   if ((await headers()).has("x-auth-return-redirect")) {
     console.error("[loginAction] refused a request carrying X-Auth-Return-Redirect");
-    await recordAuthFailure();
+    await recordAuthFailure("login");
     return { error: "Invalid email or password." };
   }
 
@@ -165,33 +151,51 @@ export async function loginAction(_prev: unknown, formData: FormData) {
   const refused = await challenge(formData, keys.ip);
   if (refused) return refused;
 
+  // `redirect: false`, so success and failure are a RETURN VALUE rather than a
+  // thrown redirect this action has to interpret.
+  //
+  // Inferring "signed in" from "a NEXT_REDIRECT was thrown" is an assumption
+  // about @auth/core internals, not a contract — and it has already been wrong
+  // once: the `X-Auth-Return-Redirect` guard above exists because that header
+  // converts a failed credential check into a redirect. Blacklisting one header
+  // closes today's instance; any future change that turns an AuthError into a
+  // redirect re-opens it silently, and this is a beta dependency. Deciding from
+  // the outcome removes the ambiguity instead of enumerating its triggers.
+  let destination: string;
   try {
-    await signIn("credentials", {
+    destination = await signIn("credentials", {
       email,
       password: formData.get("password"),
+      redirect: false,
       redirectTo: "/items",
     });
   } catch (error) {
     if (error instanceof AuthError) {
       // A real credential check that came back wrong — the only thing the
-      // global detector should count. Throttled, malformed and challenge-
-      // refused submissions never reached a password, so counting them would
-      // let an attacker raise the alarm without guessing anything.
-      await recordAuthFailure();
+      // escalation should count. Throttled, malformed and challenge-refused
+      // submissions never reached a password, so counting them would let an
+      // attacker raise the alarm without guessing anything.
+      await recordAuthFailure("login");
       return { error: "Invalid email or password." };
     }
-    // A successful sign-in leaves through here: `signIn` throws NEXT_REDIRECT.
-    // Refund BOTH before re-throwing, or the redirect skips it. Narrowed to the
-    // redirect specifically — an unexpected server error is not evidence the
-    // credentials were right, so it keeps its tokens, which is the safe
-    // direction.
-    // ONLY the narrow bucket. It belongs to this account on this network, so
-    // clearing it is precise. The per-network ceiling is SHARED — refunding it
-    // would let anyone holding one valid credential wipe everybody's counter
-    // between guesses, and the ceiling would stop meaning anything.
-    if (isRedirect(error)) await resetRateLimit(AUTH_POLICY, keys.narrow);
-    throw error; // re-throw Next.js redirect
+    // An unexpected server error is not evidence the credentials were right, so
+    // it keeps its tokens — the safe direction.
+    throw error;
   }
+
+  // The other shape of failure: @auth/core returned an error URL instead of
+  // throwing. Treated identically to a thrown AuthError.
+  if (/[?&]error=/.test(destination)) {
+    await recordAuthFailure("login");
+    return { error: "Invalid email or password." };
+  }
+
+  // Success. Refund ONLY the narrow bucket — it belongs to this account on this
+  // network, so clearing it is precise. The per-network ceiling is SHARED;
+  // refunding that would let anyone holding one valid credential wipe
+  // everybody's counter between guesses.
+  await resetRateLimit(AUTH_POLICY, keys.narrow);
+  redirect(destination);
 }
 
 export async function logoutAction() {
@@ -282,9 +286,20 @@ export async function resetPasswordAction(_prev: unknown, formData: FormData) {
   // only after the token lookup fails would leave a concurrency window. Checked
   // after the cheap validation above so a mistyped confirmation is not an
   // "attempt".
-  const key = await authRateLimitKey("reset-submit");
-  const gate = await consumeRateLimit(AUTH_POLICY, key);
-  if (!gate.allowed) return THROTTLED(gate.retryAfterSeconds);
+  // Keyed on the TOKEN, not just the network. A bare `(scope, ip)` bucket is
+  // the single-bucket-per-IP design `loginAction` documents as punishing the
+  // wrong people: five colleagues clicking yesterday expired reset links would
+  // lock out the sixth, who is holding a perfectly valid one. The token is a
+  // usable identity, and `rateLimitIdentity` hashes it — required here, not
+  // optional, because the raw value is itself a secret.
+  const keys = await identityRateLimitKeys("reset-submit", token);
+  const throttled = await spendAuthBudget(keys);
+  if (throttled) return throttled;
+
+  // The one surface where a correct guess is an outright account takeover, and
+  // it was the only auth action with no challenge in front of it.
+  const refused = await challenge(formData, keys.ip);
+  if (refused) return refused;
 
   try {
     const ok = await resetPasswordWithToken(token, password);
@@ -296,7 +311,9 @@ export async function resetPasswordAction(_prev: unknown, formData: FormData) {
       await recordAuthFailure();
       return { error: "This reset link is invalid or has expired." };
     }
-    await resetRateLimit(AUTH_POLICY, key);
+    // Safe to refund: unlike the unlock bucket, this key carries the token
+    // hash, so it belongs to this reset attempt alone rather than the network.
+    await resetRateLimit(AUTH_POLICY, keys.narrow);
   } catch (e) {
     console.error("[resetPasswordAction] error:", e);
     return { error: "Something went wrong. Please try again." };

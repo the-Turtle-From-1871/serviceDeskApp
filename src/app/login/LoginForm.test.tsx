@@ -66,6 +66,35 @@ describe("LoginForm with Turnstile configured", () => {
     await waitFor(() => expect(submit().disabled).toBe(false));
   });
 
+  it("re-arms the deadline after a rejected attempt, not just on mount", async () => {
+    // The commonest path there is: one mistyped password. `resetOn` changes,
+    // the widget goes back to `pending`, and Cloudflare — more suspicious after
+    // a failed sign-in — never calls back. Armed only on mount, the deadline
+    // had already been cleared by the first verdict, so the button stayed
+    // disabled at "Checking your browser…" until a full page reload.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { rerender } = render(
+      <LoginForm turnstileSiteKey="1x00000000000000000000AA" />,
+    );
+    await waitFor(() => expect(lastOpts?.callback).toBeTypeOf("function"));
+    act(() => lastOpts!.callback!("a-token"));
+    await waitFor(() => expect(submit().disabled).toBe(false));
+
+    // A rejected submission hands `useActionState` a new state object.
+    act(() => {
+      rerender(<LoginForm turnstileSiteKey="1x00000000000000000000AA" />);
+      lastOpts!["expired-callback"]!(); // stands in for the resetOn transition
+    });
+    await waitFor(() => expect(submit().disabled).toBe(true));
+
+    // …and this time nothing ever answers.
+    await act(async () => {
+      vi.advanceTimersByTime(20_000);
+    });
+    await waitFor(() => expect(submit().disabled).toBe(false));
+    vi.useRealTimers();
+  });
+
   it("holds it again when a token expires", async () => {
     // Tokens live ~5 minutes; the widget auto-refreshes, but the form must not
     // submit during the gap carrying nothing.

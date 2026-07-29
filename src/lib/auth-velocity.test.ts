@@ -21,7 +21,10 @@ afterEach(() => {
   __resetAuthVelocityStateForTests();
 });
 
-const failures = (n: number) => Array.from({ length: n }, () => recordAuthFailure());
+/** Sign-in failures — the only surface that may raise the escalation. */
+const failures = (n: number) => Array.from({ length: n }, () => recordAuthFailure("login"));
+/** Any other guessable surface: counted for the ALERT, never for the escalation. */
+const otherFailures = (n: number) => Array.from({ length: n }, () => recordAuthFailure("other"));
 
 describe("the threshold", () => {
   it("is a whole-application rate, not a per-caller budget", () => {
@@ -43,7 +46,7 @@ describe("recordAuthFailure", () => {
 
   it("reports elevated once the app-wide rate reaches the threshold", async () => {
     await Promise.all(failures(AUTH_VELOCITY_POLICY.limit - 1));
-    expect(await recordAuthFailure()).toBe(true);
+    expect(await recordAuthFailure("login")).toBe(true);
     expect(await authVelocityElevated()).toBe(true);
   });
 
@@ -51,11 +54,13 @@ describe("recordAuthFailure", () => {
     // Two functions naming one state must flip on the same attempt. An
     // off-by-one here is invisible in normal operation and wrong exactly when
     // it matters.
+    // Sign-in failures throughout, so the alert bucket and the escalation
+    // bucket cross on the same attempt and the two answers stay comparable.
     await Promise.all(failures(AUTH_VELOCITY_POLICY.limit - 2));
     expect(await authVelocityElevated()).toBe(false);
-    expect(await recordAuthFailure()).toBe(false);
+    expect(await recordAuthFailure("login")).toBe(false);
     expect(await authVelocityElevated()).toBe(false);
-    expect(await recordAuthFailure()).toBe(true);
+    expect(await recordAuthFailure("login")).toBe(true);
     expect(await authVelocityElevated()).toBe(true);
   });
 
@@ -105,6 +110,50 @@ describe("recordAuthFailure", () => {
   });
 });
 
+describe("the alert / escalation split", () => {
+  it("counts every surface toward the ALERT", async () => {
+    // Broad on purpose: a blind spot costs the whole point of the feature, and
+    // a false alarm costs a log line.
+    await Promise.all(otherFailures(AUTH_VELOCITY_POLICY.limit - 1));
+    expect(await recordAuthFailure("other")).toBe(true);
+    expect(console.error).toHaveBeenCalled();
+  });
+
+  it("does NOT let /unlock or a bad reset token raise the ESCALATION", async () => {
+    // The load-bearing property. `/unlock` needs no account and carries no
+    // challenge of its own, so if it could flip Turnstile to strict an
+    // unauthenticated attacker would have a cheap global switch: fill the
+    // bucket and every sign-in whose verification is `unreachable` is refused
+    // app-wide. That is the detector becoming the vulnerability.
+    await Promise.all(otherFailures(AUTH_VELOCITY_POLICY.limit * 3));
+    expect(await authVelocityElevated()).toBe(false);
+  });
+
+  it("still escalates on sign-in failures", async () => {
+    await Promise.all(failures(AUTH_VELOCITY_POLICY.limit));
+    expect(await authVelocityElevated()).toBe(true);
+  });
+
+  it("LATCHES, so the mitigation does not flicker off mid-attack", async () => {
+    // Refused hits are deliberately not recorded, so at exactly the threshold
+    // the moment the oldest entry ages out `remaining` becomes 1 and an
+    // unlatched check would report NOT elevated until the next failure refills
+    // it — waving through roughly half the submissions it exists to refuse.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-29T09:00:00Z"));
+    await Promise.all(failures(AUTH_VELOCITY_POLICY.limit));
+    expect(await authVelocityElevated()).toBe(true);
+
+    // Most of a window later, with nothing new recorded, it must still hold.
+    vi.advanceTimersByTime(AUTH_VELOCITY_POLICY.windowSeconds * 1000 - 1_000);
+    expect(await authVelocityElevated()).toBe(true);
+
+    // …and still lapse on its own once the window is genuinely past.
+    vi.advanceTimersByTime(2_000);
+    expect(await authVelocityElevated()).toBe(false);
+  });
+});
+
 describe("authVelocityElevated", () => {
   it("does not itself count as a failure", async () => {
     // It is read-only. If reading the state spent from the bucket, merely
@@ -119,6 +168,7 @@ describe("authVelocityElevated", () => {
     // stricter mode nobody asked for, on top of the outage.
     vi.stubEnv("RATE_LIMIT_DISABLED", "true");
     await Promise.all(failures(AUTH_VELOCITY_POLICY.limit * 2));
+    __resetAuthVelocityStateForTests(); // drop the latch too — the store is the subject
     expect(await authVelocityElevated()).toBe(false);
   });
 });

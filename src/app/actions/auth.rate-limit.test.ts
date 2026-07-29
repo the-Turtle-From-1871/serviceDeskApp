@@ -39,6 +39,15 @@ vi.mock("next/headers", () => ({
   headers: async () => new Headers({ "x-forwarded-for": TEST_IP, ...extraHeaders.current }),
 }));
 
+// `loginAction` issues its own redirect now that it decides success from a
+// RETURN value rather than a thrown marker. Throwing here keeps the assertions
+// able to see that it happened.
+vi.mock("next/navigation", () => ({
+  redirect: (url: string) => {
+    throw Object.assign(new Error(`NEXT_REDIRECT:${url}`), { digest: "NEXT_REDIRECT" });
+  },
+}));
+
 import { loginAction, requestPasswordResetAction, resetPasswordAction } from "./auth";
 import {
   AUTH_POLICY,
@@ -122,12 +131,9 @@ describe("loginAction rate limiting", () => {
   it("REFUNDS the token when the sign-in succeeds", async () => {
     // The load-bearing property: the service desk shares one NAT egress IP, so
     // charging successes would take the whole desk offline after five logins.
-    // `signIn` throws NEXT_REDIRECT on success — the action must refund and
-    // re-throw it.
-    const redirectError = Object.assign(new Error("NEXT_REDIRECT"), {
-      digest: "NEXT_REDIRECT;replace;/items;307;",
-    });
-    signIn.mockRejectedValue(redirectError);
+    // With `redirect: false`, success is a RETURNED destination and the action
+    // redirects to it itself.
+    signIn.mockResolvedValue("http://localhost/items");
 
     for (let i = 0; i < AUTH_POLICY.limit * 4; i++) {
       await expect(loginAction(undefined, creds())).rejects.toThrow("NEXT_REDIRECT");
@@ -140,6 +146,20 @@ describe("loginAction rate limiting", () => {
         error: "Invalid email or password.",
       });
     }
+  });
+
+  it("treats a RETURNED error URL as a failed attempt, not a success", async () => {
+    // @auth/core can hand back `?error=CredentialsSignin` instead of throwing —
+    // that is exactly what the `X-Auth-Return-Redirect` header provokes. Reading
+    // it as success would refund the token and skip the detector.
+    signIn.mockResolvedValue("http://localhost/login?error=CredentialsSignin&code=credentials");
+    for (let i = 0; i < AUTH_POLICY.limit; i++) {
+      expect(await loginAction(undefined, creds()), `try ${i + 1}`).toEqual({
+        error: "Invalid email or password.",
+      });
+    }
+    const blocked = await loginAction(undefined, creds());
+    expect(blocked?.error).toMatch(/Too many attempts/);
   });
 
   it("does NOT refund on an unexpected server error", async () => {
@@ -258,9 +278,6 @@ describe("loginAction rate limiting", () => {
     // Refunding it would let anyone holding one valid credential clear the
     // whole network's counter between guesses — 5 tries each against an
     // unlimited number of accounts, which is the ceiling doing nothing.
-    const redirectError = Object.assign(new Error("NEXT_REDIRECT"), {
-      digest: "NEXT_REDIRECT;replace;/items;307;",
-    });
 
     // Spend most of the ceiling on distinct accounts...
     signIn.mockRejectedValue(new AuthError("CredentialsSignin"));
@@ -268,7 +285,7 @@ describe("loginAction rate limiting", () => {
       await loginAction(undefined, fd({ email: `v${i}@example.com`, password: "wrong" }));
     }
     // ...then sign in correctly, which must NOT hand the ceiling back...
-    signIn.mockRejectedValue(redirectError);
+    signIn.mockResolvedValue("http://localhost/items");
     await expect(
       loginAction(undefined, fd({ email: "real@example.com", password: "right" })),
     ).rejects.toThrow("NEXT_REDIRECT");
@@ -303,11 +320,35 @@ describe("resetPasswordAction rate limiting", () => {
   const submission = (token: string) =>
     fd({ token, password: "new-password-123", confirm: "new-password-123" });
 
-  it("throttles token guessing after five bad tokens", async () => {
+  it("throttles repeated guesses at ONE token", async () => {
+    // Keyed on the token now, not just the network — so hammering a single
+    // token is capped at five while a colleague with a different (valid) link
+    // is unaffected. See the network-ceiling test below for the other half.
     resetPasswordWithToken.mockResolvedValue(false);
     for (let i = 0; i < AUTH_POLICY.limit; i++) {
-      const res = await resetPasswordAction(undefined, submission(`guess-${i}`));
+      const res = await resetPasswordAction(undefined, submission("one-token"));
       expect(res).toEqual({ error: "This reset link is invalid or has expired." });
+    }
+    const blocked = await resetPasswordAction(undefined, submission("one-token"));
+    expect("error" in blocked && blocked.error).toMatch(/Too many attempts from this network/);
+  });
+
+  it("does not let one dead link lock out someone holding a valid one", async () => {
+    // Five colleagues clicking yesterday's expired links used to lock out the
+    // sixth, who was holding a perfectly good link, because the bucket was the
+    // whole network.
+    resetPasswordWithToken.mockResolvedValue(false);
+    for (let i = 0; i < AUTH_POLICY.limit + 1; i++) {
+      await resetPasswordAction(undefined, submission("stale-token"));
+    }
+    resetPasswordWithToken.mockResolvedValue(true);
+    expect(await resetPasswordAction(undefined, submission("fresh-token"))).toEqual({ ok: true });
+  });
+
+  it("still caps a walk through many tokens from one network", async () => {
+    resetPasswordWithToken.mockResolvedValue(false);
+    for (let i = 0; i < AUTH_SPRAY_POLICY.limit; i++) {
+      await resetPasswordAction(undefined, submission(`guess-${i}`));
     }
     const blocked = await resetPasswordAction(undefined, submission("guess-final"));
     expect("error" in blocked && blocked.error).toMatch(/Too many attempts from this network/);

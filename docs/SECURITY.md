@@ -3,7 +3,7 @@
 A living inventory of every security control in this app — what it does, where
 it lives, and why. **Maintained over time**; see [Keeping this current](#keeping-this-current).
 
-**Last reviewed: 2026-07-28**
+**Last reviewed: 2026-07-29**
 
 Related: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`../CLAUDE.md`](../CLAUDE.md) · [`password-reset-hardening.md`](./password-reset-hardening.md)
 
@@ -552,10 +552,11 @@ migration must be applied *before* the merge deploys. See [`../DEPLOY.md`](../DE
 | Policy | Budget | Keyed on | Applies to |
 |---|---|---|---|
 | `AUTH_POLICY` | **5 per 15 min** | scope + IP + **submitted email** | sign-in, password-reset request |
-| `AUTH_POLICY` | **5 per 15 min** | scope + IP | reset submission, PIN unlock, `POST /api/auth/*` (no identity available) |
-| `AUTH_SPRAY_POLICY` | **60 per 15 min** | scope + IP | the ceiling over the two identity-keyed surfaces above |
-| `API_POLICY` | **100 per min** | IP | `GET /api/auth/*`, plus `/api/*` and the public PII surface (`/`, `/i/*`, `/receipts/*`) **for anonymous callers only** |
-| `AUTH_VELOCITY_POLICY` | **100 per 5 min** | one global key | every failed credential check, app-wide — the botnet detector |
+| `AUTH_POLICY` | **5 per 15 min** | scope + IP + **reset-token hash** | reset submission |
+| `AUTH_POLICY` | **5 per 15 min** | scope + IP | PIN unlock — one org-wide secret, so no identity exists |
+| `AUTH_SPRAY_POLICY` | **60 per 15 min** | scope + IP | the ceiling over the identity-keyed surfaces; separately, scope `api-auth-write` meters other `POST /api/auth/*` |
+| `API_POLICY` | **100 per min** | scope + IP | two buckets: `GET /api/auth/*`, and `/api/*` + the public PII surface (`/`, `/i/*`, `/receipts/*`) **for anonymous callers only** |
+| `AUTH_VELOCITY_POLICY` | **100 per 5 min** | one global key ×2 | the botnet detector — one bucket alerts on every surface, one escalates on sign-in only |
 
 **Auth buckets are composite: `(scope, network, account)`, under a per-network
 ceiling.** Neither half works alone. A purely per-IP limit punishes the wrong
@@ -563,8 +564,8 @@ people — the service desk shares one NAT egress IP, so one person mistyping
 their password five times would lock out every colleague. A purely composite key
 is not a limit at all — the email is supplied by whoever is submitting the form,
 so rotating it mints a fresh 5-attempt bucket and one host could spray thousands
-of accounts. Together: five failures per account per network, under twenty
-failures per network. The email is **hashed** (`rateLimitIdentity`, SHA-256
+of accounts. Together: five failures per account per network, under sixty
+attempts per network. The email is **hashed** (`rateLimitIdentity`, SHA-256
 truncated to 64 bits) before it becomes a key — "who tried to sign in as whom"
 must not sit in a third-party Redis or a log line — and normalised first, so
 capitalisation is not a fresh budget.
@@ -595,10 +596,38 @@ read, i.e. a database query, on the one path an unauthenticated attacker can
 hammer. `isApiAuthPath` matches on a path **segment**, so a future `/api/authors`
 is not silently exempted from the login gate.
 
-**Sign-in has ONE budget across two surfaces.** `loginAction` and the proxy's
-`/api/auth/*` mutation gate share the `"login"` scope. `POST
-/api/auth/callback/credentials` is a working sign-in path, so separate scopes
-would have meant ten guesses per window while this table said five.
+**`POST /api/auth/callback/*` is CLOSED (404), not throttled.** It is a fully
+working second front door to the credential check, and one this app never uses —
+`loginAction` calls `signIn()` in process. Left open it walked around *all three*
+protections layered onto the Server Action: the Turnstile challenge, the
+per-account composite bucket (the proxy cannot key on an email that lives in the
+POST body it must not consume), and the botnet counter, which only `loginAction`
+feeds. `GET` of a callback path is still allowed, for any OAuth-style provider
+added later.
+
+**Nothing else may borrow the `login` scope.** Other `/api/auth/*` writes are
+metered under `api-auth-write`. Sharing it was a whole-desk lockout waiting to
+happen: `POST /api/auth/signout` needs no CSRF token, no body and no session, so
+60 of them from anywhere would fill the very bucket that gates sign-in and refuse
+every technician behind that egress for fifteen minutes — the failure the
+narrow-bucket-first ordering exists to prevent, reached through a second door.
+The reason the scopes were shared is gone: the credentials callback is closed.
+
+**A login POST carrying `X-Auth-Return-Redirect` is refused outright.**
+`signIn()` copies the incoming request headers into the request it hands to
+`@auth/core` (`new Headers(await nextHeaders())`), and that library treats the
+header as *"return the error instead of throwing it"*. A crafted login POST
+carrying it therefore turned a **wrong password into a `NEXT_REDIRECT`** —
+indistinguishable from success — so the action refunded the token and told the
+detector nothing: unlimited per-account guessing, silently. It is charged as a
+failed attempt rather than ignored, so probing costs what guessing costs.
+
+> The header guard is belt and braces, not the fix. `loginAction` no longer
+> infers success from a thrown redirect at all: it calls `signIn(…, { redirect:
+> false })`, treats a returned `?error=` URL as a failed attempt, and issues the
+> `redirect()` itself. Blacklisting one header would have closed today's
+> instance while any future change that turns an `AuthError` into a redirect
+> silently re-opened it — and this is a beta dependency.
 
 **The auth budget is spent up front and REFUNDED on success.** Checking the
 bucket first and charging only failures reads better but is a
@@ -617,8 +646,22 @@ does **not** refund: a crash is not evidence the credentials were right.
   ceiling first meant 60 cheap requests naming one address — 55 of them refused
   by the per-account bucket and still charged — locked every colleague behind
   that egress out of sign-in for fifteen minutes, which is exactly the failure
-  the composite key exists to prevent. If the ceiling then refuses, the narrow
-  token is handed back: the account did not get its attempt.
+  the composite key exists to prevent.
+- **A ceiling refusal does not refund the narrow token either.**
+  `resetRateLimit` EMPTIES a bucket rather than decrementing it, so "handing it
+  back" let an attacker who saturates the ceiling with throwaway addresses wipe
+  a real account's failure count on every subsequent attempt — lifting the
+  effective per-account guess rate from 5 to 60 — and put an O(keyspace) Redis
+  `SCAN` on a path an unauthenticated caller controls. Over-charging one token
+  during an attack is the safe direction.
+- **Only an identity-keyed bucket may ever be refunded.** The PIN-unlock bucket
+  is `(scope, ip)` — shared by everyone on that network — so refunding it on a
+  correct PIN handed an attacker on the same egress a fresh five guesses every
+  time a colleague unlocked legitimately. It is no longer refunded; a successful
+  unlock costs one of the five, which the budget absorbs. The reset-submit
+  bucket gained a **token hash** instead, which makes it the caller's own and
+  therefore safe to refund — and stops five people with expired links locking
+  out a sixth holding a valid one.
 - *Accepted cost:* the refund is `resetUsedTokens`, which on Upstash `SCAN`s for
   the identifier's keys — O(keyspace), not O(1). It runs only on SUCCESS, tens
   of times a day, never on the failure path an attacker controls. Do not move it
@@ -661,6 +704,24 @@ throttled requests, malformed submissions or challenge refusals, which never
 reached a password; counting those would let one host raise the app-wide alarm
 without guessing anything. The state clears on its own as the window slides.
 
+**Two buckets, because the detector has two jobs and only one of them may be
+attacker-triggerable.**
+- **Alerting** counts every guessable surface — sign-in, a wrong PIN at
+  `/unlock`, a bad reset token. Broad is right: a blind spot costs the whole
+  feature, a false alarm costs a log line.
+- **Escalation** (strict Turnstile) counts *sign-in failures only*. `/unlock`
+  needs no account and carries no challenge of its own, so letting it raise the
+  escalation would hand an unauthenticated attacker a cheap global switch: fill
+  the bucket, and every sign-in whose Turnstile verification is `unreachable` is
+  refused app-wide. That is exactly the failure this section opens with — a
+  state an attacker can trigger turns the detector into the vulnerability.
+
+**The escalation LATCHES for a full window.** Refused hits are deliberately not
+recorded, so at exactly the threshold the moment the oldest entry ages out the
+bucket reports room again; an unlatched check would flicker off request by
+request mid-attack and wave through roughly half the unverifiable submissions it
+exists to refuse.
+
 **Anonymous requests that do not present as a browser are refused (403).**
 `looksAutomated` in `src/proxy.ts`: a missing or blank `User-Agent` is the strong
 signal (every real browser sends one), plus a short list of default automation
@@ -690,11 +751,17 @@ local work; never set it in a deployed environment.
 
 ## 13. CAPTCHA — Cloudflare Turnstile
 
-**Where.** The two unauthenticated forms that do work for an anonymous caller:
-`/login` and `/forgot-password`. `src/components/TurnstileWidget.tsx` renders the
-widget; `loginAction` and `requestPasswordResetAction` verify the token
+**Where.** The three unauthenticated forms that do work for an anonymous caller:
+`/login`, `/forgot-password` and `/reset-password`.
+`src/components/TurnstileWidget.tsx` renders the widget; `loginAction`,
+`requestPasswordResetAction` and `resetPasswordAction` verify the token
 server-side against `challenges.cloudflare.com/turnstile/v0/siteverify`.
 `src/lib/turnstile.ts`
+
+> `/reset-password` got the challenge last, and is the one surface where a
+> correct guess is an outright **account takeover** rather than a step towards
+> one. It was also escalating to a mitigation (strict Turnstile) that it did not
+> itself render.
 
 **Config-gated, off until both keys are set.** `NEXT_PUBLIC_TURNSTILE_SITE_KEY`
 (public by design — the client needs it) and `TURNSTILE_SECRET_KEY`. **Both** are
@@ -758,6 +825,15 @@ real browser and real keys: it happens on a fast submit. The button is
 *released* if the challenge errors outright (blocked CDN, offline), because a
 button that can never be pressed, with nothing explaining why, is worse than a
 refusal that says something.
+
+**The hold has a 15-second deadline, re-armed on EVERY return to `pending`.**
+Turnstile can render, fire no error, and simply never call back — that is what
+it does to a browser it distrusts, and it is observable (it is how Playwright
+behaves against real keys). Some real visitors land there too: a stale WebView,
+a hardened privacy browser, a CDN hiccup. Armed only at mount, the deadline was
+already spent by the time it was needed: the commonest way to reach `pending`
+again is a **single mistyped password**, and the form could then hang forever
+with nothing to click. A token expiring on an idle tab is the same path.
 
 **Turnstile refuses automated browsers, including our own test suite.** With
 real keys, Playwright's Chromium renders the widget, fires no error — so the

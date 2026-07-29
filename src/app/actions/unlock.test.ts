@@ -110,14 +110,36 @@ describe("unlockAction", () => {
       expect(verifyPin.mock.calls.length).toBe(spentCalls);
     });
 
-    it("does not charge a CORRECT PIN against the budget", async () => {
-      // The public gate is one shared PIN behind (typically) one office IP. If
-      // success spent a token, five people unlocking would lock out the sixth.
+    it("CHARGES a correct PIN too, because the bucket is shared", async () => {
+      // Deliberate reversal. Refunding on success looked kind — five people
+      // unlocking would otherwise spend the budget — but this bucket is keyed
+      // `(scope, ip)` and therefore SHARED by everyone on that network, and
+      // `resetRateLimit` empties a bucket rather than decrementing it. So the
+      // refund handed an attacker sitting on the same egress a fresh five
+      // guesses at an 8-digit secret every time a colleague unlocked
+      // legitimately; on a busy morning the cap was effectively unbounded.
       verifyPin.mockResolvedValue(true);
-      for (let i = 0; i < AUTH_POLICY.limit * 3; i++) {
+      for (let i = 0; i < AUTH_POLICY.limit; i++) {
         await expect(unlockAction(undefined, fd({ pin: "12345678", next: "/i/x" })))
           .rejects.toThrow("REDIRECT:/i/x");
       }
+      const res = await unlockAction(undefined, fd({ pin: "12345678", next: "/i/x" }));
+      expect(res.error).toMatch(/Too many attempts/);
+    });
+
+    it("does not let a colleague's correct PIN refill an attacker's guesses", async () => {
+      // The property the refund destroyed, stated directly.
+      verifyPin.mockResolvedValue(false);
+      for (let i = 0; i < AUTH_POLICY.limit - 1; i++) {
+        await unlockAction(undefined, fd({ pin: "00000000", next: "/i/x" }));
+      }
+      verifyPin.mockResolvedValue(true);
+      await expect(unlockAction(undefined, fd({ pin: "12345678", next: "/i/x" })))
+        .rejects.toThrow("REDIRECT:/i/x");
+
+      verifyPin.mockResolvedValue(false);
+      const res = await unlockAction(undefined, fd({ pin: "00000001", next: "/i/x" }));
+      expect(res.error).toMatch(/Too many attempts/);
     });
 
     it("does not charge a malformed submission against the budget", async () => {

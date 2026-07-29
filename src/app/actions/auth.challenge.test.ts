@@ -118,7 +118,7 @@ describe("loginAction — Turnstile under a detected attack", () => {
   // under test, and pushing 100 real logins through would trip the per-IP
   // limiter first and prove nothing about the velocity state.
   const elevate = async () => {
-    for (let i = 0; i < AUTH_VELOCITY_POLICY.limit; i++) await recordAuthFailure();
+    for (let i = 0; i < AUTH_VELOCITY_POLICY.limit; i++) await recordAuthFailure("login");
     expect(await authVelocityElevated()).toBe(true);
   };
 

@@ -3,6 +3,18 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-07-29
+
+### Fixed
+- **The browser check now gives up after 15 seconds** rather than leaving the Sign in button disabled forever — including after a mistyped password, which is the commonest way to hit it. Cloudflare sometimes renders the check and then simply never answers; a few real browsers (older in-app browsers, hardened privacy browsers) land in that state, and they were left with a button that could never be pressed and nothing explaining why.
+- **A failed search no longer reports "No matches."** If the public search is temporarily throttled or unreachable it now says so, instead of telling you your serial number does not exist.
+- **Resetting a password is now counted per link rather than per network.** Five people clicking yesterday's expired reset links used to lock out the sixth, who was holding a perfectly good one. The reset form also now carries the same browser check as sign-in — it is the one place where a correct guess would hand over an account outright.
+
+### Security
+- **Signing out can no longer lock the office out of signing in.** An unauthenticated request to the sign-out endpoint shared a budget with sign-in, so 60 of them from anywhere would have refused every technician behind the same internet connection for fifteen minutes.
+- **Entering the correct public PIN no longer resets the guess counter for everyone on that network**, which had let someone sharing the connection get a fresh five guesses every time a colleague unlocked legitimately.
+- **A distributed attack on the public PIN can no longer tighten sign-in for everybody.** Wrong PINs and bad reset links still raise an alert; only failed sign-ins now trigger the stricter browser check, so the alarm cannot be used as a lever against the app.
+
 ## 2026-07-28
 
 ### Added

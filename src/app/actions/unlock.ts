@@ -4,13 +4,12 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { verifyPin } from "@/lib/public-access";
 import { recordAuthFailure } from "@/lib/auth-velocity";
+import { THROTTLED } from "@/app/actions/throttled";
 import {
   AUTH_POLICY,
   clientIp,
   consumeRateLimit,
-  formatRetryAfter,
   rateLimitKey,
-  resetRateLimit,
 } from "@/lib/rate-limit";
 import {
   signUnlockValue,
@@ -40,9 +39,9 @@ export async function unlockAction(_prev: unknown, formData: FormData) {
   const rlKey = rateLimitKey(AUTH_POLICY, clientIp(await headers()), "unlock");
   const gate = await consumeRateLimit(AUTH_POLICY, rlKey);
   if (!gate.allowed) {
-    return {
-      error: `Too many attempts from this network. Try again ${formatRetryAfter(gate.retryAfterSeconds)}.`,
-    };
+    // Same wording as the auth actions, from the same helper — a hand-copied
+    // duplicate drifts the moment one of them is reworded.
+    return THROTTLED(gate.retryAfterSeconds);
   }
 
   let ok = false;
@@ -63,7 +62,14 @@ export async function unlockAction(_prev: unknown, formData: FormData) {
     await new Promise((r) => setTimeout(r, 400));
     return { error: "Incorrect PIN." };
   }
-  await resetRateLimit(AUTH_POLICY, rlKey);
+  // NO refund here, deliberately. `resetRateLimit` empties a bucket, and this
+  // one is keyed `(scope, ip)` — SHARED by everyone on that network. Handing it
+  // back on success would mean every colleague who types the correct PIN wipes
+  // the counter and gives an attacker sitting on the same egress a fresh five
+  // guesses at an 8-digit secret. On a busy morning the cap becomes unbounded.
+  // The refund pattern is only safe on a bucket keyed to the caller own
+  // identity; see the warning on `resetRateLimit`. Costing a successful unlock
+  // one of five tokens is what the budget is for.
 
   const secret = process.env.AUTH_SECRET ?? "";
   const secure = process.env.NODE_ENV === "production";

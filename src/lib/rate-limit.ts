@@ -396,10 +396,17 @@ export function __resetRateLimitStateForTests() {
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
-/** Disable switch for local work. Never set this in a deployed environment. */
-function disabled(): boolean {
+/**
+ * Disable switch for local work. Never set this in a deployed environment.
+ *
+ * Exported because `src/proxy.ts` gates its User-Agent filter on the same
+ * switch; a second copy of the env-var name meant renaming it would silently
+ * disable only half the anti-abuse surface.
+ */
+export function rateLimitDisabled(): boolean {
   return process.env.RATE_LIMIT_DISABLED === "true";
 }
+const disabled = rateLimitDisabled;
 
 function allow(policy: RateLimitPolicy): RateLimitVerdict {
   return {

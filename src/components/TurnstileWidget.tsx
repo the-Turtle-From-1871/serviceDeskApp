@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 // The Cloudflare Turnstile widget, rendered EXPLICITLY rather than by the
 // script's own class scan.
@@ -125,28 +125,54 @@ export function TurnstileWidget({
     onStatusRef.current = onStatus;
   });
 
-  useEffect(() => {
-    let cancelled = false;
-    const container = containerRef.current;
-    if (!container) return;
+  // The deadline lives OUTSIDE the mount effect because every transition back
+  // to `pending` needs one, not just the first.
+  //
+  // Armed only on mount, it was cleared by the first verdict and never
+  // re-armed — so the commonest path there is, a single mistyped password,
+  // could hang the form forever: `resetOn` sets `pending`, Cloudflare (now more
+  // suspicious after a failed sign-in) never calls back, and the button stays
+  // disabled at "Checking your browser…" with nothing to click. Only a full
+  // reload recovered. Same via `expired-callback` on a tab left open past the
+  // ~5-minute token life.
+  const deadlineRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const cancelledRef = useRef(false);
 
-    // Cleared by the first verdict of any kind, so a widget that answers
-    // normally never sees it.
-    let deadline: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
-      deadline = undefined;
-      if (!cancelled) {
+  const clearDeadline = useCallback(() => {
+    if (deadlineRef.current) {
+      clearTimeout(deadlineRef.current);
+      deadlineRef.current = undefined;
+    }
+  }, []);
+
+  const armDeadline = useCallback(() => {
+    clearDeadline();
+    deadlineRef.current = setTimeout(() => {
+      deadlineRef.current = undefined;
+      if (!cancelledRef.current) {
         console.error("[turnstile] no verdict within the deadline; releasing the form");
         onStatusRef.current?.("error");
       }
     }, VERDICT_DEADLINE_MS);
+  }, [clearDeadline]);
 
-    const report = (s: TurnstileStatus) => {
-      if (deadline) {
-        clearTimeout(deadline);
-        deadline = undefined;
-      }
-      if (!cancelled) onStatusRef.current?.(s);
-    };
+  /** A verdict of any kind ends the wait. `pending` is not a verdict. */
+  const report = useCallback(
+    (s: TurnstileStatus) => {
+      if (s === "pending") armDeadline();
+      else clearDeadline();
+      if (!cancelledRef.current) onStatusRef.current?.(s);
+    },
+    [armDeadline, clearDeadline],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    cancelledRef.current = false;
+    const container = containerRef.current;
+    if (!container) return;
+
+    armDeadline();
 
     loadTurnstileScript()
       .then(() => {
@@ -182,14 +208,15 @@ export function TurnstileWidget({
 
     return () => {
       cancelled = true;
-      if (deadline) clearTimeout(deadline);
+      cancelledRef.current = true;
+      clearDeadline();
       const id = widgetIdRef.current;
       if (id && window.turnstile) {
         window.turnstile.remove(id);
         widgetIdRef.current = undefined;
       }
     };
-  }, [siteKey]);
+  }, [siteKey, armDeadline, clearDeadline, report]);
 
   useEffect(() => {
     // Skipped on mount: `resetOn` starts undefined and there is nothing spent
@@ -198,11 +225,13 @@ export function TurnstileWidget({
     const id = widgetIdRef.current;
     if (id && window.turnstile) {
       // Back to pending until the replacement token arrives, or the form would
-      // let the next attempt through carrying the token that was just spent.
-      onStatusRef.current?.("pending");
+      // let the next attempt through carrying the token that was just spent —
+      // and `report` re-arms the deadline, so a replacement that never comes
+      // releases the form instead of hanging it.
+      report("pending");
       window.turnstile.reset(id);
     }
-  }, [resetOn]);
+  }, [resetOn, report]);
 
   // The widget renders into this node and injects the hidden
   // `cf-turnstile-response` field into the enclosing form itself.

@@ -45,19 +45,41 @@ export const AUTH_VELOCITY_POLICY: RateLimitPolicy = {
 };
 
 /**
- * One bucket for the entire application — the point is that it is not per-IP.
- * Exported so a test can count what actually landed in it rather than inferring
- * it from the threshold.
+ * Two buckets, because the detector has two jobs and only one of them may be
+ * attacker-triggerable.
+ *
+ * `AUTH_VELOCITY_KEY` counts EVERY guessable surface — sign-in, a wrong PIN at
+ * `/unlock`, a bad reset token — and drives the alert. Broad is right here: a
+ * false alarm costs a log line, and a blind spot costs the whole point of the
+ * feature.
+ *
+ * `AUTH_VELOCITY_LOGIN_KEY` counts sign-in failures only and is the ONLY thing
+ * that drives the escalation (strict Turnstile). `/unlock` needs no account and
+ * carries no challenge of its own, so letting it raise the escalation would
+ * hand an unauthenticated attacker a cheap global switch: fill the bucket, and
+ * every sign-in whose Turnstile verification is `unreachable` is refused
+ * app-wide. That is the failure this module's own header warns about — "a
+ * global refusal is a global outage that any attacker could trigger on purpose,
+ * which would turn the detector into the vulnerability" — and it is why the two
+ * jobs do not share a counter.
  */
 export const AUTH_VELOCITY_KEY = "auth-velocity:global";
+export const AUTH_VELOCITY_LOGIN_KEY = "auth-velocity:login";
+
+/** Which surface a failure came from. Only `login` can raise the escalation. */
+export type AuthFailureSurface = "login" | "other";
 
 /** Minimum gap between alert lines, so the alarm cannot become the flood. */
 const ALERT_COOLDOWN_MS = 60_000;
 let lastAlertAt = 0;
 
+/** Epoch ms until which the escalation stays on regardless of the bucket edge. */
+let elevatedUntil = 0;
+
 /** Test seam. */
 export function __resetAuthVelocityStateForTests() {
   lastAlertAt = 0;
+  elevatedUntil = 0;
 }
 
 /**
@@ -69,7 +91,7 @@ export function __resetAuthVelocityStateForTests() {
  *
  * @returns whether the app is now in the elevated state.
  */
-export async function recordAuthFailure(): Promise<boolean> {
+export async function recordAuthFailure(surface: AuthFailureSurface = "other"): Promise<boolean> {
   // The bucket holds `limit` failures per window, so exhausting it IS the
   // threshold crossing — and the state then clears on its own once failures
   // stop, with no separate expiry to maintain.
@@ -80,9 +102,25 @@ export async function recordAuthFailure(): Promise<boolean> {
   // reads the same bucket. Two functions naming one state must agree about
   // when it starts.
   const verdict = await consumeRateLimit(AUTH_VELOCITY_POLICY, AUTH_VELOCITY_KEY);
-  const elevated = !verdict.allowed || verdict.remaining === 0;
-  if (elevated) alertOnce();
-  return elevated;
+  const alerting = !verdict.allowed || verdict.remaining === 0;
+  if (alerting) alertOnce();
+
+  if (surface !== "login") return alerting;
+
+  // Sign-in failures additionally feed the bucket that can flip Turnstile to
+  // strict. Latched: once crossed, the state holds for a full window rather
+  // than tracking the bucket edge. Without the latch it flickers — refused hits
+  // are deliberately not recorded, so at exactly the threshold the moment the
+  // oldest entry ages out `remaining` becomes 1 and the mitigation switches off
+  // until the next failure refills it, waving through roughly half the
+  // unverifiable submissions it exists to refuse.
+  const login = await consumeRateLimit(AUTH_VELOCITY_POLICY, AUTH_VELOCITY_LOGIN_KEY);
+  if (!login.allowed || login.remaining === 0) {
+    elevatedUntil = Date.now() + AUTH_VELOCITY_POLICY.windowSeconds * 1000;
+    alertOnce();
+    return true;
+  }
+  return alerting;
 }
 
 /**
@@ -93,7 +131,11 @@ export async function recordAuthFailure(): Promise<boolean> {
  * mode nobody asked for.
  */
 export async function authVelocityElevated(): Promise<boolean> {
-  const verdict = await readRateLimit(AUTH_VELOCITY_POLICY, AUTH_VELOCITY_KEY);
+  // The latch first: it is what gives the mitigation hysteresis, and it is free
+  // to read. It is per-instance, which is the same limitation everything else
+  // in the in-memory fallback has; the bucket read below is the shared signal.
+  if (Date.now() < elevatedUntil) return true;
+  const verdict = await readRateLimit(AUTH_VELOCITY_POLICY, AUTH_VELOCITY_LOGIN_KEY);
   return !verdict.allowed;
 }
 
