@@ -208,7 +208,10 @@ describe("configuration", () => {
 describe("formatRetryAfter", () => {
   it("rounds up and never promises an earlier retry than the bucket honours", () => {
     expect(formatRetryAfter(1)).toBe("in less than a minute");
-    expect(formatRetryAfter(60)).toBe("in less than a minute");
+    expect(formatRetryAfter(59)).toBe("in less than a minute");
+    // Exactly 60 is a FULL minute away — "in less than a minute" would be the
+    // earlier retry this function promises never to name.
+    expect(formatRetryAfter(60)).toBe("in about 1 minute");
     expect(formatRetryAfter(61)).toBe("in about 2 minutes");
     expect(formatRetryAfter(120)).toBe("in about 2 minutes");
     expect(formatRetryAfter(15 * 60)).toBe("in about 15 minutes");

@@ -3,6 +3,7 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { verifyPin } from "@/lib/public-access";
+import { recordAuthFailure } from "@/lib/auth-velocity";
 import {
   AUTH_POLICY,
   clientIp,
@@ -52,6 +53,12 @@ export async function unlockAction(_prev: unknown, formData: FormData) {
     return { error: "Something went wrong. Please try again." };
   }
   if (!ok) {
+    // Counted app-wide as well as per-IP. The PIN is a single 8-digit secret
+    // shared org-wide, so it is the smallest keyspace in the app and the most
+    // attractive target for a distributed guess — precisely the population the
+    // velocity detector was written for. Feeding it only from `loginAction`
+    // left this surface able to be brute-forced without raising anything.
+    await recordAuthFailure();
     // Slow down online guessing; also masks "no PIN set" vs "wrong PIN".
     await new Promise((r) => setTimeout(r, 400));
     return { error: "Incorrect PIN." };

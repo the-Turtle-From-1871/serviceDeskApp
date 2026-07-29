@@ -37,7 +37,7 @@ async function authRateLimitKey(scope: string) {
 
 /**
  * The pair of buckets an identity-bearing auth surface spends from:
- * `narrow` is (scope, network, account) at 5, `spray` is (scope, network) at 20.
+ * `narrow` is (scope, network, account) at 5, `spray` is (scope, network) at 60.
  *
  * Both are required. The narrow bucket alone is not a limit — the email is
  * attacker-supplied, so rotating it mints a fresh one. The spray bucket alone
@@ -66,19 +66,21 @@ const THROTTLED = (retryAfterSeconds: number) => ({
  * colleague behind that egress out of sign-in for fifteen minutes. That is
  * exactly the failure the composite key exists to prevent, so the ceiling is
  * only ever charged for attempts that got past the per-account gate.
- *
- * If the ceiling then refuses, the narrow token is handed back: the account did
- * not get its attempt, so it should not have paid for one.
  */
 async function spendAuthBudget(keys: { narrow: string; spray: string }) {
   const gate = await consumeRateLimit(AUTH_POLICY, keys.narrow);
   if (!gate.allowed) return THROTTLED(gate.retryAfterSeconds);
 
   const spray = await consumeRateLimit(AUTH_SPRAY_POLICY, keys.spray);
-  if (!spray.allowed) {
-    await resetRateLimit(AUTH_POLICY, keys.narrow);
-    return THROTTLED(spray.retryAfterSeconds);
-  }
+  // The narrow token is NOT handed back here, even though this attempt never
+  // reached a password. `resetRateLimit` empties a bucket rather than
+  // decrementing it, and that turns into a bypass: an attacker who saturates
+  // the shared ceiling with throwaway addresses makes every subsequent attempt
+  // against a real account wipe that account's failure count, so the effective
+  // per-account guess rate becomes the ceiling (60) instead of 5. It would also
+  // put an O(keyspace) Redis SCAN on a path an unauthenticated caller controls.
+  // Over-charging one token during an attack is the cheap, safe direction.
+  if (!spray.allowed) return THROTTLED(spray.retryAfterSeconds);
   return null;
 }
 
@@ -137,6 +139,25 @@ export async function loginAction(_prev: unknown, formData: FormData) {
   const keys = await identityRateLimitKeys("login", email);
   const throttled = await spendAuthBudget(keys);
   if (throttled) return throttled;
+
+  // `signIn()` copies the INCOMING request headers into the request it hands to
+  // @auth/core (`new Headers(await nextHeaders())`, next-auth/lib/actions.js),
+  // and @auth/core treats `X-Auth-Return-Redirect` as "return the error instead
+  // of throwing it" (`if (isAuthError && isRaw && !isRedirect) throw error`).
+  //
+  // So a crafted login POST carrying that one header turns a WRONG password
+  // into a NEXT_REDIRECT — which the catch below would read as success: it
+  // would hand the rate-limit token back and never tell the botnet detector
+  // anything. Unlimited per-account guessing, silently.
+  //
+  // No browser form sends this header; only a crafted request does. It is
+  // charged as a failed attempt rather than merely ignored, so probing costs
+  // the same as guessing.
+  if ((await headers()).has("x-auth-return-redirect")) {
+    console.error("[loginAction] refused a request carrying X-Auth-Return-Redirect");
+    await recordAuthFailure();
+    return { error: "Invalid email or password." };
+  }
 
   // After the limiter (a refused request must cost as little as possible) and
   // before the password check (the challenge exists to keep headless scripts
@@ -267,7 +288,14 @@ export async function resetPasswordAction(_prev: unknown, formData: FormData) {
 
   try {
     const ok = await resetPasswordWithToken(token, password);
-    if (!ok) return { error: "This reset link is invalid or has expired." };
+    if (!ok) {
+      // Counted app-wide: guessing reset tokens is credential guessing, and a
+      // botnet spread thin enough to stay under every per-IP bucket is exactly
+      // what the detector exists for. Feeding it only from `loginAction` left
+      // this surface able to be brute-forced without raising anything.
+      await recordAuthFailure();
+      return { error: "This reset link is invalid or has expired." };
+    }
     await resetRateLimit(AUTH_POLICY, key);
   } catch (e) {
     console.error("[resetPasswordAction] error:", e);

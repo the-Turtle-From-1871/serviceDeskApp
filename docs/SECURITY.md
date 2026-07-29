@@ -791,9 +791,13 @@ Marketplace Redis integration is attached to the Vercel project
 in-memory fallback**, which throttles only requests that happen to land on the
 same warm lambda. Two further accepted properties, both deliberate: a Redis
 outage **allows** traffic rather than locking the desk out, and the identifier
-is the client IP taken from `x-vercel-forwarded-for` / `x-real-ip` /
-`x-forwarded-for` — forgeable if this app is ever served without a proxy that
+is the client IP taken from `x-vercel-forwarded-for` → `x-forwarded-for` →
+`x-real-ip` — forgeable if this app is ever served without a proxy that
 overwrites those headers, and shared by everyone behind one NAT egress.
+`x-real-ip` is DELIBERATELY last: a reverse proxy configured with only
+`proxy_set_header X-Forwarded-For` leaves it client-settable, and preferring it
+there would let one `curl -H` mint a fresh bucket per request and walk through
+every limit in the module.
 
 **2. Public receipts and item pages are enumerable and unauthenticated.**
 *Accepted product requirement*, not a bug — behind the shared PIN when the flag

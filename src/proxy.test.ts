@@ -19,6 +19,7 @@ import {
   API_POLICY,
   AUTH_POLICY,
   AUTH_SPRAY_POLICY,
+  __memoryHitCountForTests,
   __resetRateLimitStateForTests,
   consumeRateLimit,
   rateLimitKey,
@@ -223,16 +224,19 @@ describe("proxy — rate limiting", () => {
 
     it("does not charge reads to the sign-in budget", async () => {
       // GET /api/auth/session and /csrf are how the client discovers state; if
-      // they spent from the 5-per-15-minutes bucket, an ordinary page could
-      // exhaust a user's sign-in budget before they typed a password.
+      // they spent from the sign-in bucket, an ordinary page could exhaust a
+      // user's budget before they typed a password.
+      //
+      // Asserted against the bucket ITSELF, not against a follow-up request to
+      // the credentials callback: that path is unconditionally 404 (two tests
+      // above pin it), so a request there can never return 429 and the
+      // assertion could not fail no matter what the reads charged.
       const ip = "5.0.0.2";
-      for (let i = 0; i < AUTH_POLICY.limit + 3; i++) {
+      for (let i = 0; i < AUTH_SPRAY_POLICY.limit + 3; i++) {
         expect((await runIp(ipRequest({ path: "/api/auth/session", ip }))).status).not.toBe(429);
       }
-      const mutation = await runIp(
-        ipRequest({ path: "/api/auth/callback/credentials", ip, method: "POST" }),
-      );
-      expect(mutation.status).not.toBe(429);
+      expect(__memoryHitCountForTests(rateLimitKey(AUTH_SPRAY_POLICY, ip, "login"))).toBe(0);
+      expect(__memoryHitCountForTests(rateLimitKey(AUTH_POLICY, ip, "login"))).toBe(0);
     });
 
     it("still meters reads under the general policy", async () => {

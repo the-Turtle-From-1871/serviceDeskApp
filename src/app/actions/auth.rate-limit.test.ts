@@ -34,8 +34,9 @@ vi.mock("@/modules/auth/send-password-reset-email", () => ({
 }));
 
 const TEST_IP = "198.51.100.4";
+const extraHeaders = vi.hoisted(() => ({ current: {} as Record<string, string> }));
 vi.mock("next/headers", () => ({
-  headers: async () => new Headers({ "x-forwarded-for": TEST_IP }),
+  headers: async () => new Headers({ "x-forwarded-for": TEST_IP, ...extraHeaders.current }),
 }));
 
 import { loginAction, requestPasswordResetAction, resetPasswordAction } from "./auth";
@@ -59,7 +60,9 @@ const creds = () => fd({ email: "tech@example.com", password: "hunter2hunter2" }
 beforeEach(() => {
   vi.clearAllMocks();
   __resetRateLimitStateForTests();
+  extraHeaders.current = {};
   vi.spyOn(console, "warn").mockImplementation(() => {});
+  vi.spyOn(console, "error").mockImplementation(() => {});
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -155,6 +158,58 @@ describe("loginAction rate limiting", () => {
     signIn.mockRejectedValue(new AuthError("CredentialsSignin"));
     const res = await loginAction(undefined, creds());
     expect(res).toEqual({ error: "Invalid email or password." });
+  });
+
+  it("refuses a request carrying X-Auth-Return-Redirect, and charges it", async () => {
+    // `signIn()` copies the incoming request headers into the request it hands
+    // to @auth/core, which treats this header as "return the error instead of
+    // throwing it". A wrong password then arrives here as a NEXT_REDIRECT —
+    // indistinguishable from success — so the attempt would be refunded and
+    // never counted by the botnet detector. One header, unlimited guessing.
+    signIn.mockRejectedValue(new AuthError("CredentialsSignin"));
+    extraHeaders.current = { "x-auth-return-redirect": "1" };
+
+    const res = await loginAction(undefined, creds());
+    expect(res).toEqual({ error: "Invalid email or password." });
+    // Refused before the password check, not merely tolerated afterwards.
+    expect(signIn).not.toHaveBeenCalled();
+
+    // …and it still cost a token, so probing is not cheaper than guessing.
+    expect(
+      __memoryHitCountForTests(
+        rateLimitKey(AUTH_POLICY, TEST_IP, "login", await rateLimitIdentity("tech@example.com")),
+      ),
+    ).toBe(1);
+  });
+
+  it("does NOT wipe an account's failure count when the shared ceiling refuses", async () => {
+    // `resetRateLimit` empties a bucket rather than decrementing it, so handing
+    // the narrow token "back" when the ceiling refuses is a bypass: saturate the
+    // ceiling with throwaway addresses and every subsequent attempt against a
+    // real account clears that account's counter, lifting the effective
+    // per-account guess rate from 5 to the ceiling.
+    signIn.mockRejectedValue(new AuthError("CredentialsSignin"));
+    const victim = "alice@example.com";
+    const victimKey = rateLimitKey(
+      AUTH_POLICY,
+      TEST_IP,
+      "login",
+      await rateLimitIdentity(victim),
+    );
+
+    // Two real guesses at the victim, then saturate the shared ceiling.
+    await loginAction(undefined, fd({ email: victim, password: "wrong" }));
+    await loginAction(undefined, fd({ email: victim, password: "wrong" }));
+    expect(__memoryHitCountForTests(victimKey)).toBe(2);
+
+    for (let i = 0; i < AUTH_SPRAY_POLICY.limit; i++) {
+      await loginAction(undefined, fd({ email: `filler${i}@example.com`, password: "x" }));
+    }
+
+    // Now ceiling-refused. The victim's count must not be reset by it.
+    const blocked = await loginAction(undefined, fd({ email: victim, password: "wrong" }));
+    expect(blocked?.error).toMatch(/Too many attempts/);
+    expect(__memoryHitCountForTests(victimKey)).toBeGreaterThanOrEqual(2);
   });
 
   it("does not let one person's typos lock out a colleague on the same network", async () => {

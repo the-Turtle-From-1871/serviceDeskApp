@@ -35,7 +35,7 @@ const WATCHED = [
   [/^src\/app\/actions\/auth\.ts$/, "login + reset actions, anti-enumeration (§1, §4)"],
   [/^src\/lib\/public-access(-cookie)?\.ts$/, "the public PIN gate (§3)"],
   [/^src\/app\/actions\/unlock\.ts$/, "the unlock action + cookie flags, anti-guessing delay (§3)"],
-  // The policy numbers (5/15min, 20/15min, 100/min), the composite key shape,
+  // The policy numbers (5/15min, 60/15min, 100/min), the composite key shape,
   // the spend-then-refund split and the fail-OPEN behavior are all posture, not
   // implementation detail — changing any of them changes what the app is
   // protected against.
@@ -52,6 +52,11 @@ const WATCHED = [
   // lifecycle, both of which can silently produce a tokenless form.
   [/^src\/components\/TurnstileWidget\.tsx$/, "the CAPTCHA widget lifecycle (§13)"],
   [/^src\/app\/(login|forgot-password)\/page\.tsx$/, "whether the CAPTCHA is rendered (§13)"],
+  // …and whether a tokenless submission can be SENT: the forms own the state
+  // that holds the submit button until the challenge answers. Deleting that
+  // one `disabled` expression reintroduces the bug the third commit fixed.
+  [/^src\/app\/login\/LoginForm\.tsx$/, "the submit hold on the challenge (§13)"],
+  [/^src\/app\/forgot-password\/ForgotPasswordForm\.tsx$/, "the submit hold on the challenge (§13)"],
   [/^src\/app\/admin\/actions\/public-access\.ts$/, "setting/rotating the public PIN (§3)"],
   [/^src\/lib\/crypto\.ts$/, "the Ed25519 receipt seal (§7)"],
   // Deliberately the leaf allowlist, NOT the whole of items.service.ts: adding a

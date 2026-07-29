@@ -110,12 +110,19 @@ export type RateLimitVerdict = {
 /**
  * Best-effort client IP from request headers.
  *
- * Order matters. `x-vercel-forwarded-for` is stamped by Vercel's edge and
- * cannot be set by the client, so it is preferred where it exists. A
- * client-supplied `X-Forwarded-For` is only trustworthy because every
- * deployment of this app sits behind a proxy that overwrites it — running it
- * naked on a public port would make the identifier forgeable. Recorded in
- * docs/SECURITY.md rather than pretended away.
+ * Order matters, and EVERY entry here is a header a client can send. They are
+ * trustworthy only because the platform in front of this app overwrites them:
+ * `x-vercel-forwarded-for` is stamped by Vercel's edge and cannot be forged
+ * through it, so it comes first. `x-forwarded-for` is next, leftmost entry.
+ * `x-real-ip` is LAST on purpose — Vercel sets it, but a reverse proxy
+ * configured with only `proxy_set_header X-Forwarded-For` does not, and
+ * preferring it there would let `curl -H 'x-real-ip: <random>'` mint a fresh
+ * bucket per request and walk straight through every limit in this module.
+ *
+ * Serving this app without such a proxy makes the identifier forgeable in both
+ * directions — unlimited guessing for the attacker, and the ability to burn a
+ * shared office ceiling on their behalf. Recorded in docs/SECURITY.md under
+ * Known gaps rather than pretended away.
  *
  * Returns null when no header identifies the caller (local `next dev`), which
  * callers collapse into a single shared bucket — see `rateLimitKey`.
@@ -123,8 +130,8 @@ export type RateLimitVerdict = {
 export function clientIp(headers: Headers): string | null {
   const candidates = [
     headers.get("x-vercel-forwarded-for"),
-    headers.get("x-real-ip"),
     headers.get("x-forwarded-for"),
+    headers.get("x-real-ip"),
   ];
   for (const raw of candidates) {
     if (!raw) continue;
@@ -316,11 +323,13 @@ function memoryReading(
   now: number,
   allowed: boolean,
 ): Reading {
-  // The bucket frees a slot when the hit that put it at the limit ages out —
-  // which is the `limit`-th newest, NOT the oldest. They coincide while the
-  // array is exactly full; taking `hits[0]` unconditionally would understate
-  // the wait, and `Retry-After` is a promise to the caller.
-  const pivot = hits[Math.max(0, hits.length - policy.limit)];
+  // The oldest hit, because `consume` refuses before pushing once the array is
+  // full — so it can never hold more than `policy.limit` entries and the
+  // "limit-th newest" is always the first. (An earlier version generalised this
+  // to `hits[hits.length - limit]`, which read as prudent but described a state
+  // the module structurally prevents; dead arithmetic beside a comment
+  // explaining it is how the next reader gets talked into loosening the bound.)
+  const pivot = hits[0];
   return {
     allowed,
     limit: policy.limit,
@@ -421,7 +430,10 @@ function verdict(reading: Reading): RateLimitVerdict {
  * actually honour.
  */
 export function formatRetryAfter(seconds: number): string {
-  if (seconds <= 60) return "in less than a minute";
+  // `< 60`, not `<= 60`: at exactly 60 the bucket is a full minute away, and
+  // "in less than a minute" would be the earlier retry this function promises
+  // never to name.
+  if (seconds < 60) return "in less than a minute";
   const minutes = Math.ceil(seconds / 60);
   return `in about ${minutes} minute${minutes === 1 ? "" : "s"}`;
 }

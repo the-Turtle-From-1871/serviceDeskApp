@@ -28,6 +28,23 @@ declare global {
 
 const SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
 
+/**
+ * How long to wait for a verdict before releasing the form anyway.
+ *
+ * Turnstile can render, fire no error, and simply never call back — that is
+ * what it does to a browser it distrusts, and it is observable: it is exactly
+ * how Playwright behaves against real keys (see `playwright.config.ts`). Some
+ * real visitors land in the same bucket: a stale WebView, a hardened privacy
+ * browser, a CDN hiccup after the script loaded. Without a deadline they get a
+ * permanently disabled Sign in button and no explanation — an unrecoverable
+ * lockout that no server-side fail-open can rescue, because the form never
+ * submits.
+ *
+ * Releasing costs nothing: the submission is still verified server-side and
+ * refused if the token is missing, and that refusal at least says something.
+ */
+const VERDICT_DEADLINE_MS = 15_000;
+
 // One shared promise per document: both /login and /forgot-password mount this,
 // and a second <script> tag would re-register the global and orphan live
 // widgets. Module scope is per-tab, which is the right lifetime.
@@ -112,7 +129,22 @@ export function TurnstileWidget({
     let cancelled = false;
     const container = containerRef.current;
     if (!container) return;
+
+    // Cleared by the first verdict of any kind, so a widget that answers
+    // normally never sees it.
+    let deadline: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
+      deadline = undefined;
+      if (!cancelled) {
+        console.error("[turnstile] no verdict within the deadline; releasing the form");
+        onStatusRef.current?.("error");
+      }
+    }, VERDICT_DEADLINE_MS);
+
     const report = (s: TurnstileStatus) => {
+      if (deadline) {
+        clearTimeout(deadline);
+        deadline = undefined;
+      }
       if (!cancelled) onStatusRef.current?.(s);
     };
 
@@ -150,6 +182,7 @@ export function TurnstileWidget({
 
     return () => {
       cancelled = true;
+      if (deadline) clearTimeout(deadline);
       const id = widgetIdRef.current;
       if (id && window.turnstile) {
         window.turnstile.remove(id);
