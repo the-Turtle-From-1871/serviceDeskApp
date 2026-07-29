@@ -146,8 +146,10 @@ backfilled. Apply commits.
 
 **Rename semantics.** Changing a unit's `fullName` rewrites every `Item.homeUnit`
 holding the old value in one `updateMany`, with the affected count shown before
-applying. This requires adding `homeUnit` to the `ItemEdit` logged-field set — it
-is not there today, so a mass change would otherwise leave no history.
+applying, and writes an `ItemEdit` row per affected item so the mass change
+leaves history. (`homeUnit` is already a member of `ItemLoggedFields` in
+`item-diff.ts` — the importer just never populates it — so no type change is
+needed, only passing the field.)
 
 **Delete.** Refused while any item still carries the name, mirroring categories.
 The item would otherwise hold a value that appears in no picker.
