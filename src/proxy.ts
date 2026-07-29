@@ -8,7 +8,6 @@ import {
 } from "@/lib/public-access-cookie";
 import {
   API_POLICY,
-  AUTH_POLICY,
   AUTH_SPRAY_POLICY,
   clientIp,
   consumeRateLimit,
@@ -38,9 +37,9 @@ import {
 // Actions, and a 429 to an action POST surfaces as an unhandled error boundary
 // rather than a message the user can read. Those limits live inside the actions
 // themselves (`src/app/actions/auth.ts`, `src/app/actions/unlock.ts`), which can
-// return an ordinary form error. `loginAction` shares the `"login"` scope with
-// the `/api/auth` mutation gate below so the two surfaces cannot add up to ten
-// guesses per window.
+// return an ordinary form error. The credential endpoint that would otherwise
+// be a second door to the same capability is closed outright below, so there is
+// no second budget to keep in step with theirs.
 
 /** 429 with the headers a well-behaved client needs to back off. */
 function tooManyRequests(verdict: RateLimitVerdict) {

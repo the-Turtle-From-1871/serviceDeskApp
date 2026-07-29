@@ -1,8 +1,8 @@
 "use client";
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { requestPasswordResetAction } from "@/app/actions/auth";
-import { TurnstileWidget } from "@/components/TurnstileWidget";
+import { TurnstileWidget, type TurnstileStatus } from "@/components/TurnstileWidget";
 
 // The interactive part of /forgot-password — it switches between the form and a
 // "check your email" confirmation based on the action result, so it owns both
@@ -12,6 +12,12 @@ import { TurnstileWidget } from "@/components/TurnstileWidget";
 // for why the page resolves it server-side.
 export function ForgotPasswordForm({ turnstileSiteKey }: { turnstileSiteKey: string | null }) {
   const [state, action, pending] = useActionState(requestPasswordResetAction, undefined);
+  // See LoginForm for why the button waits: submitting before Cloudflare
+  // answers sends a tokenless form and is refused, for a valid request.
+  const [challenge, setChallenge] = useState<TurnstileStatus>(
+    turnstileSiteKey ? "pending" : "ready",
+  );
+  const waiting = challenge === "pending";
 
   if (state && "ok" in state) {
     return (
@@ -37,9 +43,13 @@ export function ForgotPasswordForm({ turnstileSiteKey }: { turnstileSiteKey: str
           <label className="label" htmlFor="email">Email</label>
           <input id="email" className="input" name="email" type="email" required autoComplete="email" />
         </div>
-        {turnstileSiteKey && <TurnstileWidget siteKey={turnstileSiteKey} resetOn={state} />}
+        {turnstileSiteKey && (
+          <TurnstileWidget siteKey={turnstileSiteKey} resetOn={state} onStatus={setChallenge} />
+        )}
         {state && "error" in state && state.error && <p role="alert" className="alert-error">{state.error}</p>}
-        <button disabled={pending} type="submit" className="btn btn-primary btn-block">{pending ? "Sending…" : "Send reset link"}</button>
+        <button disabled={pending || waiting} type="submit" className="btn btn-primary btn-block">
+          {pending ? "Sending…" : waiting ? "Checking your browser…" : "Send reset link"}
+        </button>
       </form>
     </>
   );

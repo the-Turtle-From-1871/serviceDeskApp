@@ -750,6 +750,23 @@ that challenges visitors and is then never verified.
 **The widget is `interaction-only`** — invisible unless Cloudflare decides the
 visitor must interact.
 
+**The submit button is held until a token exists** ("Checking your browser…").
+Filling in an email and password takes a second or two; submitting first sends a
+tokenless form, which the server correctly refuses with "could not verify that
+request came from a browser" — for a completely valid login. Verified against a
+real browser and real keys: it happens on a fast submit. The button is
+*released* if the challenge errors outright (blocked CDN, offline), because a
+button that can never be pressed, with nothing explaining why, is worse than a
+refusal that says something.
+
+**Turnstile refuses automated browsers, including our own test suite.** With
+real keys, Playwright's Chromium renders the widget, fires no error — so the
+site key and hostname are accepted — and simply never receives a token. That is
+the product working. It does mean `tests/e2e` cannot sign in against real keys,
+so `playwright.config.ts` pins Cloudflare's always-pass **test** keys for the
+server it starts (`1x0000…`). Don't "fix" a hanging e2e sign-in by weakening the
+challenge.
+
 ---
 
 ## Known gaps & accepted risks

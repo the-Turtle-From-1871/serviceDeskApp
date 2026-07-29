@@ -64,6 +64,13 @@ function loadTurnstileScript(): Promise<void> {
   return scriptPromise;
 }
 
+/**
+ * `pending` — no usable token yet (still solving, or the visitor must interact).
+ * `ready` — a token is in the form and the submission will carry it.
+ * `error` — the challenge could not run at all (blocked CDN, offline).
+ */
+export type TurnstileStatus = "pending" | "ready" | "error";
+
 export function TurnstileWidget({
   siteKey,
   /**
@@ -74,23 +81,52 @@ export function TurnstileWidget({
    * changes even when the message is the same.
    */
   resetOn,
+  /**
+   * Reports whether a token is available yet, so the form can hold the submit
+   * button until it is.
+   *
+   * Without this the challenge is a race the user loses: typing an email and
+   * password takes a second or two, and submitting before Cloudflare has
+   * answered sends a tokenless form, which the server correctly refuses with
+   * "could not verify that request came from a browser" — for a completely
+   * valid login. Verified: it happens on a fast submit against real keys.
+   */
+  onStatus,
 }: {
   siteKey: string;
   resetOn?: unknown;
+  onStatus?: (status: TurnstileStatus) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const widgetIdRef = useRef<string | undefined>(undefined);
+  // Held in a ref so the render effect does not re-run (and re-render the
+  // widget) every time the parent passes a new inline callback. Assigned in an
+  // effect rather than during render — a ref write during render is a lint
+  // error and, under concurrent rendering, a real hazard.
+  const onStatusRef = useRef(onStatus);
+  useEffect(() => {
+    onStatusRef.current = onStatus;
+  });
 
   useEffect(() => {
     let cancelled = false;
     const container = containerRef.current;
     if (!container) return;
+    const report = (s: TurnstileStatus) => {
+      if (!cancelled) onStatusRef.current?.(s);
+    };
 
     loadTurnstileScript()
       .then(() => {
         if (cancelled || !window.turnstile || widgetIdRef.current) return;
         widgetIdRef.current = window.turnstile.render(container, {
           sitekey: siteKey,
+          callback: () => report("ready"),
+          // A token lives ~5 minutes. `refresh-expired: auto` fetches a new one,
+          // so this is a brief gap, not a dead end — but the form must not
+          // submit during it.
+          "expired-callback": () => report("pending"),
+          "error-callback": () => report("error"),
           // Invisible in the ordinary case: the widget shows itself only when
           // Cloudflare decides the visitor must interact.
           appearance: "interaction-only",
@@ -109,6 +145,7 @@ export function TurnstileWidget({
         // a message the user can act on, and a broken widget must not replace
         // the form with an error screen.
         console.error("[turnstile] widget unavailable", err);
+        report("error");
       });
 
     return () => {
@@ -126,7 +163,12 @@ export function TurnstileWidget({
     // yet. Resetting here would throw away the challenge just rendered.
     if (resetOn === undefined) return;
     const id = widgetIdRef.current;
-    if (id && window.turnstile) window.turnstile.reset(id);
+    if (id && window.turnstile) {
+      // Back to pending until the replacement token arrives, or the form would
+      // let the next attempt through carrying the token that was just spent.
+      onStatusRef.current?.("pending");
+      window.turnstile.reset(id);
+    }
   }, [resetOn]);
 
   // The widget renders into this node and injects the hidden

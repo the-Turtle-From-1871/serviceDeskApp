@@ -1,8 +1,8 @@
 "use client";
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { loginAction } from "@/app/actions/auth";
-import { TurnstileWidget } from "@/components/TurnstileWidget";
+import { TurnstileWidget, type TurnstileStatus } from "@/components/TurnstileWidget";
 
 // The interactive part of /login. Split out so the page shell (brand, headings)
 // stays a Server Component instead of shipping as client JS.
@@ -14,6 +14,20 @@ import { TurnstileWidget } from "@/components/TurnstileWidget";
 // gains nothing.
 export function LoginForm({ turnstileSiteKey }: { turnstileSiteKey: string | null }) {
   const [state, action, pending] = useActionState(loginAction, undefined);
+  // `ready` when there is no challenge to wait for, so the button behaves
+  // exactly as it did before Turnstile existed.
+  const [challenge, setChallenge] = useState<TurnstileStatus>(
+    turnstileSiteKey ? "pending" : "ready",
+  );
+
+  // Held until Cloudflare answers. Filling in an email and password takes a
+  // second or two, and submitting first sends a tokenless form — which the
+  // server correctly refuses with "could not verify that request came from a
+  // browser", for a completely valid login. An `error` state still submits: the
+  // challenge could not run at all, and a button that can never be pressed is
+  // worse than a refusal that says something.
+  const waiting = challenge === "pending";
+
   return (
     <form action={action} className="stack">
       <div className="field">
@@ -28,10 +42,12 @@ export function LoginForm({ turnstileSiteKey }: { turnstileSiteKey: string | nul
       {/* `resetOn={state}` replaces the spent challenge after a rejected
           attempt — a token is single-use, so without it the second sign-in try
           would be refused for a reason the user cannot see. */}
-      {turnstileSiteKey && <TurnstileWidget siteKey={turnstileSiteKey} resetOn={state} />}
+      {turnstileSiteKey && (
+        <TurnstileWidget siteKey={turnstileSiteKey} resetOn={state} onStatus={setChallenge} />
+      )}
       {state?.error && <p role="alert" className="alert-error">{state.error}</p>}
-      <button disabled={pending} type="submit" className="btn btn-primary btn-block">
-        {pending ? "Signing in…" : "Sign in"}
+      <button disabled={pending || waiting} type="submit" className="btn btn-primary btn-block">
+        {pending ? "Signing in…" : waiting ? "Checking your browser…" : "Sign in"}
       </button>
     </form>
   );
