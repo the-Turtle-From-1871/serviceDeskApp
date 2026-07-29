@@ -26,15 +26,12 @@ import {
 // cooldown) — throttles email-bombing of a known address.
 const RESET_COOLDOWN_MS = 60_000;
 
-// These three actions are the interactive half of the auth rate limit; the
-// proxy covers `/api/auth/*`. They are limited HERE rather than in the proxy
-// because a 429 to a Server Action POST is not a message — `useActionState`
-// cannot render it, so it escalates to the error boundary and the page breaks
-// with a digest (the same failure mode `unlockAction` documents for a rejected
-// promise). Returning `{ error }` keeps the refusal inside the form.
-async function authRateLimitKey(scope: string) {
-  return rateLimitKey(AUTH_POLICY, clientIp(await headers()), scope);
-}
+// These actions are the interactive half of the auth rate limit; the proxy
+// covers `/api/auth/*`. They are limited HERE rather than in the proxy because a
+// 429 to a Server Action POST is not a message — `useActionState` cannot render
+// it, so it escalates to the error boundary and the page breaks with a digest
+// (the same failure mode `unlockAction` documents for a rejected promise).
+// Returning `{ error }` keeps the refusal inside the form.
 
 /**
  * The pair of buckets an identity-bearing auth surface spends from:
@@ -84,9 +81,28 @@ async function spendAuthBudget(keys: { narrow: string; spray: string }) {
 }
 
 /** Shown for a refused challenge. Deliberately not "you look like a bot". */
-const CHALLENGE_FAILED = {
-  error: "Could not verify that request came from a browser. Please try again.",
-};
+/**
+ * A FUNCTION, not a shared object — the identity has to change every time.
+ *
+ * `useActionState` hands the returned value to the form as `state`, and the
+ * forms pass it to the widget as `resetOn`. Returning one module-level object
+ * meant two consecutive challenge failures produced the SAME identity, React
+ * bailed out of the reset effect, `turnstile.reset()` never ran, and every
+ * later submit re-sent the token Cloudflare had already spent — refused as
+ * `timeout-or-duplicate` forever, recoverable only by reloading the page.
+ * Every other return in this file is a fresh object literal; this was the one
+ * singleton.
+ */
+const CHALLENGE_FAILED = () => ({
+  // Names the likely cause and gives a route out, because for one population
+  // this is not a transient failure: a browser that cannot reach
+  // `challenges.cloudflare.com` will never produce a token, and "please try
+  // again" would be advice that cannot work. See the failure-posture note in
+  // `src/lib/turnstile.ts`.
+  error:
+    "Could not verify that this request came from a browser. If your network blocks " +
+    "Cloudflare, this check cannot complete — contact the service desk.",
+});
 
 /**
  * Run the Turnstile check for one submission.
@@ -102,9 +118,9 @@ async function challenge(formData: FormData, ip: string | null) {
   const outcome = await verifyTurnstile(String(formData.get(TURNSTILE_FIELD) ?? ""), ip);
   if (outcome.ok && outcome.status === "unreachable" && (await authVelocityElevated())) {
     console.error("[turnstile] refusing an unverifiable submission: auth velocity is elevated");
-    return CHALLENGE_FAILED;
+    return CHALLENGE_FAILED();
   }
-  return outcome.ok ? null : CHALLENGE_FAILED;
+  return outcome.ok ? null : CHALLENGE_FAILED();
 }
 
 // PUBLIC BY DESIGN: login/register are the unauthenticated entry to the auth
@@ -126,6 +142,19 @@ export async function loginAction(_prev: unknown, formData: FormData) {
   const throttled = await spendAuthBudget(keys);
   if (throttled) return throttled;
 
+  // Shape-check the address HERE so a malformed one never reaches the detector.
+  //
+  // `authorize()` runs the same Zod check and returns null, which @auth/core
+  // turns into a `CredentialsSignin` — indistinguishable below from a wrong
+  // password, so `email=x` used to record a global auth failure having touched
+  // neither the database nor bcrypt. That is a near-free lever on an app-wide
+  // escalation: two hosts rotating junk addresses could flip Turnstile to
+  // strict for everyone in seconds. The detector's rule is "genuinely failed
+  // credential checks only", and this is what makes the code honour it.
+  if (!emailField.safeParse(email).success) {
+    return { error: "Invalid email or password." };
+  }
+
   // `signIn()` copies the INCOMING request headers into the request it hands to
   // @auth/core (`new Headers(await nextHeaders())`, next-auth/lib/actions.js),
   // and @auth/core treats `X-Auth-Return-Redirect` as "return the error instead
@@ -136,12 +165,13 @@ export async function loginAction(_prev: unknown, formData: FormData) {
   // would hand the rate-limit token back and never tell the botnet detector
   // anything. Unlimited per-account guessing, silently.
   //
-  // No browser form sends this header; only a crafted request does. It is
-  // charged as a failed attempt rather than merely ignored, so probing costs
-  // the same as guessing.
+  // No browser form sends this header; only a crafted request does. It has
+  // already cost a rate-limit token above, which is the right price — it is NOT
+  // reported to the velocity detector, because no password was checked and
+  // "cheap request raises the app-wide alarm" is the lever that turns the
+  // detector into the vulnerability.
   if ((await headers()).has("x-auth-return-redirect")) {
     console.error("[loginAction] refused a request carrying X-Auth-Return-Redirect");
-    await recordAuthFailure("login");
     return { error: "Invalid email or password." };
   }
 
@@ -311,9 +341,12 @@ export async function resetPasswordAction(_prev: unknown, formData: FormData) {
       await recordAuthFailure();
       return { error: "This reset link is invalid or has expired." };
     }
-    // Safe to refund: unlike the unlock bucket, this key carries the token
-    // hash, so it belongs to this reset attempt alone rather than the network.
-    await resetRateLimit(AUTH_POLICY, keys.narrow);
+    // No refund on success, and not because it would be unsafe — because it
+    // would be pointless. The bucket is keyed on the token hash, and a
+    // successful reset CONSUMES the token, so the freed attempts can never be
+    // spent by anyone. All it would buy is the O(keyspace) Redis `SCAN` that
+    // `resetRateLimit` warns about. (Contrast the login refund, which is
+    // genuinely reusable: the email persists.)
   } catch (e) {
     console.error("[resetPasswordAction] error:", e);
     return { error: "Something went wrong. Please try again." };

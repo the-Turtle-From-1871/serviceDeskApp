@@ -368,11 +368,18 @@ describe("resetPasswordAction rate limiting", () => {
     expect(await resetPasswordAction(undefined, submission("good"))).toEqual({ ok: true });
   });
 
-  it("refunds a successful reset", async () => {
+  it("does NOT refund a successful reset, because the token is spent anyway", async () => {
+    // The bucket is keyed on the token hash and a successful reset CONSUMES the
+    // token, so freed attempts could never be spent by anyone — the refund
+    // bought nothing and cost the O(keyspace) Redis SCAN that resetRateLimit
+    // warns about. Five goes at one token is all anybody needs.
     resetPasswordWithToken.mockResolvedValue(true);
-    for (let i = 0; i < AUTH_POLICY.limit * 3; i++) {
-      expect(await resetPasswordAction(undefined, submission("good"))).toEqual({ ok: true });
+    for (let i = 0; i < AUTH_POLICY.limit; i++) {
+      expect(await resetPasswordAction(undefined, submission("good")), `try ${i + 1}`)
+        .toEqual({ ok: true });
     }
+    const blocked = await resetPasswordAction(undefined, submission("good"));
+    expect("error" in blocked && blocked.error).toMatch(/Too many attempts from this network/);
   });
 
   it("keeps the token spent when the reset THROWS", async () => {

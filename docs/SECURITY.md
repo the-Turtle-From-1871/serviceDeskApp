@@ -849,6 +849,19 @@ challenge.
 
 Tracked deliberately, so nobody re-discovers them as new findings.
 
+**0a. A visitor whose network blocks Cloudflare cannot sign in at all** once
+Turnstile is configured. ⚠️ *Accepted, with an operational lever.*
+The server leg fails OPEN (an unreachable Cloudflare lets the submission
+through); the CLIENT leg cannot. A browser behind a proxy or content filter that
+blocks `challenges.cloudflare.com` produces no token, and a tokenless submission
+is refused on every retry. The widget releases the submit button so they get a
+message rather than a dead control, and the message names the likely cause — but
+it is the end of the road for them. It cannot be made symmetrical from the
+server: there is no way to distinguish "the client could not reach Cloudflare"
+from "the client chose not to send a token", and trusting the client on that is
+the whole bypass. The lever is unsetting `TURNSTILE_SECRET_KEY`, which disables
+the check everywhere.
+
 **0. The bot defences are config-gated and spoofable, in that order.**
 ⚠️ *Owed to a human: provision the Turnstile keys.*
 Until `NEXT_PUBLIC_TURNSTILE_SITE_KEY` + `TURNSTILE_SECRET_KEY` are set, no

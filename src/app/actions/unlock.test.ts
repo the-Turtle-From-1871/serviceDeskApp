@@ -17,7 +17,7 @@ vi.mock("next/navigation", () => ({ redirect: (u: string) => redirect(u) }));
 
 import { unlockAction } from "./unlock";
 import { UNLOCK_MAX_AGE_SECONDS } from "@/lib/public-access-cookie";
-import { AUTH_POLICY, __resetRateLimitStateForTests } from "@/lib/rate-limit";
+import { UNLOCK_POLICY, __resetRateLimitStateForTests } from "@/lib/rate-limit";
 
 function fd(entries: Record<string, string>) {
   const f = new FormData();
@@ -97,7 +97,7 @@ describe("unlockAction", () => {
   describe("rate limiting", () => {
     it("stops guessing after the auth budget is spent, without calling verifyPin again", async () => {
       verifyPin.mockResolvedValue(false);
-      for (let i = 0; i < AUTH_POLICY.limit; i++) {
+      for (let i = 0; i < UNLOCK_POLICY.limit; i++) {
         expect(await unlockAction(undefined, fd({ pin: "00000000", next: "/i/x" })))
           .toEqual({ error: "Incorrect PIN." });
       }
@@ -108,7 +108,8 @@ describe("unlockAction", () => {
       // The refusal happens BEFORE the bcrypt compare — otherwise the limiter
       // would still be paying the cost it exists to avoid.
       expect(verifyPin.mock.calls.length).toBe(spentCalls);
-    });
+      // 20 wrong PINs x the deliberate 400ms anti-guessing delay is ~8s.
+    }, 30_000);
 
     it("CHARGES a correct PIN too, because the bucket is shared", async () => {
       // Deliberate reversal. Refunding on success looked kind — five people
@@ -119,7 +120,7 @@ describe("unlockAction", () => {
       // guesses at an 8-digit secret every time a colleague unlocked
       // legitimately; on a busy morning the cap was effectively unbounded.
       verifyPin.mockResolvedValue(true);
-      for (let i = 0; i < AUTH_POLICY.limit; i++) {
+      for (let i = 0; i < UNLOCK_POLICY.limit; i++) {
         await expect(unlockAction(undefined, fd({ pin: "12345678", next: "/i/x" })))
           .rejects.toThrow("REDIRECT:/i/x");
       }
@@ -130,7 +131,7 @@ describe("unlockAction", () => {
     it("does not let a colleague's correct PIN refill an attacker's guesses", async () => {
       // The property the refund destroyed, stated directly.
       verifyPin.mockResolvedValue(false);
-      for (let i = 0; i < AUTH_POLICY.limit - 1; i++) {
+      for (let i = 0; i < UNLOCK_POLICY.limit - 1; i++) {
         await unlockAction(undefined, fd({ pin: "00000000", next: "/i/x" }));
       }
       verifyPin.mockResolvedValue(true);
@@ -140,11 +141,11 @@ describe("unlockAction", () => {
       verifyPin.mockResolvedValue(false);
       const res = await unlockAction(undefined, fd({ pin: "00000001", next: "/i/x" }));
       expect(res.error).toMatch(/Too many attempts/);
-    });
+    }, 30_000);
 
     it("does not charge a malformed submission against the budget", async () => {
       // A typo that never reached the PIN check is not a guess.
-      for (let i = 0; i < AUTH_POLICY.limit * 2; i++) {
+      for (let i = 0; i < UNLOCK_POLICY.limit * 2; i++) {
         expect(await unlockAction(undefined, fd({ pin: "12ab", next: "/i/x" })))
           .toEqual({ error: "Enter the 8-digit PIN." });
       }

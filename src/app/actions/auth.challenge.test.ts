@@ -51,7 +51,7 @@ const configureTurnstile = () => {
 const siteverify = (body: Record<string, unknown>) =>
   fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => body });
 
-const CHALLENGE_MESSAGE = /Could not verify that request came from a browser/;
+const CHALLENGE_MESSAGE = /Could not verify that this request came from a browser/;
 
 beforeEach(() => {
   vi.clearAllMocks();

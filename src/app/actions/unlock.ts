@@ -6,7 +6,7 @@ import { verifyPin } from "@/lib/public-access";
 import { recordAuthFailure } from "@/lib/auth-velocity";
 import { THROTTLED } from "@/app/actions/throttled";
 import {
-  AUTH_POLICY,
+  UNLOCK_POLICY,
   clientIp,
   consumeRateLimit,
   rateLimitKey,
@@ -28,16 +28,21 @@ export async function unlockAction(_prev: unknown, formData: FormData) {
   const parsed = schema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: "Enter the 8-digit PIN." };
 
-  // 5 WRONG PINs per 15 minutes per IP, on top of the 400ms delay below. The
-  // delay alone only caps a SERIAL attacker; the limiter is what closes the
-  // parallel case. Spend-then-refund like login (see `consumeRateLimit`): the
-  // token is taken before the bcrypt compare so concurrent guesses cannot all
-  // read an untouched bucket, and given back on a correct PIN so a shared
-  // office IP is never locked out by people legitimately unlocking. This action
-  // is public by design and has no session to key on, so the IP is the only
-  // identifier available.
-  const rlKey = rateLimitKey(AUTH_POLICY, clientIp(await headers()), "unlock");
-  const gate = await consumeRateLimit(AUTH_POLICY, rlKey);
+  // 20 attempts per 15 minutes per NETWORK, on top of the 400ms delay below.
+  //
+  // Every word of that is deliberate. There is no identity to narrow the key
+  // with — the PIN is one 8-digit secret shared org-wide — so unlike sign-in
+  // this bucket cannot be split per account, and it therefore covers everyone
+  // on that egress. SUCCESSES COUNT: the token is spent before the bcrypt
+  // compare (so concurrent guesses cannot all read an untouched bucket) and is
+  // NOT handed back on a correct PIN, because emptying a shared bucket would
+  // give an attacker on the same network a fresh budget every time a colleague
+  // unlocked legitimately. That is why the budget is 20 rather than sign-in's
+  // 5: at 5, the sixth soldier to unlock in a quarter of an hour was refused.
+  //
+  // 20 guesses per 15 minutes against 10^8, plus the delay, is still hopeless.
+  const rlKey = rateLimitKey(UNLOCK_POLICY, clientIp(await headers()), "unlock");
+  const gate = await consumeRateLimit(UNLOCK_POLICY, rlKey);
   if (!gate.allowed) {
     // Same wording as the auth actions, from the same helper — a hand-copied
     // duplicate drifts the moment one of them is reworded.
@@ -62,14 +67,6 @@ export async function unlockAction(_prev: unknown, formData: FormData) {
     await new Promise((r) => setTimeout(r, 400));
     return { error: "Incorrect PIN." };
   }
-  // NO refund here, deliberately. `resetRateLimit` empties a bucket, and this
-  // one is keyed `(scope, ip)` — SHARED by everyone on that network. Handing it
-  // back on success would mean every colleague who types the correct PIN wipes
-  // the counter and gives an attacker sitting on the same egress a fresh five
-  // guesses at an 8-digit secret. On a busy morning the cap becomes unbounded.
-  // The refund pattern is only safe on a bucket keyed to the caller own
-  // identity; see the warning on `resetRateLimit`. Costing a successful unlock
-  // one of five tokens is what the budget is for.
 
   const secret = process.env.AUTH_SECRET ?? "";
   const secure = process.env.NODE_ENV === "production";

@@ -86,10 +86,40 @@ export const AUTH_SPRAY_POLICY: RateLimitPolicy = {
   windowSeconds: 15 * 60,
 };
 
-/** Everything else that is worth throttling: 100 per minute per IP. */
+/**
+ * The public PIN gate: 20 per 15 minutes per IP.
+ *
+ * Higher than `AUTH_POLICY` because there is no identity to narrow the key
+ * with — one 8-digit secret shared org-wide — so this bucket is unavoidably
+ * per-NETWORK, and successes count (refunding a shared bucket would let a
+ * colleague's correct PIN hand an attacker on the same egress a fresh budget).
+ * At 5 the sixth soldier to unlock in a quarter of an hour was refused, and the
+ * public surface's entire audience is behind shared egress by design.
+ *
+ * 20 is still hopeless for an attacker: 20 guesses per 15 minutes against 10^8,
+ * on top of the 400ms delay in `unlockAction`, is ~10^5 years of guessing.
+ */
+export const UNLOCK_POLICY: RateLimitPolicy = {
+  name: "unlock",
+  limit: 20,
+  windowSeconds: 15 * 60,
+};
+
+/**
+ * Everything else that is worth throttling: 300 per minute per IP.
+ *
+ * Deliberately above the 100 the sprint named. The same shared-NAT reasoning
+ * that exempts signed-in staff applies to the population the public surface
+ * EXISTS for: a unit turn-in puts twenty soldiers behind one egress, each
+ * loading item pages, receipts and a debounced search, and 100/min divided
+ * twenty ways is about five requests per person per minute before everyone
+ * starts getting 429s on the pages they were told to use. 300 keeps the
+ * anti-scraping intent — a scraper wants thousands — without shipping an
+ * outage for the primary use case.
+ */
 export const API_POLICY: RateLimitPolicy = {
   name: "api",
-  limit: 100,
+  limit: 300,
   windowSeconds: 60,
 };
 

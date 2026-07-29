@@ -15,10 +15,23 @@
 // deliberate config gate, not a bypass: `turnstileConfigured()` reports it and
 // docs/SECURITY.md records the deploy step.
 //
-// ── Failure posture ──────────────────────────────────────────────────────────
+// ── Failure posture, and its ONE asymmetry ───────────────────────────────────
 // A token Cloudflare REFUSES blocks the submission — that is the whole feature.
-// A failure to REACH Cloudflare (timeout, 5xx, DNS) does not: it is logged and
-// the submission proceeds. Same reasoning as the rate limiter's fail-open, and
+// A failure to REACH Cloudflare from the SERVER (timeout, 5xx, DNS) does not:
+// it is logged and the submission proceeds.
+//
+// A failure to reach Cloudflare from the CLIENT is different, and fails CLOSED:
+// a browser that cannot load `challenges.cloudflare.com` (corporate proxy,
+// content filter, captive portal) produces no token, and a tokenless
+// submission is `missing` — refused, on every retry, with no way for the user
+// to get past it. The widget releases the submit button so they at least get a
+// message instead of a dead control, but the message is the end of the road.
+//
+// This is NOT symmetrical with the server leg and cannot be made so from here:
+// the server has no way to tell "the client could not reach Cloudflare" from
+// "the client chose not to send a token", and trusting the client's word on
+// that is the whole bypass. Recorded in docs/SECURITY.md under Known gaps; the
+// operational lever is unsetting TURNSTILE_SECRET_KEY. Same reasoning as the rate limiter's fail-open, and
 // the same reason it is written down: an outage at a third party must not be
 // able to lock the service desk out of its own property book. The password
 // check, the rate limiter and the reset-token check all still apply.
@@ -43,7 +56,20 @@ const MAX_TOKEN_LENGTH = 2048;
  * either would be a self-inflicted outage, so they take the same allow path as
  * an unreachable Cloudflare.
  */
-const NOT_THE_VISITORS_FAULT = ["invalid-input-secret", "missing-input-secret", "internal-error"];
+const NOT_THE_VISITORS_FAULT = [
+  "invalid-input-secret",
+  "missing-input-secret",
+  // Cloudflare telling us to retry.
+  "internal-error",
+  // WE sent a bad `remoteip` (or a malformed request). `looksLikeIp` is a shape
+  // check, not a parser — "1.2.3.4.5" and "::::" both pass it — so a weird
+  // upstream `X-Forwarded-For` can produce these, and treating them as the
+  // visitor's failure would refuse a perfectly good token on every attempt from
+  // that path. Exactly the outcome the `remoteIp` parameter doc promises to
+  // avoid, and the shape check alone does not deliver it.
+  "invalid-input-remoteip",
+  "bad-request",
+];
 
 /**
  * Public site key. `NEXT_PUBLIC_` because the client component that renders the
