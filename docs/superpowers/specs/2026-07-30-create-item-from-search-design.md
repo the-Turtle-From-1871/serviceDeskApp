@@ -396,12 +396,10 @@ deliberate — a pre-check races.
 | `src/app/admin/items/new/NewItemForm.tsx` | Prefill, two new fields, two datalists, hidden `fromSearch`/`returnUic`, collision link |
 | `src/modules/items/items.schema.ts` | `categoryNew`; `deviceUIC` + `deviceCategory` on `newItemSchema`; `.max()` on `serialNumber` |
 | `src/app/admin/actions/items.ts` | `revalidatePath` ×3, `learnCategories`, conditional redirect, P2002 handling |
-| `src/app/admin/actions/items.test.ts` | **New file** — see §5 |
+| `src/app/actions/items.test.ts` | `createItemAction` tests added to the **existing** file — see §5 |
+| `src/modules/items/items.service.ts` | `getItemBySerial` added, used to resolve the P2002 branch's collision link |
 | `CLAUDE.md` | "FOUR write sites" → five; note the create path's category handling |
 | `CHANGELOG.md` | Append to the **existing** `## 2026-07-30` section, not a second heading |
-
-`src/modules/items/items.service.ts` is **not** in this list. `createItem` is
-unchanged — see §2.4.
 
 **`docs/SECURITY.md` is not triggered.** None of these files match any regex in
 `scripts/check-security-docs.mjs:23-86`. (`admin/actions/items.ts` is
@@ -427,11 +425,15 @@ it (`ItemDetailsCard.tsx:164`, `EditItemForm.tsx:62`).
 - `newItemSchema.parse(newItemSchema.parse(x))` round-trips with a blank
   category — the regression test for the `.optional()` in §2.3.
 
-**Action (`src/app/admin/actions/items.test.ts` — NEW FILE):**
-`createItemAction` is untested today. Action tests in this repo live at
-`src/app/**/actions/*.test.ts` and mock authz with `vi.mock("@/lib/authz")`;
-they do **not** belong in `items.service.test.ts`, which is a real-DB file that
-imports service functions only and has no authz mock.
+**Action (`src/app/actions/items.test.ts` — existing file):**
+`createItemAction` is untested today. It is added to
+`src/app/actions/items.test.ts`, which already imports and tests
+`updateItemIdentityAction` from the admin actions module and carries every
+mock (authz, `items.service`, etc.) both actions need — no new test file.
+Action tests in this repo live at `src/app/**/actions/*.test.ts` and mock
+authz with `vi.mock("@/lib/authz")`; they do **not** belong in
+`items.service.test.ts`, which is a real-DB file that imports service
+functions only and has no authz mock.
 - Happy path with `fromSearch` set asserts `rejects.toThrow("NEXT_REDIRECT")`,
   the existing pattern at `src/app/actions/auth.rate-limit.test.ts:139`.
 - Happy path *without* `fromSearch` returns `{ itemId }` and does not throw.
