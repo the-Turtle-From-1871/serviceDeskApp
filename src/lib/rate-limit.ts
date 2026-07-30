@@ -21,12 +21,29 @@
 // maps. It exists so dev, CI and the tests exercise the same call sites with no
 // infrastructure; it is NOT the production posture. See docs/SECURITY.md.
 //
-// The two backends are kept semantically identical on the one point where they
-// could plausibly differ: a REFUSED attempt is not recorded. Upstash's sliding-
-// window Lua script returns before its `INCRBY`, so the fallback does the same.
-// The alternative (recording denials, so hammering extends the lockout) is
-// defensible, but a limiter that means two different things depending on
-// whether Redis happens to be attached is not.
+// The two backends agree on WHAT counts: a REFUSED attempt is not recorded.
+// Upstash's sliding-window Lua script returns before its `INCRBY`, so the
+// fallback does the same. The alternative (recording denials, so hammering
+// extends the lockout) is defensible, but a limiter that counts two different
+// things depending on whether Redis happens to be attached is not.
+//
+// They do NOT agree on how long a lockout LASTS, and that is worth knowing
+// before you read a `Retry-After` as a promise:
+//
+//   • Upstash is a sliding-window COUNTER. It weights the previous window by
+//     how far you are into the current one — five failures, one minute into a
+//     fresh 15-minute block, scores 5 × (1 − 1/15) = 4.67 and is let through.
+//     Its reported `reset` is `(currentWindow + 1) * windowDuration`, the edge
+//     of the fixed wall-clock block, so exhausting the bucket near a boundary
+//     legitimately reports "try again in less than a minute".
+//   • The in-memory fallback is an exact timestamp LOG, so it holds for the
+//     full window every time.
+//
+// So the real lockout is "between about a minute and the full window,
+// depending where in the block you ran out" — not a flat 15 minutes. Observed
+// in production, not theorised. The cost is roughly one extra attempt every
+// `window / limit`, which is the ordinary sliding-counter tradeoff and is why
+// this is documented rather than "fixed".
 //
 // ── Failure mode: OPEN ───────────────────────────────────────────────────────
 // A Redis outage lets requests through (logged server-side) rather than locking
@@ -291,8 +308,10 @@ function upstashLimiter(policy: RateLimitPolicy): Ratelimit {
   if (cached) return cached;
   const limiter = new Ratelimit({
     redis: upstashRedis,
-    // Sliding window: no burst at the window boundary, which a fixed window
-    // would allow (2× the limit across two adjacent windows).
+    // Sliding window rather than fixed: it stops the 2×-the-limit burst a fixed
+    // window allows across two adjacent blocks. It is a weighted COUNTER, not a
+    // log, so a lockout decays from the boundary rather than holding flat — see
+    // the header note before reading `Retry-After` as a fixed wait.
     limiter: Ratelimit.slidingWindow(policy.limit, `${policy.windowSeconds} s`),
     // Off on purpose: analytics writes extra Redis keys per request and leaves
     // a `pending` promise the caller must drain. We want the cheapest possible
