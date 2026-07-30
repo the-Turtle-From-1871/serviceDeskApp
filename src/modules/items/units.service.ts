@@ -168,6 +168,47 @@ export async function listUnitsWithCounts(): Promise<UnitRow[]> {
   }));
 }
 
+/**
+ * Items the importer could not derive a home unit for.
+ *
+ * BOUNDED — `take` only, never an unbounded `findMany` over Item (1,200+ rows
+ * and growing). This is a sample so an admin can spot the pattern (usually
+ * one new abbreviation shared by many devices) and teach it above, not a
+ * worklist meant to enumerate every unresolved row.
+ *
+ * `select` pulls only id + deviceName — no notes, holder PII, or signature
+ * data belongs in this list.
+ */
+export async function listUnassignedHomeUnits(
+  limit = 50,
+): Promise<{ id: string; deviceName: string }[]> {
+  const rows = await prisma.item.findMany({
+    where: { homeUnit: null, deviceName: { not: null }, status: "ACTIVE" },
+    select: { id: true, deviceName: true },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
+  return rows.map((r) => ({ id: r.id, deviceName: r.deviceName! }));
+}
+
+/**
+ * When the fleet was last refreshed by an import.
+ *
+ * WHY THIS IS SHOWN: the nightly automated import runs with nobody watching
+ * it. A scheduled job that quietly dies looks identical, from the app's
+ * point of view, to a fleet that has simply stopped changing — there is no
+ * error to see, just silence. A visible "last imported" timestamp (and a
+ * stale-after-48h warning, applied by the caller) is the cheapest way for
+ * that kind of failure to surface in days instead of weeks.
+ */
+export async function lastImportAt(): Promise<Date | null> {
+  const batch = await prisma.importBatch.findFirst({
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+  return batch?.createdAt ?? null;
+}
+
 /** How many items would a rename of this full name touch (case- and
  *  whitespace-insensitively). Used to warn the admin BEFORE they commit a
  *  change that rewrites a thousand rows. */

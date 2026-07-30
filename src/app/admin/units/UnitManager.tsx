@@ -13,6 +13,53 @@ type RenameState = { ok: true; itemsUpdated: number } | { error: string } | unde
 type DeleteState = { ok: true } | { error: string } | undefined;
 type BulkState = { ok: true; created: number; updated: number } | { error: string } | undefined;
 
+// lastImportLabel/lastImportStale are computed server-side in page.tsx (see
+// the comment there for why) — this component only decides how to render
+// them, not whether the timestamp is stale.
+function LastImportNotice({
+  lastImportLabel,
+  lastImportStale,
+}: {
+  lastImportLabel: string | null;
+  lastImportStale: boolean;
+}) {
+  if (!lastImportLabel) {
+    return <p className="alert-warning">No import has run yet.</p>;
+  }
+
+  if (!lastImportStale) {
+    return <p className="subtle">Fleet last imported {lastImportLabel}.</p>;
+  }
+
+  return (
+    <p className="alert-warning">
+      Fleet last imported {lastImportLabel}. The scheduled import may not be running.
+    </p>
+  );
+}
+
+function UnassignedHomeUnits({ unassigned }: { unassigned: { id: string; deviceName: string }[] }) {
+  if (unassigned.length === 0) return null;
+
+  return (
+    <details className="card stack-sm">
+      <summary className="btn btn-secondary">
+        Devices with no home unit ({unassigned.length})
+      </summary>
+      <p className="subtle">
+        These devices imported with no abbreviation the importer recognized. Adding the matching
+        abbreviation above will let the next import resolve them — it will not fix devices already
+        imported until that next run.
+      </p>
+      <ul className="stack-sm">
+        {unassigned.map((item) => (
+          <li key={item.id}>{item.deviceName}</li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 // One row editable at a time — mirrors ContactBookSection's inline-edit pattern.
 function RenameUnitForm({ unit, onDone }: { unit: UnitRow; onDone: () => void }) {
   const [state, action, pending] = useActionState<RenameState, FormData>(renameUnitAction, undefined);
@@ -73,7 +120,17 @@ function RenameUnitForm({ unit, onDone }: { unit: UnitRow; onDone: () => void })
   );
 }
 
-export function UnitManager({ units }: { units: UnitRow[] }) {
+export function UnitManager({
+  units,
+  unassigned,
+  lastImportLabel,
+  lastImportStale,
+}: {
+  units: UnitRow[];
+  unassigned: { id: string; deviceName: string }[];
+  lastImportLabel: string | null;
+  lastImportStale: boolean;
+}) {
   const [addState, addAction, adding] = useActionState<CreateState, FormData>(
     createUnitAction,
     undefined,
@@ -94,6 +151,9 @@ export function UnitManager({ units }: { units: UnitRow[] }) {
 
   return (
     <div className="stack">
+      <LastImportNotice lastImportLabel={lastImportLabel} lastImportStale={lastImportStale} />
+      <UnassignedHomeUnits unassigned={unassigned} />
+
       <section className="card stack-sm">
         <h2>Add a unit</h2>
         <p className="subtle">

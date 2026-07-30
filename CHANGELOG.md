@@ -5,6 +5,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-07-29
 
+### Added
+- **`/admin/units` now shows when the fleet was last imported, and flags it when the scheduled import may have stopped running.** With a nightly automated import replacing the human-driven browser flow, nobody is watching each run — a dead job and a fleet that has simply stopped changing look identical otherwise. The page now shows the last import time and warns when it is more than 48 hours old. It also lists a sample of devices that imported with no home unit (device name recognized by no known abbreviation), with a note that teaching the abbreviation above resolves them on the *next* import, not retroactively.
+
 ### Fixed
 - **A failed search no longer reports "No matches."** If the public search is temporarily throttled or unreachable it now says so, instead of telling you your serial number does not exist.
 - **Resetting a password is now counted per link rather than per network.** Five people clicking yesterday's expired reset links used to lock out the sixth, who was holding a perfectly good one. The reset form also now carries the same browser check as sign-in — it is the one place where a correct guess would hand over an account outright.

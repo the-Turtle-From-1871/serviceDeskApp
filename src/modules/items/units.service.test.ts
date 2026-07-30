@@ -9,6 +9,8 @@ import {
   countItemsWithHomeUnit,
   renameUnit,
   deleteUnit,
+  listUnassignedHomeUnits,
+  lastImportAt,
 } from "./units.service";
 
 // resetDb() TRUNCATEs User (and Item, Unit) before every test, so no admin
@@ -293,4 +295,62 @@ test("deleteUnit deletes an unused unit", async () => {
 
 test("deleteUnit throws NOT_FOUND for a missing unit", async () => {
   await expect(deleteUnit("does-not-exist")).rejects.toThrow(/no longer exists/i);
+});
+
+// --- listUnassignedHomeUnits ---------------------------------------------
+
+test("listUnassignedHomeUnits returns active items with a device name but no home unit", async () => {
+  const admin = await createAdmin();
+  await prisma.item.create({
+    data: { make: "D", model: "1", serialNumber: "NOUNIT-1", deviceName: "ZZTOP99-LT-1", createdById: admin.id },
+  });
+  const rows = await listUnassignedHomeUnits();
+  expect(rows.some((r) => r.deviceName === "ZZTOP99-LT-1")).toBe(true);
+});
+
+test("listUnassignedHomeUnits excludes items that already have a home unit", async () => {
+  const admin = await createAdmin();
+  await prisma.item.create({
+    data: {
+      make: "D",
+      model: "1",
+      serialNumber: "HASUNIT-1",
+      deviceName: "HASUNIT-LT-1",
+      homeUnit: "Some Unit",
+      createdById: admin.id,
+    },
+  });
+  const rows = await listUnassignedHomeUnits();
+  expect(rows.some((r) => r.deviceName === "HASUNIT-LT-1")).toBe(false);
+});
+
+// --- lastImportAt ---------------------------------------------------------
+
+test("lastImportAt returns null when nothing has ever been imported", async () => {
+  expect(await lastImportAt()).toBeNull();
+});
+
+test("lastImportAt returns the createdAt of the most recent import batch", async () => {
+  const admin = await createAdmin();
+  await prisma.importBatch.create({
+    data: {
+      createdById: admin.id,
+      filename: "old.csv",
+      addedCount: 1,
+      skippedCount: 0,
+      skipped: [],
+      createdAt: new Date("2026-01-01T00:00:00Z"),
+    },
+  });
+  const newest = await prisma.importBatch.create({
+    data: {
+      createdById: admin.id,
+      filename: "new.csv",
+      addedCount: 1,
+      skippedCount: 0,
+      skipped: [],
+      createdAt: new Date("2026-01-02T00:00:00Z"),
+    },
+  });
+  expect((await lastImportAt())?.toISOString()).toBe(newest.createdAt.toISOString());
 });
