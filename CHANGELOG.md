@@ -6,7 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## 2026-07-29
 
 ### Added
+- **A Units page for admins** at `/admin/units`. Add a unit one at a time, or paste a whole block of `ABBREVIATION,Unit name` lines to add or re-teach many at once — a malformed line is reported by its line number and nothing is saved until every line parses. Correcting a unit's full name also rewrites every item currently assigned to it, and the page shows how many that will affect before you save. Removing a unit is refused while any item still uses it, naming the count.
 - **`/admin/units` now shows when the fleet was last imported, and flags it when the scheduled import may have stopped running.** With a nightly automated import replacing the human-driven browser flow, nobody is watching each run — a dead job and a fleet that has simply stopped changing look identical otherwise. The page now shows the last import time and warns when it is more than 48 hours old. It also lists a sample of devices that imported with no home unit (device name recognized by no known abbreviation), with a note that teaching the abbreviation above resolves them on the *next* import, not retroactively.
+
+### Changed
+- **Unit abbreviations are now case-insensitive.** `WABC01` and `wabc01` are one unit, not two. Matching an item to its unit is also now case- and whitespace-insensitive everywhere the app compares them, so correcting a unit's name also folds in items whose home unit was already the right unit but spelled with different capitalization — those are counted as updated too, since they genuinely changed; an item already spelled exactly like the new name is left alone and does not add to that count.
 
 ### Fixed
 - **A failed search no longer reports "No matches."** If the public search is temporarily throttled or unreachable it now says so, instead of telling you your serial number does not exist.
