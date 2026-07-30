@@ -1,7 +1,15 @@
 import { beforeAll, beforeEach, expect, test } from "vitest";
 import prisma from "@/lib/prisma";
 import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
-import { createItem, getItem, listItems, updateItemFields, retireItem, setItemStatus } from "./items.service";
+import {
+  createItem,
+  getItem,
+  getItemBySerial,
+  listItems,
+  updateItemFields,
+  retireItem,
+  setItemStatus,
+} from "./items.service";
 
 let adminId: string;
 const base = { deviceName: "Radio", homeUnit: undefined, notes: undefined } as const;
@@ -109,4 +117,17 @@ test("setItemStatus can retire then reactivate", async () => {
   const item = await createItem({ make: "M", model: "N", serialNumber: "S", ...base }, adminId);
   expect((await setItemStatus(item.id, "RETIRED")).status).toBe("RETIRED");
   expect((await setItemStatus(item.id, "ACTIVE")).status).toBe("ACTIVE");
+});
+
+test("getItemBySerial finds an item by serial REGARDLESS of casing (citext) and returns just its id", async () => {
+  const created = await createItem(
+    { make: "Dell", model: "5540", serialNumber: "CaSe-1", deviceName: "LT-case" },
+    adminId,
+  );
+  expect(await getItemBySerial("case-1")).toEqual({ id: created.id });
+  expect(await getItemBySerial("CASE-1")).toEqual({ id: created.id });
+});
+
+test("getItemBySerial returns null for a serial that does not exist", async () => {
+  expect(await getItemBySerial("NO-SUCH-SERIAL")).toBeNull();
 });
