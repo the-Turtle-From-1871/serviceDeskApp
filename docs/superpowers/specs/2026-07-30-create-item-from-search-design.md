@@ -2,6 +2,7 @@
 
 **Date:** 2026-07-30
 **Status:** Approved, not yet implemented
+**Revision:** 2 — corrected after review; see "Review corrections" at the end.
 
 ## Problem
 
@@ -22,7 +23,7 @@ filtered list seeing the row they just made.
 - No change for non-admin `USER`s. They see today's empty state, unchanged.
 - No `detectHomeUnit` / unit-abbreviation resolution on the manual create path.
   That is import-only today and stays that way; `homeUnit` is stored verbatim
-  as it already is.
+  as it already is. See §6 for why `learnUnits` is also not added.
 - No new item-creation surface. This reuses `/admin/items/new`.
 - No change to what a `USER` may edit. Nothing here touches
   `userItemDetailsSchema`.
@@ -34,7 +35,7 @@ filtered list seeing the row they just made.
 `/items` renders `ItemSelectTable` even when there are zero rows — deliberately,
 because the table owns the filter and sort controls and swapping it for an
 empty-state card removed the very controls needed to undo the filter. The empty
-message therefore lives *inside* the table, at `ItemSelectTable.tsx:295-303`:
+message therefore lives *inside* the table, at `ItemSelectTable.tsx:297-301`:
 
 ```tsx
 {items.length === 0 && (
@@ -49,8 +50,8 @@ That block gains a second line, rendered **only when `isAdmin && q.trim()`**:
 > No items match your search.
 > **[+ Create "ABC12345" as a new item]**
 
-`ItemSelectTable` already receives both `isAdmin` and `q` as props
-(`items/page.tsx:100,102`), so no new plumbing is needed.
+`ItemSelectTable` already receives both `isAdmin` (`:41`) and `q` (`:42`) as
+props, passed at `items/page.tsx:100` and `:101`. No new plumbing is needed.
 
 The button is a `Link` to:
 
@@ -67,9 +68,35 @@ The button is a `Link` to:
 - **`q` non-empty only.** An empty result caused by a UIC filter alone gives us
   nothing to prefill and no evidence the admin was hunting a specific device.
   That case keeps today's single-line message.
+- **Deliberately NOT suppressed while a UIC filter is active.** `q` + `uic` can
+  return zero rows for an item that exists under a *different* UIC, so this
+  button can be clicked for a serial that is already in the book. That is
+  accepted rather than blocked: an admin filtered to a unit who finds nothing
+  may legitimately be adding a device, and blocking the button would be wrong
+  more often than right. The duplicate-serial handling in §3.2 is what makes it
+  land gracefully — and this, not the case-folding story, is the *main*
+  reachable path to that collision.
 - The searched text is rendered inside the label, so it is escaped by React
-  like any other interpolated string. Long values are visually truncated with
-  CSS (`text-overflow: ellipsis`), not cut from the href.
+  like any other interpolated string. Truncation is handled per §1.1, not by
+  shortening the href.
+
+### 1.1 Styling
+
+The affordance is a **legacy `.btn btn-sm`**, not a Tailwind or `shadcn`
+control. `ItemSelectTable` is entirely legacy-styled, and `globals.css:1086-1091`
+raises `.btn`/`.btn-sm` to `var(--tap)` at ≤720px, which satisfies the
+documented 44px touch floor for free. A bare styled `<Link>` or a `shadcn`
+`Button` would ship below that floor and is not used here.
+
+`.btn` is `display:inline-flex` with `white-space:nowrap` (`globals.css:333-350`),
+so `text-overflow:ellipsis` on the button itself does nothing — the label is an
+anonymous flex item. A long serial would force horizontal overflow of the
+`.card` on a phone. The label therefore goes in an inner `<span>` carrying
+`min-width:0; overflow:hidden; text-overflow:ellipsis` and a `max-width`, which
+is the only form that actually truncates here.
+
+Per `CLAUDE.md`, neither jsdom nor `npm run build` is evidence for any of this.
+Verify in a real browser at a phone width with a deliberately long serial.
 
 ---
 
@@ -77,14 +104,21 @@ The button is a `Link` to:
 
 ### 2.1 Prefill
 
-`/admin/items/new/page.tsx` becomes a Server Component that reads
-`searchParams` and passes two things to `NewItemForm`:
+`/admin/items/new/page.tsx` is **already** an async Server Component
+(`:6`) that calls `requireAdmin()`. It gains a `searchParams` prop. Per the
+Next 16 convention this repo uses (`items/page.tsx:17-27`), `searchParams` is a
+**`Promise`** and must be awaited before the existing `firstParam` helper
+(`src/lib/search-params.ts:12`) collapses each `string | string[]`.
+
+It passes to `NewItemForm`:
 
 - `serialNumber` — the prefill, used as the `defaultValue` of the serial input.
-  Collapsed with the existing `firstParam` helper (params are
-  `string | string[]`) and **capped at 200 characters** before it reaches the
-  input, so a pathological URL cannot produce an absurd field value.
-- a derived `cameFromSearch: boolean` — simply `Boolean(prefill)`. See §3.
+- `cameFromSearch: boolean` — simply `Boolean(prefill)`. See §3.1.
+- `uic` — the UIC filter that was active on `/items`, if any, so the return
+  trip can restore it. See §3.1.
+- `categories: string[]` — from `listCategoryNames()`, matching the shape
+  `EditItemForm` takes (`/admin/items/[itemId]/edit/page.tsx:19`). Note
+  `ItemSelectTable` takes `{name:string}[]` instead; follow `EditItemForm`.
 
 Visiting `/admin/items/new` bare behaves exactly as it does today.
 
@@ -92,7 +126,19 @@ Visiting `/admin/items/new` bare behaves exactly as it does today.
 `defaultValue` of a text input and nothing else — it never reaches a redirect
 target, a query, a raw SQL fragment, or `dangerouslySetInnerHTML`. On submit it
 is validated by `newItemSchema` like any other field. There is deliberately
-**no `returnTo` parameter**; see §3.
+**no `returnTo` parameter**; see §3.1.
+
+**Length bound.** `serialNumber` has **no `.max()`** today
+(`items.schema.ts:54`), so a pasted 5,000-character value submits and lands in
+the citext-unique column. Capping only the prefilled `defaultValue` would
+protect nothing — the bound belongs on the schema. Add `.max(100)` to
+`serialNumber` in `identityItemFields`, **after** checking the longest serial
+currently in production (`SELECT max(length(serial_number)) FROM items`) and
+raising the bound if real data exceeds it. Note this is a *shared* definition:
+it also applies to `itemIdentitySchema`, so an existing over-long serial would
+be rejected the next time someone re-saves that item's identity. That is the
+correct trade, but it must be a deliberate check against real data, not a
+guess.
 
 ### 2.2 Two new fields
 
@@ -101,10 +147,8 @@ homeUnit, and a notes textarea. It gains:
 
 - **`deviceUIC`** — plain optional text.
 - **`deviceCategory`** — text input backed by a `<datalist>` of the existing
-  vocabulary, matching the pattern already used by
-  `EditItemForm.tsx:63,69-73` (`list="device-category-options"`). The page
-  fetches the options with `listCategoryNames()`, as
-  `/admin/items/[itemId]/edit/page.tsx:19` already does.
+  vocabulary, matching the pattern already used by `EditItemForm.tsx:63,69-73`
+  (`list="device-category-options"`).
 
 Field order: make\*, model\*, serial\*, device name\*, home unit, UIC,
 category, notes.
@@ -163,41 +207,54 @@ const categoryNew = z
   .optional();
 ```
 
-The trailing `.optional()` is **load-bearing, not decoration**: `createItem`
-re-parses its input through `newItemSchema` as defense at the service boundary,
-so the schema must accept its own output. Without `.optional()`, a blank
-category becomes `undefined` on the first parse and then fails
-`z.string()` on the second — every create with no category would break.
-`categoryOptional` and the `optional` helper already end this way for the same
-reason.
-
 Neither existing variant fits: `categoryOptional` is import-only and *drops*
 over-long values silently; `categoryClearable` keeps `""` and would write an
 empty string into a fresh row.
 
-### 2.4 Service change — `createItem`
+The trailing `.optional()` is **load-bearing, not decoration**: `createItem`
+re-parses its input through `newItemSchema` (`items.service.ts:19`) as defense
+at the service boundary, so the schema must accept its own output. Zod v4's
+optional short-circuits `undefined` *input* before running the inner type
+(`node_modules/zod/v4/core/schemas.js:1767-1770`), which is what makes the
+round-trip work — this is not merely object-level optionality. Without it,
+every create with a blank category would fail on the second parse. The existing
+`optional` helper ends the same way for the same reason, and `homeUnit`/`notes`
+already round-trip through `createItem` today, proving the pattern.
 
-`createItem` (`items.service.ts:18-25`) is today a bare `prisma.item.create`
-with an explicit comment that it needs no transaction, because readiness is
-derived and a new item has no history to record. That reasoning still holds for
-history — but registering the category is a second write that must not land
-without the item, so it becomes a two-statement transaction mirroring
-`setItemsCategory` (`items.service.ts:556`):
+Refine-then-transform order is deliberate and verified: `""` normalizes to `""`,
+passes the `<= 60` refine, then becomes `undefined`.
 
-```ts
-return prisma.$transaction(async (tx) => {
-  const item = await tx.item.create({ data: { ...data, createdById } });
-  await learnCategories([data.deviceCategory], tx);
-  return item;
-});
-```
+### 2.4 Registering the category — OUTSIDE the item write
 
-`learnCategories` already accepts a `Prisma.TransactionClient`, already
-no-ops on `undefined`, and already does a single `createMany({ skipDuplicates:
-true })` — so this is one extra statement, not a per-row loop.
+After a successful create, the action calls `learnCategories([category])`
+**sequentially after the item has committed, in its own try/catch that swallows
+its own failure** — following the two existing single-item precedents
+(`src/app/actions/items.ts:47-63` and `src/app/admin/actions/items.ts:61-72`),
+both of which carry explicit comments saying why: reporting a vocabulary-insert
+failure as "something went wrong saving your changes" would tell the admin
+their write did not land when it did.
 
-The comment about "no history row" stays; it is still true and still worth
-explaining.
+`createItem` therefore stays a bare `prisma.item.create` and keeps its existing
+comment about needing no transaction.
+
+**This is the opposite of what revision 1 of this spec said**, and the reason
+matters. Revision 1 put the learn *inside* a transaction with the item create,
+justified as "a second write that must not land without the item." That is
+backwards: running it sequentially afterwards already guarantees the category
+cannot land without the item, because the item has committed by then. Wrapping
+them together only adds a new failure mode — a vocabulary insert failing would
+roll back a perfectly good item.
+
+`setItemsCategory` (`items.service.ts:551-556`) *does* learn in-transaction, but
+it is not a precedent for this: its comment documents a delete-race specific to
+picking a *pre-existing* category from a rendered list, which cannot apply to a
+category typed fresh on a create form.
+
+`learnCategories` already accepts a `Prisma.TransactionClient` (defaulting to
+`prisma`), already no-ops on `undefined`, blank-after-normalize and over-long
+names, and returns `0` without issuing a query when there is nothing to insert
+(`categories.service.ts:136-147`). Calling it with a blank category costs
+nothing.
 
 **This makes create the FIFTH normalize-then-learn write site.** `CLAUDE.md`
 currently says four (CSV import, admin edit page, item card, bulk selection
@@ -209,51 +266,91 @@ bar). That line is updated in the same commit.
 
 ### 3.1 Where the admin lands
 
-`createItemAction` gains `revalidatePath("/items")`. This is **missing today**
-— nothing on the create path revalidates anything — so a cached `/items` render
-can omit the item that was just created. That is a latent bug this feature
-would otherwise make very visible.
+**Signalling that the form came from search.** `createItemAction` receives only
+`FormData`, so `NewItemForm` renders two hidden inputs when it was opened with
+a prefill: `fromSearch="1"` and `returnUic` (empty when no UIC filter was
+active). Both are read **directly off `formData`**, never off `parsed.data` —
+`newItemSchema` is a `z.object()` and strips unknown keys, so they would
+silently vanish if read from the parsed result. This is the mechanism revision 1
+of this spec left unspecified.
 
-Then, **when the form was opened with a prefill**, the action redirects to:
+When `fromSearch` is set, the action redirects to `/items` with the search
+restored:
 
+```ts
+const params = new URLSearchParams({ q: item.serialNumber });
+if (returnUic) params.set("uic", returnUic);
+redirect(`/items?${params}`);
 ```
-/items?q=<the created item's serialNumber>
-```
 
-The admin lands on the filtered list with the row they just made visible —
-proof it worked — already positioned to search the next missing serial.
+`URLSearchParams` handles the encoding. Building the string by concatenation
+would mangle any serial containing `&`, `#`, `+` or a space and land the admin
+on an empty list for the item they just created — the exact opposite of the
+"proof it worked" this redirect exists to provide.
 
-**There is no redirect parameter anywhere in this design.** The destination is
-*derived*: the serial is read back off the row Prisma just wrote, so the target
-is app-controlled data, never a caller-supplied string. A `returnTo` querystring
-would be an open redirect on an authenticated admin page immediately after a
-successful action — a good phishing primitive, and unnecessary here.
+The admin lands on the filtered list with the row they just made visible,
+already positioned to search the next missing serial, with their unit filter
+intact.
 
-The only thing the URL influences is *which of two hardcoded destinations*
-applies, not *where*:
+**There is still no redirect target in the URL, and none is caller-supplied in
+any meaningful sense.** The path `/items` is hardcoded in the action. `q` is
+read back off the row Prisma just wrote. `returnUic` only ever becomes a query
+*value* on that fixed path, never a destination — so there is no open redirect
+here, which a `returnTo` parameter would have been.
 
-- opened with a prefill (came from search) → `redirect("/items?q=…")`
+Which of two hardcoded destinations applies:
+
+- `fromSearch` set → `redirect("/items?…")`
 - opened bare from "+ Log new item" → today's in-place success card
   ("Item created successfully" / Add another / Back to items), unchanged.
 
-**Implementation note:** `redirect()` works by throwing `NEXT_REDIRECT`. It must
-be called **outside** the `try` block that catches P2002, or the catch swallows
-it and the redirect silently becomes a generic error.
+**Implementation note:** `redirect()` works by throwing `NEXT_REDIRECT`, and
+Next 16's own docs say it "should be called outside the `try` block"
+(`node_modules/next/dist/docs/01-app/03-api-reference/04-functions/redirect.md`).
+Called inside the P2002 catch, it would be swallowed and silently become a
+generic error.
+
+**Revalidation.** `createItemAction` gains `revalidatePath` for three paths:
+
+- `/items` — the list the admin returns to.
+- `/admin/categories` — its in-use counts (`categories.service.ts:36-60`) go
+  stale the moment `learnCategories` registers a new name.
+- `/admin/analytics` — fleet counts change; `markItemsReadyAction` already
+  revalidates it for the same reason (`admin/actions/items.ts:171`).
+
+Note this is **not** fixing a stale-server-render bug. `/items` calls
+`requireUser()` → `auth()` → `cookies()` (`src/lib/authz.ts:27-37`), so the
+route is dynamically rendered on every request and there is no cached server
+render to invalidate. Revision 1 claimed otherwise and was wrong. The
+revalidation is still worth adding — it clears the client Router Cache, which
+governs back-navigation and prefetched links — but it is a correctness nicety,
+not a bug fix.
 
 ### 3.2 Duplicate serial
 
 `Item.serialNumber` is `@unique @db.Citext`, and `createItemAction` has **no
-P2002 handling today** — a duplicate serial is an unhandled throw.
+P2002 handling today** (`admin/actions/items.ts:25-33` — no try/catch at all).
+A duplicate serial is an unhandled throw.
 
-This feature makes that reachable. The premise is "the search found nothing, so
-create it", but the search is a `contains` match across four fields while
-creation collides on serial alone. A serial that differs only in case, or an
-admin who mistypes the search but types the serial correctly on the form, lands
-straight on the constraint.
+This feature makes that reachable. The path is the UIC filter described in §1:
+`/items?q=ABC123&uic=WXYZ` shows "No items match this unit and your search" for
+an item that exists under a *different* UIC, and the create button is offered.
 
-So `createItemAction` catches `Prisma.PrismaClientKnownRequestError` with code
-`P2002` and returns a specific error naming the serial, following the message
-shape `updateItemIdentityAction` already uses (`admin/actions/items.ts:119-124`):
+Two things revision 1 got wrong here, worth recording so they are not
+reintroduced:
+
+- **A case-only difference is NOT a path to this.** `listItems` searches
+  `serialNumber: { contains: search, mode: "insensitive" }`
+  (`items.service.ts:261`), so a serial differing only in case *is* found and
+  the empty state never appears.
+- **RETIRED items are NOT hidden.** `listItems` applies no status filter
+  (`items.service.ts:254-267`), so a retired device with that serial shows up
+  in search results normally. There is no invisible-retired-row trap.
+
+So `createItemAction` wraps the create in a try/catch and, on
+`Prisma.PrismaClientKnownRequestError` with code `P2002`, returns a specific
+error naming the serial, following the message shape `updateItemIdentityAction`
+already uses (`admin/actions/items.ts:119-124`):
 
 > Serial number "ABC12345" already belongs to an item. Serial numbers are
 > unique and ignore case — open that item instead.
@@ -273,20 +370,31 @@ deliberate — a pre-check races.
 
 | File | Change |
 |---|---|
-| `src/components/ItemSelectTable.tsx` | Empty state gains the admin-only create link |
-| `src/app/admin/items/new/page.tsx` | Read `searchParams`, fetch `listCategoryNames()`, pass prefill down |
-| `src/app/admin/items/new/NewItemForm.tsx` | Prefill, two new fields, category datalist, collision link |
-| `src/modules/items/items.schema.ts` | `categoryNew`; `deviceUIC` + `deviceCategory` on `newItemSchema` |
-| `src/modules/items/items.service.ts` | `createItem` becomes a txn + `learnCategories` |
-| `src/app/admin/actions/items.ts` | `revalidatePath`, conditional redirect, P2002 handling |
+| `src/components/ItemSelectTable.tsx` | Empty state gains the admin-only create link (§1, §1.1) |
+| `src/app/admin/items/new/page.tsx` | Await `searchParams`, fetch `listCategoryNames()`, pass prefill + uic down |
+| `src/app/admin/items/new/NewItemForm.tsx` | Prefill, two new fields, datalist, hidden `fromSearch`/`returnUic`, collision link |
+| `src/modules/items/items.schema.ts` | `categoryNew`; `deviceUIC` + `deviceCategory` on `newItemSchema`; `.max()` on `serialNumber` |
+| `src/app/admin/actions/items.ts` | `revalidatePath` ×3, `learnCategories`, conditional redirect, P2002 handling |
+| `src/app/admin/actions/items.test.ts` | **New file** — see §5 |
 | `CLAUDE.md` | "FOUR write sites" → five; note the create path's category handling |
-| `CHANGELOG.md` | User-facing entry under `## 2026-07-30` |
+| `CHANGELOG.md` | Append to the **existing** `## 2026-07-30` section, not a second heading |
 
-**`docs/SECURITY.md` is not triggered.** `admin/actions/items.ts` is
-explicitly excluded from the `check-security-docs` watch list (with a comment
-saying why: it churns for unrelated reasons), and neither `items.schema.ts` nor
-`ItemSelectTable.tsx` is watched. Confirm with `npm run check:security-docs`
+`src/modules/items/items.service.ts` is **not** in this list. `createItem` is
+unchanged — see §2.4.
+
+**`docs/SECURITY.md` is not triggered.** None of these files match any regex in
+`scripts/check-security-docs.mjs:23-86`. (`admin/actions/items.ts` is
+explicitly called out as deliberately unwatched, in a comment attached to the
+`readiness.ts` entry at `:77-79`.) Confirm with `npm run check:security-docs`
 before opening the PR rather than assuming.
+
+**No other consumer of `newItemSchema` exists.** Its only runtime consumers are
+`createItemAction` (`admin/actions/items.ts:27`) and `createItem`
+(`items.service.ts:19`); `planImport` parses through `importRowSchema` and uses
+its own `NewItemImport` type (`import.ts:33-49`). Adding two optional fields
+leaks nowhere. A category set at creation also breaks nothing downstream —
+`Item.deviceCategory` is already nullable and both edit surfaces already handle
+it (`ItemDetailsCard.tsx:164`, `EditItemForm.tsx:62`).
 
 ## 5. Testing
 
@@ -295,18 +403,79 @@ before opening the PR rather than assuming.
   over `MAX_CATEGORY_NAME` is **rejected with a message**, not dropped.
 - `newItemSchema` accepts and retains `deviceUIC` and `deviceCategory` — the
   direct regression test for the strip-unknown-keys bug.
+- `newItemSchema.parse(newItemSchema.parse(x))` round-trips with a blank
+  category — the regression test for the `.optional()` in §2.3.
+
+**Action (`src/app/admin/actions/items.test.ts` — NEW FILE):**
+`createItemAction` is untested today. Action tests in this repo live at
+`src/app/**/actions/*.test.ts` and mock authz with `vi.mock("@/lib/authz")`;
+they do **not** belong in `items.service.test.ts`, which is a real-DB file that
+imports service functions only and has no authz mock.
+- Happy path with `fromSearch` set asserts `rejects.toThrow("NEXT_REDIRECT")`,
+  the existing pattern at `src/app/actions/auth.rate-limit.test.ts:139`.
+- Happy path *without* `fromSearch` returns `{ itemId }` and does not throw.
+- A serial containing `&` and a space produces a correctly encoded redirect.
+- A duplicate serial returns the named error plus `existingItemId`.
 
 **Integration (`items.service.test.ts`, real DB):**
 - Creating an item with a category not in the vocabulary registers it, so
   `listCategoryNames()` then contains it.
 - Creating with a blank category registers nothing.
-- Creating a serial that already exists in different casing raises P2002, and
-  `createItemAction` returns the named error plus the existing item's id.
 
 **Component (`test:ui`, jsdom opt-in):**
 - Empty state renders the create link with the searched text when
   `isAdmin && q`, and renders neither for a `USER` nor for a blank `q`.
 
 **Not evidence:** per `CLAUDE.md`, neither jsdom nor `npm run build` has a
-layout engine, so neither proves anything about how the new empty state and the
-widened form actually look. Verify in a real browser.
+layout engine, so neither proves anything about §1.1. Verify in a real browser.
+
+## 6. Rejected: registering `homeUnit` via `learnUnits`
+
+Review raised that the create path registers a typed category but not a typed
+home unit, leaving `Item.homeUnit` able to hold a string matching no
+`/admin/units` row — asymmetric with the §2.2 argument that a create form
+should not be stricter than the importer.
+
+**Not adopted, because the two vocabularies are not the same shape.**
+`learnUnits` takes `UnitResolution` records and keys on `abbreviation`, which
+is `Unit`'s citext-unique identity (`units.service.ts:35-60`). A hand-typed
+`homeUnit` is a bare `fullName` with no abbreviation, so there is nothing to
+learn it *as* — the import can only call `learnUnits` because it derives both
+halves. `DeviceCategory` is a single name, so a typed category is complete on
+its own.
+
+The asymmetry is real and pre-existing (`CLAUDE.md` already lists item creation
+among the four `homeUnit` write paths, none of which resolve a `Unit`). Closing
+it means asking the admin for an abbreviation, or resolving the typed name
+against existing `Unit.fullName`s — a separate feature with its own design, not
+a line in this one.
+
+---
+
+## Review corrections
+
+Revision 2 changed the following after review. Recorded because each was stated
+confidently and wrongly in revision 1:
+
+1. `learnCategories` moved **out** of a transaction with the item create — the
+   two single-item precedents deliberately run it outside and swallow its
+   failure (§2.4).
+2. The "opened with a prefill" signal was never specified; it is now two hidden
+   inputs read directly off `formData` (§3.1).
+3. The return URL is built with `URLSearchParams`; raw concatenation would
+   mangle serials containing `&`, `#`, `+` or a space (§3.1).
+4. The duplicate-serial reachability argument was wrong — a case-only
+   difference *is* found by search, and RETIRED items are *not* hidden. The
+   real path is an active UIC filter (§3.2).
+5. `revalidatePath("/items")` does not fix a stale server render; `/items` is
+   dynamic. It clears the client Router Cache (§3.1).
+6. The 200-char prefill cap protected nothing; the bound belongs on the schema
+   (§2.1).
+7. `text-overflow: ellipsis` on a `.btn` is a no-op; it needs an inner span
+   (§1.1).
+8. Action tests belong in a new `src/app/admin/actions/items.test.ts`, not in
+   the real-DB service test file (§5).
+9. `/admin/items/new/page.tsx` is already an async Server Component, and
+   `searchParams` is a Promise that must be awaited (§2.1).
+10. Line citations corrected: empty state is `ItemSelectTable.tsx:297-301`;
+    props are passed at `items/page.tsx:100,101`.
