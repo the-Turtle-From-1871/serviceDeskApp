@@ -6,7 +6,6 @@ import {
   learnUnits,
   listUnits,
   listUnitsWithCounts,
-  countItemsWithHomeUnit,
   renameUnit,
   deleteUnit,
   listUnassignedHomeUnits,
@@ -30,12 +29,6 @@ test("loadUnitMap keys by uppercase abbreviation", async () => {
   expect(map.get("DCSIM")).toBe("DCSIM");
 });
 
-test("learnUnits upserts new units, uppercasing the abbreviation", async () => {
-  await learnUnits([{ abbreviation: "xyz", fullName: "456th Signal Co" }]);
-  const row = await prisma.unit.findUnique({ where: { abbreviation: "XYZ" } });
-  expect(row?.fullName).toBe("456th Signal Co");
-});
-
 test("learnUnits updates the full name of an existing abbreviation", async () => {
   await prisma.unit.create({ data: { abbreviation: "XYZ", fullName: "Old" } });
   await learnUnits([{ abbreviation: "XYZ", fullName: "New" }]);
@@ -45,11 +38,6 @@ test("learnUnits updates the full name of an existing abbreviation", async () =>
 
 test("learnUnits rejects a non-alphanumeric abbreviation and writes nothing", async () => {
   await expect(learnUnits([{ abbreviation: "X-Y", fullName: "Bad" }])).rejects.toThrow();
-  expect(await prisma.unit.count()).toBe(0);
-});
-
-test("learnUnits accepts an empty array (no-op)", async () => {
-  await learnUnits([]);
   expect(await prisma.unit.count()).toBe(0);
 });
 
@@ -108,6 +96,7 @@ test("learnUnits stores abbreviations uppercased regardless of input casing", as
 
 test("learnUnits is a no-op on an empty list", async () => {
   await expect(learnUnits([])).resolves.toEqual({ created: 0, updated: 0 });
+  expect(await prisma.unit.count()).toBe(0);
 });
 
 // --- listUnitsWithCounts -------------------------------------------------
@@ -127,20 +116,6 @@ test("listUnitsWithCounts reports item counts per unit, and 0 for an unused unit
   const byId = new Map(rows.map((r) => [r.id, r]));
   expect(byId.get(used.id)?.itemCount).toBe(2);
   expect(byId.get(unused.id)?.itemCount).toBe(0);
-});
-
-// --- countItemsWithHomeUnit -----------------------------------------------
-
-test("countItemsWithHomeUnit counts items carrying the exact full name", async () => {
-  const admin = await createAdmin();
-  await prisma.item.createMany({
-    data: [
-      { make: "D", model: "1", serialNumber: "HU-1", homeUnit: "Some Unit", createdById: admin.id },
-      { make: "D", model: "1", serialNumber: "HU-2", homeUnit: "Other Unit", createdById: admin.id },
-    ],
-  });
-  expect(await countItemsWithHomeUnit("Some Unit")).toBe(1);
-  expect(await countItemsWithHomeUnit("Nonexistent Unit")).toBe(0);
 });
 
 // --- renameUnit -------------------------------------------------------
@@ -230,11 +205,14 @@ test("renameUnit writes nothing when the name is unchanged", async () => {
 
 // --- case/whitespace-insensitive matching --------------------------------
 // Item.homeUnit reaches the column via CSV passthrough and hand edits, not
-// only as a verbatim copy of Unit.fullName, so arbitrary case and stray
-// whitespace genuinely land in the fleet. listUnitsWithCounts, renameUnit
-// and deleteUnit must all still recognize those rows as belonging to the
-// unit, or a differently-cased item survives a rename as a second spelling,
-// or blocks a delete it should not block (or vice versa).
+// only as a verbatim copy of Unit.fullName, so arbitrary CASE genuinely
+// lands in the fleet — that is the live drift listUnitsWithCounts, renameUnit
+// and deleteUnit must all still recognize, or a differently-cased item
+// survives a rename as a second spelling, or blocks a delete it should not
+// block (or vice versa). Whitespace is NOT a live path today (all four
+// homeUnit write schemas `.trim()` before Prisma); the btrim() half below is
+// defence for legacy rows or a future write path that bypasses those
+// schemas, not something any current write can actually produce.
 
 test("case- and whitespace-differing homeUnit values are still matched to the unit", async () => {
   const admin = await createAdmin();

@@ -33,6 +33,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Turnstile is off until it is given keys.** Add `NEXT_PUBLIC_TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` (both, or it stays off) from the Cloudflare dashboard. Until then no challenge is shown and none is required — and note that the distributed-attack detector escalates *to* Turnstile, so without keys it can alert but cannot act.
 - **The browser check is a coarse filter, not a wall.** Anyone determined can send whatever identification they like; it turns away the lazy majority and nothing more.
 - **Rate limiting works with no setup, but is only fleet-wide once a Redis store is attached.** Until then each server instance counts on its own, so a determined attacker spread across instances gets more attempts than the numbers above suggest. To fix: add a Redis integration from the Vercel Marketplace to the project — it sets `KV_REST_API_URL` and `KV_REST_API_TOKEN` automatically and nothing else needs to change. (Vercel's own KV product is retired; the Marketplace integration is its replacement.) If Redis is attached and later goes down, requests are allowed through rather than everyone being locked out.
+- **Migration `20260729130000_unit_abbreviation_citext` makes `Unit.abbreviation` case-insensitive.** It fails to apply if any two existing `Unit` rows differ only by letter case (e.g. `WABC01` and `wabc01`) — check for and resolve a collision like that before deploying.
 
 ## 2026-07-28
 

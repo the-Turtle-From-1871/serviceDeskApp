@@ -145,26 +145,37 @@ export type UnitRow = { id: string; abbreviation: string; fullName: string; item
  * over items — never a count query per unit. Mirrors listCategoriesWithCounts,
  * except the grouping key itself has to be normalized in SQL (LOWER(btrim(...)))
  * rather than in JS, since a plain Prisma groupBy can't express that.
+ *
+ * Each unit's fullName is bound into the second query (a VALUES list via
+ * Prisma.join, never spliced) and matched with LOWER(btrim(...)) entirely in
+ * SQL on BOTH sides. Folding the unit side in JS (`fullName.toLowerCase()`)
+ * instead would let Postgres and JS disagree on non-ASCII case folding,
+ * which would show itemCount: 0 for a unit deleteUnit still refuses to
+ * remove — the exact three-sites disagreement this module's design exists
+ * to prevent. One engine decides, so the count and the delete guard can
+ * never drift apart.
  */
 export async function listUnitsWithCounts(): Promise<UnitRow[]> {
-  const [units, counts] = await Promise.all([
-    prisma.unit.findMany({
-      select: { id: true, abbreviation: true, fullName: true },
-      orderBy: { fullName: "asc" },
-    }),
-    prisma.$queryRaw<{ key: string; count: bigint }[]>(Prisma.sql`
-      SELECT LOWER(btrim("homeUnit")) AS key, COUNT(*)::bigint AS count
-      FROM "Item"
-      WHERE "homeUnit" IS NOT NULL AND btrim("homeUnit") <> ''
-      GROUP BY LOWER(btrim("homeUnit"))
-    `),
-  ]);
+  const units = await prisma.unit.findMany({
+    select: { id: true, abbreviation: true, fullName: true },
+    orderBy: { fullName: "asc" },
+  });
+  if (units.length === 0) return [];
+
+  const counts = await prisma.$queryRaw<{ key: string; count: bigint }[]>(Prisma.sql`
+    SELECT v.full_name AS key, COUNT(i.id)::bigint AS count
+    FROM (VALUES ${Prisma.join(units.map((u) => Prisma.sql`(${u.fullName})`))}) AS v(full_name)
+    LEFT JOIN "Item" i
+      ON i."homeUnit" IS NOT NULL
+      AND LOWER(btrim(i."homeUnit")) = LOWER(btrim(v.full_name))
+    GROUP BY v.full_name
+  `);
 
   const byKey = new Map(counts.map((c) => [c.key, Number(c.count)]));
 
   return units.map((u) => ({
     ...u,
-    itemCount: byKey.get(u.fullName.trim().toLowerCase()) ?? 0,
+    itemCount: byKey.get(u.fullName) ?? 0,
   }));
 }
 
@@ -207,18 +218,6 @@ export async function lastImportAt(): Promise<Date | null> {
     select: { createdAt: true },
   });
   return batch?.createdAt ?? null;
-}
-
-/** How many items would a rename of this full name touch (case- and
- *  whitespace-insensitively). Used to warn the admin BEFORE they commit a
- *  change that rewrites a thousand rows. */
-export async function countItemsWithHomeUnit(fullName: string): Promise<number> {
-  const [{ count }] = await prisma.$queryRaw<[{ count: bigint }]>(Prisma.sql`
-    SELECT COUNT(*)::bigint AS count
-    FROM "Item"
-    WHERE LOWER(btrim("homeUnit")) = LOWER(btrim(${fullName}))
-  `);
-  return Number(count);
 }
 
 /**
