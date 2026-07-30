@@ -282,9 +282,14 @@ idempotent against unchanged input.
 bounded, not row bounded*: a 2000-row file is roughly 15-20 database queries,
 not 2000. Rows are grouped by which columns changed and written with batched
 `UPDATE ... FROM (VALUES ...)` statements. So Supabase latency multiplies by
-about twenty, not by two thousand. The function is allowed 300s and the
-transaction inside it 55s, which is a wide margin — but measure it in step 2
-rather than trusting this paragraph.
+about twenty, not by two thousand. The function is allowed **60s** total; the
+database transaction inside it is budgeted **45s** (`maxWait` 5s + `timeout`
+40s — not "the transaction" alone, `maxWait` is time spent waiting to acquire
+a pool connection before the transaction even starts). That leaves roughly
+**15s** outside the transaction for reading the upload, resolving the service
+account, and the lookup queries that run before the transaction opens, plus
+unwind time afterward — measure it in step 2 rather than trusting this
+paragraph.
 
 **If it does time out**, the symptom is a `500` with nothing written (the
 transaction aborts as a unit). The fix is to split the export into smaller

@@ -191,7 +191,12 @@ measurement):
 **Why it should fit comfortably:** the import is round-trip bounded, not row bounded
 — a 2000-row file is roughly 15–20 database queries, not 2000, because rows are
 grouped and written in batches. Database latency multiplies by about twenty, not by
-two thousand. Measure it at step 2 rather than trusting this paragraph.
+two thousand. The function is allowed **60s** total; the database transaction inside
+it is budgeted **45s** (`maxWait` 5s to acquire a pool connection, plus `timeout` 40s
+for the transaction itself), leaving roughly **15s** outside the transaction for
+reading the upload, resolving the service account, and the lookup queries that run
+before the transaction opens, plus unwind time afterward. Measure it at step 2
+rather than trusting this paragraph.
 
 **If it ever does time out**, the symptom is a `500` with nothing written. Split the
 export into smaller files; that is safe precisely because nothing is deleted and

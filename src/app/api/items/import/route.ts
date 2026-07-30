@@ -9,23 +9,35 @@ import { getImportActor } from "@/modules/items/import-actor";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// MUST be declared, and MUST exceed commitImport's transaction budget.
+// MUST be declared, and the invariant is bigger than just "exceed the
+// transaction budget":
 //
-// commitImport runs an interactive transaction configured with
-// `timeout: 50_000, maxWait: 5_000` (items.service.ts). Those are consumed
-// SEQUENTIALLY, so the function must be allowed to live longer than their sum
-// (55s) or the platform kills it mid-transaction instead of letting it abort
-// cleanly into the catch below — which is exactly the confusing generic failure
-// the batching work went in to remove.
+//   maxDuration > pre-transaction work + maxWait + timeout
+//
+// `maxWait` (5s, time spent waiting to acquire a pool connection before the
+// transaction even starts) and `timeout` (40s, items.service.ts) bound
+// commitImport's interactive transaction, consumed SEQUENTIALLY — 45s. But
+// real work happens BEFORE that transaction opens, in this same invocation,
+// and it is not free: `req.formData()` buffering the whole upload (above),
+// `getImportActor()` (one DB round trip), `file.text()`, and inside
+// commitImport, `Promise.all([loadExistingBySerial, loadUnitMap])` — two
+// parallel queries, the first of which can return up to MAX_IMPORT_ROWS
+// (2000) rows × 14 columns. On a cold start, add Prisma engine
+// initialization and the first pool connect on top of that. If the platform
+// kills the function before this pre-transaction work finishes, it never
+// reaches the transaction at all — same bad outcome (no clean 500 into the
+// catch below), just earlier.
 //
 // 60 is used deliberately, NOT a larger number picked "to be safe": Vercel
 // REJECTS an unsupported maxDuration at DEPLOY time, on every plan below
 // whatever ceiling that plan allows, and `next build` in CI cannot catch
 // that — the first place an unverified higher value would fail is the
-// production deployment itself. 60 clears the 55s floor with a small margin
-// and is accepted on every Vercel plan (it's also what the interactive
-// /admin/items/import page already uses, so this isn't a new number in the
-// codebase). Raise it later only once a measured production run actually
+// production deployment itself. 60 is accepted on every Vercel plan (it's
+// also what the interactive /admin/items/import page already uses). That
+// leaves ~15s for everything outside the 45s transaction — pre-transaction
+// work plus unwind — which is the margin `timeout` was lowered from 50s to
+// 40s to buy back (see the comment at commitImport's transaction options).
+// Raise maxDuration later only once a measured production run actually
 // needs more AND the target plan's real ceiling has been confirmed.
 export const maxDuration = 60;
 
