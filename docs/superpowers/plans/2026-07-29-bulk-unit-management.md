@@ -10,6 +10,50 @@
 
 Spec: `docs/superpowers/specs/2026-07-29-automated-mdm-import-design.md` (§ "`/admin/units` — bulk unit management")
 
+---
+
+## ⚠️ STATUS: EXECUTED 2026-07-29/30 — read these corrections before reusing anything below
+
+This plan shipped on `feat/bulk-unit-management`. **Several code snippets below are
+wrong** and were corrected during execution. They are left in place so the record
+matches what was actually planned, but do not copy them:
+
+1. **`parseUnitBlock` CANNOT live in `src/app/admin/actions/units.ts`** (Task 4). That
+   file starts with `"use server"`, and Next.js requires *every* export from such a
+   module to be an async function — a synchronous export is a **build error**. It was
+   moved to its own pure module, `src/modules/items/units.parse.ts`. Only
+   `npm run build` catches this; vitest does not.
+2. **`bulkLearnUnitsAction`'s return was dishonest** (Task 4). `{ created: units.length,
+   updated: 0 }` reports lines *submitted*, not created, and `updated: 0` is false
+   whenever an existing unit was re-taught. `learnUnits` was extended to return the real
+   `{ created, updated }` it already computes internally. That changed its return type
+   from `void`, which broke a pre-existing assertion.
+3. **Every `prisma.user.findFirstOrThrow({ where: { role: "ADMIN" } })` in the test
+   snippets always throws.** `tests/helpers/db.ts` `resetDb()` TRUNCATEs `User` before
+   each test. Tests must create their own admin.
+4. **The test snippets use `describe`/`it` with per-test `deleteMany`.** The real
+   `units.service.test.ts` uses top-level `test()` with `beforeEach(resetDb)`, which
+   already truncates. Follow the file.
+5. **Task 3's `listUnitsWithCounts` snippet folds case in JS (`.toLowerCase()`) while
+   `deleteUnit` compared exactly.** Three comparison sites that disagree is the exact
+   bug this feature exists to prevent — the UI reported a unit as in use while the
+   delete succeeded anyway. All sites now use one parameterized
+   `LOWER(btrim(...))` comparison in SQL. **Consequence to know:** renaming a unit also
+   normalises items whose home unit differed only in capitalisation.
+6. **Task 6's page-local `isStale` helper was untested.** It was extracted to
+   `src/modules/items/import-freshness.ts` with `now` as a required parameter and the
+   threshold as an exported constant, mirroring `src/modules/timers/due.ts`.
+7. **The spec claimed `homeUnit` needed adding to `ItemLoggedFields`.** It was already
+   there (`item-diff.ts`); no type change was needed.
+
+Two defects found only by a **real-browser** pass, which neither `npm run build` nor
+jsdom caught — the reason this project insists on browser verification:
+
+- The unresolved-devices panel showed the *capped array length* (50) as if it were the
+  device count; 100 actually qualified. It now returns `{ items, total }`.
+- JSX stripped the space after a `</strong>` tag, rendering "the next **timeit** is
+  included". jsdom did not reproduce it. An explicit `{" "}` fixes it.
+
 ## Global Constraints
 
 - Every Server Action and Route Handler starts with `requireUser()`/`requireAdmin()` from `@/lib/authz` — never bare `auth()`. This whole feature is `requireAdmin()`.
