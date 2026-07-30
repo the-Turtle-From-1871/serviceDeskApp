@@ -35,9 +35,9 @@ export async function loadUnitMap(): Promise<Map<string, string>> {
 export async function learnUnits(
   resolutions: UnitResolution[],
   tx: Prisma.TransactionClient = prisma,
-): Promise<void> {
+): Promise<{ created: number; updated: number }> {
   const parsed = z.array(resolutionSchema).parse(resolutions);
-  if (parsed.length === 0) return;
+  if (parsed.length === 0) return { created: 0, updated: 0 };
 
   // Last write wins on a duplicate abbreviation within one batch.
   const wanted = new Map<string, string>();
@@ -77,6 +77,8 @@ export async function learnUnits(
   for (const [fullName, abbrevs] of byNewName) {
     await tx.unit.updateMany({ where: { abbreviation: { in: abbrevs } }, data: { fullName } });
   }
+
+  return { created: toCreate.length, updated: changed.length };
 }
 
 // Units for the item-detail unit picker's <datalist>, ordered for display.

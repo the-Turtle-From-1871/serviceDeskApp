@@ -87,11 +87,12 @@ test("listUnits returns abbreviation + fullName ordered by fullName", async () =
 test("learnUnits creates new units and updates existing names in one call", async () => {
   await prisma.unit.create({ data: { abbreviation: "BATCH01", fullName: "Old Name" } });
 
-  await learnUnits([
+  const res = await learnUnits([
     { abbreviation: "batch01", fullName: "New Name" },
     { abbreviation: "batch02", fullName: "Second Unit" },
   ]);
 
+  expect(res).toEqual({ created: 1, updated: 1 });
   const map = await loadUnitMap();
   expect(map.get("BATCH01")).toBe("New Name");
   expect(map.get("BATCH02")).toBe("Second Unit");
@@ -104,7 +105,7 @@ test("learnUnits stores abbreviations uppercased regardless of input casing", as
 });
 
 test("learnUnits is a no-op on an empty list", async () => {
-  await expect(learnUnits([])).resolves.toBeUndefined();
+  await expect(learnUnits([])).resolves.toEqual({ created: 0, updated: 0 });
 });
 
 // --- listUnitsWithCounts -------------------------------------------------
