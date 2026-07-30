@@ -165,13 +165,63 @@ test("renameUnit rewrites every item carrying the old full name and logs each ch
   const edits = await prisma.itemEdit.findMany({ where: { itemId: item1.id } });
   expect(edits).toHaveLength(1);
   expect(edits[0].changes).toEqual([{ field: "homeUnit", from: "Old Full Name", to: "New Full Name" }]);
+
+  // The untouched item must get NO history row at all — a rename that logged
+  // edits for items it didn't change would pollute every item's history.
+  const item3 = await prisma.item.findFirstOrThrow({ where: { serialNumber: "RN-3" } });
+  expect(await prisma.itemEdit.count({ where: { itemId: item3.id } })).toBe(0);
 });
 
 test("renameUnit writes nothing when the name is unchanged", async () => {
   const unit = await prisma.unit.create({ data: { abbreviation: "RENAME02", fullName: "Same" } });
   const admin = await createAdmin();
+  // An item carrying the (unchanged) name proves this is a real no-op, not a
+  // vacuous one: an implementation that ran the whole transaction and wrote
+  // empty-`changes` ItemEdit rows would still report itemsUpdated: 0 here if
+  // no item existed to touch.
+  const item = await prisma.item.create({
+    data: { make: "D", model: "1", serialNumber: "NOOP-1", homeUnit: "Same", createdById: admin.id },
+  });
+
   const res = await renameUnit(unit.id, "Same", { id: admin.id, name: admin.name });
+
   expect(res.itemsUpdated).toBe(0);
+  expect(await prisma.itemEdit.count()).toBe(0);
+  expect((await prisma.item.findUniqueOrThrow({ where: { id: item.id } })).homeUnit).toBe("Same");
+});
+
+// --- case/whitespace-insensitive matching --------------------------------
+// Item.homeUnit reaches the column via CSV passthrough and hand edits, not
+// only as a verbatim copy of Unit.fullName, so arbitrary case and stray
+// whitespace genuinely land in the fleet. listUnitsWithCounts, renameUnit
+// and deleteUnit must all still recognize those rows as belonging to the
+// unit, or a differently-cased item survives a rename as a second spelling,
+// or blocks a delete it should not block (or vice versa).
+
+test("case- and whitespace-differing homeUnit values are still matched to the unit", async () => {
+  const admin = await createAdmin();
+  const unit = await prisma.unit.create({ data: { abbreviation: "CI01", fullName: "Alpha Company" } });
+  await prisma.item.createMany({
+    data: [
+      // Differs only by case.
+      { make: "D", model: "1", serialNumber: "CI-1", homeUnit: "ALPHA COMPANY", createdById: admin.id },
+      // Differs only by leading/trailing whitespace.
+      { make: "D", model: "1", serialNumber: "CI-2", homeUnit: "  Alpha Company  ", createdById: admin.id },
+    ],
+  });
+
+  // Counted by listUnitsWithCounts despite the differing casing/whitespace.
+  const rows = await listUnitsWithCounts();
+  expect(rows.find((r) => r.id === unit.id)?.itemCount).toBe(2);
+
+  // deleteUnit must refuse: both rows still, in effect, point at this unit.
+  await expect(deleteUnit(unit.id)).rejects.toThrow(/still/i);
+
+  // renameUnit must find and rewrite both rows.
+  const res = await renameUnit(unit.id, "Alpha Co", { id: admin.id, name: admin.name });
+  expect(res.itemsUpdated).toBe(2);
+  expect((await prisma.item.findFirstOrThrow({ where: { serialNumber: "CI-1" } })).homeUnit).toBe("Alpha Co");
+  expect((await prisma.item.findFirstOrThrow({ where: { serialNumber: "CI-2" } })).homeUnit).toBe("Alpha Co");
 });
 
 test("renameUnit throws NOT_FOUND for a missing unit", async () => {

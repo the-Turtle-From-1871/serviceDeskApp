@@ -91,23 +91,48 @@ export function listUnits(): Promise<{ abbreviation: string; fullName: string }[
    The managed unit vocabulary (admin CRUD).
 
    Unit has no FK to Item — Item.homeUnit is a denormalised copy of
-   Unit.fullName, written verbatim by the CSV importer (see loadUnitMap /
-   the import path). That means this module owns keeping the two coherent:
-   renaming a unit must rewrite every item carrying the old spelling, or the
-   fleet ends up holding two spellings of one unit, which shows up as TWO
-   entries in the /items unit filter and TWO bars in the analytics unit
-   leaderboard for what is really one unit. Deleting a unit still in use
-   would leave those devices holding a string that matches no vocabulary
-   row, so it is refused instead, mirroring deleteCategory.
+   Unit.fullName. Unlike learnUnits' own callers, Item.homeUnit reaches the
+   database through THREE different paths, only one of which is an exact
+   copy of Unit.fullName:
+     1. detectHomeUnit (import.ts) — derived from the device name and
+        assigned Unit.fullName verbatim, but ONLY when the CSV's own
+        homeUnit column was blank.
+     2. CSV passthrough (import.ts) — the CSV's homeUnit column is copied
+        straight through UNMODIFIED (whatever casing/whitespace the property
+        book's spreadsheet happened to contain).
+     3. Hand edit — homeUnit is one of the seven admin-editable fields
+        (editableItemFields, items.schema.ts), settable free-text from both
+        `/admin/items/<id>/edit` and the item detail card.
+   Paths 2 and 3 mean arbitrary case and stray whitespace genuinely reach
+   this column, so a case-sensitive/whitespace-sensitive comparison against
+   Unit.fullName cannot see those rows. That is exactly the case a rename or
+   delete needs to catch: missing it here is what would let the fleet keep
+   holding a second spelling of a unit that was supposedly just renamed, or
+   let deleteUnit remove a unit while a differently-cased row still points
+   at it. Every comparison below is therefore LOWER(btrim(...)) on BOTH
+   sides, values bound (never interpolated) — mirroring deleteCategory in
+   categories.service.ts, which needs the same treatment for the same
+   reason (there, because DeviceCategory.name is citext and Item.deviceCategory
+   is free text written the same three ways).
+
+   With that comparison in place, renaming a unit must rewrite every item
+   carrying the old spelling (in whatever casing it was actually stored),
+   or the fleet ends up split across TWO entries in the /items unit filter
+   and TWO bars in the analytics unit leaderboard for what is really one
+   unit. Deleting a unit still in use would leave those devices holding a
+   string that matches no vocabulary row, so it is refused instead.
    ============================================================ */
 
 export type UnitRow = { id: string; abbreviation: string; fullName: string; itemCount: number };
 
 /**
- * Every unit with the number of items whose homeUnit carries its full name.
+ * Every unit with the number of items whose homeUnit carries its full name
+ * (case- and whitespace-insensitively — see the module comment above).
  *
- * TWO queries regardless of unit count: the list, then ONE groupBy over
- * items — never a count query per unit. Mirrors listCategoriesWithCounts.
+ * TWO queries regardless of unit count: the list, then ONE grouped raw query
+ * over items — never a count query per unit. Mirrors listCategoriesWithCounts,
+ * except the grouping key itself has to be normalized in SQL (LOWER(btrim(...)))
+ * rather than in JS, since a plain Prisma groupBy can't express that.
  */
 export async function listUnitsWithCounts(): Promise<UnitRow[]> {
   const [units, counts] = await Promise.all([
@@ -115,51 +140,58 @@ export async function listUnitsWithCounts(): Promise<UnitRow[]> {
       select: { id: true, abbreviation: true, fullName: true },
       orderBy: { fullName: "asc" },
     }),
-    prisma.item.groupBy({
-      by: ["homeUnit"],
-      where: { homeUnit: { not: null } },
-      _count: { _all: true },
-    }),
+    prisma.$queryRaw<{ key: string; count: bigint }[]>(Prisma.sql`
+      SELECT LOWER(btrim("homeUnit")) AS key, COUNT(*)::bigint AS count
+      FROM "Item"
+      WHERE "homeUnit" IS NOT NULL AND btrim("homeUnit") <> ''
+      GROUP BY LOWER(btrim("homeUnit"))
+    `),
   ]);
 
-  // Item.homeUnit is plain text and so is Unit.fullName (unlike
-  // DeviceCategory.name, it is NOT citext) — but the value is written
-  // verbatim from Unit.fullName at import time, so an exact (trimmed)
-  // match is the correct comparison here, not a case-insensitive one.
-  const byName = new Map<string, number>();
-  for (const c of counts) {
-    if (!c.homeUnit) continue;
-    const key = c.homeUnit.trim();
-    byName.set(key, (byName.get(key) ?? 0) + c._count._all);
-  }
+  const byKey = new Map(counts.map((c) => [c.key, Number(c.count)]));
 
   return units.map((u) => ({
     ...u,
-    itemCount: byName.get(u.fullName.trim()) ?? 0,
+    itemCount: byKey.get(u.fullName.trim().toLowerCase()) ?? 0,
   }));
 }
 
-/** How many items would a rename of this full name touch. Used to warn the
- *  admin BEFORE they commit a change that rewrites a thousand rows. */
+/** How many items would a rename of this full name touch (case- and
+ *  whitespace-insensitively). Used to warn the admin BEFORE they commit a
+ *  change that rewrites a thousand rows. */
 export async function countItemsWithHomeUnit(fullName: string): Promise<number> {
-  return prisma.item.count({ where: { homeUnit: fullName } });
+  const [{ count }] = await prisma.$queryRaw<[{ count: bigint }]>(Prisma.sql`
+    SELECT COUNT(*)::bigint AS count
+    FROM "Item"
+    WHERE LOWER(btrim("homeUnit")) = LOWER(btrim(${fullName}))
+  `);
+  return Number(count);
 }
 
 /**
  * Correct a unit's full name, and rewrite every item carrying the old one.
  *
  * WHY THE BACKFILL: Unit has no FK to Item — Item.homeUnit is a denormalised
- * copy of Unit.fullName, written at import time. Renaming only the
- * vocabulary row would leave the fleet holding the old spelling, splitting
- * one real unit into two entries in the /items filter and two bars in the
- * analytics leaderboard.
+ * copy of Unit.fullName. Renaming only the vocabulary row would leave the
+ * fleet holding the old spelling, splitting one real unit into two entries
+ * in the /items filter and two bars in the analytics leaderboard.
+ *
+ * The match against the OLD name is LOWER(btrim(...)) on both sides (see the
+ * module comment) because homeUnit reaches Item via CSV passthrough and hand
+ * edits, not only as a verbatim copy of Unit.fullName — a differently-cased
+ * or padded row must still be found and rewritten, or it survives the rename
+ * as a second spelling. Prisma's `updateMany`/`groupBy` can't express that
+ * predicate, so the read and the write are raw SQL; ids are bound via
+ * Prisma.join, never spliced in.
  *
  * A FIXED number of queries in one transaction, never one per item: a read
- * of the affected item ids, the unit's own update, one updateMany of the
+ * of the affected items (id + their OWN stored value, needed because two
+ * affected rows can differ from each other in case/whitespace even though
+ * both match the old name), the unit's own update, one raw UPDATE of the
  * items, and one createMany of history rows. homeUnit is already a member
- * of ItemLoggedFields, so these rows are shaped exactly like a hand edit —
- * the diff is identical for every affected item (same before/after), so it
- * is computed once rather than per row.
+ * of ItemLoggedFields, so these rows are shaped exactly like a hand edit.
+ * Each row's diff uses ITS OWN prior value as `from` (not the unit's
+ * canonical fullName), so the history reflects what was actually stored.
  */
 export async function renameUnit(
   id: string,
@@ -177,29 +209,31 @@ export async function renameUnit(
   if (unit.fullName === fullName) return { abbreviation: unit.abbreviation, itemsUpdated: 0 };
 
   return prisma.$transaction(async (tx) => {
-    const affected = await tx.item.findMany({
-      where: { homeUnit: unit.fullName },
-      select: { id: true },
-    });
+    const affected = await tx.$queryRaw<{ id: string; homeUnit: string | null }[]>(Prisma.sql`
+      SELECT id, "homeUnit"
+      FROM "Item"
+      WHERE LOWER(btrim("homeUnit")) = LOWER(btrim(${unit.fullName}))
+    `);
 
     await tx.unit.update({ where: { id }, data: { fullName } });
 
     if (affected.length > 0) {
-      await tx.item.updateMany({
-        where: { id: { in: affected.map((a) => a.id) } },
-        data: { homeUnit: fullName },
-      });
+      const ids = affected.map((a) => a.id);
+      await tx.$executeRaw(Prisma.sql`
+        UPDATE "Item"
+        SET "homeUnit" = ${fullName}
+        WHERE id IN (${Prisma.join(ids)})
+      `);
 
-      const changes = diffItemFields(
-        { homeUnit: unit.fullName },
-        { homeUnit: fullName },
-      ) as unknown as Prisma.InputJsonValue;
       await tx.itemEdit.createMany({
         data: affected.map((a) => ({
           itemId: a.id,
           editedById: editor.id,
           editedByName: editor.name,
-          changes,
+          changes: diffItemFields(
+            { homeUnit: a.homeUnit },
+            { homeUnit: fullName },
+          ) as unknown as Prisma.InputJsonValue,
         })),
       });
     }
@@ -216,15 +250,12 @@ export async function renameUnit(
  * that appears in no picker and stops the importer resolving the
  * abbreviation to anything meaningful.
  *
- * Plain Prisma equality, NOT deleteCategory's raw-SQL LOWER(btrim(...))
- * comparison — that treatment exists there because DeviceCategory.name is
- * citext and Prisma's `mode: "insensitive"` compiles to ILIKE, which turns
- * `_`/`%` inside the name into wildcards. Unit.fullName is a plain String
- * column, not citext (see schema.prisma), and this check is not asking for
- * case-insensitivity at all — it is an exact match against a value that was
- * itself written verbatim from this same fullName at import time. A plain
- * `=` comparison has no ILIKE wildcard behavior, so there is nothing here
- * for that treatment to guard against.
+ * LOWER(btrim(...)) on both sides, parameterized — same reasoning as
+ * deleteCategory's raw-SQL comparison, and as the module comment above:
+ * Item.homeUnit reaches this column via CSV passthrough and hand edits, not
+ * only as an exact copy of Unit.fullName, so a case/whitespace-sensitive
+ * check would miss a differently-cased row and delete a unit that a device
+ * still, in effect, points at.
  */
 export async function deleteUnit(id: string): Promise<{ abbreviation: string }> {
   const unit = await prisma.unit.findUnique({
@@ -233,7 +264,12 @@ export async function deleteUnit(id: string): Promise<{ abbreviation: string }> 
   });
   if (!unit) throw new ItemError("NOT_FOUND", "That unit no longer exists.");
 
-  const inUse = await prisma.item.count({ where: { homeUnit: unit.fullName } });
+  const [{ count }] = await prisma.$queryRaw<[{ count: bigint }]>(Prisma.sql`
+    SELECT COUNT(*)::bigint AS count
+    FROM "Item"
+    WHERE LOWER(btrim("homeUnit")) = LOWER(btrim(${unit.fullName}))
+  `);
+  const inUse = Number(count);
   if (inUse > 0) {
     throw new ItemError(
       "IN_USE",
