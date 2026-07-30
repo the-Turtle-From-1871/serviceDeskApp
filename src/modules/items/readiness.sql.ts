@@ -14,7 +14,9 @@ import { READINESS_ORDER } from "./readiness";
 
    The precedence below is load-bearing and is documented in full on
    readinessState(); the short version is that a service flag outranks every
-   "deployed" signal, which is what makes the open-receipt rule safe.
+   "deployed" signal, which is what makes the open-receipt rule safe, and that
+   a hand-set `markedReadyAt` is beaten only by a deliberate act (service flag,
+   open receipt, retirement) — never by MDM telemetry.
    ============================================================ */
 
 /** Alias the caller must use for the Item table when embedding these. */
@@ -48,9 +50,9 @@ export const READINESS_CASE = Prisma.sql`
         AND ti."returnedAt" IS NULL
         AND t."status" = 'OPEN'
     ) THEN 'DEPLOYED'
-    WHEN i."lastLogonAt" IS NOT NULL
-     AND i."markedReadyAt" IS NOT NULL
-     AND i."lastLogonAt" > i."markedReadyAt" THEN 'DEPLOYED'
+    -- NOTE: no "lastLogonAt > markedReadyAt" rule here. It was removed from
+    -- both twins together; see readinessState() for why. Do not re-add it to
+    -- one side only — readiness.parity.test.ts exists to catch exactly that.
     WHEN i."markedReadyAt" IS NOT NULL THEN 'READY_TO_DEPLOY'
     WHEN i."lastLogonUserPrincipalName" IS NOT NULL
      AND btrim(i."lastLogonUserPrincipalName") <> '' THEN 'DEPLOYED'

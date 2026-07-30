@@ -2,8 +2,9 @@
 // (mirrors audit.status.ts and service-queue.status.ts).
 //
 // Readiness is DERIVED, never stored. The one thing an operator sets by hand is
-// `markedReadyAt` — "this is back on my shelf" — and even that is outranked by
-// evidence that the device has been used since.
+// `markedReadyAt` — "this is back on my shelf" — and it is outranked only by
+// evidence that the device DELIBERATELY left again: a service flag, an open
+// hand receipt, or retirement. MDM telemetry does not outvote it.
 //
 // WHY DERIVED: the previous design stored a four-value `deployableStatus` enum
 // set only from a bulk action. In production 0 of 1,139 items ever had it set,
@@ -45,7 +46,12 @@ export type ReadinessSignals = {
   /** True when the item sits on an OPEN hand receipt with an unreturned line. */
   onOpenReceipt: boolean;
   /** Parsed MDM last-logon instant (see parseLastLogonAt). Null when the raw
-   *  string was absent or unparseable. */
+   *  string was absent or unparseable.
+   *
+   *  NOT used by readinessState any more — see the precedence note about the
+   *  removed "logon after the marking" rule. Retained because it is a real
+   *  column the analytics surfaces read, and because reinstating that rule
+   *  should not require re-deriving how to parse the date. */
   lastLogonAt: Date | null;
   /** Raw MDM last-logon user. Present = the device has been used by someone,
    *  even if the date could not be parsed. */
@@ -67,22 +73,35 @@ export type ReadinessSignals = {
  *                   service first is what makes the receipt rule below safe.
  *  3. DEPLOYED    — on an open, unreturned hand receipt. Reflects an issue the
  *                   moment it happens, with no wait for the next MDM import.
- *  4. DEPLOYED    — used since it was shelved (lastLogonAt > markedReadyAt).
- *                   This is why markedReadyAt is a TIMESTAMP and not a boolean:
- *                   the marking self-expires instead of going stale.
- *  5. READY       — marked on hand, and nothing above contradicts it.
- *  6. DEPLOYED    — has an MDM last-logon user. Covers the ~1,053 devices that
+ *                   This is what covers "we actually gave it out": it fires on
+ *                   the deliberate act, not on telemetry catching up.
+ *  4. READY       — marked on hand, and nothing above contradicts it.
+ *  5. DEPLOYED    — has an MDM last-logon user. Covers the ~1,053 devices that
  *                   are genuinely in soldiers' hands but predate the app, so
  *                   have no hand receipt. Deliberately LAST of the deployed
  *                   rules: it is the weakest evidence and the stickiest.
- *  7. UNTRIAGED   — no signal at all. Not a failure state; it means "we have
+ *  6. UNTRIAGED   — no signal at all. Not a failure state; it means "we have
  *                   never heard anything about this device".
+ *
+ * REMOVED RULE — "used since it was shelved" (lastLogonAt > markedReadyAt),
+ * which used to sit between 3 and 4 and made the marking self-expire.
+ *
+ * It fired on any logon newer than the stamp, and a device on our own shelf
+ * produces those routinely: powering it on to image it, an MDM check-in, a
+ * test before reissue. The item then read Deployed while physically in our
+ * hands, contradicting the person who had just held it. Nightly automated
+ * imports turned that from a weekly annoyance into a next-morning one, since
+ * every shelf-side logon now lands within 24 hours instead of whenever
+ * somebody remembered to import.
+ *
+ * What it uniquely caught was an issue-out with NO hand receipt — rule 3
+ * already covers a documented one. If undocumented issues become common, this
+ * is the rule to reinstate, and `lastLogonAt` is still populated for it.
  */
 export function readinessState(s: ReadinessSignals): ReadinessState {
   if (s.status === "RETIRED") return "RETIRED";
   if (s.flaggedForService) return "IN_REPAIR";
   if (s.onOpenReceipt) return "DEPLOYED";
-  if (s.lastLogonAt && s.markedReadyAt && s.lastLogonAt > s.markedReadyAt) return "DEPLOYED";
   if (s.markedReadyAt) return "READY_TO_DEPLOY";
   if (s.lastLogonUser && s.lastLogonUser.trim() !== "") return "DEPLOYED";
   return "UNTRIAGED";
