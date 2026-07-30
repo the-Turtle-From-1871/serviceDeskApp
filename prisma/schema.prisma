@@ -192,7 +192,13 @@ model DeviceCategory {
 
 model Unit {
   id           String   @id @default(cuid())
-  abbreviation String   @unique
+  // citext, like User.email and Item.serialNumber: an abbreviation is an
+  // identity, and "WABC01" / "wabc01" are the same unit. Without it the
+  // uppercasing in learnUnits is convention-only, so any write site that
+  // forgets it forks the unit into a second row that resolves differently —
+  // and the importer would then resolve device names inconsistently depending
+  // on which row it happened to match.
+  abbreviation String   @unique @db.Citext
   fullName     String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

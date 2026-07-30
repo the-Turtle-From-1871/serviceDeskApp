@@ -18,6 +18,7 @@ export type ExistingItem = {
   make: string;
   model: string;
   deviceName: string | null;
+  homeUnit: string | null;
   deviceUIC: string | null;
   deviceCategory: string | null;
   currentUserEmail: string | null;
@@ -128,13 +129,64 @@ export function planImport(
         ...(d.model !== undefined ? { model: d.model } : {}),
       }).length > 0;
 
+      // The value deviceName WILL have after this import — the CSV's own value
+      // when it supplied one, else whatever is already stored. Used below so a
+      // row that gains a decodable name in this SAME import can still resolve
+      // its home unit, mirroring the CREATE branch's use of item.deviceName.
+      const effectiveDeviceName = d.deviceName !== undefined ? d.deviceName : match.deviceName;
+
+      // Set when this row's homeUnit came from detectHomeUnit below (as opposed
+      // to a CSV-supplied value). Whether it counts toward `detected` is decided
+      // AFTER diffItemFields runs, by checking loggedChanges for an actual
+      // homeUnit change — see below.
+      let homeUnitDerivedByDetection = false;
+
       // Logged fields (deviceName, deviceUIC, currentUserEmail) -> ItemEdit history.
       const loggedAfter: Partial<ItemLoggedFields> = {};
       if (d.deviceName !== undefined) loggedAfter.deviceName = d.deviceName;
       if (d.deviceUIC !== undefined) loggedAfter.deviceUIC = d.deviceUIC;
       if (d.deviceCategory !== undefined) loggedAfter.deviceCategory = d.deviceCategory;
       if (d.assignedUser !== undefined) loggedAfter.currentUserEmail = d.assignedUser;
+
+      // homeUnit: the CSV import is the single source of truth (task 8). A row
+      // that already exists gets it the SAME way a freshly created row does —
+      // see the mirrored logic in the CREATE branch below — and that means a
+      // CSV-supplied value OVERWRITES whatever is already stored, exactly like
+      // deviceName/deviceUIC/deviceCategory/currentUserEmail above. Do not add
+      // a "only if blank" guard here.
+      if (d.homeUnit !== undefined) {
+        // Verbatim, no normalisation/canonicalisation against the Unit
+        // vocabulary — whatever the export says is what the item holds. Not
+        // an auto-detection, so `detected` is untouched.
+        loggedAfter.homeUnit = d.homeUnit;
+      } else if (effectiveDeviceName) {
+        const full = detectHomeUnit(effectiveDeviceName, unitsByAbbrev);
+        if (full) {
+          loggedAfter.homeUnit = full;
+          homeUnitDerivedByDetection = true;
+        } else if (!match.homeUnit) {
+          // Still blank after both sources (no CSV value, detection failed)
+          // AND there was a name to try decoding: report it the same way the
+          // CREATE branch does, for the admin panel to surface. A row that
+          // already carries a home unit is not "unresolved" — it just isn't
+          // being changed this import, per the "leave it alone" rule above.
+          unresolved.push({ row: r.row, deviceName: effectiveDeviceName, segments: splitSegments(effectiveDeviceName) });
+        }
+      }
+      // Otherwise (no CSV value, no effective device name): leave it alone —
+      // homeUnit is simply absent from loggedAfter, so diffItemFields treats
+      // it as "not submitted" and the stored value is untouched.
       const loggedChanges = diffItemFields(match, loggedAfter);
+
+      // `detected` counts devices whose home unit this import actually filled
+      // in or corrected — not devices whose name merely still decodes to the
+      // value they already hold. Reuse diffItemFields' own normalisation
+      // (trim, blank->null) rather than hand-rolling a second comparison here:
+      // only increment when the detected value produced a REAL homeUnit entry
+      // in loggedChanges, i.e. it differs from what's already stored.
+      if (homeUnitDerivedByDetection && loggedChanges.some((c) => c.field === "homeUnit")) {
+        detected++;
+      }
 
       // Silent telemetry fields -> updated but not logged.
       const silentAfter: Partial<ItemLoggedFields> = {};

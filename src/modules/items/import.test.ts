@@ -11,7 +11,7 @@ const mk = (row: number, over: Partial<RawRow> = {}): RawRow => ({
 });
 
 const existing = (over: Partial<ExistingItem> = {}): ExistingItem => ({
-  id: "id-1", status: "ACTIVE", make: "M4", model: "Carbine", deviceName: "Radio", deviceUIC: null, deviceCategory: null, currentUserEmail: null,
+  id: "id-1", status: "ACTIVE", make: "M4", model: "Carbine", deviceName: "Radio", homeUnit: null, deviceUIC: null, deviceCategory: null, currentUserEmail: null,
   lastLogonUserPrincipalName: null, lastLogonDate: null, enrollmentDate: null, compliance: null, ...over,
 });
 
@@ -119,16 +119,118 @@ describe("planImport", () => {
     expect(unchanged).toHaveLength(1);
   });
 
-  it("never writes homeUnit/notes on a matched update, even when the CSV supplies them", () => {
+  it("never writes notes on a matched update, even when the CSV supplies it (out of scope for task 8)", () => {
     const { toUpdate } = planImport(
-      [mk(1, { serialNumber: "A1", deviceName: "NewName", homeUnit: "SomeUnit", notes: "some notes" })],
+      [mk(1, { serialNumber: "A1", deviceName: "NewName", notes: "some notes" })],
       map("A1", existing({ id: "x", deviceName: "Old" })),
       UNITS,
     );
-    // deviceName changed -> it's an update; homeUnit/notes are ignored on a match.
+    // deviceName changed -> it's an update; notes is still ignored on a match.
     expect(toUpdate[0].data).toEqual({ deviceName: "NewName" });
-    expect(toUpdate[0].data).not.toHaveProperty("homeUnit");
     expect(toUpdate[0].data).not.toHaveProperty("notes");
+  });
+
+  // --- homeUnit on a matched (UPDATE) row — task 8: the CSV import is the
+  // single source of truth for homeUnit, including on rows that already exist.
+
+  it("matched row, blank stored homeUnit, CSV supplies one -> stored verbatim, logged, not counted as detected", () => {
+    const { toUpdate, detected } = planImport(
+      [mk(1, { serialNumber: "A1", homeUnit: "456th Signal Co" })],
+      map("A1", existing({ id: "x", homeUnit: null })),
+      UNITS,
+    );
+    expect(toUpdate[0].data).toMatchObject({ homeUnit: "456th Signal Co" });
+    expect(toUpdate[0].loggedChanges).toContainEqual({ field: "homeUnit", from: null, to: "456th Signal Co" });
+    expect(detected).toBe(0);
+  });
+
+  it("matched row, blank stored, no CSV value, device name decodes -> filled from detectHomeUnit, detected incremented", () => {
+    const { toUpdate, detected } = planImport(
+      [mk(1, { serialNumber: "A1", deviceName: "HI-DCSIM-LT-001" })],
+      map("A1", existing({ id: "x", deviceName: "HI-DCSIM-LT-001", homeUnit: null })),
+      UNITS,
+    );
+    expect(toUpdate[0].data).toMatchObject({ homeUnit: "DCSIM" });
+    expect(detected).toBe(1);
+  });
+
+  it("matched row, stored homeUnit already equals what detectHomeUnit derives -> NOT counted as detected, no homeUnit change", () => {
+    // Regression test: the nightly full-fleet CSV carries no homeUnit column, so
+    // nearly every matched row re-derives the value it already has. `detected`
+    // must not fire just because detection SUCCEEDED — only when it actually
+    // changed the stored value.
+    const { toUpdate, unchanged, detected } = planImport(
+      [mk(1, { serialNumber: "A1", deviceName: "HI-DCSIM-LT-001" })],
+      map("A1", existing({ id: "x", deviceName: "HI-DCSIM-LT-001", homeUnit: "DCSIM" })),
+      UNITS,
+    );
+    expect(detected).toBe(0);
+    expect(toUpdate).toHaveLength(0);
+    expect(unchanged).toEqual([{ row: 1, serialNumber: "A1", makeModelMismatch: false }]);
+  });
+
+  it("matched row, stored homeUnit differs from what detectHomeUnit derives (no CSV value) -> corrected, detected incremented", () => {
+    const { toUpdate, detected } = planImport(
+      [mk(1, { serialNumber: "A1", deviceName: "HI-DCSIM-LT-001" })],
+      map("A1", existing({ id: "x", deviceName: "HI-DCSIM-LT-001", homeUnit: "Some Other Unit" })),
+      UNITS,
+    );
+    expect(toUpdate[0].data).toMatchObject({ homeUnit: "DCSIM" });
+    expect(toUpdate[0].loggedChanges).toContainEqual({ field: "homeUnit", from: "Some Other Unit", to: "DCSIM" });
+    expect(detected).toBe(1);
+  });
+
+  it("matched row with a NON-blank stored value and a different CSV value -> OVERWRITTEN with the CSV value, change logged", () => {
+    const { toUpdate, detected } = planImport(
+      [mk(1, { serialNumber: "A1", homeUnit: "New Unit" })],
+      map("A1", existing({ id: "x", homeUnit: "Old Unit" })),
+      UNITS,
+    );
+    expect(toUpdate[0].data).toMatchObject({ homeUnit: "New Unit" });
+    expect(toUpdate[0].loggedChanges).toContainEqual({ field: "homeUnit", from: "Old Unit", to: "New Unit" });
+    expect(detected).toBe(0);
+  });
+
+  it("matched row, blank stored, device name does not decode -> unchanged, appears in unresolved", () => {
+    const { toUpdate, unchanged, unresolved } = planImport(
+      [mk(1, { serialNumber: "A1", deviceName: "HI-XYZ-LT-001" })],
+      map("A1", existing({ id: "x", deviceName: "HI-XYZ-LT-001", homeUnit: null })),
+      UNITS,
+    );
+    expect(toUpdate).toHaveLength(0);
+    expect(unchanged).toEqual([{ row: 1, serialNumber: "A1", makeModelMismatch: false }]);
+    expect(unresolved).toEqual([{ row: 1, deviceName: "HI-XYZ-LT-001", segments: ["HI", "XYZ", "LT", "001"] }]);
+  });
+
+  it("matched row, blank stored, no device name at all -> unchanged, NOT in unresolved", () => {
+    const { toUpdate, unchanged, unresolved } = planImport(
+      [mk(1, { serialNumber: "A1", deviceName: "" })],
+      map("A1", existing({ id: "x", deviceName: null, homeUnit: null })),
+      UNITS,
+    );
+    expect(toUpdate).toHaveLength(0);
+    expect(unchanged).toEqual([{ row: 1, serialNumber: "A1", makeModelMismatch: false }]);
+    expect(unresolved).toHaveLength(0);
+  });
+
+  it("effective device name: stored name does not decode, CSV supplies one that does -> filled", () => {
+    const { toUpdate, detected } = planImport(
+      [mk(1, { serialNumber: "A1", deviceName: "HI-DCSIM-LT-001" })],
+      map("A1", existing({ id: "x", deviceName: "HI-XYZ-LT-001", homeUnit: null })),
+      UNITS,
+    );
+    expect(toUpdate[0].data).toMatchObject({ homeUnit: "DCSIM" });
+    expect(detected).toBe(1);
+  });
+
+  it("CSV homeUnit that is whitespace-only is treated as blank and falls through to detection", () => {
+    const { toUpdate, detected } = planImport(
+      [mk(1, { serialNumber: "A1", deviceName: "HI-DCSIM-LT-001", homeUnit: "   " })],
+      map("A1", existing({ id: "x", deviceName: "HI-DCSIM-LT-001", homeUnit: null })),
+      UNITS,
+    );
+    expect(toUpdate[0].data).toMatchObject({ homeUnit: "DCSIM" });
+    expect(detected).toBe(1);
   });
 
   it("updates a RETIRED item's fields but emits no loggedChanges (no history row)", () => {

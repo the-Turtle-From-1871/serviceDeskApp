@@ -1,0 +1,25 @@
+-- Unit.abbreviation becomes case-insensitive.
+--
+-- An abbreviation is an IDENTITY -- "WABC01" and "wabc01" name the same unit --
+-- so it belongs in the same class as User.email and Item.serialNumber, which
+-- are already citext. Before this, the column was @unique but case-SENSITIVE,
+-- which meant:
+--
+--   * the uppercasing in learnUnits was the only thing preventing a fork, so
+--     any write site that forgot it created a second row for the same unit;
+--   * the two rows could carry different fullNames, and detectHomeUnit would
+--     resolve a device name to whichever it matched -- so the same UIC could
+--     land two spellings of one unit in Item.homeUnit, which then reads as two
+--     separate units in the /items filter and the analytics leaderboard.
+--
+-- The conversion FAILS if two rows already differ only by case; that is
+-- deliberate, because merging duplicate units is a data decision (which
+-- fullName wins, and which items get rewritten), not something a migration
+-- should choose. Check before applying to a new environment with:
+--
+--   SELECT LOWER(abbreviation), COUNT(*) FROM "Unit" GROUP BY 1 HAVING COUNT(*) > 1;
+--
+-- The citext extension is already installed (User.email, Item.serialNumber).
+
+-- AlterTable
+ALTER TABLE "Unit" ALTER COLUMN "abbreviation" SET DATA TYPE CITEXT;

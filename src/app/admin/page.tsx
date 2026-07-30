@@ -76,6 +76,7 @@ export default async function AdminHome() {
         <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
           <Link className="btn btn-secondary" href="/admin/analytics">Readiness analytics</Link>
           <Link className="btn btn-secondary" href="/admin/categories">Device categories</Link>
+          <Link className="btn btn-secondary" href="/admin/units">Units</Link>
           <Link className="btn btn-secondary" href="/admin/queue">Service queue</Link>
           <Link className="btn btn-secondary" href="/admin/users">Users</Link>
           <Link className="btn btn-secondary" href="/admin/audit">Audit</Link>

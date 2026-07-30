@@ -3,7 +3,20 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-07-30
+
+### Fixed
+- **The import's "auto-detected" home unit count now reflects devices actually changed, not every device whose name still decodes.** A matched (already-in-the-fleet) row was counted as auto-detected whenever `detectHomeUnit` succeeded, even when the derived value was identical to what the item already stored — so a nightly full-fleet CSV with no `homeUnit` column, where nearly every row's device name simply still decodes to its current unit, reported roughly 1,100 "auto-detected" home units when the real number of devices filled in or corrected was a handful. The count now only increments when detection actually fills a blank home unit or corrects a different stored one.
+
 ## 2026-07-29
+
+### Added
+- **A Units page for admins** at `/admin/units`. Add a unit one at a time, or paste a whole block of `ABBREVIATION,Unit name` lines to add or re-teach many at once — a malformed line is reported by its line number and nothing is saved until every line parses. Correcting a unit's full name also rewrites every item currently assigned to it, and the page shows how many that will affect before you save. Removing a unit is refused while any item still uses it, naming the count.
+- **`/admin/units` now shows when the fleet was last imported, and flags it when the scheduled import may have stopped running.** With a nightly automated import replacing the human-driven browser flow, nobody is watching each run — a dead job and a fleet that has simply stopped changing look identical otherwise. The page now shows the last import time and warns when it is more than 48 hours old. It also lists a sample of devices that imported with no home unit (device name recognized by no known abbreviation), with a note that these devices already exist in the fleet, so teaching the abbreviation above resolves one of them the next time it is included in an import — a device that has dropped out of the export entirely is never matched, so it is never backfilled that way; set it directly on the item's edit page instead. The disclosure heading always shows the true count of such devices, not just how many are listed — on a fleet with more than the sample size, the panel says so ("Showing the first 50").
+
+### Changed
+- **Unit abbreviations are now case-insensitive.** `WABC01` and `wabc01` are one unit, not two. Matching an item to its unit is also now case- and whitespace-insensitive everywhere the app compares them, so correcting a unit's name also folds in items whose home unit was already the right unit but spelled with different capitalization — those are counted as updated too, since they genuinely changed; an item already spelled exactly like the new name is left alone and does not add to that count.
+- **The CSV importer now keeps an existing device's home unit in step with the spreadsheet, instead of only ever setting it on first creation.** A matched (already-in-the-fleet) row now gets its `homeUnit` written the same way a brand-new row does — the CSV's own `homeUnit` column, verbatim, when it has one, otherwise re-derived from the device name using the taught abbreviations — and this **overwrites** whatever was already stored. The importer is now the single source of truth for a device's home unit: correcting it by hand or via a unit rename on `/admin/units` lasts only until the next import that carries a value for that device.
 
 ### Fixed
 - **A failed search no longer reports "No matches."** If the public search is temporarily throttled or unreachable it now says so, instead of telling you your serial number does not exist.
@@ -26,6 +39,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Turnstile is off until it is given keys.** Add `NEXT_PUBLIC_TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` (both, or it stays off) from the Cloudflare dashboard. Until then no challenge is shown and none is required — and note that the distributed-attack detector escalates *to* Turnstile, so without keys it can alert but cannot act.
 - **The browser check is a coarse filter, not a wall.** Anyone determined can send whatever identification they like; it turns away the lazy majority and nothing more.
 - **Rate limiting works with no setup, but is only fleet-wide once a Redis store is attached.** Until then each server instance counts on its own, so a determined attacker spread across instances gets more attempts than the numbers above suggest. To fix: add a Redis integration from the Vercel Marketplace to the project — it sets `KV_REST_API_URL` and `KV_REST_API_TOKEN` automatically and nothing else needs to change. (Vercel's own KV product is retired; the Marketplace integration is its replacement.) If Redis is attached and later goes down, requests are allowed through rather than everyone being locked out.
+- **Migration `20260729130000_unit_abbreviation_citext` makes `Unit.abbreviation` case-insensitive.** It fails to apply if any two existing `Unit` rows differ only by letter case (e.g. `WABC01` and `wabc01`) — check for and resolve a collision like that before deploying.
 
 ## 2026-07-28
 
