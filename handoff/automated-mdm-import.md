@@ -45,13 +45,25 @@ schedule.
 > ```
 > That allows scripts for this window only and changes nothing permanently.
 
+> **Constrained Language Mode is supported.** On a machine locked down with WDAC or
+> AppLocker, PowerShell blocks .NET method calls and prints *"Method invocation is
+> supported only on core types in this language mode."* `Send-MdmImport.ps1` is
+> written to run under that restriction — it prints the mode it detected on its
+> second line, so paste that line in if you report a problem. If you see that error
+> anyway, you are running an older copy of the script; take a fresh one.
+
 **When you're ready to schedule it**, set the secret as a *machine* environment
 variable so it survives reboots and isn't visible in the task definition:
 
 ```powershell
 # Run PowerShell as Administrator, once:
-[Environment]::SetEnvironmentVariable("MDM_IMPORT_SECRET", "paste-the-secret-here", "Machine")
+setx MDM_IMPORT_SECRET "paste-the-secret-here" /M
 ```
+
+`setx` is used rather than `[Environment]::SetEnvironmentVariable(...)` because the
+latter is a .NET method call, which a locked-down machine refuses — see the
+Constrained Language Mode note below. Open a **new** window afterwards; `setx` does
+not affect the window you ran it in.
 
 Then point a Task Scheduler action at:
 
@@ -274,6 +286,7 @@ re-importing unchanged rows does nothing.
 | `200` but the body is **HTML**, not JSON | The request was redirected to the login page | Tell the app owner — the endpoint's exemption from the login gate has been lost. **This one is dangerous: the job looks successful while importing nothing.** |
 | `500` on every request | The service account is missing from the database | Apply the migration named in section 6 |
 | `404` | Not deployed yet | Wait for the release |
+| "Method invocation is supported only on core types in this language mode" | The machine enforces Constrained Language Mode, and something is calling a .NET method | The current script and the commands in this document avoid those calls — take a fresh copy of `Send-MdmImport.ps1`. If it is your own wrapper, replace `[Environment]::…`, `[Math]::…` and `[System.IO.…]::…` with cmdlets |
 | Counts are all `unchanged` | Nothing in the export differs from what's on file | Working as intended |
 | A device's hand-corrected details keep reverting | The export is the source of truth for those fields (section 5) | Correct it in the MDM export, not in the app |
 
