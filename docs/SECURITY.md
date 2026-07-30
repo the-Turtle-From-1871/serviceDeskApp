@@ -570,6 +570,25 @@ truncated to 64 bits) before it becomes a key — "who tried to sign in as whom"
 must not sit in a third-party Redis or a log line — and normalised first, so
 capitalisation is not a fresh budget.
 
+**A lockout is not a flat fifteen minutes — read the window as decaying.**
+Upstash's sliding window is a weighted COUNTER, not a log: it discounts the
+previous window by how far you are into the current one, so five failures, one
+minute into a fresh block, score `5 × (1 − 1/15) = 4.67` and are let through.
+Its reported `reset` is the edge of the fixed wall-clock block, so running out
+near a boundary correctly reports "try again in less than a minute". The real
+range is **about a minute to the full window**, depending where in the block the
+budget ran out — observed in production, not theorised.
+
+> The in-memory fallback differs here: it is an exact timestamp log, so it holds
+> for the full window every time. The two backends agree on *what* counts (a
+> refused attempt is never recorded) but not on how long a lockout lasts.
+>
+> The cost is roughly one extra attempt per `window / limit` — about one every
+> three minutes on the auth bucket. That is the ordinary sliding-counter
+> tradeoff and the reason this is written down rather than "fixed": the
+> alternative, an exact log in Redis, stores a timestamp per attempt and turns a
+> flood into unbounded memory.
+
 **The store is Upstash Redis, with a per-instance fallback.** `@vercel/kv` is
 deprecated by Vercel; the Marketplace Redis integration injects
 `KV_REST_API_URL` / `KV_REST_API_TOKEN`, which is what this reads (also
