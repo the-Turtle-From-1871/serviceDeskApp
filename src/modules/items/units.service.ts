@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
+import { ItemError } from "./items.errors";
+import { diffItemFields } from "./item-diff";
 
 export const resolutionSchema = z.object({
   abbreviation: z
@@ -83,4 +85,163 @@ export function listUnits(): Promise<{ abbreviation: string; fullName: string }[
     select: { abbreviation: true, fullName: true },
     orderBy: { fullName: "asc" },
   });
+}
+
+/* ============================================================
+   The managed unit vocabulary (admin CRUD).
+
+   Unit has no FK to Item — Item.homeUnit is a denormalised copy of
+   Unit.fullName, written verbatim by the CSV importer (see loadUnitMap /
+   the import path). That means this module owns keeping the two coherent:
+   renaming a unit must rewrite every item carrying the old spelling, or the
+   fleet ends up holding two spellings of one unit, which shows up as TWO
+   entries in the /items unit filter and TWO bars in the analytics unit
+   leaderboard for what is really one unit. Deleting a unit still in use
+   would leave those devices holding a string that matches no vocabulary
+   row, so it is refused instead, mirroring deleteCategory.
+   ============================================================ */
+
+export type UnitRow = { id: string; abbreviation: string; fullName: string; itemCount: number };
+
+/**
+ * Every unit with the number of items whose homeUnit carries its full name.
+ *
+ * TWO queries regardless of unit count: the list, then ONE groupBy over
+ * items — never a count query per unit. Mirrors listCategoriesWithCounts.
+ */
+export async function listUnitsWithCounts(): Promise<UnitRow[]> {
+  const [units, counts] = await Promise.all([
+    prisma.unit.findMany({
+      select: { id: true, abbreviation: true, fullName: true },
+      orderBy: { fullName: "asc" },
+    }),
+    prisma.item.groupBy({
+      by: ["homeUnit"],
+      where: { homeUnit: { not: null } },
+      _count: { _all: true },
+    }),
+  ]);
+
+  // Item.homeUnit is plain text and so is Unit.fullName (unlike
+  // DeviceCategory.name, it is NOT citext) — but the value is written
+  // verbatim from Unit.fullName at import time, so an exact (trimmed)
+  // match is the correct comparison here, not a case-insensitive one.
+  const byName = new Map<string, number>();
+  for (const c of counts) {
+    if (!c.homeUnit) continue;
+    const key = c.homeUnit.trim();
+    byName.set(key, (byName.get(key) ?? 0) + c._count._all);
+  }
+
+  return units.map((u) => ({
+    ...u,
+    itemCount: byName.get(u.fullName.trim()) ?? 0,
+  }));
+}
+
+/** How many items would a rename of this full name touch. Used to warn the
+ *  admin BEFORE they commit a change that rewrites a thousand rows. */
+export async function countItemsWithHomeUnit(fullName: string): Promise<number> {
+  return prisma.item.count({ where: { homeUnit: fullName } });
+}
+
+/**
+ * Correct a unit's full name, and rewrite every item carrying the old one.
+ *
+ * WHY THE BACKFILL: Unit has no FK to Item — Item.homeUnit is a denormalised
+ * copy of Unit.fullName, written at import time. Renaming only the
+ * vocabulary row would leave the fleet holding the old spelling, splitting
+ * one real unit into two entries in the /items filter and two bars in the
+ * analytics leaderboard.
+ *
+ * A FIXED number of queries in one transaction, never one per item: a read
+ * of the affected item ids, the unit's own update, one updateMany of the
+ * items, and one createMany of history rows. homeUnit is already a member
+ * of ItemLoggedFields, so these rows are shaped exactly like a hand edit —
+ * the diff is identical for every affected item (same before/after), so it
+ * is computed once rather than per row.
+ */
+export async function renameUnit(
+  id: string,
+  rawFullName: string,
+  editor: { id: string; name: string },
+): Promise<{ abbreviation: string; itemsUpdated: number }> {
+  const fullName = rawFullName.trim();
+  if (!fullName) throw new ItemError("INVALID", "Enter a unit name.");
+
+  const unit = await prisma.unit.findUnique({
+    where: { id },
+    select: { abbreviation: true, fullName: true },
+  });
+  if (!unit) throw new ItemError("NOT_FOUND", "That unit no longer exists.");
+  if (unit.fullName === fullName) return { abbreviation: unit.abbreviation, itemsUpdated: 0 };
+
+  return prisma.$transaction(async (tx) => {
+    const affected = await tx.item.findMany({
+      where: { homeUnit: unit.fullName },
+      select: { id: true },
+    });
+
+    await tx.unit.update({ where: { id }, data: { fullName } });
+
+    if (affected.length > 0) {
+      await tx.item.updateMany({
+        where: { id: { in: affected.map((a) => a.id) } },
+        data: { homeUnit: fullName },
+      });
+
+      const changes = diffItemFields(
+        { homeUnit: unit.fullName },
+        { homeUnit: fullName },
+      ) as unknown as Prisma.InputJsonValue;
+      await tx.itemEdit.createMany({
+        data: affected.map((a) => ({
+          itemId: a.id,
+          editedById: editor.id,
+          editedByName: editor.name,
+          changes,
+        })),
+      });
+    }
+
+    return { abbreviation: unit.abbreviation, itemsUpdated: affected.length };
+  });
+}
+
+/**
+ * Remove a unit from the vocabulary.
+ *
+ * REFUSED while items still carry its full name, mirroring deleteCategory.
+ * With no FK, deleting an in-use unit leaves those devices holding a string
+ * that appears in no picker and stops the importer resolving the
+ * abbreviation to anything meaningful.
+ *
+ * Plain Prisma equality, NOT deleteCategory's raw-SQL LOWER(btrim(...))
+ * comparison — that treatment exists there because DeviceCategory.name is
+ * citext and Prisma's `mode: "insensitive"` compiles to ILIKE, which turns
+ * `_`/`%` inside the name into wildcards. Unit.fullName is a plain String
+ * column, not citext (see schema.prisma), and this check is not asking for
+ * case-insensitivity at all — it is an exact match against a value that was
+ * itself written verbatim from this same fullName at import time. A plain
+ * `=` comparison has no ILIKE wildcard behavior, so there is nothing here
+ * for that treatment to guard against.
+ */
+export async function deleteUnit(id: string): Promise<{ abbreviation: string }> {
+  const unit = await prisma.unit.findUnique({
+    where: { id },
+    select: { abbreviation: true, fullName: true },
+  });
+  if (!unit) throw new ItemError("NOT_FOUND", "That unit no longer exists.");
+
+  const inUse = await prisma.item.count({ where: { homeUnit: unit.fullName } });
+  if (inUse > 0) {
+    throw new ItemError(
+      "IN_USE",
+      `"${unit.fullName}" is still the home unit of ${inUse} item${inUse === 1 ? "" : "s"}. ` +
+        "Reassign them first, then remove it.",
+    );
+  }
+
+  await prisma.unit.delete({ where: { id } });
+  return { abbreviation: unit.abbreviation };
 }
