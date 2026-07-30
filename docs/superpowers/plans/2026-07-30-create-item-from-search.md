@@ -196,10 +196,18 @@ Expected: PASS, all of them, including the pre-existing tests in that file.
 Run: `npx vitest run src/modules/items/item-diff.test.ts src/app/actions/items.test.ts`
 Expected: PASS. These exercise `itemIdentitySchema` and the editable-field schemas; the serial bound is the only thing that could disturb them.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 7: Document the third category variant in `CLAUDE.md`**
+
+Docs ship in the same commit as the code — a project non-negotiable. In the categories section, after the `categoryOptional` / `categoryClearable` bullet, add:
+
+```markdown
+  * **`categoryNew` is the CREATE form's variant** — blank → `undefined` like `categoryOptional` (a row that does not exist yet has no value to clear, and `""` in an indexed column is a value every filter counts), but over-long names are *rejected* like `categoryClearable`. Its trailing `.optional()` is load-bearing: `createItem` re-parses its own input at the service boundary, so the schema must accept its own output.
+```
+
+- [ ] **Step 8: Commit**
 
 ```bash
-git add src/modules/items/items.schema.ts src/modules/items/items.schema.test.ts
+git add src/modules/items/items.schema.ts src/modules/items/items.schema.test.ts CLAUDE.md
 git commit -m "feat(items): new-item schema gains deviceUIC, deviceCategory and a serial bound
 
 A category typed on the create form now survives parsing instead of being
@@ -491,10 +499,26 @@ Add `getItemBySerial` to the existing `@/modules/items/items.service` import at 
 Run: `npx vitest run src/app/actions/items.test.ts`
 Expected: PASS — the new `createItemAction` block and every pre-existing test in the file.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Update `CLAUDE.md` — the fifth normalize-then-learn write site**
+
+Docs ship in the same commit as the code. Find the line reading **"Normalization now runs at FOUR write sites"** and update it:
+
+```markdown
+  * **Normalization now runs at FIVE write sites** — CSV import, the admin edit page, the item card, the bulk selection-bar control, and the new-item form — and all five call `normalizeCategoryName` (from the pure `items.schema.ts`, never the `server-only` service) and then `learnCategories`. Miss either half at a new write site and you get the exact drift this design exists to prevent: an item holding a string that matches no vocabulary row, so the in-use count under-reports and an admin can delete a category still in use.
+```
+
+- [ ] **Step 7: Add the `CHANGELOG.md` "Fixed" entry**
+
+A `## 2026-07-30` section already exists. Append to its existing `### Fixed` subsection — do NOT create a second `## 2026-07-30` heading:
+
+```markdown
+- **Logging a new item no longer silently drops its category, and says so when the serial is taken.** A category typed on the new-item form now joins the managed category list instead of leaving the device holding a value that appeared in no picker, and the items list is refreshed so a newly created item is not missing from it. Creating an item whose serial already exists used to fail with a generic error; it now names the serial and links to the item that already has it.
+```
+
+- [ ] **Step 8: Commit**
 
 ```bash
-git add src/app/admin/actions/items.ts src/app/actions/items.test.ts
+git add src/app/admin/actions/items.ts src/app/actions/items.test.ts CLAUDE.md CHANGELOG.md
 git commit -m "feat(items): createItemAction registers the category and survives a duplicate serial
 
 Three gaps on the create path, all reachable once an item can be created
@@ -1035,10 +1059,18 @@ Append to `src/app/globals.css`, near the other utility classes:
 Run: `npx vitest run src/components/ItemSelectTable.test.tsx`
 Expected: PASS (6 tests).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Add the `CHANGELOG.md` "Added" entry**
+
+Docs ship in the same commit as the code. Append to the existing `### Added` subsection under the existing `## 2026-07-30` heading — do NOT create a second one:
+
+```markdown
+- **A search that finds nothing can now create the item.** When an admin searches the items list and nothing matches, the empty state offers to log that device — opening the new-item form with the searched text already filled in as the serial, and returning to the same filtered search afterwards so the new row is visible. The new-item form also gained UIC and Category fields, and suggests the unit and category names already in use.
+```
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/components/ItemSelectTable.tsx src/components/ItemSelectTable.test.tsx src/app/globals.css
+git add src/components/ItemSelectTable.tsx src/components/ItemSelectTable.test.tsx src/app/globals.css CHANGELOG.md
 git commit -m "feat(items): create a missing item straight from the search empty state
 
 A search that finds nothing was a dead end — the only way forward was to notice
@@ -1058,41 +1090,12 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Task 8: Docs, guardrails, and real-browser verification
+## Task 8: Guardrails, verification, and the PR
 
 **Files:**
-- Modify: `CHANGELOG.md`, `CLAUDE.md`
-- Modify: `docs/superpowers/specs/2026-07-30-create-item-from-search-design.md` (§5's test-placement claim)
+- Modify: `docs/superpowers/specs/2026-07-30-create-item-from-search-design.md` (two wrong claims)
 
-- [ ] **Step 1: Append to `CHANGELOG.md`**
-
-A `## 2026-07-30` section already exists with `### Added` and `### Fixed`. Append to those existing subsections — do NOT create a second `## 2026-07-30` heading.
-
-Under `### Added`:
-
-```markdown
-- **A search that finds nothing can now create the item.** When an admin searches the items list and nothing matches, the empty state offers to log that device — opening the new-item form with the searched text already filled in as the serial, and returning to the same filtered search afterwards so the new row is visible. The new-item form also gained UIC and Category fields, and suggests the unit and category names already in use.
-```
-
-Under `### Fixed`:
-
-```markdown
-- **Logging a new item no longer silently drops its category, and says so when the serial is taken.** A category typed on the new-item form now joins the managed category list instead of leaving the device holding a value that appeared in no picker, and the items list is refreshed so a newly created item is not missing from it. Creating an item whose serial already exists used to fail with a generic error; it now names the serial and links to the item that already has it.
-```
-
-- [ ] **Step 2: Update `CLAUDE.md`**
-
-Find the line reading **"Normalization now runs at FOUR write sites"** (in the categories section) and update it to five, naming the create form:
-
-```markdown
-  * **Normalization now runs at FIVE write sites** — CSV import, the admin edit page, the item card, the bulk selection-bar control, and the new-item form — and all five call `normalizeCategoryName` (from the pure `items.schema.ts`, never the `server-only` service) and then `learnCategories`. Miss either half at a new write site and you get the exact drift this design exists to prevent: an item holding a string that matches no vocabulary row, so the in-use count under-reports and an admin can delete a category still in use.
-```
-
-In the same section, after the `categoryOptional` / `categoryClearable` bullet, add the third variant:
-
-```markdown
-  * **`categoryNew` is the CREATE form's variant** — blank → `undefined` like `categoryOptional` (a row that does not exist yet has no value to clear, and `""` in an indexed column is a value every filter counts), but over-long names are *rejected* like `categoryClearable`. Its trailing `.optional()` is load-bearing: `createItem` re-parses its own input at the service boundary, so the schema must accept its own output.
-```
+`CHANGELOG.md` and `CLAUDE.md` were updated inside Tasks 1, 3 and 7 — each doc edit ships in the commit that causes it, per the project's non-negotiable docs rule. Verify that happened before doing anything else here: `git log --oneline -8 -- CHANGELOG.md CLAUDE.md` should show them touched by the schema, action and empty-state commits. If a task skipped its doc edit, add it now and say so in your report.
 
 - [ ] **Step 3: Correct two claims in the spec**
 
