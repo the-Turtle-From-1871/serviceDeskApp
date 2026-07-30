@@ -47,10 +47,15 @@ schedule.
 
 > **Constrained Language Mode is supported.** On a machine locked down with WDAC or
 > AppLocker, PowerShell blocks .NET method calls and prints *"Method invocation is
-> supported only on core types in this language mode."* `Send-MdmImport.ps1` is
-> written to run under that restriction — it prints the mode it detected on its
-> second line, so paste that line in if you report a problem. If you see that error
-> anyway, you are running an older copy of the script; take a fresh one.
+> supported only on core types in this language mode."* `Send-MdmImport.ps1` contains
+> **no .NET method calls at all**, so it runs under that restriction — it prints the
+> mode it detected on its second line, so paste that line in if you report a problem.
+> If you see that error anyway, check your copy is current:
+> ```powershell
+> Select-String -Path .\Send-MdmImport.ps1 -Pattern '::','\.\w+\('
+> ```
+> No output means the copy is current, and the error is coming from something other
+> than this script — send the whole run output, which now names the file and line.
 
 **When you're ready to schedule it**, set the secret as a *machine* environment
 variable so it survives reboots and isn't visible in the task definition:

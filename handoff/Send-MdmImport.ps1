@@ -31,7 +31,7 @@ function Fail {
 Write-Log "=== MDM import starting ===" "Cyan"
 Write-Log "PowerShell $($PSVersionTable.PSVersion) ($($ExecutionContext.SessionState.LanguageMode))"
 
-if ([string]::IsNullOrWhiteSpace($Secret)) {
+if ($Secret -notmatch '\S') {
     Fail @"
 No secret. Set it first:
 
@@ -42,7 +42,7 @@ survives reboots and is not visible in the task definition.
 "@
 }
 
-if ($Secret -ne $Secret.Trim()) {
+if ($Secret -match '^\s|\s$') {
     Fail "The secret has leading or trailing whitespace. It is compared exactly, so a stray space or newline from copy-paste will be rejected as a wrong secret. Re-copy it."
 }
 
@@ -107,7 +107,7 @@ try {
 
         $lines = $rawBody -split "`n"
         $statusCode = [int]$lines[-1]
-        $bodyText = ($lines[0..($lines.Length - 2)] -join "`n").Trim()
+        $bodyText = ($lines[0..($lines.Length - 2)] -join "`n") -replace '^\s+|\s+$', ''
 
         if ($statusCode -ne 200) {
             if ($bodyText -match '<html|<!DOCTYPE') {
@@ -137,7 +137,7 @@ catch {
             default { Fail "HTTP $code - $($_.Exception.Message)" }
         }
     }
-    Fail $_.Exception.Message
+    Fail "$($_.Exception.Message)`n$($_.InvocationInfo.PositionMessage)"
 }
 
 Write-Log ""
