@@ -124,6 +124,18 @@ describe("renameUnitAction", () => {
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
   });
+
+  it("calls requireAdmin before any write, and writes nothing when it rejects", async () => {
+    requireAdmin.mockRejectedValue(new Error("FORBIDDEN"));
+    await expect(
+      renameUnitAction(undefined, fd({ id: "unit-1", fullName: "New Name" })),
+    ).rejects.toThrow("FORBIDDEN");
+    // Not just that the call threw — the underlying write must never have
+    // happened. If a call site dropped requireAdmin() (or moved it after the
+    // write), renameUnit would still have fired here.
+    expect(renameUnit).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
 });
 
 describe("deleteUnitAction", () => {
@@ -145,6 +157,16 @@ describe("deleteUnitAction", () => {
     deleteUnit.mockRejectedValue(new ItemError("IN_USE", '"HHC 1-8" is still the home unit of 2 items.'));
     const res = await deleteUnitAction(fd({ id: "unit-1" }));
     expect(res).toEqual({ error: '"HHC 1-8" is still the home unit of 2 items.' });
+  });
+
+  it("calls requireAdmin before any write, and writes nothing when it rejects", async () => {
+    requireAdmin.mockRejectedValue(new Error("FORBIDDEN"));
+    await expect(deleteUnitAction(fd({ id: "unit-1" }))).rejects.toThrow("FORBIDDEN");
+    // Not just that the call threw — the unit row must never have been
+    // touched. If requireAdmin() were dropped (or moved after the write),
+    // deleteUnit would still have fired here.
+    expect(deleteUnit).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 });
 
@@ -183,5 +205,17 @@ describe("bulkLearnUnitsAction", () => {
     expect(res).toEqual({ error: "Something went wrong. Please try again." });
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
+  });
+
+  it("calls requireAdmin before any write, and writes nothing when it rejects", async () => {
+    requireAdmin.mockRejectedValue(new Error("FORBIDDEN"));
+    await expect(
+      bulkLearnUnitsAction(undefined, fd({ block: "WABC01,HHC 1-8" })),
+    ).rejects.toThrow("FORBIDDEN");
+    // Not just that the call threw — the batch must never have reached
+    // learnUnits. If requireAdmin() were dropped (or moved after the write),
+    // learnUnits would still have fired here.
+    expect(learnUnits).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 });
