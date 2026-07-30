@@ -22,13 +22,16 @@ receipt PDF.
 - **DA Form 2062 hand receipt** — every completed transfer exports a filled, flattened DA 2062 PDF with a vertical recipient signature + date in the quantity column and a custody-record page.
 - **Accounts** — **admin-provisioned only** (no public self-registration). Rank is captured separately from name. Self-serve password reset is available (`/forgot-password`).
 - **Roles** — `ADMIN` and `USER`, enforced server-side; deactivations/role changes take effect on the next request. A `USER` may create receipts and edit only an item's current-holder email/position — all other item fields and the service/admin queues are admin-only.
+- **Sessions last one workday** — 10 hours from sign-in, or 4 hours idle, whichever comes first; then the next request goes back to the sign-in page.
+- **Abuse defences** — sign-in and password reset are rate-limited per account *and* per network (5 failures per 15 minutes, under a 60-attempt network ceiling); the public pages are capped at 300 requests a minute for logged-out visitors and refuse callers that do not present as a browser; a global failed-login counter raises an alert when the whole app sees an abnormal rate. An optional **Cloudflare Turnstile** challenge sits on `/login` and `/forgot-password` once keys are configured. See [`docs/SECURITY.md` §12–13](docs/SECURITY.md#12-rate-limiting).
 - **HST everywhere** — all timestamps display in Hawaii Standard Time (stored as UTC).
 
 ## Tech stack
 
 - **Next.js 16** (App Router, Server Components, Server Actions, Route Handlers) · **React 19** · **TypeScript 5** · Turbopack
 - **PostgreSQL** (Supabase in prod, Docker `postgres:16` locally) via **Prisma 7** with the **`@prisma/adapter-pg`** driver over **`pg`**
-- **Auth.js v5** (Credentials + JWT sessions) · **bcryptjs**
+- **Auth.js v5** (Credentials + JWT sessions, 10h absolute / 4h idle) · **bcryptjs**
+- **@upstash/ratelimit** + **@upstash/redis** (IP rate limiting; falls back to per-instance counters when no store is attached) · **Cloudflare Turnstile** (optional CAPTCHA)
 - **Zod** validation · **pdf-lib** (PDFs) · **qrcode**
 - **Tailwind CSS v4** + **shadcn/ui** (new UI only — the original `globals.css` design system still backs existing pages; see the styling section of `CLAUDE.md`) · **Recharts** · **lucide-react**
 - **Vitest** (real-DB integration tests) · **Playwright** · **ESLint 9**
@@ -73,6 +76,9 @@ create it once with `CREATE DATABASE handreceipt_test;`.
 | `PUBLIC_ACCESS_PIN_ENABLED` | `"true"` gates the public surface (`/`, `/i/*`, `/receipts/*`) behind the admin-set 8-digit PIN for logged-out users. Absent/`false` = open access. Also the kill-switch. |
 | `APP_URL`      | Absolute base URL, used to build scannable QR links.               |
 | `SIGNING_PRIVATE_KEY` | Ed25519 PKCS#8 PEM that signs each receipt's tamper-evidence seal. Best-effort — unset means receipts are created unsealed. Verification (admin-only) derives the public key from it; no separate public-key var. The key is server-held, so the seal attests attribution rather than proving user-level non-repudiation — see [`docs/SECURITY.md` §7](docs/SECURITY.md#7-cryptographic-receipt-seal) and Known gaps #6. |
+| `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Redis store for rate limiting, injected by a Vercel Marketplace Redis integration (`UPSTASH_REDIS_REST_*` also accepted). **Unset still works** — the limiter falls back to per-instance counters, which is fine locally and is not the production posture. |
+| `RATE_LIMIT_DISABLED` | `"true"` turns off the limiter and the browser check. Local work only. |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile. **Both** required, or the challenge is not rendered and not verified. |
 | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | Optional overrides for the seeded admin. |
 
 `.env*` is git-ignored except `.env.example`.

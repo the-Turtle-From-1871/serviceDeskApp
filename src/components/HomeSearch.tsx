@@ -10,6 +10,9 @@ export function HomeSearch() {
   // mode switch invalidates `settled` until the new search resolves, so
   // "No matches" never flashes for a mode/query that hasn't been fetched yet.
   const [resolvedKey, setResolvedKey] = useState("");
+  // Distinguishes "the search could not run" from "the search ran and found
+  // nothing" — see the catch below.
+  const [failed, setFailed] = useState(false);
   const reqId = useRef(0);
 
   useEffect(() => {
@@ -23,8 +26,14 @@ export function HomeSearch() {
         if (id !== reqId.current) return; // ignore out-of-order responses
         setResult(res);
         setResolvedKey(key);
+        setFailed(false);
       } catch {
-        if (id === reqId.current) { setResult({}); setResolvedKey(key); }
+        // A failure is NOT an empty result. The anonymous 100/min proxy bucket
+        // is shared by everyone behind one egress IP, so a throttled search
+        // used to land here and render "No matches." — telling a logged-out
+        // soldier their serial number does not exist, which is a confident
+        // wrong answer about the property book.
+        if (id === reqId.current) { setResult({}); setResolvedKey(key); setFailed(true); }
       }
     }, 250);
     return () => clearTimeout(timer);
@@ -37,7 +46,8 @@ export function HomeSearch() {
   // Only render "No matches" once the current (mode, query) has resolved, so it
   // doesn't flash (or get announced) during the debounce or right after a mode switch.
   const settled = resolvedKey === `${mode}\n${trimmed}`;
-  const noMatches = hasQuery && settled && (mode === "serial" ? items.length === 0 : receipts.length === 0);
+  const noMatches =
+    hasQuery && settled && !failed && (mode === "serial" ? items.length === 0 : receipts.length === 0);
 
   return (
     <div className="stack">
@@ -52,6 +62,11 @@ export function HomeSearch() {
       {/* Type-ahead has no submit, so announce result changes to assistive tech. */}
       <div aria-live="polite" role="status">
         {noMatches && <p className="subtle">No matches.</p>}
+        {hasQuery && settled && failed && (
+          <p role="alert" className="subtle">
+            Search is temporarily unavailable. Please try again in a moment.
+          </p>
+        )}
 
         {hasQuery && mode === "serial" && items.length > 0 && (
           <ul className="stack-sm">

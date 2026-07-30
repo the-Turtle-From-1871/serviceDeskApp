@@ -23,6 +23,10 @@ const SKIP_TOKEN = "[skip security-doc]";
 const WATCHED = [
   [/^src\/lib\/authz\.ts$/, "authorization checks (§2)"],
   [/^src\/auth\.ts$/, "authentication + session revocation (§1)"],
+  // Same leaf-file reasoning as sort-keys.ts: the 10h/4h numbers, the >= at
+  // both boundaries, and the backfill-from-iat rule ARE the posture, and they
+  // live outside auth.ts where nothing else would notice them changing.
+  [/^src\/lib\/session-freshness\.ts$/, "the session lifetime policy (§1)"],
   [/^src\/modules\/users\/users\.service\.ts$/, "deactivation revokes live tokens (§1)"],
   [/^src\/proxy\.ts$/, "the login gate and public PIN gate (§2, §3)"],
   [/^src\/lib\/password\.ts$/, "password hashing (§1)"],
@@ -31,6 +35,31 @@ const WATCHED = [
   [/^src\/app\/actions\/auth\.ts$/, "login + reset actions, anti-enumeration (§1, §4)"],
   [/^src\/lib\/public-access(-cookie)?\.ts$/, "the public PIN gate (§3)"],
   [/^src\/app\/actions\/unlock\.ts$/, "the unlock action + cookie flags, anti-guessing delay (§3)"],
+  // The policy numbers (5/15min, 60/15min, 100/min), the composite key shape,
+  // the spend-then-refund split and the fail-OPEN behavior are all posture, not
+  // implementation detail — changing any of them changes what the app is
+  // protected against.
+  [/^src\/lib\/rate-limit\.ts$/, "the IP rate-limit policies and fail-open behavior (§12)"],
+  // The global botnet detector: its threshold, what counts as a failure, and
+  // the fact that it escalates rather than blocks are all posture.
+  [/^src\/lib\/auth-velocity\.ts$/, "the distributed-attack detector and what it escalates to (§12)"],
+  // The CAPTCHA gate, including the deliberate config-gate and the fail-open /
+  // fail-closed split between "Cloudflare said no" and "Cloudflare is down".
+  [/^src\/lib\/turnstile\.ts$/, "the Turnstile challenge and its failure posture (§13)"],
+  // WHETHER the challenge is rendered at all is as security-relevant as how it
+  // is verified: gating a page on the site key alone ships a widget nobody
+  // checks. The widget component owns the single-use reset and the script
+  // lifecycle, both of which can silently produce a tokenless form.
+  [/^src\/components\/TurnstileWidget\.tsx$/, "the CAPTCHA widget lifecycle (§13)"],
+  [/^src\/app\/(login|forgot-password)\/page\.tsx$/, "whether the CAPTCHA is rendered (§13)"],
+  // …and whether a tokenless submission can be SENT: the forms own the state
+  // that holds the submit button until the challenge answers. Deleting that
+  // one `disabled` expression reintroduces the bug the third commit fixed.
+  [/^src\/app\/login\/LoginForm\.tsx$/, "the submit hold on the challenge (§13)"],
+  [/^src\/app\/forgot-password\/ForgotPasswordForm\.tsx$/, "the submit hold on the challenge (§13)"],
+  // The reset form got the challenge last, and it is the surface where a
+  // correct guess is an account takeover rather than a step towards one.
+  [/^src\/app\/reset-password\/(page|ResetPasswordForm)\.tsx$/, "the CAPTCHA on the reset form (§13)"],
   [/^src\/app\/admin\/actions\/public-access\.ts$/, "setting/rotating the public PIN (§3)"],
   [/^src\/lib\/crypto\.ts$/, "the Ed25519 receipt seal (§7)"],
   // Deliberately the leaf allowlist, NOT the whole of items.service.ts: adding a

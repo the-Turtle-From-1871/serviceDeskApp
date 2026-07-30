@@ -59,6 +59,23 @@ $env:SEED_ADMIN_EMAIL="admin@yourorg.com"; $env:SEED_ADMIN_PASSWORD="<strong-pas
    | `APP_URL`      | your deployed URL, e.g. `https://<app>.vercel.app`      |
    | `CRON_SECRET`  | long random value (`openssl rand -hex 32`) — authenticates the purge cron (see §6) |
 
+   Optional, but both are **owed** before this is really hardened — see
+   [`docs/SECURITY.md`](docs/SECURITY.md) Known gaps #0 and #1:
+
+   | Name           | Value                                                   |
+   |----------------|---------------------------------------------------------|
+   | `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Injected automatically by attaching a **Redis integration from the Vercel Marketplace** (Storage → Marketplace → any Redis provider). Until then the rate limiter counts per serverless instance instead of fleet-wide. Vercel's own KV product is retired; the Marketplace integration replaces it. |
+   | `NEXT_PUBLIC_TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | A Cloudflare Turnstile site + secret key. **Both or neither** — with one missing the challenge is neither rendered nor verified. The distributed-attack detector escalates *to* Turnstile, so without keys it can alert but cannot act. |
+
+   ⚠️ **Turnstile needs a REDEPLOY, not just an env change.** `NEXT_PUBLIC_*`
+   variables are inlined at build time — into the server bundle as well as the
+   browser one — so setting the two keys in Vercel and walking away leaves the
+   running server reading `undefined` for the site key: no widget renders,
+   verification reports "skipped", and the challenge is silently OFF with
+   nothing logged. Trigger a new deployment after setting them, then confirm the
+   widget appears on `/login`. (Redis is different: `KV_REST_API_*` are read at
+   request time, so those take effect on the next request.)
+
 4. **Deploy.** First deploy: you may not know the final URL yet — deploy once,
    copy the assigned domain into `APP_URL`, then redeploy so QR codes encode it.
 

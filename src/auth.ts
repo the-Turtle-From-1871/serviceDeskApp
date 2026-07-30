@@ -3,6 +3,10 @@ import Credentials from "next-auth/providers/credentials";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { verifyPassword } from "@/lib/password";
+import {
+  SESSION_MAX_AGE_SECONDS,
+  sessionFreshness,
+} from "@/lib/session-freshness";
 
 const credsSchema = z.object({
   email: z.string().trim().email().transform((v) => v.toLowerCase()),
@@ -13,7 +17,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // Trust the host header behind a platform proxy (e.g. Vercel) so Auth.js
   // does not reject requests with UntrustedHost in production.
   trustHost: true,
-  session: { strategy: "jwt" },
+  // 10 hours, down from the Auth.js default of 30 days. This bounds the cookie
+  // and the JWT's own `exp`, but it ROLLS — Auth.js re-signs the token with a
+  // fresh expiry on every `auth()` call — so on its own it is an idle timeout,
+  // not an absolute one. The absolute bound and the 4-hour idle cut-off are the
+  // `authAt`/`lastActiveAt` claims enforced in the `jwt` callback below. See
+  // `src/lib/session-freshness.ts`.
+  session: { strategy: "jwt", maxAge: SESSION_MAX_AGE_SECONDS },
   pages: { signIn: "/login" },
   providers: [
     Credentials({
@@ -36,6 +46,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (user) {
         token.id = user.id;
         token.role = user.role;
+        // Start of the 10-hour workday. `authAt` is never moved again — that is
+        // what makes the absolute bound absolute.
+        token.authAt = Date.now();
+        token.lastActiveAt = token.authAt;
         try {
           const dbUser = await prisma.user.findUnique({
             where: { id: user.id },
@@ -49,8 +63,47 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         return token;
       }
 
-      // Subsequent calls (every auth() invocation, incl. proxy/middleware):
-      // re-check the DB stamp so a password reset revokes already-issued JWTs.
+      // Subsequent calls (every auth() invocation, incl. proxy/middleware).
+      //
+      // Freshness FIRST, because it is free: an expired session should not cost
+      // a database round trip. Revoking returns null, so the session no longer
+      // satisfies `!!req.auth` and the coarse gate in `src/proxy.ts` redirects
+      // to /login — i.e. it forces re-authentication, which is what the
+      // requirement asks middleware to do.
+      //
+      // ENFORCEMENT lives here rather than in the proxy because this callback
+      // runs on EVERY `auth()` call — Server Actions, Route Handlers and RSC
+      // included, not only the routes the proxy matcher covers. A proxy-only
+      // check would leave a 9-hour-idle session able to POST a Server Action.
+      //
+      // The WRITE, however, does ride the proxy, and that asymmetry is worth
+      // knowing: only the middleware/route-handler wrapper copies the session
+      // action's `Set-Cookie` onto the response (`handleAuth` in
+      // `next-auth/lib/index.js`). The bare `auth()` used by RSC and
+      // `requireUser` re-signs a token and discards it. So `lastActiveAt`
+      // advances because `src/proxy.ts` ran for the same request — which makes
+      // its MATCHER load-bearing for the idle clock. Every authenticated
+      // surface is matched today; excluding one would leave users working there
+      // bounced 4 hours after their last *matched* request.
+      const now = Date.now();
+      const freshness = sessionFreshness(
+        {
+          authAt: token.authAt,
+          lastActiveAt: token.lastActiveAt,
+          // `iat` is seconds; it is re-stamped on every roll, so it is "when
+          // this token was last legitimately used" — the right basis for
+          // backfilling a pre-deploy token. See session-freshness.ts.
+          issuedAtMs: typeof token.iat === "number" ? token.iat * 1000 : null,
+        },
+        now,
+      );
+      if (freshness.action === "revoke") return null;
+      // `authAt` comes back unchanged for a normal request and backfilled for a
+      // token minted before these claims existed — never recomputed from `now`.
+      token.authAt = freshness.authAt;
+      token.lastActiveAt = now;
+
+      // Re-check the DB stamp so a password reset revokes already-issued JWTs.
       try {
         const dbUser = await prisma.user.findUnique({
           where: { id: token.id },

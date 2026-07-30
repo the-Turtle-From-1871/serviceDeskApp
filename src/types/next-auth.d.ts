@@ -16,5 +16,9 @@ declare module "next-auth/jwt" {
     id: string;
     role: Role;
     pwdChangedAt?: number | null;
+    /** Epoch ms of sign-in. Never moved — the 10-hour absolute bound. */
+    authAt?: number | null;
+    /** Epoch ms of the last request on this session — the 4-hour idle clock. */
+    lastActiveAt?: number | null;
   }
 }

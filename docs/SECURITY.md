@@ -3,7 +3,7 @@
 A living inventory of every security control in this app — what it does, where
 it lives, and why. **Maintained over time**; see [Keeping this current](#keeping-this-current).
 
-**Last reviewed: 2026-07-28**
+**Last reviewed: 2026-07-29**
 
 Related: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`../CLAUDE.md`](../CLAUDE.md) · [`password-reset-hardening.md`](./password-reset-hardening.md)
 
@@ -13,21 +13,24 @@ Related: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`../CLAUDE.md`](../CLAUDE.md
 
 | Area | Posture |
 |---|---|
-| Authentication | Auth.js v5, Credentials + JWT, bcrypt cost 12, live session revocation |
+| Authentication | Auth.js v5, Credentials + JWT, bcrypt cost 12, live session revocation, 10h absolute / 4h idle |
 | Authorization | Role-based (`ADMIN`/`USER`), enforced per-route, re-read from the DB every request |
 | Public surface | Enumerable **by design**, behind a shared 8-digit PIN gate |
 | Secrets | All via env; sensitive modules marked `server-only` |
 | Database | RLS deny-all, but **app-layer is the real boundary** |
-| CI | Semgrep SAST + build, both required to merge to `main` |
+| CI | Semgrep SAST + build + security-docs check, all three required to merge to `main` |
 | Accountability | Receipts sealed + attributed; **server-attested, not user non-repudiation** |
-| Biggest gap | **No IP-based rate limiting** |
+| Rate limiting | Composite `(IP, email)`: 5 auth failures / 15 min under a 60 / IP ceiling; 300 requests / min anonymous; global botnet detector |
+| Bot defence | Cloudflare Turnstile on login + reset (config-gated); anonymous non-browser agents refused |
+| Biggest gap | **No Redis provisioned yet**, so the limiter runs per-instance |
 
 Jump to: [1 Authentication](#1-authentication) · [2 Authorization](#2-authorization) ·
 [3 Public surface](#3-public-surface--the-pin-gate) · [4 Password reset](#4-password-reset) ·
 [5 Injection](#5-injection--output-safety) · [6 Secrets](#6-secrets--data-leakage) ·
 [7 Receipt seal](#7-cryptographic-receipt-seal) · [8 Cron](#8-background-jobs-cron) ·
 [9 Retention](#9-data-retention--minimization) · [10 Database](#10-database-posture) ·
-[11 CI/CD](#11-supply-chain--cicd) · [Known gaps](#known-gaps--accepted-risks)
+[11 CI/CD](#11-supply-chain--cicd) · [12 Rate limiting](#12-rate-limiting) ·
+[13 CAPTCHA](#13-captcha--cloudflare-turnstile) · [Known gaps](#known-gaps--accepted-risks)
 
 ---
 
@@ -82,6 +85,60 @@ via the path above. `src/modules/users/users.service.ts`
 > a transient error returns the token unchanged rather than mass-logging-out
 > users. Cost: one extra `SELECT` per authenticated request — the accepted price
 > of keeping JWT sessions while supporting revocation.
+
+**Sessions last one 10-hour workday, absolutely, and 4 hours idle.**
+`src/lib/session-freshness.ts` + the `jwt` callback in `src/auth.ts`.
+`session.maxAge` is 10 hours (down from the Auth.js default of **30 days**), but
+that alone is only an idle bound: Auth.js JWT sessions ROLL — every `auth()` call
+re-signs the token with a fresh `exp` and re-sets the cookie, so a tab left open
+would never expire. The absolute bound is therefore an **`authAt`** claim stamped
+at sign-in and never moved; a separate **`lastActiveAt`** claim moves on every
+request and enforces the 4-hour idle cut-off. Either lapsing returns `null` from
+the `jwt` callback, so the session stops satisfying `!!req.auth` and the coarse
+gate in `src/proxy.ts` redirects to `/login` — i.e. it forces re-authentication.
+
+> Why the callback and not the proxy: the callback runs on EVERY `auth()` call —
+> Server Actions, Route Handlers and RSC included — not only the routes the
+> proxy matcher covers. A proxy-only check would leave a 9-hour-idle session
+> able to POST a Server Action.
+>
+> **But the WRITE rides the proxy, and that asymmetry is load-bearing.** Only
+> the middleware/route-handler wrapper copies the session action's `Set-Cookie`
+> onto the response (`handleAuth` in `next-auth/lib/index.js`); the bare
+> `auth()` used by RSC and `requireUser` re-signs a token and discards it. So
+> `lastActiveAt` advances because `src/proxy.ts` ran for the same request, which
+> makes its **matcher** part of this control: excluding an authenticated route
+> would leave users working there bounced 4 hours after their last *matched*
+> request, with the whole unit suite still green. `tests/e2e/auth.spec.ts`
+> asserts the cookie is re-issued across a navigation, because nothing else
+> can see it.
+>
+> Same grandfathering softening as `pwdChangedAt`: a token minted before these
+> claims existed is **backfilled, not revoked**, so the deploy that adds them
+> does not sign every technician out at once. The backfill is dated from the
+> token's own **`iat`**, never from `now`. That distinction is the whole of it:
+> Auth.js JWTs are stateless with no revocation list, so writing a new cookie
+> cannot invalidate the old string — dating from `now` would let a pre-deploy
+> cookie saved out of devtools be re-pasted over and over, minting another full
+> 10-hour session each time, until its own **30-day** expiry ran out. `iat` is
+> re-stamped on every roll, so a live session backfills to moments ago (nobody
+> is signed out) while a stale snapshot backfills to when it was last used and
+> fails these bounds immediately. Each claim is backfilled independently, so a
+> token carrying a real `authAt` never has its absolute clock restarted.
+>
+> A stamp in the *future* (clock skew between instances) is treated as fresh
+> rather than expired — getting that backwards fails in the one direction that
+> logs people out.
+
+> **Knock-on, worth knowing:** a shorter session means staff land in the
+> *logged-out* population more often, and the public surface treats them
+> accordingly. A technician back from lunch who clicks a bookmarked `/i/<id>`
+> now meets the recipient **PIN gate** ([§3](#3-public-surface--the-pin-gate)),
+> not `/login` — `/unlock` carries a "Staff? Log in instead" link for exactly
+> this — and that request spends the shared **anonymous** 300/min bucket
+> ([§12](#12-rate-limiting)) keyed on the desk's single egress IP, rather than
+> the signed-in exemption. Both are correct by design; both get more common as
+> sessions get shorter.
 
 **No public self-registration.** Removed by decision — accounts are provisioned
 only by an admin (`createUserAction` / `createUser`). `registerSchema` is
@@ -290,8 +347,9 @@ HTML-escaped by `escapeHtml()` in `src/lib/email.ts` (which escapes `'` too).
 > server/proxy access logs. Fully removing it needs a token→HttpOnly-cookie
 > exchange with a redirect to a clean URL — intentionally deferred.
 >
-> **Gap, owed to a human:** no IP-based or global rate limiting. See
-> [Known gaps](#known-gaps--accepted-risks).
+> **Also throttled per IP** — 5 reset requests and 5 failed reset submissions
+> per 15 minutes, on top of the per-account cooldown. See
+> [§12](#12-rate-limiting).
 
 ---
 
@@ -465,8 +523,9 @@ intermediate `env:` var and quote the expansion. Semgrep enforces this
 (`run-shell-injection`) — it caught exactly this bug in the `Security docs
 current` job before it merged.
 
-**`main` is branch-protected** — both checks required, `strict` mode (the branch
-must be up to date). Admin bypass exists for emergencies only.
+**`main` is branch-protected** — all three checks required (`Semgrep SAST`,
+`Build (next build)`, `Security docs current`), `strict` mode (the branch must be
+up to date). Admin bypass exists for emergencies only.
 
 **An `xhigh` review marker is required before pushing** — per-commit, so a new
 commit needs a fresh review. Note this is a **Claude Code hook**
@@ -486,14 +545,372 @@ migration must be applied *before* the merge deploys. See [`../DEPLOY.md`](../DE
 
 ---
 
+## 12. Rate limiting
+
+**Five policies.** `src/lib/rate-limit.ts`
+
+| Policy | Budget | Keyed on | Applies to |
+|---|---|---|---|
+| `AUTH_POLICY` | **5 per 15 min** | scope + IP + **submitted email** | sign-in, password-reset request |
+| `AUTH_POLICY` | **5 per 15 min** | scope + IP + **reset-token hash** | reset submission |
+| `UNLOCK_POLICY` | **20 per 15 min** | scope + IP | PIN unlock — one org-wide secret, so no identity exists and successes count |
+| `AUTH_SPRAY_POLICY` | **60 per 15 min** | scope + IP | the ceiling over the identity-keyed surfaces; separately, scope `api-auth-write` meters other `POST /api/auth/*` |
+| `API_POLICY` | **300 per min** | scope + IP | two buckets: `GET /api/auth/*`, and `/api/*` + the public PII surface (`/`, `/i/*`, `/receipts/*`) **for anonymous callers only** |
+| `AUTH_VELOCITY_POLICY` | **100 per 5 min** | one global key ×2 | the botnet detector — one bucket alerts on every surface, one escalates on sign-in only |
+
+**Auth buckets are composite: `(scope, network, account)`, under a per-network
+ceiling.** Neither half works alone. A purely per-IP limit punishes the wrong
+people — the service desk shares one NAT egress IP, so one person mistyping
+their password five times would lock out every colleague. A purely composite key
+is not a limit at all — the email is supplied by whoever is submitting the form,
+so rotating it mints a fresh 5-attempt bucket and one host could spray thousands
+of accounts. Together: five failures per account per network, under sixty
+attempts per network. The email is **hashed** (`rateLimitIdentity`, SHA-256
+truncated to 64 bits) before it becomes a key — "who tried to sign in as whom"
+must not sit in a third-party Redis or a log line — and normalised first, so
+capitalisation is not a fresh budget.
+
+**The store is Upstash Redis, with a per-instance fallback.** `@vercel/kv` is
+deprecated by Vercel; the Marketplace Redis integration injects
+`KV_REST_API_URL` / `KV_REST_API_TOKEN`, which is what this reads (also
+`UPSTASH_REDIS_REST_*`). With neither pair set it falls back to in-process
+counters and logs a warning — a real sliding window, but one that only sees
+requests landing on the same warm instance, so **it is not the production
+posture**. `rateLimitStoreConfigured()` reports which is live. Both backends
+agree that a *refused* attempt is not recorded (Upstash's Lua script returns
+before its `INCRBY`), so the fallback and Redis mean the same thing by "5 in 15
+minutes" — and an in-memory bucket can never hold more than `limit` entries.
+
+**Enforced in two places, on purpose.** `src/proxy.ts` covers `/api/auth/*` and
+the anti-scraping limit; the interactive flows — `loginAction`,
+`requestPasswordResetAction`, `resetPasswordAction` (`src/app/actions/auth.ts`)
+and `unlockAction` (`src/app/actions/unlock.ts`) — limit themselves, because a
+429 to a Server Action POST is not a message a user can read: `useActionState`
+cannot render it and the page breaks with an error-boundary digest.
+
+**`/api/auth/*` is metered OUTSIDE the `auth()` wrapper.** The Auth.js endpoint
+must never reach the login gate (signing in would redirect to itself), and the
+`auth()` wrapper resolves the session *before* it calls its handler — so
+delegating would make every request to the auth endpoint pay a second session
+read, i.e. a database query, on the one path an unauthenticated attacker can
+hammer. `isApiAuthPath` matches on a path **segment**, so a future `/api/authors`
+is not silently exempted from the login gate.
+
+**`POST /api/auth/callback/*` is CLOSED (404), not throttled.** It is a fully
+working second front door to the credential check, and one this app never uses —
+`loginAction` calls `signIn()` in process. Left open it walked around *all three*
+protections layered onto the Server Action: the Turnstile challenge, the
+per-account composite bucket (the proxy cannot key on an email that lives in the
+POST body it must not consume), and the botnet counter, which only `loginAction`
+feeds. `GET` of a callback path is still allowed, for any OAuth-style provider
+added later.
+
+**Nothing else may borrow the `login` scope.** Other `/api/auth/*` writes are
+metered under `api-auth-write`. Sharing it was a whole-desk lockout waiting to
+happen: `POST /api/auth/signout` needs no CSRF token, no body and no session, so
+60 of them from anywhere would fill the very bucket that gates sign-in and refuse
+every technician behind that egress for fifteen minutes — the failure the
+narrow-bucket-first ordering exists to prevent, reached through a second door.
+The reason the scopes were shared is gone: the credentials callback is closed.
+
+**A login POST carrying `X-Auth-Return-Redirect` is refused outright.**
+`signIn()` copies the incoming request headers into the request it hands to
+`@auth/core` (`new Headers(await nextHeaders())`), and that library treats the
+header as *"return the error instead of throwing it"*. A crafted login POST
+carrying it therefore turned a **wrong password into a `NEXT_REDIRECT`** —
+indistinguishable from success — so the action refunded the token and told the
+detector nothing: unlimited per-account guessing, silently. It is charged as a
+failed attempt rather than ignored, so probing costs what guessing costs.
+
+> The header guard is belt and braces, not the fix. `loginAction` no longer
+> infers success from a thrown redirect at all: it calls `signIn(…, { redirect:
+> false })`, treats a returned `?error=` URL as a failed attempt, and issues the
+> `redirect()` itself. Blacklisting one header would have closed today's
+> instance while any future change that turns an `AuthError` into a redirect
+> silently re-opened it — and this is a beta dependency.
+
+**The auth budget is spent up front and REFUNDED on success.** Checking the
+bucket first and charging only failures reads better but is a
+time-of-check/time-of-use hole exactly as wide as the bcrypt compare: 500
+concurrent sign-in POSTs would all read an untouched bucket and all be admitted,
+turning "5 per 15 minutes" into "5 × the attacker's parallelism". So the token is
+taken before the password check, and `resetRateLimit` gives back **the
+per-account bucket only** when the attempt succeeds. An unexpected server error
+does **not** refund: a crash is not evidence the credentials were right.
+- **The shared per-network ceiling is never refunded.** Emptying it on success
+  would let anyone holding one valid credential clear everybody's counter
+  between guesses — five tries each against an unlimited number of accounts,
+  i.e. the ceiling doing nothing. That is why it is 60 rather than something
+  tighter: it counts attempts that reached a password, successes included.
+- **Order matters: narrow bucket first, ceiling second.** Charging the shared
+  ceiling first meant 60 cheap requests naming one address — 55 of them refused
+  by the per-account bucket and still charged — locked every colleague behind
+  that egress out of sign-in for fifteen minutes, which is exactly the failure
+  the composite key exists to prevent.
+- **A ceiling refusal does not refund the narrow token either.**
+  `resetRateLimit` EMPTIES a bucket rather than decrementing it, so "handing it
+  back" let an attacker who saturates the ceiling with throwaway addresses wipe
+  a real account's failure count on every subsequent attempt — lifting the
+  effective per-account guess rate from 5 to 60 — and put an O(keyspace) Redis
+  `SCAN` on a path an unauthenticated caller controls. Over-charging one token
+  during an attack is the safe direction.
+- **Only an identity-keyed bucket may ever be refunded.** The PIN-unlock bucket
+  is `(scope, ip)` — shared by everyone on that network — so refunding it on a
+  correct PIN handed an attacker on the same egress a fresh five guesses every
+  time a colleague unlocked legitimately. It is no longer refunded; a successful
+  unlock costs one of the five, which the budget absorbs. The reset-submit
+  bucket gained a **token hash** instead, which makes it the caller's own and
+  therefore safe to refund — and stops five people with expired links locking
+  out a sixth holding a valid one.
+- *Accepted cost:* the refund is `resetUsedTokens`, which on Upstash `SCAN`s for
+  the identifier's keys — O(keyspace), not O(1). It runs only on SUCCESS, tens
+  of times a day, never on the failure path an attacker controls. Do not move it
+  onto a hot path.
+- The reset-*request* action never refunds: the abuse there is volume itself,
+  and its refusal is IP-shaped rather than account-shaped, so it still leaks
+  nothing about whether an address is registered.
+
+**Reads of `/api/auth/*` do not spend the sign-in budget** (`GET`/`HEAD`) —
+discovering CSRF/session state must not exhaust it — but they are metered under
+`API_POLICY` (their own `api-auth` bucket), which is the only limit they have.
+
+**Signed-in staff are exempt from the anti-scraping limit.** `/items` links to
+`/i/<id>` for every row on the page and Next prefetches those links in
+production — the proxy runs on prefetches too — so one technician scrolling
+inventory would spend ~50 tokens, and the whole desk shares one egress IP. The
+limit exists for anonymous scraping of the public surface and is applied there.
+Knowing the caller is signed in needs the session read, but that costs little
+for the traffic being shed: an anonymous request carries no session cookie, so
+Auth.js short-circuits before any JWT decode or database query.
+
+**`/api/cron/*` is deliberately excluded** from the proxy matcher. It
+authenticates with a constant-time `CRON_SECRET` compare and is called once a
+day; a shared per-IP bucket would let unrelated traffic from the same egress
+starve the purge job. See [§8](#8-background-jobs-cron).
+
+**Global velocity tracking catches what per-IP buckets cannot.**
+`src/lib/auth-velocity.ts` counts failed credential checks app-wide on one
+shared Redis key. Ten thousand hosts making four attempts each never trip a
+5-per-IP limit, but the aggregate is unmistakable. Crossing 100 failures in 5
+minutes puts the app in an **elevated** state, which:
+- logs one structured `auth.velocity.elevated` line per minute for a log drain
+  to alert on (rate-limited, or the alarm becomes the flood), and
+- makes Turnstile **strict** — see [§13](#13-captcha--cloudflare-turnstile).
+
+It deliberately does **not** block. A global refusal is a global outage any
+attacker could trigger on purpose, which would make the detector the
+vulnerability. Only *genuinely failed credential checks* are counted — not
+throttled requests, malformed submissions or challenge refusals, which never
+reached a password; counting those would let one host raise the app-wide alarm
+without guessing anything. The state clears on its own as the window slides.
+
+**Two buckets, because the detector has two jobs and only one of them may be
+attacker-triggerable.**
+- **Alerting** counts every guessable surface — sign-in, a wrong PIN at
+  `/unlock`, a bad reset token. Broad is right: a blind spot costs the whole
+  feature, a false alarm costs a log line.
+- **Escalation** (strict Turnstile) counts *sign-in failures only*. `/unlock`
+  needs no account and carries no challenge of its own, so letting it raise the
+  escalation would hand an unauthenticated attacker a cheap global switch: fill
+  the bucket, and every sign-in whose Turnstile verification is `unreachable` is
+  refused app-wide. That is exactly the failure this section opens with — a
+  state an attacker can trigger turns the detector into the vulnerability.
+
+**The escalation LATCHES for a full window.** Refused hits are deliberately not
+recorded, so at exactly the threshold the moment the oldest entry ages out the
+bucket reports room again; an unlatched check would flicker off request by
+request mid-attack and wave through roughly half the unverifiable submissions it
+exists to refuse.
+
+**The public surface is `/`, `/i/*` and a receipt or its PDF — not the whole
+`/receipts/` prefix.** The bare prefix also caught `/receipts/new` (the staff
+hand-receipt builder) and `/receipts/<n>/return` (admin-only), so an anonymous
+request to either met the browser check and the PIN gate instead of the sign-in
+redirect. Authorization was never affected — `requireUser` runs in-page
+regardless — but a colleague following a bookmarked builder link got a
+plain-text 403 rather than being sent to log in.
+
+**The proxy matcher's exclusions are SEGMENT-anchored** with `(?:/|$)`.
+Unanchored they were prefixes, so a future `/api/cronjobs`, `/logins`,
+`/unlockables` or `/terms-of-service` would have skipped the proxy entirely — no
+login gate, no PIN gate, no rate limit, no session-cookie refresh. That is the
+same hazard `isApiAuthPath` guards against in code; the fix had been applied
+there and not to the regex one screen below.
+
+**Anonymous requests that do not present as a browser are refused (403).**
+`looksAutomated` in `src/proxy.ts`: a missing or blank `User-Agent` is the strong
+signal (every real browser sends one), plus a short list of default automation
+agents (`curl/`, `python-requests`, `Scrapy`, …). `RATE_LIMIT_DISABLED=true`
+turns it off along with the limiter, so a dev server can be driven with `curl`.
+**`HeadlessChrome` is
+deliberately not on that list** — headless browsers are what Turnstile is for,
+a UA match buys nothing against one (a single line of Playwright changes the
+string), and blocking it refuses real tooling: it broke this repo's own e2e
+suite, and would break uptime monitors the same way. Checked *before* a
+rate-limit token is spent, so a header-less flood cannot exhaust the budget of
+everyone sharing its IP. Scoped to anonymous callers on the public surface and
+NOT applied to `/api/auth/*` — a signed-in technician may be driving a script,
+and Auth.js callbacks must not depend on a UA string. **Trivially spoofable by
+one line of code**; it is defence in depth against the lazy majority, listed
+under [Known gaps](#known-gaps--accepted-risks) rather than counted as a control.
+
+**It fails OPEN.** A Redis outage logs and allows the request rather than
+locking every technician out of the property book. Deliberate availability
+choice for an internal tool whose real authz boundary is per-route; recorded
+under [Known gaps](#known-gaps--accepted-risks).
+
+**`RATE_LIMIT_DISABLED=true`** short-circuits the limiter entirely. It exists for
+local work; never set it in a deployed environment.
+
+---
+
+## 13. CAPTCHA — Cloudflare Turnstile
+
+**Where.** The three unauthenticated forms that do work for an anonymous caller:
+`/login`, `/forgot-password` and `/reset-password`.
+`src/components/TurnstileWidget.tsx` renders the widget; `loginAction`,
+`requestPasswordResetAction` and `resetPasswordAction` verify the token
+server-side against `challenges.cloudflare.com/turnstile/v0/siteverify`.
+`src/lib/turnstile.ts`
+
+> `/reset-password` got the challenge last, and is the one surface where a
+> correct guess is an outright **account takeover** rather than a step towards
+> one. It was also escalating to a mitigation (strict Turnstile) that it did not
+> itself render.
+
+**Config-gated, off until both keys are set.** `NEXT_PUBLIC_TURNSTILE_SITE_KEY`
+(public by design — the client needs it) and `TURNSTILE_SECRET_KEY`. **Both** are
+required: a site key alone renders a widget nobody checks, and a secret alone
+refuses every sign-in, because no form could produce a token. With either
+missing the widget is not rendered and verification is skipped, so dev, CI and a
+deploy that has not been given keys keep working. `turnstileConfigured()` reports
+which.
+
+**Verified server-side, never trusted from the client.** The widget injects a
+hidden `cf-turnstile-response` field into the enclosing form, which reaches the
+Server Action through FormData. A client that omits the widget gains nothing —
+the action verifies regardless, and a missing token is a refusal.
+
+**Checked after the rate limiter, before the password.** A throttled request must
+cost as little as possible; a challenge exists to keep headless scripts away from
+bcrypt entirely. A refused challenge is **not** counted by the velocity detector
+([§12](#12-rate-limiting)) — it never reached a credential check.
+
+**Failure posture, and the one place it flips.** A token Cloudflare *refuses*
+blocks the submission — that is the feature. A failure to *reach* Cloudflare
+(timeout, 5xx, non-JSON) does not: it is logged and the submission proceeds,
+because a third-party outage must not lock the service desk out of its own
+property book, and the password check plus the rate limiter still apply. The
+same goes for `invalid-input-secret` / `missing-input-secret`, which mean *we*
+are misconfigured, not that the visitor failed — blocking every sign-in on our
+own typo would be a self-inflicted outage. `internal-error` — Cloudflare
+telling us to retry — takes the same path.
+**While the global failure velocity is elevated, that trade flips:** an
+unverifiable submission is refused. During a distributed attack an unverifiable
+sign-in is not worth the benefit of the doubt; a real technician retries in a
+minute.
+
+**Rendered explicitly, not by the script's class scan.** Implicit rendering races
+React hydration and can leave a form that submits with no token, which the server
+then refuses — a broken sign-in with no visible cause. The widget is also reset
+after a rejected submission, because a token is single-use. A `<script>` tag that
+fails to load is **removed**, not reused: a tag that has already fired its
+terminal `error` never fires another event, so re-attaching to it would hang the
+retry forever and leave the form permanently unsubmittable in that tab.
+
+**The token is length-capped before the round trip** (2 KB). Without it the
+submitter chooses how many bytes we upload to Cloudflare, and a few hundred KB
+reliably earns a 413 or blows the 5-second timeout — both of which land in the
+allow-on-unreachable branch. That would turn fail-open from an outage
+accommodation into a bypass anyone could trigger on demand.
+
+**The pages gate on `turnstileWidgetSiteKey()`, not `turnstileSiteKey()`** — the
+former is null unless BOTH keys are present. Rendering on the site key alone is
+the security theatre this section's config gate exists to prevent: a live widget
+that challenges visitors and is then never verified.
+
+**The widget is `interaction-only`** — invisible unless Cloudflare decides the
+visitor must interact.
+
+**The button is only held AFTER hydration.** The server HTML ships it enabled;
+`useSyncExternalStore` flips it once the client mounts. Deriving the disabled
+state from the challenge alone put `<button disabled>` in the initial HTML, so
+any failure that stopped the bundle running — a content filter, a parse error —
+left an inert form with no message and no way to sign in, because the release
+deadline lives in that same JS. It also defeated React's progressive
+enhancement. `LoginForm.test.tsx` asserts the SSR output through
+`renderToString`, since a hydrating render hides it.
+
+**The submit button is held until a token exists** ("Checking your browser…").
+Filling in an email and password takes a second or two; submitting first sends a
+tokenless form, which the server correctly refuses with "could not verify that
+request came from a browser" — for a completely valid login. Verified against a
+real browser and real keys: it happens on a fast submit. The button is
+*released* if the challenge errors outright (blocked CDN, offline), because a
+button that can never be pressed, with nothing explaining why, is worse than a
+refusal that says something.
+
+**The hold has a 15-second deadline, re-armed on EVERY return to `pending`.**
+Turnstile can render, fire no error, and simply never call back — that is what
+it does to a browser it distrusts, and it is observable (it is how Playwright
+behaves against real keys). Some real visitors land there too: a stale WebView,
+a hardened privacy browser, a CDN hiccup. Armed only at mount, the deadline was
+already spent by the time it was needed: the commonest way to reach `pending`
+again is a **single mistyped password**, and the form could then hang forever
+with nothing to click. A token expiring on an idle tab is the same path.
+
+**Turnstile refuses automated browsers, including our own test suite.** With
+real keys, Playwright's Chromium renders the widget, fires no error — so the
+site key and hostname are accepted — and simply never receives a token. That is
+the product working. It does mean `tests/e2e` cannot sign in against real keys,
+so `playwright.config.ts` pins Cloudflare's always-pass **test** keys for the
+server it starts (`1x0000…`). Don't "fix" a hanging e2e sign-in by weakening the
+challenge.
+
+---
+
 ## Known gaps & accepted risks
 
 Tracked deliberately, so nobody re-discovers them as new findings.
 
-**1. No IP-based or global rate limiting.** ⚠️ *Owed to a human.*
-Login and password reset have only the per-account cooldown — nothing throttles
-distributed abuse or enumeration probing. A real limiter (Upstash/Redis or an
-edge throttle) is infrastructure work and remains outstanding.
+**0a. A visitor whose network blocks Cloudflare cannot sign in at all** once
+Turnstile is configured. ⚠️ *Accepted, with an operational lever.*
+The server leg fails OPEN (an unreachable Cloudflare lets the submission
+through); the CLIENT leg cannot. A browser behind a proxy or content filter that
+blocks `challenges.cloudflare.com` produces no token, and a tokenless submission
+is refused on every retry. The widget releases the submit button so they get a
+message rather than a dead control, and the message names the likely cause — but
+it is the end of the road for them. It cannot be made symmetrical from the
+server: there is no way to distinguish "the client could not reach Cloudflare"
+from "the client chose not to send a token", and trusting the client on that is
+the whole bypass. The lever is unsetting `TURNSTILE_SECRET_KEY`, which disables
+the check everywhere.
+
+**0. The bot defences are config-gated and spoofable, in that order.**
+⚠️ *Owed to a human: provision the Turnstile keys.*
+Until `NEXT_PUBLIC_TURNSTILE_SITE_KEY` + `TURNSTILE_SECRET_KEY` are set, no
+CAPTCHA runs ([§13](#13-captcha--cloudflare-turnstile)) — and because Turnstile
+is what the botnet detector escalates to, the detector is **alerting only**, not
+a mitigation. Separately, the User-Agent filter ([§12](#12-rate-limiting)) is
+defeated by one line in a scraper; it is deliberately a coarse filter for the
+lazy majority, not a control, and it must never be the thing something else
+relies on.
+
+**1. Rate limiting is only as good as the store behind it, and it fails open.**
+⚠️ *Owed to a human: provision the Redis store.*
+[§12](#12-rate-limiting) ships the limiter and every call site, but until a
+Marketplace Redis integration is attached to the Vercel project
+(`KV_REST_API_URL` / `KV_REST_API_TOKEN`), production runs the **per-instance
+in-memory fallback**, which throttles only requests that happen to land on the
+same warm lambda. Two further accepted properties, both deliberate: a Redis
+outage **allows** traffic rather than locking the desk out, and the identifier
+is the client IP taken from `x-vercel-forwarded-for` → `x-forwarded-for` →
+`x-real-ip` — forgeable if this app is ever served without a proxy that
+overwrites those headers, and shared by everyone behind one NAT egress.
+`x-real-ip` is DELIBERATELY last: a reverse proxy configured with only
+`proxy_set_header X-Forwarded-For` leaves it client-settable, and preferring it
+there would let one `curl -H` mint a fresh bucket per request and walk through
+every limit in the module.
 
 **2. Public receipts and item pages are enumerable and unauthenticated.**
 *Accepted product requirement*, not a bug — behind the shared PIN when the flag
