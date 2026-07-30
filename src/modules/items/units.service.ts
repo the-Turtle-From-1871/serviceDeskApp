@@ -198,27 +198,47 @@ export async function listUnitsWithCounts(): Promise<UnitRow[]> {
   }));
 }
 
+// Shared by both queries below so the capped sample and the true count can
+// never drift onto two different definitions of "unassigned" — see the
+// docstring on listUnassignedHomeUnits for why that would be its own bug.
+const UNASSIGNED_HOME_UNIT_WHERE = {
+  homeUnit: null,
+  deviceName: { not: null },
+  status: "ACTIVE",
+} as const satisfies Prisma.ItemWhereInput;
+
 /**
  * Items the importer could not derive a home unit for.
  *
- * BOUNDED — `take` only, never an unbounded `findMany` over Item (1,200+ rows
- * and growing). This is a sample so an admin can spot the pattern (usually
- * one new abbreviation shared by many devices) and teach it above, not a
- * worklist meant to enumerate every unresolved row.
+ * Returns a BOUNDED sample (`take` only, never an unbounded `findMany` over
+ * Item — 1,200+ rows and growing) alongside the TRUE total, from one
+ * `findMany` + one `count` sharing the identical `where` — TWO queries,
+ * fixed, regardless of fleet size. The sample lets an admin spot the pattern
+ * (usually one new abbreviation shared by many devices) and teach it above;
+ * it is not a worklist meant to enumerate every unresolved row. Showing only
+ * `items.length` as if it were the total undercounts once the real number
+ * exceeds `limit` — the caller must show `total` and note when the list is
+ * a partial sample.
  *
  * `select` pulls only id + deviceName — no notes, holder PII, or signature
  * data belongs in this list.
  */
 export async function listUnassignedHomeUnits(
   limit = 50,
-): Promise<{ id: string; deviceName: string }[]> {
-  const rows = await prisma.item.findMany({
-    where: { homeUnit: null, deviceName: { not: null }, status: "ACTIVE" },
-    select: { id: true, deviceName: true },
-    orderBy: { createdAt: "desc" },
-    take: limit,
-  });
-  return rows.map((r) => ({ id: r.id, deviceName: r.deviceName! }));
+): Promise<{ items: { id: string; deviceName: string }[]; total: number }> {
+  const [rows, total] = await Promise.all([
+    prisma.item.findMany({
+      where: UNASSIGNED_HOME_UNIT_WHERE,
+      select: { id: true, deviceName: true },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+    }),
+    prisma.item.count({ where: UNASSIGNED_HOME_UNIT_WHERE }),
+  ]);
+  return {
+    items: rows.map((r) => ({ id: r.id, deviceName: r.deviceName! })),
+    total,
+  };
 }
 
 /**

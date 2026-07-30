@@ -38,13 +38,23 @@ function LastImportNotice({
   );
 }
 
-function UnassignedHomeUnits({ unassigned }: { unassigned: { id: string; deviceName: string }[] }) {
-  if (unassigned.length === 0) return null;
+function UnassignedHomeUnits({
+  unassigned,
+}: {
+  // { items, total }: items is the capped sample listUnassignedHomeUnits
+  // actually fetched; total is the real count sharing that query's `where`.
+  // Rendering items.length as the heading count understates the problem
+  // once the fleet has more unresolved devices than the cap — see
+  // listUnassignedHomeUnits in units.service.ts.
+  unassigned: { items: { id: string; deviceName: string }[]; total: number };
+}) {
+  const { items, total } = unassigned;
+  if (total === 0) return null;
 
   return (
     <details className="card stack-sm">
       <summary className="btn btn-secondary">
-        Devices with no home unit ({unassigned.length})
+        Devices with no home unit ({total})
       </summary>
       <p className="subtle">
         These devices have no home unit. Teaching the matching abbreviation above resolves a
@@ -54,8 +64,9 @@ function UnassignedHomeUnits({ unassigned }: { unassigned: { id: string; deviceN
         export entirely is never matched, so it is never backfilled this way; set it directly on
         the item&apos;s edit page instead.
       </p>
+      {total > items.length && <p className="subtle">Showing the first {items.length}.</p>}
       <ul className="stack-sm">
-        {unassigned.map((item) => (
+        {items.map((item) => (
           <li key={item.id}>{item.deviceName}</li>
         ))}
       </ul>
@@ -130,7 +141,7 @@ export function UnitManager({
   lastImportStale,
 }: {
   units: UnitRow[];
-  unassigned: { id: string; deviceName: string }[];
+  unassigned: { items: { id: string; deviceName: string }[]; total: number };
   lastImportLabel: string | null;
   lastImportStale: boolean;
 }) {

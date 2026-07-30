@@ -305,8 +305,9 @@ test("listUnassignedHomeUnits returns active items with a device name but no hom
   await prisma.item.create({
     data: { make: "D", model: "1", serialNumber: "NOUNIT-1", deviceName: "ZZTOP99-LT-1", createdById: admin.id },
   });
-  const rows = await listUnassignedHomeUnits();
-  expect(rows.some((r) => r.deviceName === "ZZTOP99-LT-1")).toBe(true);
+  const { items, total } = await listUnassignedHomeUnits();
+  expect(items.some((r) => r.deviceName === "ZZTOP99-LT-1")).toBe(true);
+  expect(total).toBe(1);
 });
 
 test("listUnassignedHomeUnits excludes items that already have a home unit", async () => {
@@ -321,8 +322,31 @@ test("listUnassignedHomeUnits excludes items that already have a home unit", asy
       createdById: admin.id,
     },
   });
-  const rows = await listUnassignedHomeUnits();
-  expect(rows.some((r) => r.deviceName === "HASUNIT-LT-1")).toBe(false);
+  const { items, total } = await listUnassignedHomeUnits();
+  expect(items.some((r) => r.deviceName === "HASUNIT-LT-1")).toBe(false);
+  expect(total).toBe(0);
+});
+
+// This is the exact regression the browser walkthrough caught: the panel
+// heading used to render `items.length` (the capped sample) as if it were
+// the whole count, silently understating the true number once the fleet had
+// more unresolved devices than the cap.
+test("listUnassignedHomeUnits caps the sample at the limit but reports the true total", async () => {
+  const admin = await createAdmin();
+  await prisma.item.createMany({
+    data: Array.from({ length: 7 }, (_, i) => ({
+      make: "D",
+      model: "1",
+      serialNumber: `CAP-${i}`,
+      deviceName: `CAP-DEVICE-${i}`,
+      createdById: admin.id,
+    })),
+  });
+
+  const { items, total } = await listUnassignedHomeUnits(3);
+
+  expect(items).toHaveLength(3);
+  expect(total).toBe(7);
 });
 
 // --- lastImportAt ---------------------------------------------------------
