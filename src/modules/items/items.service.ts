@@ -686,9 +686,9 @@ export async function commitImport(
   filename: string,
   resolutions: UnitResolution[],
   editor: { id: string; name: string }
-): Promise<{ added: number; updated: number; skipped: SkippedRow[]; unchanged: number; detected: number; mismatches: { serialNumber: string }[]; error?: string }> {
+): Promise<{ added: number; updated: number; skipped: SkippedRow[]; unchanged: number; detected: number; mismatches: { serialNumber: string }[]; unresolved: UnresolvedRow[]; error?: string }> {
   const { rows, error } = parseItemsCsv(text);
-  if (error) return { added: 0, updated: 0, skipped: [], unchanged: 0, detected: 0, mismatches: [], error };
+  if (error) return { added: 0, updated: 0, skipped: [], unchanged: 0, detected: 0, mismatches: [], unresolved: [], error };
 
   // Persist learned units BEFORE planning so detection re-runs with the enriched map.
   await learnUnits(resolutions);
@@ -855,12 +855,29 @@ export async function commitImport(
     // A full-fleet MDM refresh is an all-UPDATE import: up to MAX_IMPORT_ROWS (2000)
     // sequential item.updateMany writes (ItemEdits are batched) in one interactive
     // transaction. Prisma's default 5s timeout is far too small; but the ceiling is
-    // the hosting function timeout — the import page sets `maxDuration = 60`. maxWait
-    // (pool-acquire) and timeout are consumed sequentially, so keep their SUM under
-    // 60s (5 + 50 = 55, ~5s headroom) — otherwise a slow pool-acquire plus the txn
-    // could reach ~70s and be killed by the platform instead of aborting cleanly here
-    // (caught → generic error). Chunking large imports is a deferred follow-up.
-    timeout: 50_000,
+    // the hosting function timeout — BOTH callers of commitImport set
+    // `maxDuration = 60` (the interactive /admin/items/import page, and the
+    // automated POST /api/items/import route — see the comment there for the
+    // full breakdown). maxWait (pool-acquire) and timeout are consumed
+    // sequentially, so their SUM is this transaction's real budget: 5 + 40 = 45s
+    // out of that 60s ceiling.
+    //
+    // 40s, not 50s: the 60s function budget also has to cover work that happens
+    // OUTSIDE this transaction, in the same invocation — reading the uploaded
+    // file, resolving the import actor, and (right above, before this
+    // transaction opens) the loadExistingBySerial + loadUnitMap queries, plus a
+    // cold start's Prisma engine init and first pool connect. At 50s that
+    // pre-transaction work had only ~5s of headroom under the 60s ceiling, which
+    // a slow cold start or a slow pool acquire could plausibly exceed — and if
+    // the platform kills the function instead of the transaction aborting on
+    // its own, the caller gets a raw platform 504 instead of the clean
+    // `500 {"error":"Import failed"}` DEPLOY.md and the MDM hand-off doc both
+    // promise. 40s leaves ~15s for that pre-transaction work and unwind, which
+    // is ample: the measured 2000-row all-update run was ~0.8s locally, and the
+    // work is round-trip bounded (~15-20 queries), not row bounded — see
+    // DEPLOY.md §7a. Chunking large imports remains a deferred follow-up if a
+    // slower production database ever needs more room than this buys back.
+    timeout: 40_000,
     maxWait: 5_000,
   });
 
@@ -868,5 +885,9 @@ export async function commitImport(
     console.warn(`[commitImport] ${toCreate.length - added} row(s) skipped by the DB serialNumber unique constraint (concurrent import or casing variant).`);
   }
 
-  return { added, updated, skipped: finalSkipped, unchanged: unchanged.length, detected, mismatches: collectMismatches(plan) };
+  // `unresolved` is surfaced (not just counted) because the automated import has
+  // no human at the resolution step — the caller reports it so an admin can teach
+  // the abbreviation later. The browser flow ignores this field; it gets the same
+  // list from analyzeImport before committing.
+  return { added, updated, skipped: finalSkipped, unchanged: unchanged.length, detected, mismatches: collectMismatches(plan), unresolved: plan.unresolved };
 }

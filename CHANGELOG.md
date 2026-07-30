@@ -5,8 +5,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-07-30
 
+### Added
+- **The nightly Intune export can now import itself.** A scheduled job can POST the CSV straight to the app instead of somebody opening the import page and doing it by hand. Rows whose unit abbreviation the app does not recognise still import — they come back listed in the response so an admin can teach the abbreviation afterwards.
+
 ### Fixed
 - **The import's "auto-detected" home unit count now reflects devices actually changed, not every device whose name still decodes.** A matched (already-in-the-fleet) row was counted as auto-detected whenever `detectHomeUnit` succeeded, even when the derived value was identical to what the item already stored — so a nightly full-fleet CSV with no `homeUnit` column, where nearly every row's device name simply still decodes to its current unit, reported roughly 1,100 "auto-detected" home units when the real number of devices filled in or corrected was a handful. The count now only increments when detection actually fills a blank home unit or corrects a different stored one.
+
+### Notes
+- New environment variable **`MDM_IMPORT_SECRET`** must be set in Vercel and in the scheduled job. Unset, the endpoint refuses everything.
+- A new migration seeds an **`MDM Import (automated)`** account that automated imports are recorded under. It cannot be signed in to.
+- Measured: a full 2000-row all-update import takes ~0.8s locally (Docker Postgres), well inside the transaction and function-duration budgets.
 
 ## 2026-07-29
 

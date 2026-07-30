@@ -3,7 +3,7 @@
 A living inventory of every security control in this app — what it does, where
 it lives, and why. **Maintained over time**; see [Keeping this current](#keeping-this-current).
 
-**Last reviewed: 2026-07-29**
+**Last reviewed: 2026-07-30**
 
 Related: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`../CLAUDE.md`](../CLAUDE.md) · [`password-reset-hardening.md`](./password-reset-hardening.md)
 
@@ -219,6 +219,40 @@ redirects unauthenticated requests for `/items`, `/admin/*`, `/account` to
 
 > **Banned anti-pattern:** never gate a capability on "the user happens to own no
 > rows" — a demoted admin keeps their rows. Check the **role**.
+
+**One seeded, non-loginable account exists for machine-attributed writes: the
+import service account.** `ImportBatch.createdById` is a required FK to `User`,
+so an automated (cron-style, session-less) CSV import still needs a row to
+attribute its `editor` to. `mdm-import@service.invalid` ("MDM Import
+(automated)") is seeded by migration
+`prisma/migrations/20260730000000_import_service_account/` and resolved by
+`getImportActor()` in `src/modules/items/import-actor.ts`, which **throws**
+rather than falling back to any other account if the row is ever missing —
+attributing a machine's mass edit to a real person, silently, is worse than a
+loud failure. Two independent things keep it non-loginable and un-purgeable:
+- `isActive: false` is what blocks authentication — `defaultGetSession`
+  (`src/lib/authz.ts`) returns `null` for an inactive user regardless of the
+  password hash (which is a non-bcrypt sentinel string, not a real hash, since
+  it never needs to compare true).
+- `deactivatedAt` is seeded `NULL`, which keeps a freshly-migrated row out of
+  `purgeDeactivatedUsers`'s scope (it only considers rows with a non-null
+  `deactivatedAt`) — but that is a starting condition, not an enforced
+  invariant. This row is an ordinary `User` to the rest of the app: nothing
+  distinguishes it from a real technician's account in the admin Users list,
+  and `toggleUserActiveAction` → `setUserActive(id, false)`
+  (`src/modules/users/users.service.ts`) stamps `deactivatedAt` to `now` for
+  ANY user it's pointed at, this one included. What's actually guaranteed is
+  `hasBlockingReferences`: once this account has authored at least one
+  `ImportBatch`, `purgeDeactivatedUsers` refuses to hard-delete it no matter
+  what `deactivatedAt` holds (`ImportBatch.createdById` is
+  `ON DELETE RESTRICT`). Until its first import runs — a fresh environment,
+  or a row an admin deactivates before any import has happened — that
+  protection has not yet attached, and the row is purgeable like any other
+  deactivated account 3 months out.
+
+The `.invalid` TLD (RFC 2606) guarantees the address can never collide with a
+real person's. This is the **one deliberate exception** to "provision an
+individual account per technician" — see the corresponding `CLAUDE.md` bullet.
 
 ---
 
@@ -446,16 +480,75 @@ user-level non-repudiation — see
 **The purge endpoint authenticates with a shared secret** —
 `Authorization: Bearer <CRON_SECRET>`. `src/app/api/cron/purge/route.ts`
 
-**The comparison is constant-time** (`timingSafeEqual`), with a length check
-first so a mismatched length is rejected without comparing.
+**The check is a shared helper, not inline per-route logic** —
+`hasValidBearerSecret` in `src/lib/cron-auth.ts`. It has no `server-only` and no
+Prisma import, so it stays importable from any session-less route (the purge
+cron today; a machine-driven MDM import route is the next consumer) without
+those routes drifting into two independent copies of one auth check.
 
-**It fails closed** — an unconfigured `CRON_SECRET` rejects everything rather
-than leaving the endpoint open.
+**The comparison is constant-time** (`timingSafeEqual`), with a length check
+first so a mismatched length is rejected without comparing, and it compares
+the WHOLE header including the `Bearer ` prefix so a caller cannot pass the
+bare secret.
+
+**It fails closed** — an unconfigured (or blank) `CRON_SECRET` rejects
+everything rather than leaving the endpoint open.
 
 **Never cached, Node runtime** (`dynamic = "force-dynamic"`) — it mutates data
 and must run fresh on every invocation.
 
 **Errors don't leak internals** — generic `"Purge failed"` plus a server log.
+
+### The automated MDM import
+
+**`POST /api/items/import`** — `src/app/api/items/import/route.ts` — is the
+machine-driven consumer `hasValidBearerSecret` was already anticipating above.
+It lets a nightly Intune/MDM export job POST its CSV in with nobody present.
+
+**Same shared-secret pattern as the purge cron**, a different variable —
+`Authorization: Bearer <MDM_IMPORT_SECRET>`, checked with the same
+`hasValidBearerSecret` constant-time compare, and checked **before the request
+body is read**, so an unauthenticated flood costs one comparison rather than a
+multi-megabyte parse. **It fails closed**: an unset or blank
+`MDM_IMPORT_SECRET` rejects every request.
+
+**It writes as the service account, never as a person.** `getImportActor()`
+(`src/modules/items/import-actor.ts`) resolves the seeded, non-loginable
+`mdm-import@service.invalid` user (migration `20260730000000_import_service_account`;
+`isActive: false` keeps it unable to sign in) and every `ItemEdit`/`ImportBatch`
+row the run produces is attributed to it. If that account is missing,
+`getImportActor` throws rather than silently attributing the import to
+whichever admin happens to be first in the table.
+
+**Rotating the secret needs a redeploy, not just an env change** — the same
+non-negotiable as `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (§13): the handler reads
+`process.env.MDM_IMPORT_SECRET` from the running instance, so updating it in
+Vercel without redeploying leaves the live instance checking the old value
+while the scheduled job now sends the new one, and every run 401s until the
+mismatch is caught.
+
+**Reuses the one import implementation.** It calls the same `commitImport`
+the interactive `/admin/items/import` page calls, with `resolutions: []` — an
+unrecognised unit abbreviation does not block a row, it imports with a blank
+`homeUnit` and comes back in the response's `unresolved` list. See
+[§2](#2-authorization) / CLAUDE.md for why there are two front doors and one
+implementation.
+
+**Proxy exclusion, not an authz bypass.** `src/proxy.ts`'s matcher excludes
+`api/items/import` by exact segment (not the `api/items` namespace) so the
+route's own session-less request isn't redirected to `/login` by the coarse
+login gate before the handler can even read the `Authorization` header — same
+reasoning as the `api/cron` exclusion above. Real authorization is the bearer
+check inside the handler, not the proxy.
+
+**Declares `maxDuration = 300`** (the Hobby ceiling) because `commitImport`'s
+transaction is configured `maxWait: 5_000` + `timeout: 50_000`, consumed
+sequentially — a shorter function budget would let the platform kill the
+function mid-transaction instead of letting it abort cleanly into the route's
+catch block.
+
+**Errors don't leak internals** — generic `"Import failed"` / a specific but
+non-sensitive parse error, plus a server log.
 
 ---
 
@@ -981,6 +1074,38 @@ corroborated. Note also that only receipts are sealed: `ItemEdit`, `ItemAudit`
 and `ReturnTransaction` are ordinary mutable rows with no hash chain, and the app
 connects on a privileged role that bypasses RLS ([§10](#10-database-posture)), so
 DB-level history rewriting leaves no trace.
+
+**8. Anyone holding `MDM_IMPORT_SECRET` can create and update inventory rows.**
+*Accepted, bounded.* [§8](#8-background-jobs-cron). `POST /api/items/import`
+has no per-caller identity beyond the one shared secret — unlike a signed-in
+admin's session, there is no way to tell one holder of the secret from
+another, and no way to revoke one holder without rotating the secret for
+everyone (including the legitimate scheduled job, which then also needs
+updating). The blast radius is bounded three ways: `MAX_IMPORT_ROWS` (2000)
+caps a single call, the endpoint can only create/update items and their
+history — it has no delete, user-management, or receipt capability — and
+every row it touches is attributed in `ItemEdit`/`ImportBatch` to the fixed
+`mdm-import@service.invalid` account, so a bad import is visible and
+reversible (re-import a correct CSV) even though it can't be individually
+attributed to whoever actually held the secret at the time.
+
+**8a. `POST /api/items/import` is unmetered and unlogged — anonymous
+secret-guessing against it costs nothing to attempt and leaves no trace.**
+*Accepted.* Excluding the route from `src/proxy.ts`'s matcher (needed so the
+route's own session-less request isn't redirected to `/login` before the
+handler can read the `Authorization` header, [§8](#8-background-jobs-cron))
+also removes it from the proxy's 100/min anonymous rate limit
+([§12](#12-rate-limiting)) and the automation User-Agent filter, same as
+`api/cron`. There is no per-attempt log of a rejected guess either — only
+`console.error` on an unexpected failure, not on a routine 401. In practice
+this is not exploitable: `hasValidBearerSecret` compares against a long
+random value with `timingSafeEqual` ([§8](#8-background-jobs-cron)), so
+brute-forcing it is computationally infeasible regardless of request rate,
+and the constant-time compare means a flood buys an attacker no timing
+signal either. Accepted rather than re-metering the route, because putting it
+back behind the proxy's IP bucket is what caused the original bug this
+endpoint exists to fix — the shared secret is the only control this endpoint
+needs, and it does not weaken under volume.
 
 ---
 

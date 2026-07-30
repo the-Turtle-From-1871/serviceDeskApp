@@ -22,7 +22,11 @@ export default defineConfig({
     // NOTHING in this repo could render a component, and a green suite was zero
     // evidence for any UI change — a form bug that saved one contact's phone
     // number onto the next one survived all 338 tests and seven code reviews.
-    include: ["src/**/*.test.ts", "src/**/*.test.tsx", "tests/**/*.test.ts"],
+    // scripts/**/*.test.mjs covers guardrail scripts themselves (e.g.
+    // check-security-docs.test.mjs asserting the WATCHED list still names
+    // every security-relevant file) — those are plain Node, not app code, so
+    // they stay .mjs rather than joining the src/ TypeScript tree.
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx", "tests/**/*.test.ts", "scripts/**/*.test.mjs"],
     fileParallelism: false, // integration tests share one test DB
     setupFiles: ["tests/helpers/setup-env.ts"],
   },

@@ -140,6 +140,167 @@ Success is HTTP `200` with a JSON summary:
 > middleware (`src/proxy.ts` matcher) so the cron isn't redirected to `/login`;
 > its only protection is `CRON_SECRET`, so keep that value secret.
 
+## 7. Automated MDM import (optional)
+
+If a technician automates a nightly Intune/MDM export, that export can be
+POSTed straight into the app instead of imported by hand.
+
+**Endpoint:** `POST /api/items/import`, `multipart/form-data`, with the CSV in
+a field named `file`. Authenticate with a bearer secret:
+
+```
+Authorization: Bearer <MDM_IMPORT_SECRET>
+```
+
+**Set the secret.** Add `MDM_IMPORT_SECRET` (long random value, e.g.
+`openssl rand -hex 32`) as an Environment Variable in Vercel for **both
+Production and Preview**, and give the scheduled export job the same value.
+Unset, the endpoint refuses every request. Rotating the value means changing
+it in Vercel **and** in the scheduled job, and **requires a redeploy** to take
+effect — the same non-negotiable as Turnstile in step 4, because the check
+reads the value at request time from the deployed instance, but a stale
+scheduled job holding the old secret will simply start getting `401`s until
+it's updated too.
+
+**Example (PowerShell, reading the secret from an environment variable rather
+than hardcoding it — this is what a scheduled task should run):**
+
+```powershell
+$headers = @{ Authorization = "Bearer $env:MDM_IMPORT_SECRET" }
+$form = @{ file = Get-Item .\fleet.csv }
+Invoke-RestMethod -Uri "https://<APP_URL>/api/items/import" -Method Post -Headers $headers -Form $form
+```
+
+**Responses:**
+- `200` — the import ran, with a JSON summary. `added`, `updated`, `unchanged`,
+  and `detected` are **counts** (numbers); `skipped`, `unresolved`, and
+  `mismatches` are **arrays** of per-row detail, `[]` when there's nothing to
+  report — don't call `.length` on the first four or iterate the last three
+  as if they were counts. Example body:
+
+  ```json
+  {
+    "added": 3,
+    "updated": 118,
+    "unchanged": 1876,
+    "detected": 12,
+    "skipped": [
+      { "row": 47, "serialNumber": "SN-004821", "reason": "missing make/model on a new device" }
+    ],
+    "unresolved": [
+      { "row": 203, "deviceName": "LAPTOP-WABC01-042", "segments": ["WABC01", "042"] }
+    ],
+    "mismatches": [
+      { "serialNumber": "SN-001177" }
+    ]
+  }
+  ```
+- `401` — missing or wrong secret.
+- `400` — the file isn't named `*.csv`, it couldn't be parsed, **or it has
+  more than 2000 rows** (the endpoint doesn't chunk an oversized file for
+  you — split it and send multiple requests).
+- `413` — the upload is too large.
+- `500` — unexpected failure.
+
+**Limits and behaviour to know before scheduling this:**
+- **Maximum 2000 rows per import.** A larger export must be split into
+  multiple files/requests — the endpoint doesn't chunk it for you.
+- **`serialNumber` is the required column and the match key.** A serial
+  already in inventory is updated in place; a serial not seen before is
+  created as a new item. **Nothing is ever deleted** — a device that's missing
+  from this export (decommissioned, off the network, etc.) is left untouched,
+  not retired. Absence in the CSV is not a signal.
+- **The import overwrites matched fields from the CSV.** For a device that
+  already exists, the export is treated as the source of truth for its name,
+  home unit, category and assigned user — those fields are replaced with
+  whatever the CSV says, including overwriting a hand edit made in the app
+  since the last import.
+- **An unrecognised unit abbreviation doesn't fail the row.** That row still
+  imports, just with a blank home unit, and comes back listed under
+  `unresolved` in the response — not under `skipped`. Treat `unresolved` as
+  "needs a look", not "didn't import."
+- **A non-200 response means nothing was written.** The whole import runs as
+  one transaction, so there's no partial state to reconcile — on any
+  non-`200`, log the response body and re-run rather than assuming some rows
+  made it in.
+
+### 7a. Proving it works in production before you schedule it
+
+Do not hand this to a scheduler on day one. Timings measured on a local
+Postgres do not transfer — the app talks to Supabase over the network in
+production, and latency is the whole question. Work through these in order.
+
+**First, make sure all three prerequisites are actually done**, or you'll get a
+confusing failure instead of a useful measurement:
+
+1. The migration `20260730000000_import_service_account` is applied to the
+   production database. Without it every request returns `500`, because there
+   is no account to attribute the import to (see the note on the service
+   account in `docs/SECURITY.md`).
+2. `MDM_IMPORT_SECRET` is set in Vercel. On Windows, generate one with:
+   ```powershell
+   [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Max 256 }))
+   ```
+3. The code is deployed to production.
+
+**Step 1 — read-only dry run, no command line needed.** Open
+`/admin/items/import`, choose the export, and click **Analyze** — then stop
+without committing. This runs the same parse and the same database reads the
+real import does and **writes nothing**. It shows the counts it would apply,
+and how long it takes is your actual Supabase round-trip latency. If this feels
+instant, the real import will be fine; see the note below on why.
+
+**Step 2 — run it manually once, not on a schedule.**
+
+```powershell
+$env:MDM_IMPORT_SECRET = "<the value you set in Vercel>"
+
+Invoke-RestMethod -Uri "https://servicedeskapp.vercel.app/api/items/import" `
+  -Method Post `
+  -Headers @{ Authorization = "Bearer $env:MDM_IMPORT_SECRET" } `
+  -Form @{ file = Get-Item .\fleet.csv }
+```
+
+Then open the Vercel dashboard, find the function invocation, and read its
+**actual duration**. That is the real number — everything else is
+extrapolation. A wrong or missing secret returns `401` and writes nothing, so
+you cannot half-run this by fumbling the credential.
+
+**Expect a large `updated` count on this first run, and don't read it as a
+bug.** Devices currently carrying a blank home unit get one backfilled from
+their device name — that is the intended fix, not runaway churn.
+
+**Step 3 — run the exact same file again.** The importer only writes rows that
+actually changed, so the second pass should be close to a no-op (`added: 0`,
+`updated: 0`, most rows `unchanged`). That gives you the steady-state timing
+every subsequent nightly run will look like, and confirms the import is
+idempotent against unchanged input.
+
+**Step 4 — only now hand it to the scheduler.**
+
+**Why this should comfortably fit the budget.** The import is *round-trip
+bounded, not row bounded*: a 2000-row file is roughly 15-20 database queries,
+not 2000. Rows are grouped by which columns changed and written with batched
+`UPDATE ... FROM (VALUES ...)` statements. So Supabase latency multiplies by
+about twenty, not by two thousand. The function is allowed **60s** total; the
+database transaction inside it is budgeted **45s** (`maxWait` 5s + `timeout`
+40s — not "the transaction" alone, `maxWait` is time spent waiting to acquire
+a pool connection before the transaction even starts). That leaves roughly
+**15s** outside the transaction for reading the upload, resolving the service
+account, and the lookup queries that run before the transaction opens, plus
+unwind time afterward — measure it in step 2 rather than trusting this
+paragraph.
+
+**If it does time out**, the symptom is a `500` with nothing written (the
+transaction aborts as a unit). The fix is to split the export into smaller
+files, which is safe precisely because nothing is ever deleted and re-importing
+unchanged rows is a no-op.
+
+**What to do if the numbers look wrong.** Every field the import changes is
+recorded in that item's edit history, attributed to `MDM Import (automated)`,
+so you can see exactly what a run touched from the item's own page — and
+nothing is ever deleted, so a bad import is a correction, never a loss.
+
 ## Notes / caveats
 
 - **Change the admin password**: there is no in-app password change yet; the

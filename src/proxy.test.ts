@@ -8,7 +8,7 @@ vi.mock("@/auth", () => ({
   auth: (handler: (req: NextRequest & { auth: unknown }) => unknown) => handler,
 }));
 
-import { proxy } from "./proxy";
+import { proxy, config } from "./proxy";
 import {
   signUnlockValue,
   unlockCookieName,
@@ -438,6 +438,48 @@ describe("proxy — rate limiting", () => {
       const browser = await runIp(ipRequest({ path: "/i/abc", ip }));
       expect(browser.status).not.toBe(429);
     });
+  });
+});
+
+describe("proxy — config.matcher exclusion for the MDM import route", () => {
+  // Regression guard for the matcher STRING itself, not the login-gate logic
+  // exercised above. Without `api/items/import` in the negative lookahead, a
+  // session-less machine POST hits the coarse login gate and is redirected to
+  // /login — which a redirect-following client (PowerShell's
+  // Invoke-RestMethod) turns into a 200 with login-page HTML, so a scheduled
+  // import job logs success while importing nothing, silently, for however
+  // long it takes someone to notice the fleet stopped changing.
+  //
+  // This is also the exact hazard the plan flagged: another branch rewrites
+  // this file wholesale, and whichever branch merges second must re-apply the
+  // exclusion by hand. A plain code review can miss that; this test cannot —
+  // it fails the instant the exclusion is dropped or re-generalised, with no
+  // need to exercise the rest of the proxy.
+  //
+  // Anchored full-string match, mirroring how Next compiles a matcher pattern
+  // against a pathname.
+  const matcher = new RegExp(`^${config.matcher[0]}$`);
+  /** True when the given pathname is matched by config.matcher — i.e. the
+   *  proxy DOES run on it. False means the path is excluded (skips the proxy
+   *  entirely: no login gate, no PIN gate, no rate limit). */
+  const runsProxy = (path: string) => matcher.test(path);
+
+  it("excludes /api/items/import — the route authenticates itself, so the proxy must not intercept it", () => {
+    expect(runsProxy("/api/items/import")).toBe(false);
+  });
+
+  it("does NOT exclude /api/items/importantthing, proving the exclusion is segment-anchored", () => {
+    // Without the `(?:/|$)` anchor, a bare-prefix match on "api/items/import"
+    // would also swallow this sibling path — skipping its login gate for a
+    // route nobody meant to exempt.
+    expect(runsProxy("/api/items/importantthing")).toBe(true);
+  });
+
+  it("does NOT exempt the whole api/items namespace", () => {
+    // A future route under /api/items/* (e.g. a UI-only fetch endpoint) must
+    // keep its login gate, PIN gate, rate limit, and session-cookie refresh —
+    // only the one named import route authenticates itself by secret.
+    expect(runsProxy("/api/items/something")).toBe(true);
   });
 });
 
