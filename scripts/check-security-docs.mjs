@@ -80,6 +80,7 @@ const WATCHED = [
   [/^src\/app\/admin\/actions\/readiness\.ts$/, "the hand-settable readiness allowlist (§2)"],
   [/^src\/app\/api\/cron\//, "cron authentication (§8)"],
   [/^src\/lib\/cron-auth\.ts$/, "the shared secret check for session-less routes (§1)"],
+  [/^src\/app\/api\/items\/import\/route\.ts$/, "the secret-authenticated machine import endpoint (§8)"],
   [/^src\/lib\/email\.ts$/, "outbound email escaping (§4, §6)"],
   [/^next\.config\.ts$/, "security response headers (§4)"],
   [/^\.github\/workflows\/ci\.yml$/, "the CI security gates (§11)"],

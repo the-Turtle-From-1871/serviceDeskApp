@@ -329,6 +329,22 @@ export const config = {
   // behind a shared per-IP bucket would let unrelated traffic from the same
   // egress starve the purge job.
   //
+  // `api/items/import` is excluded for the identical reason: it authenticates
+  // with a constant-time MDM_IMPORT_SECRET compare inside the handler
+  // (hasValidBearerSecret, same helper as the cron routes), and the nightly
+  // Intune export job that calls it has no session cookie to present. Without
+  // this exclusion the coarse login gate below redirects the machine POST to
+  // `/login`, and a client that follows redirects (PowerShell's
+  // Invoke-RestMethod does) turns that 302 into a GET that returns 200 with
+  // login-page HTML — a scheduled job that logs success while importing
+  // nothing. The exclusion names the ONE route, not the `api/items` namespace:
+  // every *other* route under `/api/items/*` is session-gated UI plumbing with
+  // no secret check of its own, so excluding the whole namespace would make a
+  // future route there silently skip the login gate, the PIN gate, the rate
+  // limiter, and the session-cookie refresh — the exact hazard the
+  // segment-anchoring note below exists to prevent, just at the directory level
+  // instead of the string-prefix level.
+  //
   // The exclusions are SEGMENT-anchored with `(?:/|$)`. Unanchored, they were
   // prefixes: `/api/cronjobs`, `/logins`, `/unlockables` or `/terms-of-service`
   // would all have matched an exclusion and skipped the proxy entirely — no
@@ -337,6 +353,6 @@ export const config = {
   // fix had been applied only in code. The last three keep their trailing-slash
   // prefix form on purpose: they are directories, not routes.
   matcher: [
-    "/((?!(?:api/cron|login|forgot-password|reset-password|privacy|terms|unlock|favicon\\.ico)(?:/|$)|_next/static|_next/image|wasm/).*)",
+    "/((?!(?:api/cron|api/items/import|login|forgot-password|reset-password|privacy|terms|unlock|favicon\\.ico)(?:/|$)|_next/static|_next/image|wasm/).*)",
   ],
 };

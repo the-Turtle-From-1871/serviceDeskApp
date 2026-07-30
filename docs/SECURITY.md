@@ -489,6 +489,57 @@ and must run fresh on every invocation.
 
 **Errors don't leak internals** — generic `"Purge failed"` plus a server log.
 
+### The automated MDM import
+
+**`POST /api/items/import`** — `src/app/api/items/import/route.ts` — is the
+machine-driven consumer `hasValidBearerSecret` was already anticipating above.
+It lets a nightly Intune/MDM export job POST its CSV in with nobody present.
+
+**Same shared-secret pattern as the purge cron**, a different variable —
+`Authorization: Bearer <MDM_IMPORT_SECRET>`, checked with the same
+`hasValidBearerSecret` constant-time compare, and checked **before the request
+body is read**, so an unauthenticated flood costs one comparison rather than a
+multi-megabyte parse. **It fails closed**: an unset or blank
+`MDM_IMPORT_SECRET` rejects every request.
+
+**It writes as the service account, never as a person.** `getImportActor()`
+(`src/modules/items/import-actor.ts`) resolves the seeded, non-loginable
+`mdm-import@service.invalid` user (migration `20260730000000_import_service_account`;
+`isActive: false` keeps it unable to sign in) and every `ItemEdit`/`ImportBatch`
+row the run produces is attributed to it. If that account is missing,
+`getImportActor` throws rather than silently attributing the import to
+whichever admin happens to be first in the table.
+
+**Rotating the secret needs a redeploy, not just an env change** — the same
+non-negotiable as `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (§13): the handler reads
+`process.env.MDM_IMPORT_SECRET` from the running instance, so updating it in
+Vercel without redeploying leaves the live instance checking the old value
+while the scheduled job now sends the new one, and every run 401s until the
+mismatch is caught.
+
+**Reuses the one import implementation.** It calls the same `commitImport`
+the interactive `/admin/items/import` page calls, with `resolutions: []` — an
+unrecognised unit abbreviation does not block a row, it imports with a blank
+`homeUnit` and comes back in the response's `unresolved` list. See
+[§2](#2-authorization) / CLAUDE.md for why there are two front doors and one
+implementation.
+
+**Proxy exclusion, not an authz bypass.** `src/proxy.ts`'s matcher excludes
+`api/items/import` by exact segment (not the `api/items` namespace) so the
+route's own session-less request isn't redirected to `/login` by the coarse
+login gate before the handler can even read the `Authorization` header — same
+reasoning as the `api/cron` exclusion above. Real authorization is the bearer
+check inside the handler, not the proxy.
+
+**Declares `maxDuration = 300`** (the Hobby ceiling) because `commitImport`'s
+transaction is configured `maxWait: 5_000` + `timeout: 50_000`, consumed
+sequentially — a shorter function budget would let the platform kill the
+function mid-transaction instead of letting it abort cleanly into the route's
+catch block.
+
+**Errors don't leak internals** — generic `"Import failed"` / a specific but
+non-sensitive parse error, plus a server log.
+
 ---
 
 ## 9. Data retention & minimization
@@ -1013,6 +1064,20 @@ corroborated. Note also that only receipts are sealed: `ItemEdit`, `ItemAudit`
 and `ReturnTransaction` are ordinary mutable rows with no hash chain, and the app
 connects on a privileged role that bypasses RLS ([§10](#10-database-posture)), so
 DB-level history rewriting leaves no trace.
+
+**8. Anyone holding `MDM_IMPORT_SECRET` can create and update inventory rows.**
+*Accepted, bounded.* [§8](#8-background-jobs-cron). `POST /api/items/import`
+has no per-caller identity beyond the one shared secret — unlike a signed-in
+admin's session, there is no way to tell one holder of the secret from
+another, and no way to revoke one holder without rotating the secret for
+everyone (including the legitimate scheduled job, which then also needs
+updating). The blast radius is bounded three ways: `MAX_IMPORT_ROWS` (2000)
+caps a single call, the endpoint can only create/update items and their
+history — it has no delete, user-management, or receipt capability — and
+every row it touches is attributed in `ItemEdit`/`ImportBatch` to the fixed
+`mdm-import@service.invalid` account, so a bad import is visible and
+reversible (re-import a correct CSV) even though it can't be individually
+attributed to whoever actually held the secret at the time.
 
 ---
 
