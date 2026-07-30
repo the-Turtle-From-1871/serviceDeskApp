@@ -125,6 +125,25 @@ test("commitImport overwrites an existing item's homeUnit from the CSV and logs 
   expect(edits[0].changes).toEqual([{ field: "homeUnit", from: "Old Unit", to: "New Unit" }]);
 });
 
+test("commitImport reports rows whose home unit could not be derived", async () => {
+  // A device name with no segment matching any known unit abbreviation, and no
+  // homeUnit column -> unresolved, but the row still imports.
+  const csv = [
+    "serialNumber,make,model,deviceName",
+    "UNRESOLVED-1,Dell,7440,ZZTOP99-LT-001",
+  ].join("\n");
+
+  const res = await commitImport(csv, "fleet.csv", [], admin);
+
+  expect(res.added).toBe(1);
+  expect(res.unresolved).toHaveLength(1);
+  expect(res.unresolved[0].deviceName).toBe("ZZTOP99-LT-001");
+
+  const item = await prisma.item.findFirst({ where: { serialNumber: "UNRESOLVED-1" } });
+  expect(item).not.toBeNull();
+  expect(item?.homeUnit).toBeNull();
+});
+
 test("commitImport learns a resolution and applies it to every matching new row", async () => {
   const csv = [
     "make,model,serialNumber,deviceName,homeUnit,notes",

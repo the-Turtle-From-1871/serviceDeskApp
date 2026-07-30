@@ -686,9 +686,9 @@ export async function commitImport(
   filename: string,
   resolutions: UnitResolution[],
   editor: { id: string; name: string }
-): Promise<{ added: number; updated: number; skipped: SkippedRow[]; unchanged: number; detected: number; mismatches: { serialNumber: string }[]; error?: string }> {
+): Promise<{ added: number; updated: number; skipped: SkippedRow[]; unchanged: number; detected: number; mismatches: { serialNumber: string }[]; unresolved: UnresolvedRow[]; error?: string }> {
   const { rows, error } = parseItemsCsv(text);
-  if (error) return { added: 0, updated: 0, skipped: [], unchanged: 0, detected: 0, mismatches: [], error };
+  if (error) return { added: 0, updated: 0, skipped: [], unchanged: 0, detected: 0, mismatches: [], unresolved: [], error };
 
   // Persist learned units BEFORE planning so detection re-runs with the enriched map.
   await learnUnits(resolutions);
@@ -868,5 +868,9 @@ export async function commitImport(
     console.warn(`[commitImport] ${toCreate.length - added} row(s) skipped by the DB serialNumber unique constraint (concurrent import or casing variant).`);
   }
 
-  return { added, updated, skipped: finalSkipped, unchanged: unchanged.length, detected, mismatches: collectMismatches(plan) };
+  // `unresolved` is surfaced (not just counted) because the automated import has
+  // no human at the resolution step — the caller reports it so an admin can teach
+  // the abbreviation later. The browser flow ignores this field; it gets the same
+  // list from analyzeImport before committing.
+  return { added, updated, skipped: finalSkipped, unchanged: unchanged.length, detected, mismatches: collectMismatches(plan), unresolved: plan.unresolved };
 }
