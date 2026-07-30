@@ -110,6 +110,21 @@ test("commitImport returns a format error and imports nothing when serial column
   expect(await prisma.importBatch.count()).toBe(0);
 });
 
+test("commitImport overwrites an existing item's homeUnit from the CSV and logs the change", async () => {
+  await createItem({ make: "Dell", model: "5540", serialNumber: "HU1", deviceName: "Radio", homeUnit: "Old Unit", notes: undefined }, admin.id);
+
+  const csv = "serialNumber,deviceName,homeUnit\nHU1,Radio,New Unit\n";
+  const res = await commitImport(csv, "items.csv", [], admin);
+  expect(res.updated).toBe(1);
+
+  const item = await prisma.item.findUniqueOrThrow({ where: { serialNumber: "HU1" } });
+  expect(item.homeUnit).toBe("New Unit");
+
+  const edits = await prisma.itemEdit.findMany({ where: { itemId: item.id } });
+  expect(edits).toHaveLength(1);
+  expect(edits[0].changes).toEqual([{ field: "homeUnit", from: "Old Unit", to: "New Unit" }]);
+});
+
 test("commitImport learns a resolution and applies it to every matching new row", async () => {
   const csv = [
     "make,model,serialNumber,deviceName,homeUnit,notes",
