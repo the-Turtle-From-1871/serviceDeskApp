@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Resetting a password is now counted per link rather than per network.** Five people clicking yesterday's expired reset links used to lock out the sixth, who was holding a perfectly good one. The reset form also now carries the same browser check as sign-in — it is the one place where a correct guess would hand over an account outright.
 
 ### Security
+- **The sign-in page still works if its JavaScript does not.** The Sign in button was being sent from the server already disabled, so any failure that stopped the page's scripts running left a form nobody could submit and nothing explaining why.
+- **The staff hand-receipt builder and the return page now send you to sign in** when you are logged out, instead of the recipient PIN page or a bare "this page is for browsers" refusal. Nothing was ever accessible that should not have been — it was the wrong signpost, not a missing lock.
 - **Signing out can no longer lock the office out of signing in.** An unauthenticated request to the sign-out endpoint shared a budget with sign-in, so 60 of them from anywhere would have refused every technician behind the same internet connection for fifteen minutes.
 - **Entering the correct public PIN no longer resets the guess counter for everyone on that network**, which had let someone sharing the connection get a fresh five guesses every time a colleague unlocked legitimately.
 - **A distributed attack on the public PIN can no longer tighten sign-in for everybody.** Wrong PINs and bad reset links still raise an alert; only failed sign-ins now trigger the stricter browser check, so the alarm cannot be used as a lever against the app.

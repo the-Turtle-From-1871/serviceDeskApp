@@ -722,6 +722,21 @@ bucket reports room again; an unlatched check would flicker off request by
 request mid-attack and wave through roughly half the unverifiable submissions it
 exists to refuse.
 
+**The public surface is `/`, `/i/*` and a receipt or its PDF — not the whole
+`/receipts/` prefix.** The bare prefix also caught `/receipts/new` (the staff
+hand-receipt builder) and `/receipts/<n>/return` (admin-only), so an anonymous
+request to either met the browser check and the PIN gate instead of the sign-in
+redirect. Authorization was never affected — `requireUser` runs in-page
+regardless — but a colleague following a bookmarked builder link got a
+plain-text 403 rather than being sent to log in.
+
+**The proxy matcher's exclusions are SEGMENT-anchored** with `(?:/|$)`.
+Unanchored they were prefixes, so a future `/api/cronjobs`, `/logins`,
+`/unlockables` or `/terms-of-service` would have skipped the proxy entirely — no
+login gate, no PIN gate, no rate limit, no session-cookie refresh. That is the
+same hazard `isApiAuthPath` guards against in code; the fix had been applied
+there and not to the regex one screen below.
+
 **Anonymous requests that do not present as a browser are refused (403).**
 `looksAutomated` in `src/proxy.ts`: a missing or blank `User-Agent` is the strong
 signal (every real browser sends one), plus a short list of default automation
@@ -816,6 +831,15 @@ that challenges visitors and is then never verified.
 
 **The widget is `interaction-only`** — invisible unless Cloudflare decides the
 visitor must interact.
+
+**The button is only held AFTER hydration.** The server HTML ships it enabled;
+`useSyncExternalStore` flips it once the client mounts. Deriving the disabled
+state from the challenge alone put `<button disabled>` in the initial HTML, so
+any failure that stopped the bundle running — a content filter, a parse error —
+left an inert form with no message and no way to sign in, because the release
+deadline lives in that same JS. It also defeated React's progressive
+enhancement. `LoginForm.test.tsx` asserts the SSR output through
+`renderToString`, since a hydrating render hides it.
 
 **The submit button is held until a token exists** ("Checking your browser…").
 Filling in an email and password takes a second or two; submitting first sends a

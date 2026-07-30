@@ -319,6 +319,24 @@ describe("proxy — rate limiting", () => {
       }
     });
 
+    it("does NOT treat the staff builder or a return as public", async () => {
+      // `/receipts/` as a bare prefix swallowed `/receipts/new` (the staff hand-
+      // receipt builder) and `/receipts/<n>/return` (admin-only), so an
+      // anonymous colleague following a bookmarked link met a plain-text 403 or
+      // the recipient PIN page instead of the sign-in redirect.
+      for (const path of ["/receipts/new", "/receipts/HR-000001/return"]) {
+        const res = await runIp(ipRequest({ path, ip: "9.0.0.1" }));
+        expect(res.headers.get("location"), path).toContain("/login");
+      }
+    });
+
+    it("still treats a receipt and its PDF as public", async () => {
+      for (const path of ["/receipts/HR-000001", "/receipts/HR-000001/pdf"]) {
+        const res = await runIp(ipRequest({ path, ip: "9.0.0.2" }));
+        expect(res.headers.get("location"), path).toBeNull();
+      }
+    });
+
     it("leaves an authenticated technician's own routes alone", async () => {
       for (let i = 0; i < API_POLICY.limit + 20; i++) {
         const res = await runIp(ipRequest({ path: "/items", ip: "6.0.0.3", loggedIn: true }));

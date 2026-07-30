@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { LoginForm } from "./LoginForm";
 
 vi.mock("@/app/actions/auth", () => ({ loginAction: vi.fn() }));
@@ -106,6 +107,19 @@ describe("LoginForm with Turnstile configured", () => {
 
     act(() => lastOpts!["expired-callback"]!());
     await waitFor(() => expect(submit().disabled).toBe(true));
+  });
+});
+
+describe("progressive enhancement", () => {
+  it("renders the submit button ENABLED before hydration", () => {
+    // The server HTML must never ship `<button disabled>`: any failure that
+    // stops the client bundle running leaves an inert form with no message and
+    // no way to sign in, because the 15-second release lives in that same JS.
+    // Asserted through `renderToString`, which is the actual server path —
+    // `render()` hydrates immediately and would hide this.
+    const html = renderToString(<LoginForm turnstileSiteKey="1x00000000000000000000AA" />);
+    expect(html).not.toContain("disabled");
+    expect(html).toContain("Sign in");
   });
 });
 

@@ -77,8 +77,21 @@ function isApiAuthPath(pathname: string): boolean {
   return pathname === "/api/auth" || pathname.startsWith("/api/auth/");
 }
 
+/**
+ * The genuinely public read surface: the home search, an item page, and a
+ * receipt (or its PDF).
+ *
+ * `/receipts/` as a bare prefix was wrong: it also swallowed `/receipts/new`
+ * (the staff hand-receipt builder) and `/receipts/<n>/return` (admin-only), so
+ * an anonymous request to either met the browser check and the PIN gate instead
+ * of the sign-in redirect — a colleague following a bookmarked builder link got
+ * a plain-text 403 rather than `/login`. Authorization was never the issue
+ * (`requireUser` runs in-page regardless); the routing was.
+ */
 const isPublicPiiPath = (pathname: string) =>
-  pathname === "/" || pathname.startsWith("/i/") || pathname.startsWith("/receipts/");
+  pathname === "/" ||
+  pathname.startsWith("/i/") ||
+  /^\/receipts\/(?!new(?:\/|$))[^/]+(?:\/pdf)?$/.test(pathname);
 
 // Automation that does not pretend to be a browser. Deliberately a SHORT list of
 // default user-agent strings, not a heuristic: it costs a scraper one line to
@@ -315,5 +328,15 @@ export const config = {
   // CRON_SECRET compare and is called once a day by GitHub Actions; putting it
   // behind a shared per-IP bucket would let unrelated traffic from the same
   // egress starve the purge job.
-  matcher: ["/((?!api/cron|login|forgot-password|reset-password|privacy|terms|unlock|_next/static|_next/image|favicon.ico|wasm/).*)"],
+  //
+  // The exclusions are SEGMENT-anchored with `(?:/|$)`. Unanchored, they were
+  // prefixes: `/api/cronjobs`, `/logins`, `/unlockables` or `/terms-of-service`
+  // would all have matched an exclusion and skipped the proxy entirely — no
+  // login gate, no PIN gate, no rate limit, no session-cookie refresh. That is
+  // the same hazard `isApiAuthPath` was written to avoid, one screen up, and the
+  // fix had been applied only in code. The last three keep their trailing-slash
+  // prefix form on purpose: they are directories, not routes.
+  matcher: [
+    "/((?!(?:api/cron|login|forgot-password|reset-password|privacy|terms|unlock|favicon\\.ico)(?:/|$)|_next/static|_next/image|wasm/).*)",
+  ],
 };
