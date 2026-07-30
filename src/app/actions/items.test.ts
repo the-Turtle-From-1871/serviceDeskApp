@@ -48,6 +48,11 @@ vi.mock("@/modules/items/items.errors", () => ({
   },
 }));
 vi.mock("next/cache", () => ({ revalidatePath: (p: string) => revalidatePath(p) }));
+vi.mock("next/navigation", () => ({
+  redirect: (url: string) => {
+    throw Object.assign(new Error(`NEXT_REDIRECT:${url}`), { digest: "NEXT_REDIRECT" });
+  },
+}));
 
 import { updateItemDetailsAction } from "./items";
 // The admin edit page's separate identity form (make/model/serialNumber) has
@@ -374,5 +379,46 @@ describe("createItemAction", () => {
     const res = await createItemAction(undefined, fd({ ...NEW_ITEM, make: "" }));
     expect(res.error).toMatch(/Make is required/);
     expect(createItem).not.toHaveBeenCalled();
+  });
+
+  it("returns to the filtered list when the form came from a search", async () => {
+    requireAdmin.mockResolvedValue(ADMIN);
+    createItem.mockResolvedValue({ id: "new-1", serialNumber: "ABC123" });
+    await expect(
+      createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "" })),
+    ).rejects.toThrow("NEXT_REDIRECT:/items?q=ABC123");
+  });
+
+  it("carries the unit filter back with it", async () => {
+    requireAdmin.mockResolvedValue(ADMIN);
+    createItem.mockResolvedValue({ id: "new-1", serialNumber: "ABC123" });
+    await expect(
+      createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "WABC01" })),
+    ).rejects.toThrow("NEXT_REDIRECT:/items?q=ABC123&uic=WABC01");
+  });
+
+  // Concatenation would produce ?q=A&B C — a different search, matching nothing.
+  it("percent-encodes a serial containing URL metacharacters", async () => {
+    requireAdmin.mockResolvedValue(ADMIN);
+    createItem.mockResolvedValue({ id: "new-1", serialNumber: "A&B C#1" });
+    await expect(
+      createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1" })),
+    ).rejects.toThrow("NEXT_REDIRECT:/items?q=A%26B+C%231");
+  });
+
+  it("does NOT redirect when the form was opened directly", async () => {
+    requireAdmin.mockResolvedValue(ADMIN);
+    await expect(createItemAction(undefined, fd(NEW_ITEM))).resolves.toEqual({ itemId: "new-1" });
+  });
+
+  // The redirect must not swallow a collision — the admin needs the error.
+  it("does NOT redirect when the serial collided", async () => {
+    requireAdmin.mockResolvedValue(ADMIN);
+    createItem.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError("dup", { code: "P2002", clientVersion: "7" }),
+    );
+    getItemBySerial.mockResolvedValue({ id: "existing-9" });
+    const res = await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1" }));
+    expect(res.error).toContain("ABC123");
   });
 });

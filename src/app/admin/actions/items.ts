@@ -1,5 +1,6 @@
 "use server";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/authz";
 import {
   createItem,
@@ -25,6 +26,10 @@ import type { SkippedRow, UnresolvedRow } from "@/modules/items/import";
 
 export async function createItemAction(_prev: unknown, formData: FormData) {
   const admin = await requireAdmin();
+  // Read off formData, NOT parsed.data: newItemSchema is a z.object() and
+  // strips unknown keys, so these would silently vanish from the parsed result.
+  const fromSearch = formData.get("fromSearch") === "1";
+  const returnUic = String(formData.get("returnUic") ?? "").trim();
   const parsed = newItemSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -71,6 +76,20 @@ export async function createItemAction(_prev: unknown, formData: FormData) {
   // learnCategories registers a name; analytics counts the fleet.
   revalidatePath("/admin/categories");
   revalidatePath("/admin/analytics");
+
+  // OUTSIDE the try/catch above — redirect() works by throwing NEXT_REDIRECT,
+  // and a catch would swallow it into the generic error message.
+  //
+  // The destination is DERIVED, never caller-supplied: the path is hardcoded
+  // and q is read back off the row Prisma just wrote, so there is no redirect
+  // target for anyone to craft. URLSearchParams does the encoding — building
+  // this by concatenation mangles a serial containing &, #, + or a space and
+  // lands the admin on an empty list for the item they just created.
+  if (fromSearch) {
+    const params = new URLSearchParams({ q: item.serialNumber });
+    if (returnUic) params.set("uic", returnUic);
+    redirect(`/items?${params}`);
+  }
 
   return { itemId: item.id };
 }
