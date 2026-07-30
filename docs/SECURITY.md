@@ -3,7 +3,7 @@
 A living inventory of every security control in this app — what it does, where
 it lives, and why. **Maintained over time**; see [Keeping this current](#keeping-this-current).
 
-**Last reviewed: 2026-07-29**
+**Last reviewed: 2026-07-30**
 
 Related: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`../CLAUDE.md`](../CLAUDE.md) · [`password-reset-hardening.md`](./password-reset-hardening.md)
 
@@ -446,11 +446,19 @@ user-level non-repudiation — see
 **The purge endpoint authenticates with a shared secret** —
 `Authorization: Bearer <CRON_SECRET>`. `src/app/api/cron/purge/route.ts`
 
-**The comparison is constant-time** (`timingSafeEqual`), with a length check
-first so a mismatched length is rejected without comparing.
+**The check is a shared helper, not inline per-route logic** —
+`hasValidBearerSecret` in `src/lib/cron-auth.ts`. It has no `server-only` and no
+Prisma import, so it stays importable from any session-less route (the purge
+cron today; a machine-driven MDM import route is the next consumer) without
+those routes drifting into two independent copies of one auth check.
 
-**It fails closed** — an unconfigured `CRON_SECRET` rejects everything rather
-than leaving the endpoint open.
+**The comparison is constant-time** (`timingSafeEqual`), with a length check
+first so a mismatched length is rejected without comparing, and it compares
+the WHOLE header including the `Bearer ` prefix so a caller cannot pass the
+bare secret.
+
+**It fails closed** — an unconfigured (or blank) `CRON_SECRET` rejects
+everything rather than leaving the endpoint open.
 
 **Never cached, Node runtime** (`dynamic = "force-dynamic"`) — it mutates data
 and must run fresh on every invocation.
