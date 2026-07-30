@@ -2,7 +2,8 @@
 
 **Date:** 2026-07-30
 **Status:** Approved, not yet implemented
-**Revision:** 2 — corrected after review; see "Review corrections" at the end.
+**Revision:** 3 — re-verified against `main` at `0602bd4`; see the two revision
+sections at the end.
 
 ## Problem
 
@@ -23,7 +24,8 @@ filtered list seeing the row they just made.
 - No change for non-admin `USER`s. They see today's empty state, unchanged.
 - No `detectHomeUnit` / unit-abbreviation resolution on the manual create path.
   That is import-only today and stays that way; `homeUnit` is stored verbatim
-  as it already is. See §6 for why `learnUnits` is also not added.
+  as it already is. The create form *suggests* known unit names (§2.2) but does
+  not register new ones — see §6.
 - No new item-creation surface. This reuses `/admin/items/new`.
 - No change to what a `USER` may edit. Nothing here touches
   `userItemDetailsSchema`.
@@ -50,8 +52,9 @@ That block gains a second line, rendered **only when `isAdmin && q.trim()`**:
 > No items match your search.
 > **[+ Create "ABC12345" as a new item]**
 
-`ItemSelectTable` already receives both `isAdmin` (`:41`) and `q` (`:42`) as
-props, passed at `items/page.tsx:100` and `:101`. No new plumbing is needed.
+`ItemSelectTable` already receives both `isAdmin` and `q` as props
+(destructured `:40-41`, typed `:52-53`), passed at `items/page.tsx:100` and
+`:101`. No new plumbing is needed.
 
 The button is a `Link` to:
 
@@ -119,6 +122,8 @@ It passes to `NewItemForm`:
 - `categories: string[]` — from `listCategoryNames()`, matching the shape
   `EditItemForm` takes (`/admin/items/[itemId]/edit/page.tsx:19`). Note
   `ItemSelectTable` takes `{name:string}[]` instead; follow `EditItemForm`.
+- `units: string[]` — the `fullName`s from `listUnits()`
+  (`units.service.ts:85`), for the home-unit datalist in §2.2.
 
 Visiting `/admin/items/new` bare behaves exactly as it does today.
 
@@ -161,6 +166,22 @@ the same device would sail through as a CSV row and be rejected when typed by
 hand. `learnCategories` (§2.4) is what keeps this honest: a newly typed
 category is registered, so it appears in the picker next time instead of
 becoming an orphan string.
+
+**`homeUnit` also gains a datalist** — the existing `Unit.fullName`s from
+`listUnits()`. The field itself is unchanged (still free text, still stored
+verbatim); this only *suggests* the spellings the vocabulary already knows, so
+a hand-typed home unit lands on an existing `Unit` rather than inventing a
+second spelling of one. That matters because `renameUnit` backfills items by
+matching the old `fullName`: a drifted spelling is silently left behind by
+every future rename. `listUnits` did not exist when revision 1 was written; it
+landed with the `/admin/units` work.
+
+**Known consequence, not a bug:** whatever home unit the admin types here is
+not permanent. The CSV importer is the source of truth for `homeUnit` and
+overwrites it on every matched row — via the CSV's own column, or a re-run
+`detectHomeUnit` — so the next nightly import carrying a value for this device
+wins. `CLAUDE.md` already records this for `renameUnit`'s backfill; the same
+applies to a hand-created item.
 
 `currentUserEmail` and `currentPosition` are **not** added. A device being
 entered into the book is not yet issued to anyone; those are set when it is.
@@ -371,8 +392,8 @@ deliberate — a pre-check races.
 | File | Change |
 |---|---|
 | `src/components/ItemSelectTable.tsx` | Empty state gains the admin-only create link (§1, §1.1) |
-| `src/app/admin/items/new/page.tsx` | Await `searchParams`, fetch `listCategoryNames()`, pass prefill + uic down |
-| `src/app/admin/items/new/NewItemForm.tsx` | Prefill, two new fields, datalist, hidden `fromSearch`/`returnUic`, collision link |
+| `src/app/admin/items/new/page.tsx` | Await `searchParams`, fetch `listCategoryNames()` + `listUnits()`, pass prefill + uic down |
+| `src/app/admin/items/new/NewItemForm.tsx` | Prefill, two new fields, two datalists, hidden `fromSearch`/`returnUic`, collision link |
 | `src/modules/items/items.schema.ts` | `categoryNew`; `deviceUIC` + `deviceCategory` on `newItemSchema`; `.max()` on `serialNumber` |
 | `src/app/admin/actions/items.ts` | `revalidatePath` ×3, `learnCategories`, conditional redirect, P2002 handling |
 | `src/app/admin/actions/items.test.ts` | **New file** — see §5 |
@@ -429,26 +450,28 @@ imports service functions only and has no authz mock.
 **Not evidence:** per `CLAUDE.md`, neither jsdom nor `npm run build` has a
 layout engine, so neither proves anything about §1.1. Verify in a real browser.
 
-## 6. Rejected: registering `homeUnit` via `learnUnits`
+## 6. `homeUnit`: suggest, don't learn
 
 Review raised that the create path registers a typed category but not a typed
 home unit, leaving `Item.homeUnit` able to hold a string matching no
 `/admin/units` row — asymmetric with the §2.2 argument that a create form
 should not be stricter than the importer.
 
-**Not adopted, because the two vocabularies are not the same shape.**
-`learnUnits` takes `UnitResolution` records and keys on `abbreviation`, which
-is `Unit`'s citext-unique identity (`units.service.ts:35-60`). A hand-typed
-`homeUnit` is a bare `fullName` with no abbreviation, so there is nothing to
-learn it *as* — the import can only call `learnUnits` because it derives both
-halves. `DeviceCategory` is a single name, so a typed category is complete on
-its own.
+**Half adopted.** The field gets a datalist of existing `Unit.fullName`s
+(§2.2), which addresses the actual harm: an admin picking a known spelling
+instead of inventing a new one.
 
-The asymmetry is real and pre-existing (`CLAUDE.md` already lists item creation
-among the four `homeUnit` write paths, none of which resolve a `Unit`). Closing
-it means asking the admin for an abbreviation, or resolving the typed name
-against existing `Unit.fullName`s — a separate feature with its own design, not
-a line in this one.
+**`learnUnits` is still not called, because the two vocabularies are not the
+same shape.** It takes `UnitResolution` records keyed on `abbreviation`, which
+is `Unit`'s citext-unique identity (`units.service.ts:35-60`) — a hand-typed
+`homeUnit` is a bare `fullName` with no abbreviation, so there is nothing to
+learn it *as*. The import can only call `learnUnits` because it derives both
+halves. `DeviceCategory` is a single name, so a typed category is complete on
+its own; a unit is not.
+
+Fully closing the gap means asking the admin for an abbreviation, which turns
+a create form into a vocabulary-management surface — that is what
+`/admin/units` is for. Out of scope here.
 
 ---
 
@@ -479,3 +502,45 @@ confidently and wrongly in revision 1:
    `searchParams` is a Promise that must be awaited (§2.1).
 10. Line citations corrected: empty state is `ItemSelectTable.tsx:297-301`;
     props are passed at `items/page.tsx:100,101`.
+
+---
+
+## Revision 3 — re-verified against `main` at `0602bd4`
+
+`main` moved substantially between revision 2 and now: bulk unit management
+(`/admin/units`), a machine-driven CSV import endpoint, and readiness changes
+all landed, and `/items` had columns, sorting and filters reworked. Every
+load-bearing claim in this spec was re-checked against the merged code rather
+than trusted.
+
+**Still true, verified:**
+
+- The empty state is untouched at `ItemSelectTable.tsx:297-301`, and `isAdmin`
+  / `q` are still props. The `/items` rework did not reach either.
+- `listItems` still takes exactly two filters, `search` and `uic`
+  (`items.service.ts:241-249`), still `contains` + `mode:"insensitive"` across
+  the same four fields (`:258-261`), and still applies **no status filter** —
+  so the §3.2 reasoning about which collisions are reachable is unchanged, and
+  no new filter dimension needs a caveat alongside UIC.
+- `newItemSchema` is still six fields with no `deviceUIC`/`deviceCategory`, and
+  `serialNumber` still has no `.max()` (`items.schema.ts:51-62`).
+- `createItemAction` still has no `revalidatePath`, no try/catch and no P2002
+  handling (`admin/actions/items.ts:25-33`); `createItem` is still a bare
+  create that re-parses its input (`items.service.ts:18-25`).
+- Both learn-outside-the-transaction precedents are intact and now carry even
+  more explicit comments (`admin/actions/items.ts:61-72`,
+  `app/actions/items.ts:47-63`), confirming §2.4.
+- `markItemsReadyAction` still revalidates `/admin/analytics`
+  (`admin/actions/items.ts:170-171`), the precedent §3.1 follows.
+- None of the files in §4 are on the `check-security-docs` watch list —
+  re-checked by evaluating every regex in the script against each path, not by
+  reading it.
+- `CHANGELOG.md` still has a `## 2026-07-30` section (now with `Added` and
+  `Fixed`); the entry appends there.
+
+**Changed by the merge, and now reflected above:**
+
+- `listUnits()` exists (`units.service.ts:85`), so `homeUnit` gets a datalist.
+  §6 went from "rejected" to "half adopted" on the strength of it.
+- The CSV importer overwriting `homeUnit` on matched rows is now merged, so a
+  hand-typed home unit is explicitly documented as non-permanent (§2.2).
