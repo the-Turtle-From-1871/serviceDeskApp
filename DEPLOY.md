@@ -232,7 +232,7 @@ instant, the real import will be fine; see the note below on why.
 ```powershell
 $env:MDM_IMPORT_SECRET = "<the value you set in Vercel>"
 
-Invoke-RestMethod -Uri "https://service-desk-app.vercel.app/api/items/import" `
+Invoke-RestMethod -Uri "https://servicedeskapp.vercel.app/api/items/import" `
   -Method Post `
   -Headers @{ Authorization = "Bearer $env:MDM_IMPORT_SECRET" } `
   -Form @{ file = Get-Item .\fleet.csv }

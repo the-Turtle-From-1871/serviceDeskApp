@@ -27,7 +27,7 @@ end does the sending.
 
 | You need | Where it comes from |
 | --- | --- |
-| The app's URL | `https://service-desk-app.vercel.app` |
+| The app's URL | `https://servicedeskapp.vercel.app` |
 | A secret value | The app owner generates it and gives it to you |
 | Your export as a `.csv` file | Your existing Intune/MDM export |
 
@@ -43,7 +43,7 @@ the script, and not in email or chat.
 an `Authorization` header:
 
 ```
-POST https://service-desk-app.vercel.app/api/items/import
+POST https://servicedeskapp.vercel.app/api/items/import
 Authorization: Bearer <secret>
 Content-Type: multipart/form-data
 ```
@@ -55,7 +55,7 @@ $headers = @{ Authorization = "Bearer $env:MDM_IMPORT_SECRET" }
 $form    = @{ file = Get-Item .\fleet.csv }
 
 $result = Invoke-RestMethod `
-  -Uri "https://service-desk-app.vercel.app/api/items/import" `
+  -Uri "https://servicedeskapp.vercel.app/api/items/import" `
   -Method Post -Headers $headers -Form $form
 
 $result | ConvertTo-Json -Depth 5
@@ -67,7 +67,7 @@ rather than the file's contents.
 ### curl
 
 ```bash
-curl -X POST "https://service-desk-app.vercel.app/api/items/import" \
+curl -X POST "https://servicedeskapp.vercel.app/api/items/import" \
   -H "Authorization: Bearer $MDM_IMPORT_SECRET" \
   -F "file=@fleet.csv"
 ```
