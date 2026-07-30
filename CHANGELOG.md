@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 - **The import's "auto-detected" home unit count now reflects devices actually changed, not every device whose name still decodes.** A matched (already-in-the-fleet) row was counted as auto-detected whenever `detectHomeUnit` succeeded, even when the derived value was identical to what the item already stored — so a nightly full-fleet CSV with no `homeUnit` column, where nearly every row's device name simply still decodes to its current unit, reported roughly 1,100 "auto-detected" home units when the real number of devices filled in or corrected was a handful. The count now only increments when detection actually fills a blank home unit or corrects a different stored one.
+- **Logging a new item no longer silently drops its category, and says so when the serial is taken.** A category typed on the new-item form now joins the managed category list instead of leaving the device holding a value that appeared in no picker, and the items list is refreshed so a newly created item is not missing from it. Creating an item whose serial already exists used to fail with a generic error; it now names the serial and links to the item that already has it.
 
 ### Notes
 - New environment variable **`MDM_IMPORT_SECRET`** must be set in Vercel and in the scheduled job. Unset, the endpoint refuses everything.

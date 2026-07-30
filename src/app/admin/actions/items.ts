@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/authz";
 import {
   createItem,
+  getItemBySerial,
   updateItemFields,
   setItemStatus,
   analyzeImport,
@@ -28,7 +29,49 @@ export async function createItemAction(_prev: unknown, formData: FormData) {
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  const item = await createItem(parsed.data, admin.id);
+  const data = parsed.data;
+
+  let item;
+  try {
+    item = await createItem(data, admin.id);
+  } catch (e) {
+    // P2002 = unique-constraint violation. Item has exactly ONE unique column —
+    // serialNumber, which is @db.Citext — so this can only mean an item already
+    // holds that serial in some casing. Leaned on rather than pre-checked with a
+    // findUnique, which would race. Reachable from the create-from-search flow:
+    // /items?q=X&uic=Y shows "no matches" for an item that exists under a
+    // DIFFERENT uic, and the empty state still offers to create it.
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      console.error("[createItemAction] serial collision:", e);
+      const existing = await getItemBySerial(data.serialNumber);
+      return {
+        error: `Serial number "${data.serialNumber}" already belongs to an item. Serial numbers are unique and ignore case — open that item instead.`,
+        existingItemId: existing?.id,
+      };
+    }
+    console.error("[createItemAction] unexpected error:", e);
+    return { error: "Something went wrong creating this item. Please try again." };
+  }
+
+  // A category typed directly into the form joins the vocabulary, so the managed
+  // list keeps reflecting what is actually in the fleet. Outside the try, and
+  // swallowing its own failure, because it is a SEPARATE transaction that runs
+  // after the item write has committed — see the fuller note in
+  // src/app/actions/items.ts.
+  if (data.deviceCategory) {
+    try {
+      await learnCategories([data.deviceCategory]);
+    } catch (e) {
+      console.error("[createItemAction] learnCategories failed (item already created):", e);
+    }
+  }
+
+  revalidatePath("/items");
+  // The in-use counts on the category admin page go stale the moment
+  // learnCategories registers a name; analytics counts the fleet.
+  revalidatePath("/admin/categories");
+  revalidatePath("/admin/analytics");
+
   return { itemId: item.id };
 }
 

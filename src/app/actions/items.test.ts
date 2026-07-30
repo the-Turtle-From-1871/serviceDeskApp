@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const requireUser = vi.fn();
 const requireAdmin = vi.fn();
 const updateItemFields = vi.fn();
+const createItem = vi.fn();
+const getItemBySerial = vi.fn();
 const learnCategories = vi.fn();
 const revalidatePath = vi.fn();
 
@@ -16,7 +18,8 @@ vi.mock("@/lib/authz", () => ({
 // admin actions module (imported below for the identity tests) names them.
 vi.mock("@/modules/items/items.service", () => ({
   updateItemFields: (id: string, data: unknown, editor: unknown) => updateItemFields(id, data, editor),
-  createItem: vi.fn(),
+  createItem: (data: unknown, createdById: string) => createItem(data, createdById),
+  getItemBySerial: (serial: string) => getItemBySerial(serial),
   setItemStatus: vi.fn(),
   analyzeImport: vi.fn(),
   commitImport: vi.fn(),
@@ -51,7 +54,7 @@ import { updateItemDetailsAction } from "./items";
 // its own action; it lives in the admin actions module but shares every mock
 // above, so it is covered here alongside the surface it is deliberately kept
 // out of.
-import { updateItemIdentityAction } from "@/app/admin/actions/items";
+import { updateItemIdentityAction, createItemAction } from "@/app/admin/actions/items";
 import { Prisma } from "@prisma/client";
 
 const ADMIN = { id: "a1", role: "ADMIN" as const, name: "Admin" };
@@ -78,6 +81,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   updateItemFields.mockResolvedValue({});
   learnCategories.mockResolvedValue(1);
+  createItem.mockResolvedValue({ id: "new-1", serialNumber: "ABC123" });
+  getItemBySerial.mockResolvedValue(null);
 });
 
 describe("updateItemDetailsAction — role-gated fields", () => {
@@ -279,5 +284,95 @@ describe("updateItemIdentityAction", () => {
     await updateItemIdentityAction(undefined, fd({ id: "item-1", ...IDENTITY }));
     expect(revalidatePath).toHaveBeenCalledWith("/items");
     expect(revalidatePath).toHaveBeenCalledWith("/i/item-1");
+  });
+});
+
+describe("createItemAction", () => {
+  const NEW_ITEM = {
+    make: "Dell", model: "5540", serialNumber: "ABC123",
+    deviceName: "LT-01", homeUnit: "A Co", deviceUIC: "WABC01",
+    deviceCategory: "  Docking   Station ", notes: "",
+  };
+
+  it("calls requireAdmin BEFORE any write, and writes nothing when it rejects", async () => {
+    requireAdmin.mockRejectedValue(new Error("FORBIDDEN"));
+    await expect(createItemAction(undefined, fd(NEW_ITEM))).rejects.toThrow("FORBIDDEN");
+    expect(createItem).not.toHaveBeenCalled();
+  });
+
+  it("persists deviceUIC and the NORMALIZED category, with the creator from the SERVER session", async () => {
+    requireAdmin.mockResolvedValue(ADMIN);
+    await createItemAction(undefined, fd(NEW_ITEM));
+    expect(createItem).toHaveBeenCalledWith(
+      expect.objectContaining({ deviceUIC: "WABC01", deviceCategory: "Docking Station" }),
+      ADMIN.id,
+    );
+  });
+
+  it("teaches a typed category to the managed vocabulary", async () => {
+    requireAdmin.mockResolvedValue(ADMIN);
+    await createItemAction(undefined, fd(NEW_ITEM));
+    expect(learnCategories).toHaveBeenCalledWith(["Docking Station"]);
+  });
+
+  it("does not call learnCategories when no category was typed", async () => {
+    requireAdmin.mockResolvedValue(ADMIN);
+    await createItemAction(undefined, fd({ ...NEW_ITEM, deviceCategory: "" }));
+    expect(learnCategories).not.toHaveBeenCalled();
+  });
+
+  // The item is already committed by the time learnCategories runs. Reporting
+  // its failure would tell the admin their item was not created when it was.
+  it("still reports success when learnCategories fails", async () => {
+    requireAdmin.mockResolvedValue(ADMIN);
+    learnCategories.mockRejectedValue(new Error("vocabulary down"));
+    await expect(createItemAction(undefined, fd(NEW_ITEM))).resolves.toEqual({ itemId: "new-1" });
+  });
+
+  it("names the conflicting serial on a P2002 and links to the item holding it", async () => {
+    requireAdmin.mockResolvedValue(ADMIN);
+    createItem.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError("dup", { code: "P2002", clientVersion: "7" }),
+    );
+    getItemBySerial.mockResolvedValue({ id: "existing-9" });
+    const res = await createItemAction(undefined, fd(NEW_ITEM));
+    expect(res.error).toContain("ABC123");
+    expect(res.existingItemId).toBe("existing-9");
+  });
+
+  it("still returns the collision error when the colliding item cannot be resolved", async () => {
+    requireAdmin.mockResolvedValue(ADMIN);
+    createItem.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError("dup", { code: "P2002", clientVersion: "7" }),
+    );
+    getItemBySerial.mockResolvedValue(null);
+    const res = await createItemAction(undefined, fd(NEW_ITEM));
+    expect(res.error).toContain("ABC123");
+    expect(res.existingItemId).toBeUndefined();
+  });
+
+  it("returns a generic message and logs server-side on an unexpected failure", async () => {
+    requireAdmin.mockResolvedValue(ADMIN);
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    createItem.mockRejectedValue(new Error("connection reset"));
+    const res = await createItemAction(undefined, fd(NEW_ITEM));
+    expect(res.error).not.toContain("connection reset");
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("revalidates the item list, the category admin page and analytics", async () => {
+    requireAdmin.mockResolvedValue(ADMIN);
+    await createItemAction(undefined, fd(NEW_ITEM));
+    expect(revalidatePath).toHaveBeenCalledWith("/items");
+    expect(revalidatePath).toHaveBeenCalledWith("/admin/categories");
+    expect(revalidatePath).toHaveBeenCalledWith("/admin/analytics");
+  });
+
+  it("rejects a blank make before touching the DB", async () => {
+    requireAdmin.mockResolvedValue(ADMIN);
+    const res = await createItemAction(undefined, fd({ ...NEW_ITEM, make: "" }));
+    expect(res.error).toMatch(/Make is required/);
+    expect(createItem).not.toHaveBeenCalled();
   });
 });
