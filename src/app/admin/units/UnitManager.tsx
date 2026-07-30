@@ -58,7 +58,8 @@ function UnassignedHomeUnits({
       </summary>
       <p className="subtle">
         These devices have no home unit. Teaching the matching abbreviation above resolves a
-        device the <strong>next time</strong> it is included in an import — these devices already
+        device the <strong>next time</strong>{" "}
+        it is included in an import — these devices already
         exist, so they match by serial, and that next import re-derives their home unit from the
         (now-known) abbreviation in their device name. A device that has dropped out of the
         export entirely is never matched, so it is never backfilled this way; set it directly on
