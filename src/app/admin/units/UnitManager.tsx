@@ -47,9 +47,10 @@ function UnassignedHomeUnits({ unassigned }: { unassigned: { id: string; deviceN
         Devices with no home unit ({unassigned.length})
       </summary>
       <p className="subtle">
-        These devices imported with no abbreviation the importer recognized. Adding the matching
-        abbreviation above will let the next import resolve them — it will not fix devices already
-        imported until that next run.
+        These devices have no home unit. Teaching the matching abbreviation above only helps a
+        device imported for the <strong>first time</strong> afterward — these devices already
+        exist, so they will keep matching by serial on every future import and their home unit
+        will not fill in on its own. Set it directly on the item&apos;s edit page instead.
       </p>
       <ul className="stack-sm">
         {unassigned.map((item) => (
