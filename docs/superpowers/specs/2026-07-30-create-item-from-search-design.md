@@ -133,17 +133,17 @@ target, a query, a raw SQL fragment, or `dangerouslySetInnerHTML`. On submit it
 is validated by `newItemSchema` like any other field. There is deliberately
 **no `returnTo` parameter**; see §3.1.
 
-**Length bound.** `serialNumber` has **no `.max()`** today
-(`items.schema.ts:54`), so a pasted 5,000-character value submits and lands in
-the citext-unique column. Capping only the prefilled `defaultValue` would
-protect nothing — the bound belongs on the schema. Add `.max(100)` to
-`serialNumber` in `identityItemFields`, **after** checking the longest serial
-currently in production (`SELECT max(length(serial_number)) FROM items`) and
-raising the bound if real data exceeds it. Note this is a *shared* definition:
-it also applies to `itemIdentitySchema`, so an existing over-long serial would
-be rejected the next time someone re-saves that item's identity. That is the
-correct trade, but it must be a deliberate check against real data, not a
-guess.
+**Length bound.** `serialNumber` had **no `.max()`** before this feature
+(`items.schema.ts:54`), so a pasted 5,000-character value would have submitted
+and landed in the citext-unique column. Capping only the prefilled
+`defaultValue` would protect nothing — the bound belongs on the schema.
+Production's longest real serial was checked (`SELECT
+max(length(serial_number)) FROM items`) and came back **14 characters**, so
+`identityItemFields.serialNumber` shipped with **`.max(64)`** — generous
+headroom over the real data rather than a guess. Note this is a *shared*
+definition: it also applies to `itemIdentitySchema`, so an existing over-long
+serial (there are none in production today) would be rejected the next time
+someone re-saves that item's identity.
 
 ### 2.2 Two new fields
 
@@ -392,12 +392,14 @@ deliberate — a pre-check races.
 | File | Change |
 |---|---|
 | `src/components/ItemSelectTable.tsx` | Empty state gains the admin-only create link (§1, §1.1) |
+| `src/components/ItemSelectTable.test.tsx` | New component test (jsdom opt-in) covering the empty-state create link (§5) |
 | `src/app/admin/items/new/page.tsx` | Await `searchParams`, fetch `listCategoryNames()` + `listUnits()`, pass prefill + uic down |
 | `src/app/admin/items/new/NewItemForm.tsx` | Prefill, two new fields, two datalists, hidden `fromSearch`/`returnUic`, collision link |
 | `src/modules/items/items.schema.ts` | `categoryNew`; `deviceUIC` + `deviceCategory` on `newItemSchema`; `.max()` on `serialNumber` |
 | `src/app/admin/actions/items.ts` | `revalidatePath` ×3, `learnCategories`, conditional redirect, P2002 handling |
 | `src/app/actions/items.test.ts` | `createItemAction` tests added to the **existing** file — see §5 |
 | `src/modules/items/items.service.ts` | `getItemBySerial` added, used to resolve the P2002 branch's collision link |
+| `src/app/globals.css` | `.truncate-inline` rule (§1.1), used by the create link's label span |
 | `CLAUDE.md` | "FOUR write sites" → five; note the create path's category handling |
 | `CHANGELOG.md` | Append to the **existing** `## 2026-07-30` section, not a second heading |
 
@@ -440,10 +442,20 @@ functions only and has no authz mock.
 - A serial containing `&` and a space produces a correctly encoded redirect.
 - A duplicate serial returns the named error plus `existingItemId`.
 
-**Integration (`items.service.test.ts`, real DB):**
-- Creating an item with a category not in the vocabulary registers it, so
-  `listCategoryNames()` then contains it.
-- Creating with a blank category registers nothing.
+**Integration (real DB):** none added for `learnCategories` on the create
+path, and none pre-existed to extend — there is no real-DB suite over
+`categories.service.ts` today (only `categories.normalize.test.ts`, which
+covers the pure `normalizeCategoryName` helper, not the DB-backed
+`learnCategories`). The learn-a-new-category behavior is instead covered at
+the action level (§ Action, above), with `learnCategories` mocked and
+asserted on: called with the normalized name on a create that types one,
+not called when the category is blank, and the create still reports success
+when the mocked call rejects. This is deliberate, not a gap left open by
+this feature — the learn call lives entirely in `createItemAction`
+(`data.deviceCategory ? learnCategories(...) : ...`), so an action-level
+mock proves the wiring, and a real-DB assertion on `learnCategories` itself
+belongs to `categories.service.ts`, which has no such suite yet regardless
+of this change.
 
 **Component (`test:ui`, jsdom opt-in):**
 - Empty state renders the create link with the searched text when
@@ -498,8 +510,11 @@ confidently and wrongly in revision 1:
    (§2.1).
 7. `text-overflow: ellipsis` on a `.btn` is a no-op; it needs an inner span
    (§1.1).
-8. Action tests belong in a new `src/app/admin/actions/items.test.ts`, not in
-   the real-DB service test file (§5).
+8. Action tests belong in the **existing** `src/app/actions/items.test.ts`,
+   which already imports and mocks everything both `createItemAction` and
+   `updateItemIdentityAction` need — not in a new
+   `src/app/admin/actions/items.test.ts`, and not in the real-DB service test
+   file (§5).
 9. `/admin/items/new/page.tsx` is already an async Server Component, and
    `searchParams` is a Promise that must be awaited (§2.1).
 10. Line citations corrected: empty state is `ItemSelectTable.tsx:297-301`;
