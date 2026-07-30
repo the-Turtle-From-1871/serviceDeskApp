@@ -29,6 +29,7 @@ function Fail {
 }
 
 Write-Log "=== MDM import starting ===" "Cyan"
+Write-Log "PowerShell $($PSVersionTable.PSVersion) ($($ExecutionContext.SessionState.LanguageMode))"
 
 if ([string]::IsNullOrWhiteSpace($Secret)) {
     Fail @"
@@ -59,13 +60,11 @@ if ($file.Length -eq 0) {
     Fail "That file is empty: $CsvPath"
 }
 
-$lineCount = 0
-$reader = [System.IO.File]::OpenText($file.FullName)
-try { while ($null -ne $reader.ReadLine()) { $lineCount++ } } finally { $reader.Close() }
-$dataRows = [Math]::Max(0, $lineCount - 1)   # minus the header
+$lineCount = @(Get-Content -LiteralPath $file.FullName).Count
+$dataRows = if ($lineCount -gt 1) { $lineCount - 1 } else { 0 }   # minus the header
 
 Write-Log "File:  $($file.FullName)"
-Write-Log "Size:  $([Math]::Round($file.Length / 1KB, 1)) KB"
+Write-Log "Size:  $("{0:N1}" -f ($file.Length / 1KB)) KB"
 Write-Log "Rows:  $dataRows (excluding the header)"
 
 if ($dataRows -gt 2000) {
@@ -94,7 +93,7 @@ try {
             Fail "This is Windows PowerShell $($PSVersionTable.PSVersion) and curl.exe was not found. Either install PowerShell 7 (https://aka.ms/powershell) or use a machine with curl.exe (Windows 10 1803 and later include it)."
         }
 
-        $tmp = [System.IO.Path]::GetTempFileName()
+        $tmp = Join-Path $env:TEMP "mdm-import-$PID.stderr.txt"
         try {
             $rawBody = & $curl.Source -sS -X POST $Uri `
                 -H "Authorization: Bearer $Secret" `
