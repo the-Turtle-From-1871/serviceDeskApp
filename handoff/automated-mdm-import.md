@@ -10,6 +10,62 @@ This document is self-contained and safe to share. It contains no secrets.
 
 ---
 
+## 0. Quick start — do this and nothing else
+
+If you read one section, read this one. Everything below is detail.
+
+**Use the script in this folder: `Send-MdmImport.ps1`.** It checks for the mistakes
+people actually make — missing secret, wrong file type, too many rows, whitespace
+copied along with the secret — *before* sending anything, and prints a plain-English
+result. Don't hand-write the request unless you have a reason to.
+
+**Step 1 — put the secret in the environment.** Open PowerShell and run this,
+pasting the value you were given between the quotes:
+
+```powershell
+$env:MDM_IMPORT_SECRET = "paste-the-secret-here"
+```
+
+**Step 2 — send the file.** From the folder holding `Send-MdmImport.ps1`:
+
+```powershell
+.\Send-MdmImport.ps1 -CsvPath C:\path\to\fleet.csv
+```
+
+**Step 3 — read what it prints.** Green "Import succeeded" with counts means it
+worked. Red "FAILED" tells you what to fix, and nothing was imported.
+
+That's it. Do this **by hand at least twice** (see §6) before putting it on a
+schedule.
+
+> **If PowerShell refuses to run the script** — "running scripts is disabled on this
+> system" — run this once in the same window and try again:
+> ```powershell
+> Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+> ```
+> That allows scripts for this window only and changes nothing permanently.
+
+**When you're ready to schedule it**, set the secret as a *machine* environment
+variable so it survives reboots and isn't visible in the task definition:
+
+```powershell
+# Run PowerShell as Administrator, once:
+[Environment]::SetEnvironmentVariable("MDM_IMPORT_SECRET", "paste-the-secret-here", "Machine")
+```
+
+Then point a Task Scheduler action at:
+
+```
+Program:    powershell.exe
+Arguments:  -NoProfile -ExecutionPolicy Bypass -File "C:\path\to\Send-MdmImport.ps1" -CsvPath "C:\path\to\fleet.csv" -LogPath "C:\path\to\import.log"
+```
+
+The script exits non-zero on any failure, so Task Scheduler shows a red "Last Run
+Result" rather than reporting success on a broken run. **Check that column
+occasionally** — it is how you find out the job quietly stopped working.
+
+---
+
 ## 1. What it is, in one paragraph
 
 The app exposes one endpoint that accepts a CSV of your device fleet. Send the same
@@ -48,7 +104,13 @@ Authorization: Bearer <secret>
 Content-Type: multipart/form-data
 ```
 
-### PowerShell (what a scheduled task should run)
+> ⚠️ **`Invoke-RestMethod -Form` does not exist in Windows PowerShell 5.1**, which is
+> what a stock Windows machine still runs — check yours with
+> `$PSVersionTable.PSVersion`. On 5.1 the example below fails with *"A parameter
+> cannot be found that matches parameter name 'Form'"*. Use `Send-MdmImport.ps1`
+> from §0, which handles both versions, or the `curl` example underneath.
+
+### PowerShell 7+ (what a scheduled task should run)
 
 ```powershell
 $headers = @{ Authorization = "Bearer $env:MDM_IMPORT_SECRET" }
