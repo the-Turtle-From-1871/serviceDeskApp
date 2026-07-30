@@ -361,7 +361,7 @@ describe("createItemAction", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     createItem.mockRejectedValue(new Error("connection reset"));
     const res = await createItemAction(undefined, fd(NEW_ITEM));
-    expect(res.error).not.toContain("connection reset");
+    expect(res).toEqual({ error: "Something went wrong creating this item. Please try again." });
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
   });
@@ -389,9 +389,9 @@ describe("createItemAction", () => {
     ).rejects.toThrow("NEXT_REDIRECT:/items?q=ABC123");
   });
 
-  it("carries the unit filter back with it", async () => {
+  it("carries the unit filter back with it when the new item matches it", async () => {
     requireAdmin.mockResolvedValue(ADMIN);
-    createItem.mockResolvedValue({ id: "new-1", serialNumber: "ABC123" });
+    createItem.mockResolvedValue({ id: "new-1", serialNumber: "ABC123", deviceUIC: "WABC01" });
     await expect(
       createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "WABC01" })),
     ).rejects.toThrow("NEXT_REDIRECT:/items?q=ABC123&uic=WABC01");
@@ -411,7 +411,11 @@ describe("createItemAction", () => {
     await expect(createItemAction(undefined, fd(NEW_ITEM))).resolves.toEqual({ itemId: "new-1" });
   });
 
-  // The redirect must not swallow a collision — the admin needs the error.
+  // A collision returns early in the try/catch regardless of where redirect()
+  // sits relative to it — this test proves the collision surfaces its error
+  // rather than the redirect swallowing past it. It is the success-path tests
+  // above (asserting NEXT_REDIRECT is thrown) that prove redirect() actually
+  // sits outside the try/catch.
   it("does NOT redirect when the serial collided", async () => {
     requireAdmin.mockResolvedValue(ADMIN);
     createItem.mockRejectedValue(
@@ -420,5 +424,21 @@ describe("createItemAction", () => {
     getItemBySerial.mockResolvedValue({ id: "existing-9" });
     const res = await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1" }));
     expect(res.error).toContain("ABC123");
+  });
+
+  it("drops the unit filter from the redirect when the new item's deviceUIC is null", async () => {
+    requireAdmin.mockResolvedValue(ADMIN);
+    createItem.mockResolvedValue({ id: "new-1", serialNumber: "ABC123", deviceUIC: null });
+    await expect(
+      createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "WABC01" })),
+    ).rejects.toThrow("NEXT_REDIRECT:/items?q=ABC123");
+  });
+
+  it("drops the unit filter from the redirect when the new item's deviceUIC differs from it", async () => {
+    requireAdmin.mockResolvedValue(ADMIN);
+    createItem.mockResolvedValue({ id: "new-1", serialNumber: "ABC123", deviceUIC: "WXYZ02" });
+    await expect(
+      createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "WABC01" })),
+    ).rejects.toThrow("NEXT_REDIRECT:/items?q=ABC123");
   });
 });

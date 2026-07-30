@@ -9,7 +9,7 @@ const fields = [
   ["serialNumber", "Serial number", true],
   ["deviceName", "Device Name", true],
   ["homeUnit", "Home unit", false],
-  ["deviceUIC", "UIC", false],
+  ["deviceUIC", "Unit (UIC)", false],
   ["deviceCategory", "Category", false],
 ] as const;
 
@@ -63,7 +63,11 @@ export function NewItemForm({
               className="input"
               name={name}
               required={req}
-              defaultValue={name === "serialNumber" ? serialNumber : undefined}
+              defaultValue={
+                name === "serialNumber" ? serialNumber
+                : name === "deviceUIC" ? returnUic
+                : undefined
+              }
               list={
                 name === "deviceCategory" ? "device-category-options"
                 : name === "homeUnit" ? "home-unit-options"

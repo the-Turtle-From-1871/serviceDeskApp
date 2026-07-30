@@ -87,7 +87,10 @@ export async function createItemAction(_prev: unknown, formData: FormData) {
   // lands the admin on an empty list for the item they just created.
   if (fromSearch) {
     const params = new URLSearchParams({ q: item.serialNumber });
-    if (returnUic) params.set("uic", returnUic);
+    // Carry the unit filter back only when the new item actually satisfies it —
+    // listItems filters deviceUIC by exact equality, so returning with a filter the
+    // item does not match would hide the very row this redirect exists to show.
+    if (returnUic && item.deviceUIC === returnUic) params.set("uic", returnUic);
     redirect(`/items?${params}`);
   }
 
