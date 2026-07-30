@@ -154,6 +154,32 @@ describe("planImport", () => {
     expect(detected).toBe(1);
   });
 
+  it("matched row, stored homeUnit already equals what detectHomeUnit derives -> NOT counted as detected, no homeUnit change", () => {
+    // Regression test: the nightly full-fleet CSV carries no homeUnit column, so
+    // nearly every matched row re-derives the value it already has. `detected`
+    // must not fire just because detection SUCCEEDED — only when it actually
+    // changed the stored value.
+    const { toUpdate, unchanged, detected } = planImport(
+      [mk(1, { serialNumber: "A1", deviceName: "HI-DCSIM-LT-001" })],
+      map("A1", existing({ id: "x", deviceName: "HI-DCSIM-LT-001", homeUnit: "DCSIM" })),
+      UNITS,
+    );
+    expect(detected).toBe(0);
+    expect(toUpdate).toHaveLength(0);
+    expect(unchanged).toEqual([{ row: 1, serialNumber: "A1", makeModelMismatch: false }]);
+  });
+
+  it("matched row, stored homeUnit differs from what detectHomeUnit derives (no CSV value) -> corrected, detected incremented", () => {
+    const { toUpdate, detected } = planImport(
+      [mk(1, { serialNumber: "A1", deviceName: "HI-DCSIM-LT-001" })],
+      map("A1", existing({ id: "x", deviceName: "HI-DCSIM-LT-001", homeUnit: "Some Other Unit" })),
+      UNITS,
+    );
+    expect(toUpdate[0].data).toMatchObject({ homeUnit: "DCSIM" });
+    expect(toUpdate[0].loggedChanges).toContainEqual({ field: "homeUnit", from: "Some Other Unit", to: "DCSIM" });
+    expect(detected).toBe(1);
+  });
+
   it("matched row with a NON-blank stored value and a different CSV value -> OVERWRITTEN with the CSV value, change logged", () => {
     const { toUpdate, detected } = planImport(
       [mk(1, { serialNumber: "A1", homeUnit: "New Unit" })],

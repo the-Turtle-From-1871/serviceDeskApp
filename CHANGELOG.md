@@ -3,6 +3,11 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-07-30
+
+### Fixed
+- **The import's "auto-detected" home unit count now reflects devices actually changed, not every device whose name still decodes.** A matched (already-in-the-fleet) row was counted as auto-detected whenever `detectHomeUnit` succeeded, even when the derived value was identical to what the item already stored — so a nightly full-fleet CSV with no `homeUnit` column, where nearly every row's device name simply still decodes to its current unit, reported roughly 1,100 "auto-detected" home units when the real number of devices filled in or corrected was a handful. The count now only increments when detection actually fills a blank home unit or corrects a different stored one.
+
 ## 2026-07-29
 
 ### Added

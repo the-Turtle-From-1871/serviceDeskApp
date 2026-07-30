@@ -135,6 +135,12 @@ export function planImport(
       // its home unit, mirroring the CREATE branch's use of item.deviceName.
       const effectiveDeviceName = d.deviceName !== undefined ? d.deviceName : match.deviceName;
 
+      // Set when this row's homeUnit came from detectHomeUnit below (as opposed
+      // to a CSV-supplied value). Whether it counts toward `detected` is decided
+      // AFTER diffItemFields runs, by checking loggedChanges for an actual
+      // homeUnit change — see below.
+      let homeUnitDerivedByDetection = false;
+
       // Logged fields (deviceName, deviceUIC, currentUserEmail) -> ItemEdit history.
       const loggedAfter: Partial<ItemLoggedFields> = {};
       if (d.deviceName !== undefined) loggedAfter.deviceName = d.deviceName;
@@ -157,7 +163,7 @@ export function planImport(
         const full = detectHomeUnit(effectiveDeviceName, unitsByAbbrev);
         if (full) {
           loggedAfter.homeUnit = full;
-          detected++;
+          homeUnitDerivedByDetection = true;
         } else if (!match.homeUnit) {
           // Still blank after both sources (no CSV value, detection failed)
           // AND there was a name to try decoding: report it the same way the
@@ -171,6 +177,16 @@ export function planImport(
       // homeUnit is simply absent from loggedAfter, so diffItemFields treats
       // it as "not submitted" and the stored value is untouched.
       const loggedChanges = diffItemFields(match, loggedAfter);
+
+      // `detected` counts devices whose home unit this import actually filled
+      // in or corrected — not devices whose name merely still decodes to the
+      // value they already hold. Reuse diffItemFields' own normalisation
+      // (trim, blank->null) rather than hand-rolling a second comparison here:
+      // only increment when the detected value produced a REAL homeUnit entry
+      // in loggedChanges, i.e. it differs from what's already stored.
+      if (homeUnitDerivedByDetection && loggedChanges.some((c) => c.field === "homeUnit")) {
+        detected++;
+      }
 
       // Silent telemetry fields -> updated but not logged.
       const silentAfter: Partial<ItemLoggedFields> = {};
