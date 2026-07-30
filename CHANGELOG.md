@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - **The nightly Intune export can now import itself.** A scheduled job can POST the CSV straight to the app instead of somebody opening the import page and doing it by hand. Rows whose unit abbreviation the app does not recognise still import — they come back listed in the response so an admin can teach the abbreviation afterwards.
+- **A search that finds nothing can now create the item.** When an admin searches the items list and nothing matches, the empty state offers to log that device — opening the new-item form with the searched text already filled in as the serial, and returning to the same filtered search afterwards so the new row is visible. The new-item form also gained UIC and Category fields, and suggests the unit and category names already in use.
 
 ### Fixed
 - **The import's "auto-detected" home unit count now reflects devices actually changed, not every device whose name still decodes.** A matched (already-in-the-fleet) row was counted as auto-detected whenever `detectHomeUnit` succeeded, even when the derived value was identical to what the item already stored — so a nightly full-fleet CSV with no `homeUnit` column, where nearly every row's device name simply still decodes to its current unit, reported roughly 1,100 "auto-detected" home units when the real number of devices filled in or corrected was a handful. The count now only increments when detection actually fills a blank home unit or corrects a different stored one.
