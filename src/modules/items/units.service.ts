@@ -92,28 +92,38 @@ export function listUnits(): Promise<{ abbreviation: string; fullName: string }[
 
    Unit has no FK to Item — Item.homeUnit is a denormalised copy of
    Unit.fullName. Unlike learnUnits' own callers, Item.homeUnit reaches the
-   database through THREE different paths, only one of which is an exact
-   copy of Unit.fullName:
+   database through FOUR different write paths, only one of which is an
+   exact copy of Unit.fullName:
      1. detectHomeUnit (import.ts) — derived from the device name and
         assigned Unit.fullName verbatim, but ONLY when the CSV's own
         homeUnit column was blank.
-     2. CSV passthrough (import.ts) — the CSV's homeUnit column is copied
-        straight through UNMODIFIED (whatever casing/whitespace the property
-        book's spreadsheet happened to contain).
-     3. Hand edit — homeUnit is one of the seven admin-editable fields
+     2. CSV passthrough (import.ts, importRowSchema.homeUnit) — the CSV's
+        homeUnit column is copied through, whatever casing the property
+        book's spreadsheet happened to contain.
+     3. Item creation (newItemSchema.homeUnit, items.schema.ts) — free text
+        typed at creation time, casing uncontrolled.
+     4. Hand edit — homeUnit is one of the seven admin-editable fields
         (editableItemFields, items.schema.ts), settable free-text from both
         `/admin/items/<id>/edit` and the item detail card.
-   Paths 2 and 3 mean arbitrary case and stray whitespace genuinely reach
-   this column, so a case-sensitive/whitespace-sensitive comparison against
-   Unit.fullName cannot see those rows. That is exactly the case a rename or
-   delete needs to catch: missing it here is what would let the fleet keep
-   holding a second spelling of a unit that was supposedly just renamed, or
-   let deleteUnit remove a unit while a differently-cased row still points
-   at it. Every comparison below is therefore LOWER(btrim(...)) on BOTH
-   sides, values bound (never interpolated) — mirroring deleteCategory in
-   categories.service.ts, which needs the same treatment for the same
-   reason (there, because DeviceCategory.name is citext and Item.deviceCategory
-   is free text written the same three ways).
+   CASE is the thing that actually drifts across paths 2-4: none of them
+   assigns Unit.fullName verbatim, so whatever casing a spreadsheet cell or
+   an admin's keystrokes happened to use is what lands in the column. That
+   is exactly what a rename or delete needs to catch: missing it is what
+   would let the fleet keep holding a second spelling of a unit that was
+   supposedly just renamed, or let deleteUnit remove a unit while a
+   differently-cased row still points at it.
+     WHITESPACE, by contrast, is NOT a live path today — all four schemas
+   above (`optional` / `clearable` in items.schema.ts) call `.trim()` before
+   the value ever reaches Prisma, so no current write can store a padded
+   value. The comparisons below still wrap both sides in `btrim(...)` as
+   defence for legacy rows written before that normalization existed, or a
+   future direct-SQL/import-tool write that bypasses these schemas — not
+   because any current code path produces padding.
+   Every comparison below is therefore LOWER(btrim(...)) on BOTH sides,
+   values bound (never interpolated) — mirroring deleteCategory in
+   categories.service.ts, which needs the LOWER() half for a parallel reason
+   (DeviceCategory.name is citext and Item.deviceCategory is free text
+   written the same uncontrolled way).
 
    With that comparison in place, renaming a unit must rewrite every item
    carrying the old spelling (in whatever casing it was actually stored),
@@ -177,21 +187,32 @@ export async function countItemsWithHomeUnit(fullName: string): Promise<number> 
  * in the /items filter and two bars in the analytics leaderboard.
  *
  * The match against the OLD name is LOWER(btrim(...)) on both sides (see the
- * module comment) because homeUnit reaches Item via CSV passthrough and hand
- * edits, not only as a verbatim copy of Unit.fullName — a differently-cased
- * or padded row must still be found and rewritten, or it survives the rename
- * as a second spelling. Prisma's `updateMany`/`groupBy` can't express that
- * predicate, so the read and the write are raw SQL; ids are bound via
- * Prisma.join, never spliced in.
+ * module comment) because homeUnit reaches Item via four write paths, and
+ * only ONE of them assigns Unit.fullName verbatim — a differently-CASED row
+ * must still be found and rewritten, or it survives the rename as a second
+ * spelling (`btrim` is defensive; no current write path pads with
+ * whitespace). Prisma's `updateMany`/`groupBy` can't express that predicate,
+ * so the read and the write are raw SQL; ids are bound via Prisma.join,
+ * never spliced in.
  *
  * A FIXED number of queries in one transaction, never one per item: a read
  * of the affected items (id + their OWN stored value, needed because two
- * affected rows can differ from each other in case/whitespace even though
- * both match the old name), the unit's own update, one raw UPDATE of the
- * items, and one createMany of history rows. homeUnit is already a member
- * of ItemLoggedFields, so these rows are shaped exactly like a hand edit.
- * Each row's diff uses ITS OWN prior value as `from` (not the unit's
- * canonical fullName), so the history reflects what was actually stored.
+ * affected rows can differ from each other in case even though both match
+ * the old name), the unit's own update, one raw UPDATE of the items, and
+ * one createMany of history rows. homeUnit is already a member of
+ * ItemLoggedFields, so these rows are shaped exactly like a hand edit. Each
+ * row's diff uses ITS OWN prior value as `from` (not the unit's canonical
+ * fullName), so the history reflects what was actually stored.
+ *
+ * A row whose stored value ALREADY equals the new name once diffItemFields
+ * normalizes it (trim; e.g. the rename is really "fix the casing", and some
+ * items already had the target casing) gets NO history row and is NOT
+ * counted in itemsUpdated — filtered from the already-read `affected` array
+ * in JS, no extra query. Writing a blank-`changes` ItemEdit for a row that
+ * didn't actually change would render as an empty "Changed" cell on
+ * /admin/audit and would inflate itemsUpdated past the real count. The bulk
+ * UPDATE above still touches those rows too (harmless: it writes the same
+ * value they already had) — only the history row and the count must not lie.
  */
 export async function renameUnit(
   id: string,
@@ -217,28 +238,38 @@ export async function renameUnit(
 
     await tx.unit.update({ where: { id }, data: { fullName } });
 
-    if (affected.length > 0) {
-      const ids = affected.map((a) => a.id);
-      await tx.$executeRaw(Prisma.sql`
-        UPDATE "Item"
-        SET "homeUnit" = ${fullName}
-        WHERE id IN (${Prisma.join(ids)})
-      `);
+    if (affected.length === 0) {
+      return { abbreviation: unit.abbreviation, itemsUpdated: 0 };
+    }
 
+    const ids = affected.map((a) => a.id);
+    await tx.$executeRaw(Prisma.sql`
+      UPDATE "Item"
+      SET "homeUnit" = ${fullName}
+      WHERE id IN (${Prisma.join(ids)})
+    `);
+
+    // Only rows whose normalized value actually differs get a history row —
+    // see the docstring above for why a same-spelling row must not.
+    const edits = affected
+      .map((a) => ({
+        itemId: a.id,
+        changes: diffItemFields({ homeUnit: a.homeUnit }, { homeUnit: fullName }),
+      }))
+      .filter((e) => e.changes.length > 0);
+
+    if (edits.length > 0) {
       await tx.itemEdit.createMany({
-        data: affected.map((a) => ({
-          itemId: a.id,
+        data: edits.map((e) => ({
+          itemId: e.itemId,
           editedById: editor.id,
           editedByName: editor.name,
-          changes: diffItemFields(
-            { homeUnit: a.homeUnit },
-            { homeUnit: fullName },
-          ) as unknown as Prisma.InputJsonValue,
+          changes: e.changes as unknown as Prisma.InputJsonValue,
         })),
       });
     }
 
-    return { abbreviation: unit.abbreviation, itemsUpdated: affected.length };
+    return { abbreviation: unit.abbreviation, itemsUpdated: edits.length };
   });
 }
 
@@ -252,10 +283,11 @@ export async function renameUnit(
  *
  * LOWER(btrim(...)) on both sides, parameterized — same reasoning as
  * deleteCategory's raw-SQL comparison, and as the module comment above:
- * Item.homeUnit reaches this column via CSV passthrough and hand edits, not
- * only as an exact copy of Unit.fullName, so a case/whitespace-sensitive
- * check would miss a differently-cased row and delete a unit that a device
- * still, in effect, points at.
+ * Item.homeUnit reaches this column via four write paths, only one of which
+ * assigns Unit.fullName verbatim, so a case-sensitive check would miss a
+ * differently-CASED row and delete a unit that a device still, in effect,
+ * points at (`btrim` is defensive here too — no current write path pads
+ * with whitespace).
  */
 export async function deleteUnit(id: string): Promise<{ abbreviation: string }> {
   const unit = await prisma.unit.findUnique({

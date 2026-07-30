@@ -172,6 +172,41 @@ test("renameUnit rewrites every item carrying the old full name and logs each ch
   expect(await prisma.itemEdit.count({ where: { itemId: item3.id } })).toBe(0);
 });
 
+test("renameUnit gives NO history row and NO credit to an item already spelled like the new name", async () => {
+  // A rename is often really "fix the casing" — e.g. "1st BN" -> "1st Bn" —
+  // and some items may already carry the target spelling. Those rows still
+  // match the OLD name case-insensitively (so they get swept into `affected`
+  // and touched by the bulk UPDATE), but diffItemFields sees no real change
+  // once normalized, so they must be excluded from both the ItemEdit rows
+  // and itemsUpdated, or the count over-reports and /admin/audit shows a
+  // blank "Changed" cell for a row that didn't change.
+  const unit = await prisma.unit.create({ data: { abbreviation: "RENAME04", fullName: "1st BN" } });
+  const admin = await createAdmin();
+  await prisma.item.createMany({
+    data: [
+      // Matches the OLD name case-insensitively, but its stored value is
+      // ALREADY the exact new spelling.
+      { make: "D", model: "1", serialNumber: "RN-ALREADY", homeUnit: "1st Bn", createdById: admin.id },
+      // Genuinely needs rewriting.
+      { make: "D", model: "1", serialNumber: "RN-NEEDS-IT", homeUnit: "1st BN", createdById: admin.id },
+    ],
+  });
+
+  const res = await renameUnit(unit.id, "1st Bn", { id: admin.id, name: admin.name });
+
+  expect(res.itemsUpdated).toBe(1);
+
+  const already = await prisma.item.findFirstOrThrow({ where: { serialNumber: "RN-ALREADY" } });
+  expect(already.homeUnit).toBe("1st Bn");
+  expect(await prisma.itemEdit.count({ where: { itemId: already.id } })).toBe(0);
+
+  const needed = await prisma.item.findFirstOrThrow({ where: { serialNumber: "RN-NEEDS-IT" } });
+  expect(needed.homeUnit).toBe("1st Bn");
+  const edits = await prisma.itemEdit.findMany({ where: { itemId: needed.id } });
+  expect(edits).toHaveLength(1);
+  expect(edits[0].changes).toEqual([{ field: "homeUnit", from: "1st BN", to: "1st Bn" }]);
+});
+
 test("renameUnit writes nothing when the name is unchanged", async () => {
   const unit = await prisma.unit.create({ data: { abbreviation: "RENAME02", fullName: "Same" } });
   const admin = await createAdmin();
