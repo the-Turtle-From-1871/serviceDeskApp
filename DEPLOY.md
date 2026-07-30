@@ -201,6 +201,78 @@ Invoke-RestMethod -Uri "https://<APP_URL>/api/items/import" -Method Post -Header
   non-`200`, log the response body and re-run rather than assuming some rows
   made it in.
 
+### 7a. Proving it works in production before you schedule it
+
+Do not hand this to a scheduler on day one. Timings measured on a local
+Postgres do not transfer — the app talks to Supabase over the network in
+production, and latency is the whole question. Work through these in order.
+
+**First, make sure all three prerequisites are actually done**, or you'll get a
+confusing failure instead of a useful measurement:
+
+1. The migration `20260730000000_import_service_account` is applied to the
+   production database. Without it every request returns `500`, because there
+   is no account to attribute the import to (see the note on the service
+   account in `docs/SECURITY.md`).
+2. `MDM_IMPORT_SECRET` is set in Vercel. On Windows, generate one with:
+   ```powershell
+   [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Max 256 }))
+   ```
+3. The code is deployed to production.
+
+**Step 1 — read-only dry run, no command line needed.** Open
+`/admin/items/import`, choose the export, and click **Analyze** — then stop
+without committing. This runs the same parse and the same database reads the
+real import does and **writes nothing**. It shows the counts it would apply,
+and how long it takes is your actual Supabase round-trip latency. If this feels
+instant, the real import will be fine; see the note below on why.
+
+**Step 2 — run it manually once, not on a schedule.**
+
+```powershell
+$env:MDM_IMPORT_SECRET = "<the value you set in Vercel>"
+
+Invoke-RestMethod -Uri "https://service-desk-app.vercel.app/api/items/import" `
+  -Method Post `
+  -Headers @{ Authorization = "Bearer $env:MDM_IMPORT_SECRET" } `
+  -Form @{ file = Get-Item .\fleet.csv }
+```
+
+Then open the Vercel dashboard, find the function invocation, and read its
+**actual duration**. That is the real number — everything else is
+extrapolation. A wrong or missing secret returns `401` and writes nothing, so
+you cannot half-run this by fumbling the credential.
+
+**Expect a large `updated` count on this first run, and don't read it as a
+bug.** Devices currently carrying a blank home unit get one backfilled from
+their device name — that is the intended fix, not runaway churn.
+
+**Step 3 — run the exact same file again.** The importer only writes rows that
+actually changed, so the second pass should be close to a no-op (`added: 0`,
+`updated: 0`, most rows `unchanged`). That gives you the steady-state timing
+every subsequent nightly run will look like, and confirms the import is
+idempotent against unchanged input.
+
+**Step 4 — only now hand it to the scheduler.**
+
+**Why this should comfortably fit the budget.** The import is *round-trip
+bounded, not row bounded*: a 2000-row file is roughly 15-20 database queries,
+not 2000. Rows are grouped by which columns changed and written with batched
+`UPDATE ... FROM (VALUES ...)` statements. So Supabase latency multiplies by
+about twenty, not by two thousand. The function is allowed 300s and the
+transaction inside it 55s, which is a wide margin — but measure it in step 2
+rather than trusting this paragraph.
+
+**If it does time out**, the symptom is a `500` with nothing written (the
+transaction aborts as a unit). The fix is to split the export into smaller
+files, which is safe precisely because nothing is ever deleted and re-importing
+unchanged rows is a no-op.
+
+**What to do if the numbers look wrong.** Every field the import changes is
+recorded in that item's edit history, attributed to `MDM Import (automated)`,
+so you can see exactly what a run touched from the item's own page — and
+nothing is ever deleted, so a bad import is a correction, never a loss.
+
 ## Notes / caveats
 
 - **Change the admin password**: there is no in-app password change yet; the
