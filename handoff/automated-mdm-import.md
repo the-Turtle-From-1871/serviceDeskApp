@@ -76,24 +76,48 @@ curl -X POST "https://servicedeskapp.vercel.app/api/items/import" \
 
 ## 4. What comes back
 
-On success you get `200` and a JSON summary:
+On success you get `200` and a JSON summary. `added`, `updated`, `unchanged`,
+and `detected` are **counts** (numbers). `skipped`, `unresolved`, and
+`mismatches` are **arrays** of per-row detail — `[]` when there's nothing to
+report. Don't call `.length` on the first four, and don't treat the last
+three as counts.
 
-| Field | Meaning |
-| --- | --- |
-| `added` | New devices created |
-| `updated` | Existing devices whose details changed |
-| `unchanged` | Existing devices already matching the export |
-| `detected` | Devices whose home unit was filled in or corrected automatically |
-| `skipped` | Rows not imported, each with a reason |
-| `unresolved` | Rows imported **but** with no home unit — see below |
-| `mismatches` | Devices whose make/model in the export differs from what's on file |
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `added` | number | New devices created |
+| `updated` | number | Existing devices whose details changed |
+| `unchanged` | number | Existing devices already matching the export |
+| `detected` | number | Devices whose home unit was filled in or corrected automatically |
+| `skipped` | array | Rows not imported, each with a reason |
+| `unresolved` | array | Rows imported **but** with no home unit — see below |
+| `mismatches` | array | Devices whose make/model in the export differs from what's on file |
+
+Example body:
+
+```json
+{
+  "added": 3,
+  "updated": 118,
+  "unchanged": 1876,
+  "detected": 12,
+  "skipped": [
+    { "row": 47, "serialNumber": "SN-004821", "reason": "missing make/model on a new device" }
+  ],
+  "unresolved": [
+    { "row": 203, "deviceName": "LAPTOP-WABC01-042", "segments": ["WABC01", "042"] }
+  ],
+  "mismatches": [
+    { "serialNumber": "SN-001177" }
+  ]
+}
+```
 
 Other responses:
 
 | Code | Meaning | What to do |
 | --- | --- | --- |
 | `401` | Missing or wrong secret | Check the header and the value. Nothing was written. |
-| `400` | Not named `*.csv`, or unparseable | Check the file. Nothing was written. |
+| `400` | Not named `*.csv`, unparseable, **or more than 2000 rows** | Check the file, or split it (section 5). Nothing was written. |
 | `413` | File too large | Split it. Nothing was written. |
 | `500` | Unexpected failure | Log the body and tell the app owner. Nothing was written. |
 

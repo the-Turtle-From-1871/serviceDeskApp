@@ -1,5 +1,7 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
 import prisma from "@/lib/prisma";
+import { resetDb, migrateTestDb } from "../../../../../tests/helpers/db";
+import { IMPORT_SERVICE_ACCOUNT_EMAIL } from "@/modules/items/import-actor";
 
 // `revalidatePath` needs a Next.js request-scoped store that only exists
 // inside a real server render/request; calling the route handler directly
@@ -30,14 +32,45 @@ const csvForm = (csv: string, filename = "fleet.csv") => {
   return fd;
 };
 
+// resetDb() TRUNCATEs User (and Item, Unit, ...) before every test, so the
+// migration-seeded service account is wiped right along with everything
+// else — it does NOT survive between tests. This file used to rely on
+// import-actor.test.ts happening to leave a hand-seeded row behind in the
+// shared test DB: that made it pass only by accident of file ordering
+// (vitest orders files by size/duration, not path), and a solo run, a
+// reorder, or a fresh CI database would have turned "imports a valid CSV"
+// into a 500. Seed it ourselves, every test, with the same shape the
+// migration writes (prisma/migrations/20260730000000_import_service_account)
+// and the same shape import-actor.test.ts uses — this file must be able to
+// pass entirely on its own.
+function seedServiceAccount() {
+  return prisma.user.create({
+    data: {
+      id: "svcmdmimport000000000000",
+      name: "MDM Import (automated)",
+      email: IMPORT_SERVICE_ACCOUNT_EMAIL,
+      passwordHash: "!no-login-service-account",
+      role: "USER",
+      isActive: false,
+      deactivatedAt: null,
+    },
+  });
+}
+
 // Captured and restored rather than just set: `fileParallelism: false` means
 // this whole suite shares one worker with every other test file, so leaving
 // MDM_IMPORT_SECRET set after this file finishes would leak "test-import-secret"
 // into any later file that reads process.env.MDM_IMPORT_SECRET.
 const priorSecret = process.env.MDM_IMPORT_SECRET;
 
-beforeAll(() => {
+beforeAll(async () => {
+  migrateTestDb();
   process.env.MDM_IMPORT_SECRET = SECRET;
+});
+
+beforeEach(async () => {
+  await resetDb();
+  await seedServiceAccount();
 });
 
 afterAll(() => {
@@ -80,7 +113,7 @@ describe("POST /api/items/import", () => {
       orderBy: { createdAt: "desc" },
       include: { createdBy: { select: { email: true } } },
     });
-    expect(batch?.createdBy.email).toBe("mdm-import@service.invalid");
+    expect(batch?.createdBy.email).toBe(IMPORT_SERVICE_ACCOUNT_EMAIL);
     expect(revalidatePath).toHaveBeenCalledWith("/items");
     expect(revalidatePath).toHaveBeenCalledWith("/admin/audit");
   });

@@ -172,10 +172,33 @@ Invoke-RestMethod -Uri "https://<APP_URL>/api/items/import" -Method Post -Header
 ```
 
 **Responses:**
-- `200` — the import ran, with a JSON summary: `added`, `updated`, `unchanged`,
-  `detected`, `skipped`, `unresolved`, `mismatches`.
+- `200` — the import ran, with a JSON summary. `added`, `updated`, `unchanged`,
+  and `detected` are **counts** (numbers); `skipped`, `unresolved`, and
+  `mismatches` are **arrays** of per-row detail, `[]` when there's nothing to
+  report — don't call `.length` on the first four or iterate the last three
+  as if they were counts. Example body:
+
+  ```json
+  {
+    "added": 3,
+    "updated": 118,
+    "unchanged": 1876,
+    "detected": 12,
+    "skipped": [
+      { "row": 47, "serialNumber": "SN-004821", "reason": "missing make/model on a new device" }
+    ],
+    "unresolved": [
+      { "row": 203, "deviceName": "LAPTOP-WABC01-042", "segments": ["WABC01", "042"] }
+    ],
+    "mismatches": [
+      { "serialNumber": "SN-001177" }
+    ]
+  }
+  ```
 - `401` — missing or wrong secret.
-- `400` — the file isn't named `*.csv`, or it couldn't be parsed.
+- `400` — the file isn't named `*.csv`, it couldn't be parsed, **or it has
+  more than 2000 rows** (the endpoint doesn't chunk an oversized file for
+  you — split it and send multiple requests).
 - `413` — the upload is too large.
 - `500` — unexpected failure.
 

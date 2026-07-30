@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // Guardrail: security-relevant code must not change without docs/SECURITY.md
 // changing in the same set of commits.
 //
@@ -12,15 +11,28 @@
 // a change genuinely touches these files without altering the security posture
 // (a rename, a comment, a mechanical refactor). The check then passes and says
 // so loudly, which leaves a reviewable trail rather than a silent bypass.
+//
+// No `#!/usr/bin/env node` shebang: every real invocation (package.json,
+// ci.yml) already runs this explicitly as `node scripts/check-security-docs.mjs`,
+// and a leading shebang breaks importing this module for its WATCHED export —
+// esbuild only strips a shebang for an entry point, not for a file loaded as a
+// dependency, so check-security-docs.test.mjs would fail with a bare
+// `SyntaxError: Invalid or unexpected token` on the very first line.
 
 import { execFileSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 
 const DOC = "docs/SECURITY.md";
 const SKIP_TOKEN = "[skip security-doc]";
 
 // Files whose behavior IS the security posture. Each entry is [regex, why] —
 // the "why" is printed on failure so the message says what to go update.
-const WATCHED = [
+//
+// Exported so scripts/check-security-docs.test.mjs can assert this list
+// itself still covers every security-relevant file this codebase has, without
+// invoking the CLI's git/process.exit side effects — see the module-execution
+// guard at the bottom of this file.
+export const WATCHED = [
   [/^src\/lib\/authz\.ts$/, "authorization checks (§2)"],
   [/^src\/auth\.ts$/, "authentication + session revocation (§1)"],
   // Same leaf-file reasoning as sort-keys.ts: the 10h/4h numbers, the >= at
@@ -79,8 +91,15 @@ const WATCHED = [
   // reach for [skip security-doc].
   [/^src\/app\/admin\/actions\/readiness\.ts$/, "the hand-settable readiness allowlist (§2)"],
   [/^src\/app\/api\/cron\//, "cron authentication (§8)"],
-  [/^src\/lib\/cron-auth\.ts$/, "the shared secret check for session-less routes (§1)"],
+  [/^src\/lib\/cron-auth\.ts$/, "the shared secret check for session-less routes (§8)"],
   [/^src\/app\/api\/items\/import\/route\.ts$/, "the secret-authenticated machine import endpoint (§8)"],
+  // Resolves the identity automated writes are attributed to. It THROWS
+  // rather than falling back to any other account when the service account is
+  // missing — docs/SECURITY.md is explicit that this must stay a loud
+  // failure, not a silent substitution of "whoever we found". A change here
+  // that reintroduces a fallback would widen who a machine import can be
+  // attributed to without any doc noticing.
+  [/^src\/modules\/items\/import-actor\.ts$/, "the automated-import service-account resolver (§8)"],
   [/^src\/lib\/email\.ts$/, "outbound email escaping (§4, §6)"],
   [/^next\.config\.ts$/, "security response headers (§4)"],
   [/^\.github\/workflows\/ci\.yml$/, "the CI security gates (§11)"],
@@ -90,45 +109,50 @@ function git(args) {
   return execFileSync("git", args, { encoding: "utf8" }).trim();
 }
 
-const base = process.argv[2] || "origin/main";
+// The actual CLI. Wrapped in a function — rather than left as top-level
+// module-scope code — so this file stays IMPORTABLE (for WATCHED, above)
+// without shelling out to git or calling process.exit as a side effect of
+// import. Only invoked below, and only when this file is the process entry
+// point (`node scripts/check-security-docs.mjs`), not when another module
+// imports it.
+function main(base) {
+  // Merge-base diff ("...") so we only judge what this branch changed, not what
+  // main moved on to underneath it.
+  let changed;
+  try {
+    changed = git(["diff", "--name-only", `${base}...HEAD`]).split("\n").filter(Boolean);
+  } catch {
+    console.error(`[security-docs] cannot diff against "${base}" — is it fetched?`);
+    process.exit(2); // config problem, not a policy violation
+  }
 
-// Merge-base diff ("...") so we only judge what this branch changed, not what
-// main moved on to underneath it.
-let changed;
-try {
-  changed = git(["diff", "--name-only", `${base}...HEAD`]).split("\n").filter(Boolean);
-} catch {
-  console.error(`[security-docs] cannot diff against "${base}" — is it fetched?`);
-  process.exit(2); // config problem, not a policy violation
-}
+  const triggers = changed.flatMap((file) => {
+    const hit = WATCHED.find(([re]) => re.test(file));
+    return hit ? [{ file, why: hit[1] }] : [];
+  });
 
-const triggers = changed.flatMap((file) => {
-  const hit = WATCHED.find(([re]) => re.test(file));
-  return hit ? [{ file, why: hit[1] }] : [];
-});
+  if (triggers.length === 0) {
+    console.log("[security-docs] no security-relevant files changed — nothing to check.");
+    process.exit(0);
+  }
 
-if (triggers.length === 0) {
-  console.log("[security-docs] no security-relevant files changed — nothing to check.");
-  process.exit(0);
-}
+  if (changed.includes(DOC)) {
+    console.log(`[security-docs] OK — ${triggers.length} security-relevant file(s) changed and ${DOC} was updated.`);
+    process.exit(0);
+  }
 
-if (changed.includes(DOC)) {
-  console.log(`[security-docs] OK — ${triggers.length} security-relevant file(s) changed and ${DOC} was updated.`);
-  process.exit(0);
-}
+  const messages = git(["log", "--format=%B", `${base}...HEAD`]);
+  if (messages.includes(SKIP_TOKEN)) {
+    console.log(`[security-docs] BYPASSED via "${SKIP_TOKEN}".`);
+    console.log("  Changed without a doc update:");
+    for (const t of triggers) console.log(`    ${t.file}`);
+    console.log("  Confirm in review that the security posture genuinely did not change.");
+    process.exit(0);
+  }
 
-const messages = git(["log", "--format=%B", `${base}...HEAD`]);
-if (messages.includes(SKIP_TOKEN)) {
-  console.log(`[security-docs] BYPASSED via "${SKIP_TOKEN}".`);
-  console.log("  Changed without a doc update:");
-  for (const t of triggers) console.log(`    ${t.file}`);
-  console.log("  Confirm in review that the security posture genuinely did not change.");
-  process.exit(0);
-}
-
-console.error(`\n[security-docs] FAILED — security-relevant code changed but ${DOC} did not.\n`);
-for (const t of triggers) console.error(`  ${t.file}\n      covers ${t.why}`);
-console.error(`
+  console.error(`\n[security-docs] FAILED — security-relevant code changed but ${DOC} did not.\n`);
+  for (const t of triggers) console.error(`  ${t.file}\n      covers ${t.why}`);
+  console.error(`
 Update ${DOC}:
   - edit the entry for each control that changed (or delete it, if the control
     was removed — a doc describing controls that no longer exist is worse than
@@ -139,4 +163,15 @@ Update ${DOC}:
 If this change genuinely does not alter the security posture (a rename, a
 comment, a mechanical refactor), add "${SKIP_TOKEN}" to a commit message.
 `);
-process.exit(1);
+  process.exit(1);
+}
+
+// `pathToFileURL` (not a raw string compare) so this survives Windows'
+// backslash argv paths and any relative/absolute mismatch between
+// `import.meta.url` and `process.argv[1]`.
+const isMain =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) {
+  main(process.argv[2] || "origin/main");
+}

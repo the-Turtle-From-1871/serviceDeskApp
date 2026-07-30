@@ -16,15 +16,18 @@ export const dynamic = "force-dynamic";
 // SEQUENTIALLY, so the function must be allowed to live longer than their sum
 // (55s) or the platform kills it mid-transaction instead of letting it abort
 // cleanly into the catch below — which is exactly the confusing generic failure
-// the batching work went in to remove. The interactive import page sets 60;
-// this one is a nightly job with nobody waiting, so it is given generous
-// headroom above the 55s floor. (300 is commonly cited as the Vercel Hobby
-// plan's serverless function ceiling, but that has NOT been verified against
-// this project's actual Vercel configuration — the number that matters and
-// IS verified here is that it must exceed 55s. Confirm the plan's real
-// ceiling before relying on 300 specifically, and lower this if it turns out
-// to exceed what the deployed plan allows.)
-export const maxDuration = 300;
+// the batching work went in to remove.
+//
+// 60 is used deliberately, NOT a larger number picked "to be safe": Vercel
+// REJECTS an unsupported maxDuration at DEPLOY time, on every plan below
+// whatever ceiling that plan allows, and `next build` in CI cannot catch
+// that — the first place an unverified higher value would fail is the
+// production deployment itself. 60 clears the 55s floor with a small margin
+// and is accepted on every Vercel plan (it's also what the interactive
+// /admin/items/import page already uses, so this isn't a new number in the
+// codebase). Raise it later only once a measured production run actually
+// needs more AND the target plan's real ceiling has been confirmed.
+export const maxDuration = 60;
 
 /** Generous ceiling on the uploaded body. MAX_IMPORT_ROWS (2000) of this CSV's
  *  widest realistic shape is well under this; anything near it is a mistake. */

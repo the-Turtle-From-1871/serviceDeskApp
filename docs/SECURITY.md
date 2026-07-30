@@ -234,11 +234,21 @@ loud failure. Two independent things keep it non-loginable and un-purgeable:
   (`src/lib/authz.ts`) returns `null` for an inactive user regardless of the
   password hash (which is a non-bcrypt sentinel string, not a real hash, since
   it never needs to compare true).
-- `deactivatedAt` stays `NULL` on purpose, which keeps it permanently out of
+- `deactivatedAt` is seeded `NULL`, which keeps a freshly-migrated row out of
   `purgeDeactivatedUsers`'s scope (it only considers rows with a non-null
-  `deactivatedAt`). It is also independently protected by
-  `hasBlockingReferences`, which refuses to hard-delete any user who created
-  import batches (`ImportBatch.createdById` is `ON DELETE RESTRICT`).
+  `deactivatedAt`) — but that is a starting condition, not an enforced
+  invariant. This row is an ordinary `User` to the rest of the app: nothing
+  distinguishes it from a real technician's account in the admin Users list,
+  and `toggleUserActiveAction` → `setUserActive(id, false)`
+  (`src/modules/users/users.service.ts`) stamps `deactivatedAt` to `now` for
+  ANY user it's pointed at, this one included. What's actually guaranteed is
+  `hasBlockingReferences`: once this account has authored at least one
+  `ImportBatch`, `purgeDeactivatedUsers` refuses to hard-delete it no matter
+  what `deactivatedAt` holds (`ImportBatch.createdById` is
+  `ON DELETE RESTRICT`). Until its first import runs — a fresh environment,
+  or a row an admin deactivates before any import has happened — that
+  protection has not yet attached, and the row is purgeable like any other
+  deactivated account 3 months out.
 
 The `.invalid` TLD (RFC 2606) guarantees the address can never collide with a
 real person's. This is the **one deliberate exception** to "provision an
