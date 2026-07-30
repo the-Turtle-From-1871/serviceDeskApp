@@ -29,8 +29,9 @@ function Fail {
 }
 
 Write-Log "=== MDM import starting ===" "Cyan"
+Write-Log "PowerShell $($PSVersionTable.PSVersion) ($($ExecutionContext.SessionState.LanguageMode))"
 
-if ([string]::IsNullOrWhiteSpace($Secret)) {
+if ($Secret -notmatch '\S') {
     Fail @"
 No secret. Set it first:
 
@@ -41,7 +42,7 @@ survives reboots and is not visible in the task definition.
 "@
 }
 
-if ($Secret -ne $Secret.Trim()) {
+if ($Secret -match '^\s|\s$') {
     Fail "The secret has leading or trailing whitespace. It is compared exactly, so a stray space or newline from copy-paste will be rejected as a wrong secret. Re-copy it."
 }
 
@@ -59,13 +60,11 @@ if ($file.Length -eq 0) {
     Fail "That file is empty: $CsvPath"
 }
 
-$lineCount = 0
-$reader = [System.IO.File]::OpenText($file.FullName)
-try { while ($null -ne $reader.ReadLine()) { $lineCount++ } } finally { $reader.Close() }
-$dataRows = [Math]::Max(0, $lineCount - 1)   # minus the header
+$lineCount = @(Get-Content -LiteralPath $file.FullName).Count
+$dataRows = if ($lineCount -gt 1) { $lineCount - 1 } else { 0 }   # minus the header
 
 Write-Log "File:  $($file.FullName)"
-Write-Log "Size:  $([Math]::Round($file.Length / 1KB, 1)) KB"
+Write-Log "Size:  $("{0:N1}" -f ($file.Length / 1KB)) KB"
 Write-Log "Rows:  $dataRows (excluding the header)"
 
 if ($dataRows -gt 2000) {
@@ -94,7 +93,7 @@ try {
             Fail "This is Windows PowerShell $($PSVersionTable.PSVersion) and curl.exe was not found. Either install PowerShell 7 (https://aka.ms/powershell) or use a machine with curl.exe (Windows 10 1803 and later include it)."
         }
 
-        $tmp = [System.IO.Path]::GetTempFileName()
+        $tmp = Join-Path $env:TEMP "mdm-import-$PID.stderr.txt"
         try {
             $rawBody = & $curl.Source -sS -X POST $Uri `
                 -H "Authorization: Bearer $Secret" `
@@ -108,7 +107,7 @@ try {
 
         $lines = $rawBody -split "`n"
         $statusCode = [int]$lines[-1]
-        $bodyText = ($lines[0..($lines.Length - 2)] -join "`n").Trim()
+        $bodyText = ($lines[0..($lines.Length - 2)] -join "`n") -replace '^\s+|\s+$', ''
 
         if ($statusCode -ne 200) {
             if ($bodyText -match '<html|<!DOCTYPE') {
@@ -138,7 +137,7 @@ catch {
             default { Fail "HTTP $code - $($_.Exception.Message)" }
         }
     }
-    Fail $_.Exception.Message
+    Fail "$($_.Exception.Message)`n$($_.InvocationInfo.PositionMessage)"
 }
 
 Write-Log ""
