@@ -1,39 +1,12 @@
-<#
-.SYNOPSIS
-    Sends an MDM/Intune CSV export to the Hand Receipt app.
-
-.DESCRIPTION
-    Checks everything it can before sending, posts the file, prints a plain-English
-    summary, and exits non-zero on any failure so Task Scheduler shows a red result
-    instead of a silent success.
-
-    Works on Windows PowerShell 5.1 and PowerShell 7+.
-
-.EXAMPLE
-    # One-off, by hand:
-    $env:MDM_IMPORT_SECRET = "paste-the-secret-here"
-    .\Send-MdmImport.ps1 -CsvPath .\fleet.csv
-
-.EXAMPLE
-    # Scheduled: keep the secret out of the command line entirely.
-    # Set MDM_IMPORT_SECRET once as a MACHINE environment variable, then:
-    .\Send-MdmImport.ps1 -CsvPath C:\exports\fleet.csv -LogPath C:\exports\import.log
-#>
-
 [CmdletBinding()]
 param(
-    # The CSV to send.
     [Parameter(Mandatory = $true)]
     [string] $CsvPath,
 
-    # The app. You should not need to change this.
     [string] $Uri = "https://servicedeskapp.vercel.app/api/items/import",
 
-    # Defaults to the MDM_IMPORT_SECRET environment variable. Prefer that over
-    # passing it here -- an argument shows up in process lists and shell history.
     [string] $Secret = $env:MDM_IMPORT_SECRET,
 
-    # Optional: append a timestamped record of each run here.
     [string] $LogPath
 )
 
@@ -56,8 +29,6 @@ function Fail {
 }
 
 Write-Log "=== MDM import starting ===" "Cyan"
-
-# --- Preflight: catch the predictable mistakes before touching the network ----
 
 if ([string]::IsNullOrWhiteSpace($Secret)) {
     Fail @"
@@ -88,7 +59,6 @@ if ($file.Length -eq 0) {
     Fail "That file is empty: $CsvPath"
 }
 
-# Row count: the app caps an import at 2000 data rows and rejects more.
 $lineCount = 0
 $reader = [System.IO.File]::OpenText($file.FullName)
 try { while ($null -ne $reader.ReadLine()) { $lineCount++ } } finally { $reader.Close() }
@@ -106,8 +76,6 @@ if ($dataRows -eq 0) {
     Fail "That file has a header but no data rows."
 }
 
-# --- Send ---------------------------------------------------------------------
-
 Write-Log "Sending to $Uri ..." "Cyan"
 
 $headers = @{ Authorization = "Bearer $Secret" }
@@ -117,15 +85,10 @@ $rawBody = $null
 
 try {
     if ($PSVersionTable.PSVersion.Major -ge 6) {
-        # PowerShell 7+: -Form does multipart properly.
         $response = Invoke-RestMethod -Uri $Uri -Method Post -Headers $headers `
             -Form @{ file = $file } -TimeoutSec 300
     }
     else {
-        # Windows PowerShell 5.1 has NO -Form. Use curl.exe, which ships with
-        # Windows 10 1803+ and handles multipart correctly. Do NOT try to hand-roll
-        # the multipart body here -- getting the boundaries wrong produces a
-        # confusing 400 that looks like a bad CSV.
         $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
         if (-not $curl) {
             Fail "This is Windows PowerShell $($PSVersionTable.PSVersion) and curl.exe was not found. Either install PowerShell 7 (https://aka.ms/powershell) or use a machine with curl.exe (Windows 10 1803 and later include it)."
@@ -133,7 +96,6 @@ try {
 
         $tmp = [System.IO.Path]::GetTempFileName()
         try {
-            # -sS: quiet but still show errors. -w: append the status code so we can read it.
             $rawBody = & $curl.Source -sS -X POST $Uri `
                 -H "Authorization: Bearer $Secret" `
                 -F "file=@$($file.FullName)" `
@@ -178,8 +140,6 @@ catch {
     }
     Fail $_.Exception.Message
 }
-
-# --- Report -------------------------------------------------------------------
 
 Write-Log ""
 Write-Log "=== Import succeeded ===" "Green"
