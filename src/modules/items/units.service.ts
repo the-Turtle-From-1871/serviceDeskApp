@@ -154,6 +154,23 @@ export type UnitRow = { id: string; abbreviation: string; fullName: string; item
  * remove — the exact three-sites disagreement this module's design exists
  * to prevent. One engine decides, so the count and the delete guard can
  * never drift apart.
+ *
+ * The VALUES list is built from the DISTINCT fullNames, not one row per
+ * unit. There is no unique constraint on `Unit.fullName` (deliberately
+ * carried — see the module comment), so two units can share one fullName;
+ * a VALUES row per UNIT would put two identical rows in the list, and the
+ * LEFT JOIN would then match each carrying item TWICE (once per identical
+ * VALUES row) before GROUP BY collapsed them back onto one key — both
+ * units would report itemCount 2N instead of N, exactly the divergence
+ * from deleteUnit's count (which does not have this bug) that this module
+ * exists to prevent. One VALUES row per distinct name keeps the join 1:1
+ * regardless of how many units share it; every unit with that fullName
+ * then reads the same, correct count out of the map below.
+ *
+ * Bind parameters scale one per DISTINCT fullName — fine for a curated
+ * vocabulary (nowhere near Postgres's 65,535 ceiling). Contrast the CSV
+ * importer's UPDATE_CHUNK_ROWS in items.service.ts, which exists precisely
+ * because THAT list scales with import size, not with a managed list.
  */
 export async function listUnitsWithCounts(): Promise<UnitRow[]> {
   const units = await prisma.unit.findMany({
@@ -162,9 +179,11 @@ export async function listUnitsWithCounts(): Promise<UnitRow[]> {
   });
   if (units.length === 0) return [];
 
+  const distinctNames = [...new Set(units.map((u) => u.fullName))];
+
   const counts = await prisma.$queryRaw<{ key: string; count: bigint }[]>(Prisma.sql`
     SELECT v.full_name AS key, COUNT(i.id)::bigint AS count
-    FROM (VALUES ${Prisma.join(units.map((u) => Prisma.sql`(${u.fullName})`))}) AS v(full_name)
+    FROM (VALUES ${Prisma.join(distinctNames.map((n) => Prisma.sql`(${n})`))}) AS v(full_name)
     LEFT JOIN "Item" i
       ON i."homeUnit" IS NOT NULL
       AND LOWER(btrim(i."homeUnit")) = LOWER(btrim(v.full_name))

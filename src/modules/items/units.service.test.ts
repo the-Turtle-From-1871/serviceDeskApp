@@ -118,6 +118,29 @@ test("listUnitsWithCounts reports item counts per unit, and 0 for an unused unit
   expect(byId.get(unused.id)?.itemCount).toBe(0);
 });
 
+test("listUnitsWithCounts reports N, not 2N, when two units share a fullName", async () => {
+  // Unit.fullName has no unique constraint (deliberately carried — see the
+  // module comment on listUnitsWithCounts), so two units can legitimately
+  // share one full name. A prior implementation put one VALUES row per UNIT,
+  // so a shared name doubled its matches in the join before GROUP BY
+  // collapsed them back onto one key — both units reported 2N.
+  const admin = await createAdmin();
+  const unitA = await prisma.unit.create({ data: { abbreviation: "DUP01", fullName: "Shared Name" } });
+  const unitB = await prisma.unit.create({ data: { abbreviation: "DUP02", fullName: "Shared Name" } });
+  await prisma.item.createMany({
+    data: [
+      { make: "D", model: "1", serialNumber: "DUP-1", homeUnit: "Shared Name", createdById: admin.id },
+      { make: "D", model: "1", serialNumber: "DUP-2", homeUnit: "Shared Name", createdById: admin.id },
+      { make: "D", model: "1", serialNumber: "DUP-3", homeUnit: "Shared Name", createdById: admin.id },
+    ],
+  });
+
+  const rows = await listUnitsWithCounts();
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  expect(byId.get(unitA.id)?.itemCount).toBe(3);
+  expect(byId.get(unitB.id)?.itemCount).toBe(3);
+});
+
 // --- renameUnit -------------------------------------------------------
 
 test("renameUnit rewrites every item carrying the old full name and logs each change", async () => {
