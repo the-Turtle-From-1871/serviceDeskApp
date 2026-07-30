@@ -140,6 +140,67 @@ Success is HTTP `200` with a JSON summary:
 > middleware (`src/proxy.ts` matcher) so the cron isn't redirected to `/login`;
 > its only protection is `CRON_SECRET`, so keep that value secret.
 
+## 7. Automated MDM import (optional)
+
+If a technician automates a nightly Intune/MDM export, that export can be
+POSTed straight into the app instead of imported by hand.
+
+**Endpoint:** `POST /api/items/import`, `multipart/form-data`, with the CSV in
+a field named `file`. Authenticate with a bearer secret:
+
+```
+Authorization: Bearer <MDM_IMPORT_SECRET>
+```
+
+**Set the secret.** Add `MDM_IMPORT_SECRET` (long random value, e.g.
+`openssl rand -hex 32`) as an Environment Variable in Vercel for **both
+Production and Preview**, and give the scheduled export job the same value.
+Unset, the endpoint refuses every request. Rotating the value means changing
+it in Vercel **and** in the scheduled job, and **requires a redeploy** to take
+effect — the same non-negotiable as Turnstile in step 4, because the check
+reads the value at request time from the deployed instance, but a stale
+scheduled job holding the old secret will simply start getting `401`s until
+it's updated too.
+
+**Example (PowerShell, reading the secret from an environment variable rather
+than hardcoding it — this is what a scheduled task should run):**
+
+```powershell
+$headers = @{ Authorization = "Bearer $env:MDM_IMPORT_SECRET" }
+$form = @{ file = Get-Item .\fleet.csv }
+Invoke-RestMethod -Uri "https://<APP_URL>/api/items/import" -Method Post -Headers $headers -Form $form
+```
+
+**Responses:**
+- `200` — the import ran, with a JSON summary: `added`, `updated`, `unchanged`,
+  `detected`, `skipped`, `unresolved`, `mismatches`.
+- `401` — missing or wrong secret.
+- `400` — the file isn't named `*.csv`, or it couldn't be parsed.
+- `413` — the upload is too large.
+- `500` — unexpected failure.
+
+**Limits and behaviour to know before scheduling this:**
+- **Maximum 2000 rows per import.** A larger export must be split into
+  multiple files/requests — the endpoint doesn't chunk it for you.
+- **`serialNumber` is the required column and the match key.** A serial
+  already in inventory is updated in place; a serial not seen before is
+  created as a new item. **Nothing is ever deleted** — a device that's missing
+  from this export (decommissioned, off the network, etc.) is left untouched,
+  not retired. Absence in the CSV is not a signal.
+- **The import overwrites matched fields from the CSV.** For a device that
+  already exists, the export is treated as the source of truth for its name,
+  home unit, category and assigned user — those fields are replaced with
+  whatever the CSV says, including overwriting a hand edit made in the app
+  since the last import.
+- **An unrecognised unit abbreviation doesn't fail the row.** That row still
+  imports, just with a blank home unit, and comes back listed under
+  `unresolved` in the response — not under `skipped`. Treat `unresolved` as
+  "needs a look", not "didn't import."
+- **A non-200 response means nothing was written.** The whole import runs as
+  one transaction, so there's no partial state to reconcile — on any
+  non-`200`, log the response body and re-run rather than assuming some rows
+  made it in.
+
 ## Notes / caveats
 
 - **Change the admin password**: there is no in-app password change yet; the
