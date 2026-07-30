@@ -17,13 +17,17 @@ export const dynamic = "force-dynamic";
 // (55s) or the platform kills it mid-transaction instead of letting it abort
 // cleanly into the catch below — which is exactly the confusing generic failure
 // the batching work went in to remove. The interactive import page sets 60;
-// this one is a nightly job with nobody waiting, so it takes the Hobby ceiling.
+// this one is a nightly job with nobody waiting, so it is given generous
+// headroom above the 55s floor. (300 is commonly cited as the Vercel Hobby
+// plan's serverless function ceiling, but that has NOT been verified against
+// this project's actual Vercel configuration — the number that matters and
+// IS verified here is that it must exceed 55s. Confirm the plan's real
+// ceiling before relying on 300 specifically, and lower this if it turns out
+// to exceed what the deployed plan allows.)
 export const maxDuration = 300;
 
 /** Generous ceiling on the uploaded body. MAX_IMPORT_ROWS (2000) of this CSV's
- *  widest realistic shape is well under this; anything near it is a mistake,
- *  and rejecting it here avoids reading a large body into memory before the
- *  row cap in parseItemsCsv can apply. */
+ *  widest realistic shape is well under this; anything near it is a mistake. */
 const MAX_CSV_BYTES = 5_000_000;
 
 export async function POST(req: NextRequest) {
@@ -31,6 +35,18 @@ export async function POST(req: NextRequest) {
   // constant-time compare rather than a multi-megabyte read.
   if (!hasValidBearerSecret(req, process.env.MDM_IMPORT_SECRET)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Cheap pre-check against the DECLARED Content-Length, before formData()
+  // buffers the whole body — this is the check that actually avoids reading
+  // an oversized upload into memory. It is not the only guard: Content-Length
+  // is caller-supplied and can be absent (chunked transfer) or simply wrong,
+  // so `Number.isFinite` guards a missing/non-numeric header by skipping this
+  // check rather than rejecting or throwing, and the post-parse check below
+  // (on the buffered file's real size) is the backstop for that case.
+  const declaredLength = Number(req.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_CSV_BYTES) {
+    return NextResponse.json({ error: "That file is too large to import." }, { status: 413 });
   }
 
   let file: File;
@@ -44,6 +60,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "The file must be a .csv file." }, { status: 400 });
     }
     if (candidate.size > MAX_CSV_BYTES) {
+      // Backstop for a missing or understated Content-Length: by this point
+      // formData() has already buffered the body, so this protects against
+      // ACTING on an oversized file, not against the memory cost of
+      // receiving it — the pre-check above is what does that.
       return NextResponse.json({ error: "That file is too large to import." }, { status: 413 });
     }
     file = candidate;

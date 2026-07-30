@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import prisma from "@/lib/prisma";
 
 // `revalidatePath` needs a Next.js request-scoped store that only exists
@@ -30,8 +30,19 @@ const csvForm = (csv: string, filename = "fleet.csv") => {
   return fd;
 };
 
+// Captured and restored rather than just set: `fileParallelism: false` means
+// this whole suite shares one worker with every other test file, so leaving
+// MDM_IMPORT_SECRET set after this file finishes would leak "test-import-secret"
+// into any later file that reads process.env.MDM_IMPORT_SECRET.
+const priorSecret = process.env.MDM_IMPORT_SECRET;
+
 beforeAll(() => {
   process.env.MDM_IMPORT_SECRET = SECRET;
+});
+
+afterAll(() => {
+  if (priorSecret === undefined) delete process.env.MDM_IMPORT_SECRET;
+  else process.env.MDM_IMPORT_SECRET = priorSecret;
 });
 
 describe("POST /api/items/import", () => {

@@ -1079,6 +1079,24 @@ every row it touches is attributed in `ItemEdit`/`ImportBatch` to the fixed
 reversible (re-import a correct CSV) even though it can't be individually
 attributed to whoever actually held the secret at the time.
 
+**8a. `POST /api/items/import` is unmetered and unlogged — anonymous
+secret-guessing against it costs nothing to attempt and leaves no trace.**
+*Accepted.* Excluding the route from `src/proxy.ts`'s matcher (needed so the
+route's own session-less request isn't redirected to `/login` before the
+handler can read the `Authorization` header, [§8](#8-background-jobs-cron))
+also removes it from the proxy's 100/min anonymous rate limit
+([§12](#12-rate-limiting)) and the automation User-Agent filter, same as
+`api/cron`. There is no per-attempt log of a rejected guess either — only
+`console.error` on an unexpected failure, not on a routine 401. In practice
+this is not exploitable: `hasValidBearerSecret` compares against a long
+random value with `timingSafeEqual` ([§8](#8-background-jobs-cron)), so
+brute-forcing it is computationally infeasible regardless of request rate,
+and the constant-time compare means a flood buys an attacker no timing
+signal either. Accepted rather than re-metering the route, because putting it
+back behind the proxy's IP bucket is what caused the original bug this
+endpoint exists to fix — the shared secret is the only control this endpoint
+needs, and it does not weaken under volume.
+
 ---
 
 ## Keeping this current
