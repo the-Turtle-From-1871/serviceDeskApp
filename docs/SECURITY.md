@@ -220,6 +220,30 @@ redirects unauthenticated requests for `/items`, `/admin/*`, `/account` to
 > **Banned anti-pattern:** never gate a capability on "the user happens to own no
 > rows" — a demoted admin keeps their rows. Check the **role**.
 
+**One seeded, non-loginable account exists for machine-attributed writes: the
+import service account.** `ImportBatch.createdById` is a required FK to `User`,
+so an automated (cron-style, session-less) CSV import still needs a row to
+attribute its `editor` to. `mdm-import@service.invalid` ("MDM Import
+(automated)") is seeded by migration
+`prisma/migrations/20260730000000_import_service_account/` and resolved by
+`getImportActor()` in `src/modules/items/import-actor.ts`, which **throws**
+rather than falling back to any other account if the row is ever missing —
+attributing a machine's mass edit to a real person, silently, is worse than a
+loud failure. Two independent things keep it non-loginable and un-purgeable:
+- `isActive: false` is what blocks authentication — `defaultGetSession`
+  (`src/lib/authz.ts`) returns `null` for an inactive user regardless of the
+  password hash (which is a non-bcrypt sentinel string, not a real hash, since
+  it never needs to compare true).
+- `deactivatedAt` stays `NULL` on purpose, which keeps it permanently out of
+  `purgeDeactivatedUsers`'s scope (it only considers rows with a non-null
+  `deactivatedAt`). It is also independently protected by
+  `hasBlockingReferences`, which refuses to hard-delete any user who created
+  import batches (`ImportBatch.createdById` is `ON DELETE RESTRICT`).
+
+The `.invalid` TLD (RFC 2606) guarantees the address can never collide with a
+real person's. This is the **one deliberate exception** to "provision an
+individual account per technician" — see the corresponding `CLAUDE.md` bullet.
+
 ---
 
 ## 3. Public surface & the PIN gate
