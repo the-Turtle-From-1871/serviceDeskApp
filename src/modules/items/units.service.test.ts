@@ -63,3 +63,30 @@ test("listUnits returns abbreviation + fullName ordered by fullName", async () =
     { abbreviation: "ZED", fullName: "Zulu Company" },
   ]);
 });
+
+// --- batching -----------------------------------------------------------
+// learnUnits used to be a `for` loop of upserts (one round trip per row).
+// These lock in the semantics so a batched rewrite can't change behaviour.
+
+test("learnUnits creates new units and updates existing names in one call", async () => {
+  await prisma.unit.create({ data: { abbreviation: "BATCH01", fullName: "Old Name" } });
+
+  await learnUnits([
+    { abbreviation: "batch01", fullName: "New Name" },
+    { abbreviation: "batch02", fullName: "Second Unit" },
+  ]);
+
+  const map = await loadUnitMap();
+  expect(map.get("BATCH01")).toBe("New Name");
+  expect(map.get("BATCH02")).toBe("Second Unit");
+});
+
+test("learnUnits stores abbreviations uppercased regardless of input casing", async () => {
+  await learnUnits([{ abbreviation: "batch02", fullName: "Second Unit" }]);
+  const row = await prisma.unit.findUnique({ where: { abbreviation: "BATCH02" } });
+  expect(row?.abbreviation).toBe("BATCH02");
+});
+
+test("learnUnits is a no-op on an empty list", async () => {
+  await expect(learnUnits([])).resolves.toBeUndefined();
+});
