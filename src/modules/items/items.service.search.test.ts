@@ -13,25 +13,65 @@ import { DERIVED_SORT_KEYS } from "./sort-keys";
 beforeEach(() => vi.clearAllMocks());
 
 describe("listItems", () => {
+  // Branches are no longer uniform: four are `contains` clauses on Item columns
+  // and one is a relation filter over the item's open hand receipts. Typed
+  // loosely here, with `containsOf` narrowing the column branches at each use.
+  type SearchBranch = Record<string, unknown>;
   const whereOf = () => vi.mocked(prisma.item.findMany).mock.calls[0][0]?.where as
-    | { OR: Record<string, { contains: string; mode: string }>[] }
+    | { OR: SearchBranch[] }
     | undefined;
+  const containsOf = (branch: SearchBranch, field: string) =>
+    branch[field] as { contains: string; mode: string };
 
-  it("searches device name alongside make, model and serial", async () => {
+  it("searches device name alongside make, model, serial and the open-receipt recipient", async () => {
     await listItems({ search: "router" });
     const fields = whereOf()!.OR.map((c) => Object.keys(c)[0]);
-    expect(fields).toEqual(["deviceName", "make", "model", "serialNumber"]);
+    expect(fields).toEqual(["deviceName", "make", "model", "serialNumber", "transferItems"]);
+  });
+
+  it("matches the recipient only on an OPEN, unreturned receipt, one AND clause per token", async () => {
+    await listItems({ search: "doe jane" });
+    const branch = whereOf()!.OR.find((c) => "transferItems" in c)!.transferItems as {
+      some: {
+        returnedAt: null;
+        line: { transfer: { status: string; AND: { receiverName: { contains: string; mode: string } }[] } };
+      };
+    };
+    // The custody rule, asserted field by field: a returned row or a closed
+    // receipt is NOT custody, and dropping either guard would quietly turn this
+    // into a search of every receipt that ever existed.
+    expect(branch.some.returnedAt).toBeNull();
+    expect(branch.some.line.transfer.status).toBe("OPEN");
+    expect(branch.some.line.transfer.AND).toEqual([
+      { receiverName: { contains: "doe", mode: "insensitive" } },
+      { receiverName: { contains: "jane", mode: "insensitive" } },
+    ]);
+  });
+
+  it("emits the recipient EXISTS with one BOUND pattern per token on the raw path", async () => {
+    vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
+    await listItems({ search: "doe jane", sort: "readiness", dir: "asc" });
+    const arg = vi.mocked(prisma.$queryRaw).mock.calls[0][0] as unknown as {
+      sql: string;
+      values: unknown[];
+    };
+    expect(arg.sql).toMatch(/EXISTS/);
+    expect(arg.sql).toMatch(/"returnedAt" IS NULL/);
+    // Patterns are parameters, never spliced text (CLAUDE.md §2).
+    expect(arg.sql).not.toMatch(/ILIKE\s+'%/);
+    expect(arg.values).toContain("%doe%");
+    expect(arg.values).toContain("%jane%");
   });
 
   it("matches device name case-insensitively on a partial value", async () => {
     await listItems({ search: "Edge Rou" });
-    const deviceName = whereOf()!.OR.find((c) => "deviceName" in c)!.deviceName;
+    const deviceName = containsOf(whereOf()!.OR.find((c) => "deviceName" in c)!, "deviceName");
     expect(deviceName).toEqual({ contains: "Edge Rou", mode: "insensitive" });
   });
 
   it("trims the query before searching", async () => {
     await listItems({ search: "  router  " });
-    expect(whereOf()!.OR[0].deviceName.contains).toBe("router");
+    expect(containsOf(whereOf()!.OR[0], "deviceName").contains).toBe("router");
   });
 
   it("applies no filter for a blank or missing query", async () => {
