@@ -104,3 +104,79 @@ export function buildRawEmail(
 
   return toBase64Url(Buffer.from(mime, "utf8"));
 }
+
+export type GmailOAuthConfig = {
+  from: string;
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
+};
+
+// Refresh a minute early so a token cannot expire in flight between the check
+// and Gmail receiving the request.
+const SAFETY_MARGIN_MS = 60_000;
+
+// Module scope, not instance state: getEmailSender() constructs a fresh sender
+// per send, so an instance-level cache would never be reused. Keyed by the
+// credentials it was minted from, so a rotated refresh token invalidates it.
+let cache: { key: string; token: string; expiresAt: number } | null = null;
+let inFlight: { key: string; promise: Promise<string> } | null = null;
+
+/** Test seam: clears cached state between cases. */
+export function __resetTokenCache(): void {
+  cache = null;
+  inFlight = null;
+}
+
+async function exchange(cfg: GmailOAuthConfig, key: string): Promise<string> {
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: cfg.clientId,
+      client_secret: cfg.clientSecret,
+      refresh_token: cfg.refreshToken,
+      grant_type: "refresh_token",
+    }).toString(),
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    // Every way a refresh token dies — the 7-day Testing-status expiry,
+    // revocation, an account password change, 6 months idle, or exceeding 100
+    // live tokens per client — arrives as this one opaque 400. Name the remedy
+    // here or the log line is unactionable.
+    if (text.includes("invalid_grant")) {
+      throw new Error(
+        "Gmail OAuth refresh token rejected (invalid_grant). Re-mint GMAIL_REFRESH_TOKEN and redeploy. " +
+          "Roughly weekly is EXPECTED, not a misconfiguration: the consent screen is deliberately left in Testing " +
+          "status, and Google expires a Testing-status consent grant every 7 days. Run the token-rotation tooling.",
+      );
+    }
+    throw new Error(`Google token refresh failed: ${res.status} ${text}`);
+  }
+
+  const json = JSON.parse(text) as { access_token?: string; expires_in?: number };
+  if (!json.access_token) throw new Error("Google token refresh returned no access_token");
+
+  const ttlMs = (json.expires_in ?? 3600) * 1000;
+  cache = { key, token: json.access_token, expiresAt: Date.now() + Math.max(0, ttlMs - SAFETY_MARGIN_MS) };
+  return json.access_token;
+}
+
+/** Returns a valid access token, exchanging the refresh token only when the
+ *  cached one is missing, stale, or minted from different credentials.
+ *  Concurrent callers share a single in-flight exchange. */
+export async function getAccessToken(cfg: GmailOAuthConfig): Promise<string> {
+  const key = `${cfg.clientId}:${cfg.refreshToken}`;
+  if (cache && cache.key === key && cache.expiresAt > Date.now()) return cache.token;
+  if (inFlight && inFlight.key === key) return inFlight.promise;
+
+  // A rejection clears inFlight but leaves the cache untouched, so the next
+  // send retries rather than inheriting a poisoned entry.
+  const promise = exchange(cfg, key).finally(() => {
+    if (inFlight?.key === key) inFlight = null;
+  });
+  inFlight = { key, promise };
+  return promise;
+}

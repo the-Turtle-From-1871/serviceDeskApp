@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { buildRawEmail } from "./gmail-oauth-email";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { buildRawEmail, getAccessToken, __resetTokenCache, type GmailOAuthConfig } from "./gmail-oauth-email";
 
 // The Gmail API takes the message base64url-encoded; decode to assert on the wire format.
 function decode(raw: string): string {
@@ -180,5 +180,117 @@ describe("buildRawEmail header safety", () => {
       buildRawEmail({ ...base, attachments: [{ filename: "hand-receipt.PDF", content: new Uint8Array([1]) }] }, FROM, BOUNDARIES),
     );
     expect(mime).toContain("Content-Type: application/pdf");
+  });
+});
+
+const CFG: GmailOAuthConfig = {
+  from: FROM,
+  clientId: "cid",
+  clientSecret: "secret",
+  refreshToken: "rtok",
+};
+
+function okToken(token: string, expiresIn = 3600) {
+  return new Response(JSON.stringify({ access_token: token, expires_in: expiresIn }), { status: 200 });
+}
+
+describe("getAccessToken", () => {
+  beforeEach(() => {
+    __resetTokenCache();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-31T12:00:00Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("exchanges the refresh token and returns the access token", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(okToken("at-1"));
+    await expect(getAccessToken(CFG)).resolves.toBe("at-1");
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://oauth2.googleapis.com/token");
+    const body = new URLSearchParams(init!.body as string);
+    expect(body.get("grant_type")).toBe("refresh_token");
+    expect(body.get("client_id")).toBe("cid");
+    expect(body.get("client_secret")).toBe("secret");
+    expect(body.get("refresh_token")).toBe("rtok");
+  });
+
+  it("reuses the cached token inside its lifetime", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(okToken("at-1"));
+    await getAccessToken(CFG);
+    await getAccessToken(CFG);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("exchanges only once for concurrent callers", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(okToken("at-1"));
+    const all = await Promise.all([getAccessToken(CFG), getAccessToken(CFG), getAccessToken(CFG)]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(all).toEqual(["at-1", "at-1", "at-1"]);
+  });
+
+  it("re-exchanges after the token expires", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(okToken("at-1", 3600))
+      .mockResolvedValueOnce(okToken("at-2", 3600));
+    await expect(getAccessToken(CFG)).resolves.toBe("at-1");
+    vi.setSystemTime(new Date("2026-07-31T13:00:00Z")); // past the 3600s lifetime
+    await expect(getAccessToken(CFG)).resolves.toBe("at-2");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes early, inside the 60s safety margin", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(okToken("at-1", 3600))
+      .mockResolvedValueOnce(okToken("at-2", 3600));
+    await getAccessToken(CFG);
+    vi.setSystemTime(new Date("2026-07-31T12:59:30Z")); // 30s short of expiry
+    await expect(getAccessToken(CFG)).resolves.toBe("at-2");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("names invalid_grant and the remedy so logs are actionable", async () => {
+    // A fresh Response per call: a Response body can only be read once, and
+    // this test calls getAccessToken three times against the same mock — a
+    // single shared Response instance (mockResolvedValue with one object)
+    // throws "Body is unusable" on the second read.
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 }),
+    );
+    await expect(getAccessToken(CFG)).rejects.toThrow(/invalid_grant/);
+    await expect(getAccessToken(CFG)).rejects.toThrow(/GMAIL_REFRESH_TOKEN/);
+    // The 7-day expiry is expected, not a misconfiguration — the message must
+    // say so, or every rotation reads as an incident.
+    await expect(getAccessToken(CFG)).rejects.toThrow(/7 days/);
+  });
+
+  it("surfaces other token errors with status and body", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("upstream boom", { status: 503 }));
+    await expect(getAccessToken(CFG)).rejects.toThrow(/503 upstream boom/);
+  });
+
+  it("does not cache a failed exchange", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("nope", { status: 500 }))
+      .mockResolvedValueOnce(okToken("at-1"));
+    await expect(getAccessToken(CFG)).rejects.toThrow();
+    await expect(getAccessToken(CFG)).resolves.toBe("at-1");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-exchanges when the refresh token itself changes", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(okToken("at-1"))
+      .mockResolvedValueOnce(okToken("at-2"));
+    await expect(getAccessToken(CFG)).resolves.toBe("at-1");
+    await expect(getAccessToken({ ...CFG, refreshToken: "rotated" })).resolves.toBe("at-2");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
