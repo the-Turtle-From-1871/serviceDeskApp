@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
-// EmailSender arrives in Task 4 when the Gmail transport is wired up.
-import type { EmailMessage } from "./email";
+import type { EmailMessage, EmailSender } from "./email";
 
 const CRLF = "\r\n";
 
@@ -179,4 +178,33 @@ export async function getAccessToken(cfg: GmailOAuthConfig): Promise<string> {
   });
   inFlight = { key, promise };
   return promise;
+}
+
+/** Sends as a Gmail account through the Gmail API. Errors propagate; callers
+ *  decide whether a mail failure is fatal (sendReceiptEmails, for one,
+ *  deliberately swallows per-recipient failures so a mail outage never rolls
+ *  back a completed transfer). There is no fallback transport by design — a
+ *  dead refresh token must be visible, not silently routed around. */
+export class GmailOAuthSender implements EmailSender {
+  constructor(private cfg: GmailOAuthConfig) {}
+
+  async send(msg: EmailMessage): Promise<void> {
+    const raw = buildRawEmail(msg, this.cfg.from);
+    const token = await getAccessToken(this.cfg);
+    const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ raw }),
+    });
+    if (!res.ok) throw new Error(`Gmail send failed: ${res.status} ${await res.text()}`);
+  }
+}
+
+export function gmailOAuthConfigFromEnv(): GmailOAuthConfig | null {
+  const from = process.env.GMAIL_FROM;
+  const clientId = process.env.GMAIL_CLIENT_ID;
+  const clientSecret = process.env.GMAIL_CLIENT_SECRET;
+  const refreshToken = process.env.GMAIL_REFRESH_TOKEN;
+  if (from && clientId && clientSecret && refreshToken) return { from, clientId, clientSecret, refreshToken };
+  return null;
 }

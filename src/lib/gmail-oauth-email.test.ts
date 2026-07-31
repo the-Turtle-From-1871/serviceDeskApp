@@ -294,3 +294,95 @@ describe("getAccessToken", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
+
+import { GmailOAuthSender, gmailOAuthConfigFromEnv } from "./gmail-oauth-email";
+
+describe("GmailOAuthSender", () => {
+  beforeEach(() => {
+    __resetTokenCache();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-31T12:00:00Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("posts the encoded message to the Gmail send endpoint with a bearer token", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(okToken("at-1"))
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }));
+
+    await new GmailOAuthSender(CFG).send({ to: "u@example.com", subject: "NEW: HR-1", text: "body" });
+
+    const [url, init] = fetchMock.mock.calls[1];
+    expect(url).toBe("https://gmail.googleapis.com/gmail/v1/users/me/messages/send");
+    expect(init!.method).toBe("POST");
+    expect((init!.headers as Record<string, string>).Authorization).toBe("Bearer at-1");
+    const sent = JSON.parse(init!.body as string) as { raw: string };
+    expect(decode(sent.raw)).toContain("Subject: NEW: HR-1");
+    expect(decode(sent.raw)).toContain(`From: ${FROM}`);
+  });
+
+  it("exchanges the token only once across several sends", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) =>
+      String(url).includes("oauth2") ? okToken("at-1") : new Response("{}", { status: 200 }),
+    );
+    const sender = new GmailOAuthSender(CFG);
+    await Promise.all([
+      sender.send({ to: "a@x.com", subject: "s", text: "t" }),
+      sender.send({ to: "b@x.com", subject: "s", text: "t" }),
+      sender.send({ to: "c@x.com", subject: "s", text: "t" }),
+    ]);
+    const tokenCalls = fetchMock.mock.calls.filter(([u]) => String(u).includes("oauth2"));
+    expect(tokenCalls).toHaveLength(1);
+  });
+
+  it("throws with status and body when the send is refused", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(okToken("at-1"))
+      .mockResolvedValueOnce(new Response("quota exceeded", { status: 429 }));
+    await expect(
+      new GmailOAuthSender(CFG).send({ to: "u@x.com", subject: "s", text: "t" }),
+    ).rejects.toThrow(/Gmail send failed: 429 quota exceeded/);
+  });
+
+  it("does not attempt the send when the token exchange fails", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 }));
+    await expect(
+      new GmailOAuthSender(CFG).send({ to: "u@x.com", subject: "s", text: "t" }),
+    ).rejects.toThrow(/invalid_grant/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("gmailOAuthConfigFromEnv", () => {
+  const orig = { ...process.env };
+  afterEach(() => {
+    process.env = { ...orig };
+  });
+
+  it("returns null when any var is missing", () => {
+    process.env.GMAIL_FROM = FROM;
+    process.env.GMAIL_CLIENT_ID = "cid";
+    process.env.GMAIL_CLIENT_SECRET = "secret";
+    delete process.env.GMAIL_REFRESH_TOKEN;
+    expect(gmailOAuthConfigFromEnv()).toBeNull();
+  });
+
+  it("returns the config when all four are present", () => {
+    process.env.GMAIL_FROM = FROM;
+    process.env.GMAIL_CLIENT_ID = "cid";
+    process.env.GMAIL_CLIENT_SECRET = "secret";
+    process.env.GMAIL_REFRESH_TOKEN = "rtok";
+    expect(gmailOAuthConfigFromEnv()).toEqual({
+      from: FROM,
+      clientId: "cid",
+      clientSecret: "secret",
+      refreshToken: "rtok",
+    });
+  });
+});
