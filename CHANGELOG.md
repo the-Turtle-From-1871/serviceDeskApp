@@ -3,6 +3,14 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-07-31
+
+### Added
+- **The items list can now be searched by who is holding the device.** Typing a recipient's name into the search box on the items list returns everything that person currently has signed out — matching on first name, last name, or both, in either order, so "doe jane" finds Jane Doe. Only live custody counts: an item comes back while it is out on an open hand receipt and stops matching once that receipt is closed or the item is returned. The list also gained a **Holder** column showing that name (blank for anything nobody has signed for), so it is visible why each row matched; it can be hidden from the column menu. Devices assigned only through the MDM import, with no hand receipt, are not matched by a name search.
+
+### Notes
+- A new migration adds a trigram index on the hand-receipt recipient name, which the name search needs to stay fast. It must be applied to the production database before this deploys.
+
 ## 2026-07-30
 
 ### Added
