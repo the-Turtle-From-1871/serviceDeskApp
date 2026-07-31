@@ -78,10 +78,23 @@ describe("buildRawEmail body structure", () => {
     for (const line of payload.split("\r\n")) expect(line.length).toBeLessThanOrEqual(76);
   });
 
-  it("uses CRLF line endings, never bare LF", () => {
-    const mime = decode(buildRawEmail({ ...base, html: "<p>hi</p>" }, FROM, BOUNDARIES));
-    const headerBlock = mime.split("\r\n\r\n")[0];
-    expect(headerBlock).not.toMatch(/[^\r]\n/);
+  it("uses CRLF line endings, never bare LF — including inside multi-line text and html bodies", () => {
+    const mime = decode(
+      buildRawEmail({ ...base, text: "line one\nline two", html: "<p>hi</p>\n<p>bye</p>" }, FROM, BOUNDARIES),
+    );
+    expect(mime).not.toMatch(/[^\r]\n/);
+    expect(mime).toContain("line one\r\nline two");
+    expect(mime).toContain("<p>hi</p>\r\n<p>bye</p>");
+  });
+
+  it("does not double an already-CRLF newline in text/html bodies", () => {
+    const mime = decode(
+      buildRawEmail({ ...base, text: "line one\r\nline two", html: "<p>hi</p>\r\n<p>bye</p>" }, FROM, BOUNDARIES),
+    );
+    expect(mime).not.toMatch(/[^\r]\n/);
+    expect(mime).not.toMatch(/\r\r\n/);
+    expect(mime).toContain("line one\r\nline two");
+    expect(mime).toContain("<p>hi</p>\r\n<p>bye</p>");
   });
 
   it("generates distinct boundaries when none are supplied", () => {

@@ -13,12 +13,19 @@ function wrap76(b64: string): string {
   return b64.replace(/(.{76})/g, `$1${CRLF}`);
 }
 
+// Callers build multi-line bodies with bare "\n" (e.g. Array#join("\n")); normalize
+// every newline form to CRLF so the wire format never mixes line endings, without
+// doubling a newline that is already CRLF.
+function toCrlf(s: string): string {
+  return s.replace(/\r\n|\r|\n/g, CRLF);
+}
+
 function textPart(text: string): string {
-  return `Content-Type: text/plain; charset="UTF-8"${CRLF}${CRLF}${text}`;
+  return `Content-Type: text/plain; charset="UTF-8"${CRLF}${CRLF}${toCrlf(text)}`;
 }
 
 function htmlPart(html: string): string {
-  return `Content-Type: text/html; charset="UTF-8"${CRLF}${CRLF}${html}`;
+  return `Content-Type: text/html; charset="UTF-8"${CRLF}${CRLF}${toCrlf(html)}`;
 }
 
 function attachmentPart(a: { filename: string; content: Uint8Array }): string {
