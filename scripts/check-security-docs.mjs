@@ -106,6 +106,10 @@ export const WATCHED = [
   // attributed to without any doc noticing.
   [/^src\/modules\/items\/import-actor\.ts$/, "the automated-import service-account resolver (§8)"],
   [/^src\/lib\/email\.ts$/, "outbound email escaping (§4, §6)"],
+  // Holds a long-lived send credential and builds raw MIME headers. The CR/LF
+  // strip in buildRawEmail is the only thing stopping caller-supplied text from
+  // forging headers, and it is one deleted regex away from being gone.
+  [/^src\/lib\/gmail-oauth-email\.ts$/, "outbound mail header injection guard + the OAuth send credential (§5, §6)"],
   [/^next\.config\.ts$/, "security response headers (§4)"],
   [/^\.github\/workflows\/ci\.yml$/, "the CI security gates (§11)"],
   // Not deployed code — local Windows tooling. Watched anyway because it holds a
