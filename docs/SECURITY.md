@@ -482,6 +482,45 @@ must never enter list, search, or type-ahead queries.
 `"Something went wrong. Please try again."` to the user, full `console.error`
 server-side.
 
+### Workstation-held deploy credentials (`scripts/gmail-token-rotation/`)
+
+Local Windows tooling that rotates the Gmail OAuth refresh token and pushes it to
+Vercel production. It is **not** part of the deployed app and runs on one
+technician workstation, but it holds credentials that can write production.
+
+**What it stores, and where.** `%LOCALAPPDATA%\dcsim-gmail-rotation\config.xml`,
+written with `Export-CliXml`. The OAuth client secret, the Vercel API token and
+the deploy hook URL are held as `SecureString`, so DPAPI encrypts them bound to
+that Windows user on that machine — the file is inert if copied elsewhere. The
+tool additionally attempts to strip inherited ACEs from the file, but that is
+best-effort: a failure is logged as a warning and does not abort, so DPAPI is
+the control being relied on, not the ACL. Nothing is stored in the
+repository, and `state.json` / `rotate.log` are asserted secret-free: error
+bodies from Google and Vercel are scrubbed of the token value, the bearer token
+and the full hook URL before they reach a log line or a thrown message.
+
+**The Vercel API token is account-wide.** Vercel personal tokens cannot be scoped
+to a single project, so this token can read, modify and deploy anything in the
+account. It is created with no expiry deliberately — an expiring token would
+trade one rotation treadmill for two. This is the highest-value secret on that
+workstation; see Known gaps.
+
+**It can deploy production unattended.** A successful rotation writes
+`GMAIL_REFRESH_TOKEN` and fires a deploy hook, so `main` ships without a human
+present. The repo's migrate-before-push rule assumes the opposite; see `DEPLOY.md`.
+
+**Execution trigger.** `HKCU\Software\Classes\dcsim-gmail-rotate` lets the toast
+notification launch a rotation. The registered command is fully literal — an
+absolute `powershell.exe`, an absolute quoted script path, `-File` last — and
+`%1` is deliberately omitted, so no caller-supplied text reaches the command
+line and a stray positional would fail parameter binding rather than execute.
+Any same-user process could already run the script directly, so no trust
+boundary is crossed. Nothing in the tool requires or acquires elevation.
+
+**The consent click is not automated and must not be.** Driving a browser
+through Google sign-in would require the account password and a 2FA bypass on
+disk, and breaches Google's ToS.
+
 ---
 
 ## 7. Cryptographic receipt seal
@@ -1028,6 +1067,24 @@ challenge.
 ## Known gaps & accepted risks
 
 Tracked deliberately, so nobody re-discovers them as new findings.
+
+**0c. An account-wide Vercel API token sits on a technician workstation, and it
+can deploy production unattended.** ⚠️ *Accepted; two exits exist.*
+`scripts/gmail-token-rotation/` ([§6](#6-secrets--data-leakage)) needs a Vercel
+token to write `GMAIL_REFRESH_TOKEN` and a deploy hook to make it take effect.
+Vercel personal tokens **cannot be scoped to one project**, so the token can
+modify or deploy anything in the account, and it is created with no expiry on
+purpose. It is DPAPI-encrypted and bound to one Windows user on one machine, but
+anyone with that user's live session can use it, and a successful rotation ships
+`main` to production with nobody watching — which collides with the
+migrate-before-push rule (`DEPLOY.md`).
+The root cause is that the Google OAuth consent screen is deliberately left in
+**Testing** status, which caps refresh tokens at 7 days. Both exits remove the
+tooling entirely rather than mitigating it: publish the consent screen (free,
+immediate), or move the sender to Google Workspace on `dcsim.us`, where a service
+account with domain-wide delegation needs no refresh token at all. Until one is
+taken, this risk is the price of the workaround. Revisit whenever the `.mil`
+deliverability work moves.
 
 **0a. A visitor whose network blocks Cloudflare cannot sign in at all** once
 Turnstile is configured. ⚠️ *Accepted, with an operational lever.*

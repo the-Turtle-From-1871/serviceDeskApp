@@ -321,3 +321,12 @@ nothing is ever deleted, so a bad import is a correction, never a loss.
   email on your GitHub account (or its `ID+username@users.noreply.github.com`
   address) as `git config user.email`, otherwise pushes build-block. Direct
   `vercel --prod` CLI uploads are attributed to your Vercel user and bypass this.
+- **Unattended redeploys from the Gmail token rotation tool**: if
+  `scripts/gmail-token-rotation` is installed on a workstation, it fires a Deploy
+  Hook every ~3 days to push a refreshed `GMAIL_REFRESH_TOKEN` into production.
+  That deploys **whatever is on `main` at that moment, with nobody watching** —
+  which interacts badly with the migrate-before-push rule two bullets up. If you
+  merge schema-dependent code and defer `npm run db:deploy`, the rotation will
+  deploy it for you within three days. Apply migrations at merge time, not "before
+  the next deploy": with this installed there is no next *manual* deploy to gate on.
+  See `scripts/gmail-token-rotation/README.md`.
