@@ -100,7 +100,7 @@ end does the sending.
 
 | You need | Where it comes from |
 | --- | --- |
-| The app's URL | `https://servicedeskapp.vercel.app` |
+| The app's URL | `https://www.dcsim.us` |
 | A secret value | The app owner generates it and gives it to you |
 | Your export as a `.csv` file | Your existing Intune/MDM export |
 
@@ -116,7 +116,7 @@ the script, and not in email or chat.
 an `Authorization` header:
 
 ```
-POST https://servicedeskapp.vercel.app/api/items/import
+POST https://www.dcsim.us/api/items/import
 Authorization: Bearer <secret>
 Content-Type: multipart/form-data
 ```
@@ -134,7 +134,7 @@ $headers = @{ Authorization = "Bearer $env:MDM_IMPORT_SECRET" }
 $form    = @{ file = Get-Item .\fleet.csv }
 
 $result = Invoke-RestMethod `
-  -Uri "https://servicedeskapp.vercel.app/api/items/import" `
+  -Uri "https://www.dcsim.us/api/items/import" `
   -Method Post -Headers $headers -Form $form
 
 $result | ConvertTo-Json -Depth 5
@@ -146,7 +146,7 @@ rather than the file's contents.
 ### curl
 
 ```bash
-curl -X POST "https://servicedeskapp.vercel.app/api/items/import" \
+curl -X POST "https://www.dcsim.us/api/items/import" \
   -H "Authorization: Bearer $MDM_IMPORT_SECRET" \
   -F "file=@fleet.csv"
 ```
@@ -291,6 +291,7 @@ re-importing unchanged rows does nothing.
 | `200` but the body is **HTML**, not JSON | The request was redirected to the login page | Tell the app owner — the endpoint's exemption from the login gate has been lost. **This one is dangerous: the job looks successful while importing nothing.** |
 | `500` on every request | The service account is missing from the database | Apply the migration named in section 6 |
 | `404` | Not deployed yet | Wait for the release |
+| `308` | You used `dcsim.us`; the site is served from `www.dcsim.us` and the apex redirects to it | Use `www.dcsim.us`, or add `-L` if you are calling `curl` by hand — `curl` does not follow redirects unless told to. `Send-MdmImport.ps1` already does both. |
 | "Method invocation is supported only on core types in this language mode" | The machine enforces Constrained Language Mode, and something is calling a .NET method | The current script and the commands in this document avoid those calls — take a fresh copy of `Send-MdmImport.ps1`. If it is your own wrapper, replace `[Environment]::…`, `[Math]::…` and `[System.IO.…]::…` with cmdlets |
 | Counts are all `unchanged` | Nothing in the export differs from what's on file | Working as intended |
 | A device's hand-corrected details keep reverting | The export is the source of truth for those fields (section 5) | Correct it in the MDM export, not in the app |

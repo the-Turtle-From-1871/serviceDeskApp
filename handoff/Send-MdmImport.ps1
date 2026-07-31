@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $CsvPath,
 
-    [string] $Uri = "https://servicedeskapp.vercel.app/api/items/import",
+    [string] $Uri = "https://www.dcsim.us/api/items/import",
 
     [string] $Secret = $env:MDM_IMPORT_SECRET,
 
@@ -95,7 +95,7 @@ try {
 
         $tmp = Join-Path $env:TEMP "mdm-import-$PID.stderr.txt"
         try {
-            $rawBody = & $curl.Source -sS -X POST $Uri `
+            $rawBody = & $curl.Source -sSL -X POST $Uri `
                 -H "Authorization: Bearer $Secret" `
                 -F "file=@$($file.FullName)" `
                 -w "`n%{http_code}" 2>$tmp
@@ -109,16 +109,18 @@ try {
         $statusCode = [int]$lines[-1]
         $bodyText = ($lines[0..($lines.Length - 2)] -join "`n") -replace '^\s+|\s+$', ''
 
-        if ($statusCode -ne 200) {
-            if ($bodyText -match '<html|<!DOCTYPE') {
-                Fail @"
+        if ($bodyText -match '<html|<!DOCTYPE') {
+            Fail @"
 The server returned HTTP $statusCode with an HTML page instead of JSON.
 
-If the status is 200, this means the request was redirected to the login page --
-the import endpoint has lost its exemption from the login gate. THE JOB WOULD
-LOOK SUCCESSFUL WHILE IMPORTING NOTHING. Report this to the app owner.
+The request reached a web page rather than the import endpoint -- most likely it
+was redirected to the login page, meaning the endpoint has lost its exemption
+from the login gate. On a 200 THE JOB WOULD OTHERWISE LOOK SUCCESSFUL WHILE
+IMPORTING NOTHING. Report this to the app owner.
 "@
-            }
+        }
+
+        if ($statusCode -ne 200) {
             Fail "HTTP $statusCode - $bodyText"
         }
 
