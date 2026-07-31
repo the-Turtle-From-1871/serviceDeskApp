@@ -232,9 +232,10 @@ describe("readiness ordering", () => {
     // across the whole table, so without a total order a row can land on two
     // pages or on none.
     const paged: string[] = [];
-    // Pages deliberately overshoot the seed count: the point is that the id
-    // tie-break makes every row appear exactly once, not that the table divides
-    // evenly. Bump this whenever SEEDS grows.
+    // The bound must be exactly ceil(SEEDS.length / 5) — listItems CLAMPS
+    // `page` to totalPages, so asking for a page past the end re-serves the
+    // last one and the equality assertion below would fail on the duplicates.
+    // Bump this whenever SEEDS grows.
     for (let page = 1; page <= 4; page++) {
       paged.push(...(await listItems({ sort: "readiness", dir: "asc", page, pageSize: 5 })).items.map((it) => it.id));
     }

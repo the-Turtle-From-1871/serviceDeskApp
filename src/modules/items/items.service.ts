@@ -13,6 +13,7 @@ import { loadUnitMap, learnUnits, type UnitResolution } from "./units.service";
 import { diffItemFields, type ItemLoggedFields } from "./item-diff";
 import { learnCategories } from "./categories.service";
 import { READINESS_JOINS, READINESS_RANK } from "./readiness.sql";
+import { CUSTODY_FROM, OPEN_CUSTODY_PREDICATE } from "@/modules/transfers/custody.sql";
 import { ItemError } from "./items.errors";
 import { recipientTokens } from "./recipient-search";
 
@@ -180,10 +181,14 @@ function orderClauseFor({ key, dir }: SortKey): Prisma.ItemOrderByWithRelationIn
 
 /** The recipient half of the search filter, as SQL.
  *
- *  The EXISTS mirrors the one in READINESS_CASE (readiness.sql.ts) — same three
- *  joins, same two custody guards — so "held by" means one thing across the
- *  filter, the Readiness badge and the Holder column. An EXISTS rather than a
- *  join so an item on two receipts still counts once and cannot duplicate a row.
+ *  The joins and the custody guards come from custody.sql.ts, the ONE
+ *  definition of live custody — the same fragments READINESS_CASE's DEPLOYED
+ *  branch and holdersForItems embed — so "held by" means one thing across the
+ *  filter, the Readiness badge and the Holder column, by construction rather
+ *  than by three copies happening to agree. Only what is genuinely this query's
+ *  stays local: the correlation to the outer item row and the name match. An
+ *  EXISTS rather than a join so an item on two receipts still counts once and
+ *  cannot duplicate a row.
  *
  *  Tokens are AND'd (see recipient-search.ts) and every pattern is a BOUND
  *  parameter (CLAUDE.md §2). With no tokens the branch renders as FALSE; the
@@ -195,12 +200,9 @@ function recipientMatchSql(tokens: string[]): Prisma.Sql {
   const clauses = tokens.map((t) => Prisma.sql`t."receiverName" ILIKE ${`%${t}%`}`);
   return Prisma.sql`EXISTS (
       SELECT 1
-      FROM "TransferItem" ti
-      JOIN "TransferLine" tl ON tl."id" = ti."transferLineId"
-      JOIN "Transfer" t ON t."id" = tl."transferId"
+      ${CUSTODY_FROM}
       WHERE ti."itemId" = i."id"
-        AND ti."returnedAt" IS NULL
-        AND t."status" = 'OPEN'
+        AND ${OPEN_CUSTODY_PREDICATE}
         AND ${Prisma.join(clauses, " AND ")}
     )`;
 }

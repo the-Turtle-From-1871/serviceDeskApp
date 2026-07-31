@@ -1,5 +1,6 @@
 import "server-only";
 import { Prisma } from "@prisma/client";
+import { CUSTODY_FROM, OPEN_CUSTODY_PREDICATE } from "@/modules/transfers/custody.sql";
 import { READINESS_ORDER } from "./readiness";
 
 /* ============================================================
@@ -41,14 +42,17 @@ export const READINESS_CASE = Prisma.sql`
   CASE
     WHEN i."status" = 'RETIRED' THEN 'RETIRED'
     WHEN sq."itemId" IS NOT NULL THEN 'IN_REPAIR'
+    -- "Issued out on a live hand receipt". The joins and the custody guards are
+    -- NOT written out here: they come from custody.sql.ts, the ONE definition
+    -- of live custody, shared with the /items recipient search
+    -- (recipientMatchSql) and the Holder column (holdersForItems). Written
+    -- three times the rule would drift silently — no parity test can see a copy
+    -- it does not know about. Only the correlation to this row is local.
     WHEN EXISTS (
       SELECT 1
-      FROM "TransferItem" ti
-      JOIN "TransferLine" tl ON tl."id" = ti."transferLineId"
-      JOIN "Transfer" t ON t."id" = tl."transferId"
+      ${CUSTODY_FROM}
       WHERE ti."itemId" = i."id"
-        AND ti."returnedAt" IS NULL
-        AND t."status" = 'OPEN'
+        AND ${OPEN_CUSTODY_PREDICATE}
     ) THEN 'DEPLOYED'
     -- NOTE: no "lastLogonAt > markedReadyAt" rule here. It was removed from
     -- both twins together; see readinessState() for why. Do not re-add it to
