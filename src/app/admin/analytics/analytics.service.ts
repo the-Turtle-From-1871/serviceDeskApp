@@ -3,6 +3,9 @@ import { Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { listItemUics } from "@/modules/items/items.service";
 import { auditCutoff, type AuditState } from "@/modules/audit/audit.status";
+// The bucket CASE is shared with the /items audit sort so the donut and the
+// table can never disagree about which badge a row carries.
+import { auditCaseSql } from "@/modules/audit/audit.sql";
 import type { ReadinessState } from "@/modules/items/readiness";
 import {
   READINESS_CASE,
@@ -109,11 +112,7 @@ export async function getAuditReadiness(scope: ItemScope): Promise<AuditReadines
   // Aliased `i` only so it can share the one scope fragment with the readiness
   // aggregates; this query derives no readiness of its own.
   const rows = await prisma.$queryRaw<{ state: AuditState; count: number }[]>(Prisma.sql`
-    SELECT CASE
-             WHEN i."lastAuditedAt" IS NULL          THEN 'never'
-             WHEN i."lastAuditedAt" > ${cutoff}      THEN 'compliant'
-             ELSE                                         'overdue'
-           END AS state,
+    SELECT ${auditCaseSql(cutoff)} AS state,
            COUNT(*)::int AS count
     FROM "Item" i
     WHERE i."status" = 'ACTIVE'

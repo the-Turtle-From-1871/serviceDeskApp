@@ -6,6 +6,29 @@ export type AuditState = "compliant" | "overdue" | "never";
 
 export const AUDIT_PERIOD_YEARS = 1;
 
+/**
+ * The badge sequence, best-verified to least, used to RANK an audit sort.
+ *
+ * WHY A RANK AND NOT THE TIMESTAMP: `/items` displays a three-value badge but
+ * used to sort by `lastAuditedAt` itself. A timestamp is very nearly unique per
+ * row — production carries 31 audited rows with 31 distinct stamps — so a
+ * secondary sort key had no ties to break and silently did nothing. Ranking the
+ * badge gives each group real ties, which is what makes "Audit, then Device
+ * name" mean what the control implies.
+ *
+ * This is the SINGLE definition of that sequence. It was already the analytics
+ * donut's render order, declared there as `AUDIT_STATE_ORDER`; that name is now
+ * a re-export of this one (analytics.types.ts) rather than a second array,
+ * because the palette's colourblind check was run against that exact order and
+ * a sort that walked the states differently would contradict the chart. So:
+ * `auditRankSql` builds the SQL CASE from this array, the donut stacks from it,
+ * and `/items` sorts by it.
+ *
+ * `as const satisfies` keeps the literal tuple (the donut indexes it as a type)
+ * while still checking every entry is a real AuditState.
+ */
+export const AUDIT_ORDER = ["compliant", "overdue", "never"] as const satisfies readonly AuditState[];
+
 // null lastAuditedAt -> "never". Compliant while `now` is before the audit date
 // plus one calendar year; "overdue" from that instant on (the boundary itself is
 // overdue). setFullYear handles leap days by normalizing (Feb 29 -> Mar 1).

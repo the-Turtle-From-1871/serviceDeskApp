@@ -64,8 +64,16 @@ export function getItemWithCreator(id: string) {
 // The sort vocabulary lives in the leaf module `./sort-keys` so the client
 // table can share ONE definition without importing this server-only file (and
 // with it a Prisma client). Re-exported for existing importers.
-import { SORT_COLUMN, ITEM_SORT_COLUMNS } from "./sort-keys";
+import {
+  SORT_COLUMN,
+  ITEM_SORT_COLUMNS,
+  DERIVED_SORT_KEYS,
+  READINESS_SORT_KEY,
+  AUDIT_SORT_KEY,
+} from "./sort-keys";
 export { SORT_COLUMN, ITEM_SORT_COLUMNS };
+import { auditCutoff } from "@/modules/audit/audit.status";
+import { auditRankSql } from "@/modules/audit/audit.sql";
 
 /** Resolve a sort key to its physical column, or refuse.
  *
@@ -140,17 +148,17 @@ export function parseSortKeys(sort: string | null | undefined, dir: string | nul
  * swap ends when the direction is reversed, and reversing a sort reverses the
  * whole list. Pinning even one column would leave part of the list unmoved on
  * reverse, which reads as a broken sort — and it has to hold on BOTH paths, or
- * a sort would mean different things depending on whether `readiness` happens
- * to be among the keys (see readinessOrderedItemIds, which says the same).
+ * a sort would mean different things depending on whether a derived key happens
+ * to be among them (see derivedOrderedItemIds, which says the same).
  *
- * Consequence worth knowing: a null `lastAuditedAt` encodes "never audited", so
- * the Audit sort orders by recency rather than by badge severity.
+ * Only NON-derived keys reach here: a sort naming `readiness` or `auditState`
+ * takes the raw path entirely, and columnForKey refuses them.
  */
 function orderClauseFor({ key, dir }: SortKey): Prisma.ItemOrderByWithRelationInput {
   // Resolved through the same helper the raw path uses, so the two can never
-  // disagree about what a key means (`auditState` -> the denormalized
-  // `lastAuditedAt`), and an unmapped key raises a typed ItemError instead of
-  // producing `{ undefined: dir }` and a generic Prisma failure.
+  // disagree about what a key means, and an unmapped key raises a typed
+  // ItemError instead of producing `{ undefined: dir }` and a generic Prisma
+  // failure.
   return { [columnForKey(key)]: dir } as Prisma.ItemOrderByWithRelationInput;
 }
 
@@ -198,31 +206,44 @@ function itemFilterSql(search: string | null, uic: string | null): Prisma.Sql {
 }
 
 /**
- * ONE page of item ids, ordered by a sort that involves readiness.
+ * ONE page of item ids, ordered by a sort that involves a DERIVED key.
  *
- * Readiness has no column for Prisma to `orderBy` — but Postgres can derive it
- * inline from the same CASE the badge and the dashboard read, ranked by
- * READINESS_RANK. Selecting ids ONLY keeps this cheap and lets getItemsByIds
- * hydrate the page: two bounded queries for the whole list, never a derivation
- * per row.
+ * Neither readiness nor the audit badge has a column for Prisma to `orderBy` —
+ * readiness is computed from four signals across three tables, and the audit
+ * badge from `lastAuditedAt` against the audit period — but Postgres can derive
+ * both inline from the same CASEs the badges and the dashboard read, ranked by
+ * READINESS_RANK / auditRankSql. Selecting ids ONLY keeps this cheap and lets
+ * getItemsByIds hydrate the page: two bounded queries for the whole list, never
+ * a derivation per row.
  *
  * LIMIT/OFFSET carry the page-size cap over from the Prisma path, and the `id`
- * tie-break is repeated for the reason it exists there — readiness has five
+ * tie-break is repeated for the reason it exists there — a rank has a handful of
  * distinct values across 1,200+ rows, so without a total order a row could
  * appear on two pages or on none.
+ *
+ * `now` is threaded in rather than read here so the audit cutoff is fixed for
+ * the whole query and a test can pin it.
  */
-async function readinessOrderedItemIds(opts: {
+async function derivedOrderedItemIds(opts: {
   search: string | null;
   uic: string | null;
   sortKeys: SortKey[];
   skip: number;
   take: number;
+  now: Date;
 }): Promise<string[]> {
   const terms: Prisma.Sql[] = [];
   for (const { key, dir } of opts.sortKeys) {
     const direction = Prisma.raw(dir === "asc" ? "ASC" : "DESC");
-    if (key === "readiness") {
+    if (key === READINESS_SORT_KEY) {
       terms.push(Prisma.sql`${READINESS_RANK} ${direction}`);
+      continue;
+    }
+    if (key === AUDIT_SORT_KEY) {
+      // The BADGE, not the timestamp behind it. Ordering by `lastAuditedAt`
+      // here is what made a secondary key a no-op: stamps are near-unique, so
+      // there were no ties to break. See auditRankSql.
+      terms.push(Prisma.sql`${auditRankSql(auditCutoff(opts.now))} ${direction}`);
       continue;
     }
     // parseSortKeys already dropped anything unknown; columnForKey re-checks at
@@ -231,8 +252,8 @@ async function readinessOrderedItemIds(opts: {
     const ref = Prisma.raw(`i."${columnForKey(key)}"`);
     // Bare ordering, no NULLS override — blanks swap ends with the direction,
     // exactly as the Prisma path's `{ column: dir }` does. Keeping these two in
-    // step is what stops a sort behaving differently depending on whether
-    // readiness happens to be among the keys.
+    // step is what stops a sort behaving differently depending on whether a
+    // derived key happens to be among them.
     terms.push(Prisma.sql`${ref} ${direction}`);
   }
   terms.push(Prisma.sql`i."id" ASC`);
@@ -280,20 +301,21 @@ export async function listItems(opts: {
 
   const sortKeys = parseSortKeys(opts.sort, opts.dir);
 
-  // Readiness sorts through a SEPARATE, raw-SQL path — not because it is
-  // special, but because it is derived from four signals across three tables
-  // (readiness.ts) and so has no column for a Prisma `orderBy` to name. The two
-  // alternatives were worse: a stored copy on Item is the `deployableStatus`
-  // column that was deliberately dropped for drifting, and sorting a fetched
-  // page in JavaScript would order 50 rows while claiming to order 1,200.
-  // Postgres CAN order it — the same CASE the badge and the dashboard read —
-  // so a sort that involves readiness selects its ids in SQL and hydrates them,
-  // and every other sort stays on the untouched Prisma path below.
-  const sortsByReadiness = sortKeys.some((k) => k.key === "readiness");
+  // DERIVED sorts go through a SEPARATE, raw-SQL path — not because they are
+  // special, but because neither has a column for a Prisma `orderBy` to name:
+  // readiness is computed from four signals across three tables (readiness.ts),
+  // and the audit badge is a three-value CASE over `lastAuditedAt` against the
+  // audit period (audit.sql.ts). The two alternatives were worse: a stored copy
+  // on Item is the `deployableStatus` column that was deliberately dropped for
+  // drifting, and sorting a fetched page in JavaScript would order 50 rows while
+  // claiming to order 1,200. Postgres CAN order both — the same CASEs the badges
+  // and the dashboard read — so a sort involving either selects its ids in SQL
+  // and hydrates them, and every other sort stays on the untouched Prisma path.
+  const sortsByDerived = sortKeys.some((k) => DERIVED_SORT_KEYS.has(k.key));
 
   // The chosen sort is the whole ORDER BY.
   const orderBy: Prisma.ItemOrderByWithRelationInput[] = [];
-  if (!sortsByReadiness) {
+  if (!sortsByDerived) {
     for (const k of sortKeys) orderBy.push(orderClauseFor(k));
     // Newest-first is the historical default; keep it when nothing else orders.
     if (sortKeys.length === 0) orderBy.push({ createdAt: "desc" });
@@ -308,9 +330,16 @@ export async function listItems(opts: {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const page = Math.min(Math.max(1, Math.floor(opts.page ?? 1)), totalPages);
   const skip = (page - 1) * pageSize;
-  const items = sortsByReadiness
+  const items = sortsByDerived
     ? await getItemsByIds(
-        await readinessOrderedItemIds({ search: search ?? null, uic, sortKeys, skip, take: pageSize }),
+        await derivedOrderedItemIds({
+          search: search ?? null,
+          uic,
+          sortKeys,
+          skip,
+          take: pageSize,
+          now: new Date(),
+        }),
       )
     : await prisma.item.findMany({ where, orderBy, skip, take: pageSize });
 

@@ -1,5 +1,25 @@
 import { describe, it, expect } from "vitest";
-import { auditCutoff, auditState, auditStateDisplay } from "./audit.status";
+import { AUDIT_ORDER, auditCutoff, auditState, auditStateDisplay } from "./audit.status";
+
+describe("AUDIT_ORDER", () => {
+  // auditRankSql builds its CASE from this array and has NO `ELSE`, so a state
+  // missing here would rank NULL and sort every row carrying it to one end of
+  // /items without any error. `satisfies` only checks each entry IS an
+  // AuditState — it cannot check that all of them are present, which is why
+  // this asserts exhaustiveness against the display map instead.
+  it("ranks every AuditState", () => {
+    const everyState = (["compliant", "overdue", "never"] as const).map((s) => {
+      // Fails to compile if the union grows and this list does not.
+      expect(auditStateDisplay(s).label).toBeTruthy();
+      return s;
+    });
+    expect([...AUDIT_ORDER].sort()).toEqual([...everyState].sort());
+  });
+
+  it("runs best-verified to least, matching the analytics donut", () => {
+    expect([...AUDIT_ORDER]).toEqual(["compliant", "overdue", "never"]);
+  });
+});
 
 describe("auditState", () => {
   it("returns 'never' when there is no audit date", () => {

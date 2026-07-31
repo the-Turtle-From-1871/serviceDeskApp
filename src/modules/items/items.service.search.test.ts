@@ -8,6 +8,7 @@ import {
   ITEM_SORT_COLUMNS,
   SORT_COLUMN,
 } from "./items.service";
+import { DERIVED_SORT_KEYS } from "./sort-keys";
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -72,11 +73,12 @@ describe("listItems", () => {
     model: "model",
     serialNumber: "serialNumber",
     status: "status",
-    auditState: "lastAuditedAt",
     deviceUIC: "deviceUIC",
     deviceCategory: "deviceCategory",
   };
-  const PRISMA_PATH_KEYS = [...ITEM_SORT_COLUMNS].filter((k) => k !== "readiness");
+  // Derived keys have NO column — they are ranked CASEs on the raw path — so
+  // they are excluded here and covered by their own assertions below.
+  const PRISMA_PATH_KEYS = [...ITEM_SORT_COLUMNS].filter((k) => !DERIVED_SORT_KEYS.has(k));
 
   it("pins an expected column for every key the server accepts", () => {
     expect(Object.keys(EXPECTED_COLUMN).sort()).toEqual([...PRISMA_PATH_KEYS].sort());
@@ -126,22 +128,52 @@ describe("listItems", () => {
     }
   });
 
-  it("maps the derived auditState sort to lastAuditedAt in both directions", async () => {
+  it("sends an auditState sort down the raw path, ranked by badge not by timestamp", async () => {
     // ...Once, not a persistent implementation: `clearAllMocks` wipes call
     // records but NOT implementations, so a sticky mockResolvedValue here would
     // silently set count=100 for every test declared after this one and make
     // declaration order load-bearing for anything that reads totalPages.
-    vi.mocked(prisma.item.count).mockResolvedValueOnce(100).mockResolvedValueOnce(100);
+    for (const [dir, sql] of [
+      ["asc", "ASC"],
+      ["desc", "DESC"],
+    ] as const) {
+      vi.mocked(prisma.$queryRaw).mockClear();
+      vi.mocked(prisma.item.findMany).mockClear();
+      vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
+      await listItems({ sort: "auditState", dir });
 
-    // auditState is derived and time-dependent, so it rides the denormalized
-    // lastAuditedAt column. Never-audited rows (null) sort as a value like any
-    // other blank — they swap ends with the direction rather than being pinned.
-    await listItems({ sort: "auditState", dir: "asc" });
-    expect(orderOf()).toEqual([{ lastAuditedAt: "asc" }, { id: "asc" }]);
+      // The Prisma path must not run at all — auditState has no column.
+      expect(vi.mocked(prisma.item.findMany)).not.toHaveBeenCalled();
 
-    vi.mocked(prisma.item.findMany).mockClear();
-    await listItems({ sort: "auditState", dir: "desc" });
-    expect(orderOf()).toEqual([{ lastAuditedAt: "desc" }, { id: "asc" }]);
+      const [emitted] = vi.mocked(prisma.$queryRaw).mock.calls[0] as unknown as [
+        { strings: string[] },
+      ];
+      const text = emitted.strings.join("");
+      const orderBy = text.slice(text.lastIndexOf("ORDER BY"));
+      // Ranked CASE over lastAuditedAt, NOT a bare `i."lastAuditedAt"` term.
+      // That bare term is the regression: stamps are near-unique, so a
+      // secondary key had no ties to break and silently did nothing.
+      expect(orderBy).not.toContain(`i."lastAuditedAt" ${sql}`);
+      expect(orderBy).toContain("CASE");
+      expect(orderBy).toContain(`END) ${sql}`);
+      expect(orderBy).toContain(`i."id" ASC`);
+    }
+  });
+
+  it("keeps a secondary key after the audit rank, so it can order within a badge", async () => {
+    vi.mocked(prisma.item.count).mockResolvedValueOnce(100);
+    await listItems({ sort: "auditState,deviceName", dir: "desc,asc" });
+
+    const [emitted] = vi.mocked(prisma.$queryRaw).mock.calls[0] as unknown as [
+      { strings: string[] },
+    ];
+    const text = emitted.strings.join("");
+    const orderBy = text.slice(text.lastIndexOf("ORDER BY"));
+    // Each key carries its OWN direction — `dir` is a parallel list, not one
+    // flag for the whole ORDER BY — and the secondary follows the rank.
+    expect(orderBy).toContain(`END) DESC`);
+    expect(orderBy).toContain(`i."deviceName" ASC`);
+    expect(orderBy.indexOf("END) DESC")).toBeLessThan(orderBy.indexOf(`i."deviceName"`));
   });
 
   // The raw path is the OTHER half of the no-pinning rule, and the parity test
