@@ -75,7 +75,7 @@ export function ItemsSearchInput({
         aria-label="Search items"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search device name, make, model, or serial number"
+        placeholder="Search device name, make, model, serial number, or recipient"
         style={{ maxWidth: 360 }}
       />
       <span aria-live="polite" role="status" className="subtle">

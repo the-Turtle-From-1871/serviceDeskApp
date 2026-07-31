@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/authz";
 import { listItems, listItemUics } from "@/modules/items/items.service";
 import { listCategoryNames } from "@/modules/items/categories.service";
 import { readinessForItems } from "@/modules/items/readiness.query";
+import { holdersForItems } from "@/modules/transfers/holders.query";
 import { SiteHeader } from "@/components/SiteHeader";
 import { ItemSelectTable } from "@/components/ItemSelectTable";
 import { ItemsSearchInput } from "./ItemsSearchInput";
@@ -47,11 +48,15 @@ export default async function ItemsListPage({
     listItemUics(),
     isAdmin ? listCategoryNames() : Promise.resolve<string[]>([]),
   ]);
-  // Readiness is derived from signals in three tables, so it cannot ride along
-  // on the item row. ONE extra query derives it for the whole page at once —
-  // never one per row — and it has to follow listItems because it needs the
-  // page's ids. Bounded by ITEMS_PAGE_SIZE.
-  const readiness = await readinessForItems(result.items.map((it) => it.id));
+  // Neither readiness nor the current holder can ride along on the item row —
+  // both are derived from other tables. TWO extra queries derive them for the
+  // whole page at once, never one per row, and both must follow listItems
+  // because they need the page's ids. Bounded by ITEMS_PAGE_SIZE.
+  const ids = result.items.map((it) => it.id);
+  const [readiness, holders] = await Promise.all([
+    readinessForItems(ids),
+    holdersForItems(ids),
+  ]);
   const now = new Date();
   const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
 
@@ -89,6 +94,8 @@ export default async function ItemsListPage({
               make: it.make,
               model: it.model,
               serialNumber: it.serialNumber,
+              // Absent from the map = nothing currently holds it.
+              holderName: holders.get(it.id) ?? null,
               status: it.status,
               auditState: it.status === "RETIRED" ? null : auditState(it.lastAuditedAt, now),
               deviceUIC: it.deviceUIC,
