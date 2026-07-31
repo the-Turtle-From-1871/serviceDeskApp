@@ -3,6 +3,16 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-07-31
+
+### Added
+- **The home page now explains what this application is.** Anyone who opens the site — with or without the access PIN — gets a plain description of the app: that it issues IT equipment on signed digital hand receipts, tracks who is holding each device, processes returns, lets a device be looked up by serial number or QR code, runs the service queue, and sends transactional email to the parties on a receipt. It also says who the app is for and links the Privacy Policy and Terms of Service.
+
+### Changed
+- **The home page is no longer behind the access PIN; the records it searches still are.** A logged-out visitor used to be redirected straight from the front page to the 8-digit PIN prompt, so the only thing the site said about itself was "Enter the access PIN" — which is why Google refused the app's branding verification. The front page now opens for everyone and shows the description above, with a button to enter the PIN. Nothing else moved: item pages, hand receipts and receipt PDFs still require the PIN, and the search box on the home page still appears only once you are unlocked or signed in. Searching without the PIN is refused outright rather than quietly returning nothing.
+- **A search whose access has expired now says so.** The unlock lasts 12 hours, so it can lapse with the home page still open. A search after that point used to report "No matches" — telling someone their serial number does not exist. It now says access has expired and links back to the PIN prompt.
+- **The PIN page points back to the home page.** Anyone who arrives at the PIN wall from an item or receipt link now has a way to read what the application is for.
+
 ## 2026-07-30
 
 ### Added

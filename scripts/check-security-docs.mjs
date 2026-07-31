@@ -45,7 +45,12 @@ export const WATCHED = [
   [/^src\/lib\/password-reset\.ts$/, "password-reset tokens (§4)"],
   [/^src\/lib\/reset-token\.ts$/, "reset-token generation/hashing (§4)"],
   [/^src\/app\/actions\/auth\.ts$/, "login + reset actions, anti-enumeration (§1, §4)"],
-  [/^src\/lib\/public-access(-cookie)?\.ts$/, "the public PIN gate (§3)"],
+  // Covers public-access.ts (the PIN hash), -cookie.ts (the signed cookie) and
+  // -guard.ts (the in-app check that gates the search action now that `/` is
+  // public). The last one is the whole gate for that action, so it must not be
+  // able to change quietly.
+  [/^src\/lib\/public-access(-cookie|-guard)?\.ts$/, "the public PIN gate (§3)"],
+  [/^src\/app\/actions\/search\.ts$/, "the public search action's own PIN check (§3)"],
   [/^src\/app\/actions\/unlock\.ts$/, "the unlock action + cookie flags, anti-guessing delay (§3)"],
   // The policy numbers (5/15min, 60/15min, 100/min), the composite key shape,
   // the spend-then-refund split and the fail-OPEN behavior are all posture, not

@@ -78,8 +78,8 @@ function isApiAuthPath(pathname: string): boolean {
 }
 
 /**
- * The genuinely public read surface: the home search, an item page, and a
- * receipt (or its PDF).
+ * The pages that expose item/receipt PII: an item page, and a receipt (or its
+ * PDF). These are what the PIN gate walls off.
  *
  * `/receipts/` as a bare prefix was wrong: it also swallowed `/receipts/new`
  * (the staff hand-receipt builder) and `/receipts/<n>/return` (admin-only), so
@@ -88,10 +88,30 @@ function isApiAuthPath(pathname: string): boolean {
  * a plain-text 403 rather than `/login`. Authorization was never the issue
  * (`requireUser` runs in-page regardless); the routing was.
  */
-const isPublicPiiPath = (pathname: string) =>
-  pathname === "/" ||
+const isPinGatedPath = (pathname: string) =>
   pathname.startsWith("/i/") ||
   /^\/receipts\/(?!new(?:\/|$))[^/]+(?:\/pdf)?$/.test(pathname);
+
+/**
+ * `/` is public but NOT PIN-gated, and the split is deliberate.
+ *
+ * The home page has to be readable by a logged-out stranger: it is the page
+ * that says what this application is, and Google's OAuth branding verification
+ * requires a home page that is publicly reachable and explains the app's
+ * purpose. Redirecting it to `/unlock` failed that review — the reviewer saw an
+ * 8-digit PIN prompt and nothing else.
+ *
+ * No PII moved: the page renders only an explanation for a locked visitor, and
+ * every item/receipt page it can lead to is still gated below. The one thing
+ * that DID lose its proxy cover is the type-ahead Server Action, which POSTs to
+ * `/` — so `liveSearchAction` now runs the identical check itself via
+ * `publicAccessAllowed()`. That check is the control; this exemption is only
+ * about what a stranger may READ on the landing page.
+ */
+const isHomePath = (pathname: string) => pathname === "/";
+
+/** Anonymous callers on any of these pay the anti-scraping limit + UA check. */
+const isPublicPath = (pathname: string) => isHomePath(pathname) || isPinGatedPath(pathname);
 
 // Automation that does not pretend to be a browser. Deliberately a SHORT list of
 // default user-agent strings, not a heuristic: it costs a scraper one line to
@@ -144,7 +164,7 @@ function looksAutomated(userAgent: string | null): boolean {
 const authGatedProxy = auth(async (req) => {
   const { pathname, search } = req.nextUrl;
   const loggedIn = !!req.auth;
-  const isPublicPii = isPublicPiiPath(pathname);
+  const isPublic = isPublicPath(pathname);
 
   // Gate 0b — the anti-scraping limit, for ANONYMOUS callers only.
   //
@@ -160,7 +180,7 @@ const authGatedProxy = auth(async (req) => {
   // the caller is signed in requires the session read. It costs little for the
   // traffic being shed — an anonymous request carries no session cookie, so
   // Auth.js short-circuits before any JWT decode or database query.
-  if (!loggedIn && (isPublicPii || pathname.startsWith("/api/"))) {
+  if (!loggedIn && (isPublic || pathname.startsWith("/api/"))) {
     // Cheapest refusal first: a request with no User-Agent never needed a
     // bucket. Scoped to anonymous callers on the public surface for the same
     // reason the limit is — a signed-in technician might be driving a script,
@@ -175,7 +195,12 @@ const authGatedProxy = auth(async (req) => {
     if (!verdict.allowed) return tooManyRequests(verdict);
   }
 
-  if (isPublicPii) {
+  // The home page: public to everyone, gated for no one. It carries no item or
+  // receipt data of its own — see `isHomePath` for why it is exempt and what
+  // picked up the gating it used to inherit.
+  if (isHomePath(pathname)) return NextResponse.next();
+
+  if (isPinGatedPath(pathname)) {
     const flagEnabled = process.env.PUBLIC_ACCESS_PIN_ENABLED === "true";
     const secret = process.env.AUTH_SECRET ?? "";
     const secure = process.env.NODE_ENV === "production";

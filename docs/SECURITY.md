@@ -3,7 +3,7 @@
 A living inventory of every security control in this app — what it does, where
 it lives, and why. **Maintained over time**; see [Keeping this current](#keeping-this-current).
 
-**Last reviewed: 2026-07-30**
+**Last reviewed: 2026-07-31**
 
 Related: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`../CLAUDE.md`](../CLAUDE.md) · [`password-reset-hardening.md`](./password-reset-hardening.md)
 
@@ -15,7 +15,7 @@ Related: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`../CLAUDE.md`](../CLAUDE.md
 |---|---|
 | Authentication | Auth.js v5, Credentials + JWT, bcrypt cost 12, live session revocation, 10h absolute / 4h idle |
 | Authorization | Role-based (`ADMIN`/`USER`), enforced per-route, re-read from the DB every request |
-| Public surface | Enumerable **by design**, behind a shared 8-digit PIN gate |
+| Public surface | Enumerable **by design**, behind a shared 8-digit PIN gate; `/` itself is open and carries no data |
 | Secrets | All via env; sensitive modules marked `server-only` |
 | Database | RLS deny-all, but **app-layer is the real boundary** |
 | CI | Semgrep SAST + build + security-docs check, all three required to merge to `main` |
@@ -264,10 +264,33 @@ individual account per technician" — see the corresponding `CLAUDE.md` bullet.
 > (`HR-000001…`), and the public pages expose party PII, signatures, and the
 > device catalog. This is intended. It can be hardened later *if the team asks*.
 
-**An 8-digit shared PIN walls off `/`, `/i/*`, and `/receipts/*`** when
+**An 8-digit shared PIN walls off `/i/*` and `/receipts/*`** when
 `PUBLIC_ACCESS_PIN_ENABLED` is on. Logged-in users bypass it. This is a
 **non-authz gate** — it checks a PIN cookie or a session; `requireUser` /
 `requireAdmin` remain the real boundary. `src/proxy.ts`
+
+**`/` is deliberately NOT in that list, and the gate it used to inherit moved to
+the search action.** The home page must be readable by a logged-out stranger:
+it is the page that states what this application is, and Google's OAuth branding
+verification requires a publicly reachable home page that explains the app's
+purpose — it refused this app because `/` redirected to the 8-digit PIN prompt.
+Removing `/` from the gate exposes no data (the page renders only an
+explanation, a link to `/unlock`, and — once unlocked — the search box; every
+item and receipt page it leads to is still gated). **What it did expose is the
+type-ahead Server Action**, because a Server Action POSTs to the path of the
+page hosting it, so `liveSearchAction` was gated for free only while `/` was.
+It now runs the identical check itself through `publicAccessAllowed()`, which
+answers the same question from `shouldAllowPublic` — the shared decision
+function — so "flag off = open" and "logged in = bypass" cannot come to mean two
+different things on the two paths. **That check is the control, not defence in
+depth:** delete it and the whole item and receipt catalog is searchable by
+anyone who can POST to `/`, with no PIN. A refusal returns `{locked: true}`
+rather than an empty result, so an expired cookie reads as "enter the PIN again"
+instead of "your serial number does not exist". `/` remains inside gate 0b (the
+anonymous browser check and the 300/min anti-scraping budget).
+`src/lib/public-access-guard.ts`, `src/app/actions/search.ts`, covered by
+`src/lib/public-access-guard.test.ts`, `src/app/actions/search.test.ts` and
+`src/proxy.test.ts`
 
 **The PIN is stored bcrypt-hashed, never plaintext.** Single-row
 `PublicAccessSetting`, admin-settable from `/admin`, recording who changed it and

@@ -134,6 +134,26 @@ describe("proxy — public PIN gate", () => {
     expect(setCookie).toMatch(/Expires=Thu, 01 Jan 1970|Max-Age=0/);
   });
 
+  it("does NOT gate the home page, even with the PIN flag on and no cookie", async () => {
+    // `/` is the page that explains what this application is, and it has to be
+    // readable by a stranger — Google's OAuth branding verification refused the
+    // app because the home page redirected to this 8-digit PIN prompt. It is
+    // exempt from the PIN gate, NOT from the login gate's default-deny: assert
+    // it goes to neither, since falling through to the wrong branch would send
+    // it to /login and look just as broken.
+    const res = await run(request({ path: "/" }));
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.status).not.toBe(403);
+  });
+
+  it("still gates item and receipt pages the home page links to", async () => {
+    // The exemption above is scoped to `/` alone. If it ever widens, the PIN
+    // gate is gone — the home page's whole purpose is linking to these.
+    for (const path of ["/i/abc", "/receipts/HR-000001", "/receipts/HR-000001/pdf"]) {
+      expect((await run(request({ path }))).headers.get("location"), path).toContain("/unlock");
+    }
+  });
+
   it("refuses everyone when AUTH_SECRET is missing, rather than admitting them", async () => {
     // Fail CLOSED: with a blank key the expected MAC is hmac("", exp), which an
     // attacker can compute offline.
@@ -335,6 +355,21 @@ describe("proxy — rate limiting", () => {
         const res = await runIp(ipRequest({ path, ip: "9.0.0.2" }));
         expect(res.headers.get("location"), path).toBeNull();
       }
+    });
+
+    it("still meters the home page for anonymous callers, PIN gate or not", async () => {
+      // `/` left the PIN gate, but it must not leave gate 0b with it: it is
+      // still an anonymous, unauthenticated page and it fronts the search
+      // action, so it stays inside the anti-scraping budget and the browser
+      // check.
+      const hit = () => runIp(ipRequest({ path: "/", ip: "6.0.0.5" }));
+      for (let i = 0; i < API_POLICY.limit; i++) {
+        expect((await hit()).status, `request ${i + 1}`).not.toBe(429);
+      }
+      expect((await hit()).status).toBe(429);
+      expect(
+        (await runIp(ipRequest({ path: "/", ip: "6.0.0.6", userAgent: "curl/8.4.0" }))).status,
+      ).toBe(403);
     });
 
     it("leaves an authenticated technician's own routes alone", async () => {

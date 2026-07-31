@@ -26,6 +26,13 @@ export default async function UnlockPage({
         <p className="subtle">
           Staff? <Link href="/login">Log in</Link> instead.
         </p>
+        {/* The wall is reachable directly (any /i/* or /receipts/* link lands
+            here), so it needs a way to the page that explains what this
+            application is — otherwise a first-time visitor's only impression of
+            the site is a PIN prompt. */}
+        <p className="subtle">
+          New here? <Link href="/">Read what this application is for</Link>.
+        </p>
       </main>
     </>
   );

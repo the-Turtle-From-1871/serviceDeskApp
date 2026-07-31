@@ -25,6 +25,11 @@ describe("check-security-docs WATCHED list", () => {
     "src/lib/cron-auth.ts",
     "src/modules/items/import-actor.ts",
     "src/app/api/items/import/route.ts",
+    // `/` left the proxy's PIN gate so the home page could be publicly
+    // readable; these two are what took over gating the data behind it, and an
+    // unwatched change to either silently re-opens the item/receipt catalog.
+    "src/lib/public-access-guard.ts",
+    "src/app/actions/search.ts",
   ];
 
   it.each(introducedThisBranch)("covers %s", (path) => {
