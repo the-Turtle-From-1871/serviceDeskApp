@@ -106,3 +106,79 @@ describe("buildRawEmail body structure", () => {
     expect(mixed).not.toBe(alt);
   });
 });
+
+describe("buildRawEmail header safety", () => {
+  // Injection means a NEW header line, so assert on the line break rather than
+  // on the substring — the sanitized value legitimately still contains the
+  // text "Bcc:", just folded harmlessly into the header it came from.
+  const FORGED_HEADER = /\r\nBcc:/;
+
+  it("strips CRLF from the subject so headers cannot be forged", () => {
+    const mime = decode(
+      buildRawEmail({ ...base, subject: "ok\r\nBcc: attacker@evil.com" }, FROM, BOUNDARIES),
+    );
+    expect(mime).not.toMatch(FORGED_HEADER);
+    expect(mime).toContain("Subject: ok Bcc: attacker@evil.com");
+  });
+
+  it("strips CRLF from the to address", () => {
+    const mime = decode(buildRawEmail({ ...base, to: "a@x.com\r\nBcc: attacker@evil.com" }, FROM, BOUNDARIES));
+    expect(mime).not.toMatch(FORGED_HEADER);
+    expect(mime).toContain("To: a@x.com Bcc: attacker@evil.com");
+  });
+
+  it("strips CRLF from cc entries", () => {
+    const mime = decode(buildRawEmail({ ...base, cc: ["a@x.com\r\nBcc: evil@x.com"] }, FROM, BOUNDARIES));
+    expect(mime).not.toMatch(FORGED_HEADER);
+  });
+
+  it("strips CRLF from the from address", () => {
+    const mime = decode(buildRawEmail({ ...base }, "Desk <d@x.com>\r\nBcc: evil@x.com", BOUNDARIES));
+    expect(mime).not.toMatch(FORGED_HEADER);
+  });
+
+  it("strips CRLF and quotes from an attachment filename", () => {
+    const mime = decode(
+      buildRawEmail(
+        { ...base, attachments: [{ filename: 'a.pdf"\r\nBcc: evil@x.com', content: new Uint8Array([1]) }] },
+        FROM,
+        BOUNDARIES,
+      ),
+    );
+    expect(mime).not.toMatch(FORGED_HEADER);
+    // The quote is stripped too, or it would close the filename="..." parameter early.
+    expect(mime).toContain('filename="a.pdf Bcc: evil@x.com"');
+  });
+
+  it("RFC 2047 encodes a non-ASCII subject", () => {
+    const mime = decode(buildRawEmail({ ...base, subject: "Réparation requise" }, FROM, BOUNDARIES));
+    expect(mime).toContain(`Subject: =?UTF-8?B?${Buffer.from("Réparation requise", "utf8").toString("base64")}?=`);
+  });
+
+  it("leaves a pure-ASCII subject unencoded", () => {
+    const mime = decode(buildRawEmail({ ...base, subject: "NEW: HR-000123" }, FROM, BOUNDARIES));
+    expect(mime).toContain("Subject: NEW: HR-000123");
+    expect(mime).not.toContain("=?UTF-8?B?");
+  });
+
+  it("derives the attachment content type from the extension", () => {
+    const mime = decode(
+      buildRawEmail({ ...base, attachments: [{ filename: "report.csv", content: new Uint8Array([1]) }] }, FROM, BOUNDARIES),
+    );
+    expect(mime).toContain('Content-Type: text/csv; name="report.csv"');
+  });
+
+  it("falls back to application/octet-stream for an unknown extension", () => {
+    const mime = decode(
+      buildRawEmail({ ...base, attachments: [{ filename: "thing.xyz", content: new Uint8Array([1]) }] }, FROM, BOUNDARIES),
+    );
+    expect(mime).toContain('Content-Type: application/octet-stream; name="thing.xyz"');
+  });
+
+  it("still labels a pdf as application/pdf", () => {
+    const mime = decode(
+      buildRawEmail({ ...base, attachments: [{ filename: "hand-receipt.PDF", content: new Uint8Array([1]) }] }, FROM, BOUNDARIES),
+    );
+    expect(mime).toContain("Content-Type: application/pdf");
+  });
+});

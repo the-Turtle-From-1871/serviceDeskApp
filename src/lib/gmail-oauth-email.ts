@@ -28,10 +28,38 @@ function htmlPart(html: string): string {
   return `Content-Type: text/html; charset="UTF-8"${CRLF}${CRLF}${toCrlf(html)}`;
 }
 
+// A header value may never contain CR or LF: either would terminate the header
+// and let caller-supplied text forge new ones (an injected Bcc, a replaced
+// body). Collapse both to a space rather than dropping the value, so the
+// message still sends with visibly mangled — not silently altered — content.
+function headerValue(v: string): string {
+  return v.replace(/[\r\n]+/g, " ").trim();
+}
+
+// Non-ASCII is invalid raw in a header. Device, unit and person names can carry
+// it, so encode per RFC 2047 and leave pure-ASCII subjects byte-identical.
+function encodeSubject(s: string): string {
+  const clean = headerValue(s);
+  return /^[\x20-\x7E]*$/.test(clean) ? clean : `=?UTF-8?B?${Buffer.from(clean, "utf8").toString("base64")}?=`;
+}
+
+function contentTypeFor(filename: string): string {
+  switch (filename.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1]) {
+    case "pdf": return "application/pdf";
+    case "csv": return "text/csv";
+    case "txt": return "text/plain";
+    case "png": return "image/png";
+    case "jpg":
+    case "jpeg": return "image/jpeg";
+    default: return "application/octet-stream";
+  }
+}
+
 function attachmentPart(a: { filename: string; content: Uint8Array }): string {
+  const name = headerValue(a.filename).replace(/"/g, "");
   return (
-    `Content-Type: application/pdf; name="${a.filename}"${CRLF}` +
-    `Content-Disposition: attachment; filename="${a.filename}"${CRLF}` +
+    `Content-Type: ${contentTypeFor(name)}; name="${name}"${CRLF}` +
+    `Content-Disposition: attachment; filename="${name}"${CRLF}` +
     `Content-Transfer-Encoding: base64${CRLF}${CRLF}` +
     wrap76(Buffer.from(a.content).toString("base64"))
   );
@@ -53,9 +81,12 @@ export function buildRawEmail(
   const mixed = boundaries.mixed ?? `mix_${randomUUID()}`;
   const alt = boundaries.alt ?? `alt_${randomUUID()}`;
 
-  const headers = [`From: ${from}`, `To: ${msg.to}`];
-  if (msg.cc) headers.push(`Cc: ${Array.isArray(msg.cc) ? msg.cc.join(", ") : msg.cc}`);
-  headers.push(`Subject: ${msg.subject}`, "MIME-Version: 1.0");
+  const headers = [`From: ${headerValue(from)}`, `To: ${headerValue(msg.to)}`];
+  if (msg.cc) {
+    const cc = Array.isArray(msg.cc) ? msg.cc.map(headerValue).join(", ") : headerValue(msg.cc);
+    headers.push(`Cc: ${cc}`);
+  }
+  headers.push(`Subject: ${encodeSubject(msg.subject)}`, "MIME-Version: 1.0");
 
   // A complete body part, headers included — so it can serve either as the
   // top-level body or as the first part inside multipart/mixed.
