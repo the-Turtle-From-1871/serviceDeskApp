@@ -16,11 +16,15 @@ export type { SortDir };
 export type { SortField } from "@/modules/items/sort-keys";
 import type { SortField } from "@/modules/items/sort-keys";
 
-/** Every column the table can render. Identical to SortField: the table shows
- *  nothing it cannot also sort. Kept as its own name because the two lists are
- *  used for different things (visibility vs. ordering) and only one of them has
- *  to grow if a display-only column is ever added. */
-export type ColumnKey = SortField;
+/** Every column the table can render.
+ *
+ *  NO LONGER identical to SortField. `holder` is displayed but not
+ *  server-sortable: the current holder comes from a two-join custody lookup
+ *  (modules/transfers/holders.query.ts) with no column for Prisma to name, and
+ *  it is deliberately NOT a third derived sort key — that would mean a scalar
+ *  subquery in the raw ORDER BY, its own parity coverage and a nulls decision.
+ *  Sortability is the SORTABLE_COLUMNS list below; visibility is this one. */
+export type ColumnKey = SortField | "holder";
 
 /* Readiness labels have ONE definition, in modules/items/readiness.ts, next to
    the function that derives them. Re-exported here so the table imports its
@@ -42,6 +46,11 @@ export type ItemRow = {
   /** Derived server-side for the whole page in one query — never per row.
    *  See modules/items/readiness.query.ts. */
   readiness: ReadinessState;
+  /** The recipient named on this item's current hand receipt — open, with this
+   *  row unreturned. Null when nothing holds it. Derived server-side for the
+   *  whole page in one query — never per row. See
+   *  modules/transfers/holders.query.ts. */
+  holderName: string | null;
 };
 
 export type SortPref = GenericSortPref<SortField>;
@@ -51,6 +60,7 @@ export const ITEM_COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: "make", label: "Make" },
   { key: "model", label: "Model" },
   { key: "serialNumber", label: "Serial" },
+  { key: "holder", label: "Holder" },
   { key: "deviceUIC", label: "UIC" },
   { key: "deviceCategory", label: "Category" },
   { key: "readiness", label: "Readiness" },
@@ -58,14 +68,22 @@ export const ITEM_COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: "auditState", label: "Audit" },
 ];
 
-/** The Sort control's options. Every displayed column is server-sortable —
- *  readiness included, since listItems orders it in SQL (READINESS_RANK) rather
- *  than needing a column of its own. */
-export const SORTABLE_COLUMNS: { key: SortField; label: string }[] = ITEM_COLUMNS;
+/** The Sort control's options — every column EXCEPT `holder`.
+ *
+ *  This used to be `ITEM_COLUMNS` itself, on the invariant that the table shows
+ *  nothing it cannot also sort. `holder` breaks that invariant deliberately (see
+ *  ColumnKey), so the two lists diverge here rather than offering a sort the
+ *  server would silently drop: parseSortKeys does not accept `holder`, so a
+ *  `?sort=holder` URL falls back to the default order with no error. */
+export const SORTABLE_COLUMNS: { key: SortField; label: string }[] = ITEM_COLUMNS.filter(
+  (c): c is { key: SortField; label: string } => c.key !== "holder",
+);
 
 const SORT_FIELDS = new Set<string>(SORTABLE_COLUMNS.map((c) => c.key));
-// Visibility and sortability are separate sets on purpose, even while they hold
-// the same keys: hiding a column must never imply you cannot sort by it.
+// Visibility and sortability are separate CONCEPTS on purpose: hiding a column
+// must never imply you cannot sort by it. They also now differ in MEMBERSHIP —
+// COLUMN_KEYS has 10 keys (including "holder"), SORT_FIELDS has 9 — because
+// `holder` is displayable but not server-sortable (see SORTABLE_COLUMNS above).
 const COLUMN_KEYS = new Set<string>(ITEM_COLUMNS.map((c) => c.key));
 
 /** Client-side ordering of rows already in hand. The /items table does NOT use

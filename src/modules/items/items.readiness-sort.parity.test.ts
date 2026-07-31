@@ -42,6 +42,12 @@ type Seed = {
   lastLogonAt?: Date | null;
   lastLogonUser?: string | null;
   markedReadyAt?: Date | null;
+  /** The name on the seeded receipt. Only meaningful with `onOpenReceipt`. */
+  receiverName?: string;
+  /** Seed the receipt as CLOSED — custody has ended, so it must NOT match. */
+  receiptClosed?: boolean;
+  /** Seed the row as returned — custody has ended, so it must NOT match. */
+  receiptReturned?: boolean;
 };
 
 /* Every row is chosen for two jobs at once: it lands in a readiness bucket
@@ -55,18 +61,20 @@ type Seed = {
 const SEEDS: Seed[] = [
   { serial: `${PREFIX}DELTA-01`, make: "Dell", model: "5540", deviceName: "Node one", uic: "W1AAAA", category: "Laptop", lastAuditedAt: JAN, markedReadyAt: JUN, expected: "READY_TO_DEPLOY" },
   { serial: `${PREFIX}02`, make: "Delta Systems", model: "X1", deviceName: "Node two", uic: "W1AAAA", category: null, lastAuditedAt: null, flagged: true, expected: "IN_REPAIR" },
-  { serial: `${PREFIX}03`, make: "HP", model: "Delta-9", deviceName: null, uic: "W2BBBB", category: "Switch", lastAuditedAt: JUN, onOpenReceipt: true, expected: "DEPLOYED" },
+  { serial: `${PREFIX}03`, make: "HP", model: "Delta-9", deviceName: null, uic: "W2BBBB", category: "Switch", lastAuditedAt: JUN, onOpenReceipt: true, receiverName: "Jane Doe", expected: "DEPLOYED" },
   { serial: `${PREFIX}04`, make: "HP", model: "Z9", deviceName: "delta gateway", uic: null, category: null, lastAuditedAt: null, expected: "UNTRIAGED" },
   { serial: `${PREFIX.toLowerCase()}delta-05`, make: "Cisco", model: "C1", deviceName: "Node five", uic: "W1AAAA", category: "Switch", lastAuditedAt: JAN, retired: true, expected: "RETIRED" },
   { serial: `${PREFIX}06`, make: "Cisco", model: "C2", deviceName: "Node six", uic: "W1AAAA", category: "Laptop", lastAuditedAt: null, lastLogonUser: "a@b.mil", expected: "DEPLOYED" },
   { serial: `${PREFIX}07`, make: "Apple", model: "M3", deviceName: null, uic: "W2BBBB", category: null, lastAuditedAt: JUN, markedReadyAt: JAN, lastLogonAt: JUN, lastLogonUser: "c@d.mil", expected: "DEPLOYED" },
   { serial: `${PREFIX}08`, make: "Apple", model: "M4", deviceName: "Node eight", uic: null, category: "Printer", lastAuditedAt: null, markedReadyAt: JUN, lastLogonAt: JAN, lastLogonUser: "e@f.mil", expected: "READY_TO_DEPLOY" },
-  { serial: `${PREFIX}09`, make: "Zebra", model: "ZT", deviceName: "Node nine", uic: "W1AAAA", category: "Printer", lastAuditedAt: JAN, flagged: true, onOpenReceipt: true, expected: "IN_REPAIR" },
+  { serial: `${PREFIX}09`, make: "Zebra", model: "ZT", deviceName: "Node nine", uic: "W1AAAA", category: "Printer", lastAuditedAt: JAN, flagged: true, onOpenReceipt: true, receiverName: "John Smith", expected: "IN_REPAIR" },
   { serial: `${PREFIX}10`, make: "Zebra", model: "ZQ", deviceName: "Node ten", uic: "W2BBBB", category: null, lastAuditedAt: null, retired: true, lastLogonUser: "g@h.mil", expected: "RETIRED" },
   { serial: `${PREFIX}11`, make: "Dell", model: "5540", deviceName: "Node eleven", uic: "W1AAAA", category: "Laptop", lastAuditedAt: JUN, expected: "UNTRIAGED" },
-  { serial: `${PREFIX}12`, make: "Dell", model: "5540", deviceName: "Node twelve", uic: "W1AAAA", category: "Laptop", lastAuditedAt: JAN, onOpenReceipt: true, expected: "DEPLOYED" },
+  { serial: `${PREFIX}12`, make: "Dell", model: "5540", deviceName: "Node twelve", uic: "W1AAAA", category: "Laptop", lastAuditedAt: JAN, onOpenReceipt: true, receiverName: "Doe, Marcus", expected: "DEPLOYED" },
   { serial: `${PREFIX}DELTA-13`, make: "Dell", model: "5540", deviceName: null, uic: "W1AAAA", category: null, lastAuditedAt: null, markedReadyAt: JAN, expected: "READY_TO_DEPLOY" },
   { serial: `${PREFIX}14`, make: "Delta Systems", model: "X1", deviceName: "Node fourteen", uic: "W2BBBB", category: "Switch", lastAuditedAt: JUN, lastLogonUser: "i@j.mil", expected: "DEPLOYED" },
+  { serial: `${PREFIX}15`, make: "Getac", model: "B360", deviceName: "Node fifteen", uic: "W3CCCC", category: null, lastAuditedAt: null, onOpenReceipt: true, receiptClosed: true, receiverName: "Ellen Doe", expected: "UNTRIAGED" },
+  { serial: `${PREFIX}16`, make: "Getac", model: "S410", deviceName: "Node sixteen", uic: "W3CCCC", category: null, lastAuditedAt: null, onOpenReceipt: true, receiptReturned: true, receiverName: "Frank Doe", expected: "UNTRIAGED" },
 ];
 
 /** The filter combinations the two paths must agree on. `size` is asserted so a
@@ -77,6 +85,15 @@ const FILTERS: { name: string; opts: { search?: string; uic?: string }; size: nu
   { name: "search term", opts: { search: "delta" }, size: 7 },
   { name: "uic filter", opts: { uic: "W1AAAA" }, size: 8 },
   { name: "search + uic", opts: { search: "delta", uic: "W1AAAA" }, size: 4 },
+  // Recipient search. "doe" reaches ONLY through the receipt: no seeded serial,
+  // make, model or device name contains it. Two of the four "Doe" receipts are
+  // live custody (03 "Jane Doe", 12 "Doe, Marcus"); 15 is closed and 16 is
+  // returned, so both are excluded — asserted directly below as well, since a
+  // parity test alone would pass if BOTH paths were equally wrong.
+  { name: "recipient surname", opts: { search: "doe" }, size: 2 },
+  // Surname-first. Tokens are AND'd, so this still finds "Jane Doe" (03) and
+  // still excludes "Doe, Marcus" (12), who is not a Jane.
+  { name: "recipient reversed name", opts: { search: "doe jane" }, size: 1 },
 ];
 
 /** Each ends in the unique `serialNumber`, so appending `readiness` adds a key
@@ -127,11 +144,19 @@ beforeAll(async () => {
       await prisma.transfer.create({
         data: {
           receiptNumber: `${PREFIX}R${i}`, itemSummary: "x",
-          senderName: "s", receiverName: "r", receiverSignature: "", status: "OPEN",
+          senderName: "s", receiverName: s.receiverName ?? "r", receiverSignature: "",
+          status: s.receiptClosed ? "CLOSED" : "OPEN",
+          closedAt: s.receiptClosed ? JUN : null,
           lines: {
             create: [{
               lineNo: 1, make: s.make, model: s.model, qtyAuth: 1, qtyIssued: 1,
-              items: { create: [{ itemId: item.id, serialNumber: s.serial }] },
+              items: {
+                create: [{
+                  itemId: item.id,
+                  serialNumber: s.serial,
+                  returnedAt: s.receiptReturned ? JUN : null,
+                }],
+              },
             }],
           },
         },
@@ -207,7 +232,11 @@ describe("readiness ordering", () => {
     // across the whole table, so without a total order a row can land on two
     // pages or on none.
     const paged: string[] = [];
-    for (let page = 1; page <= 3; page++) {
+    // The bound must be exactly ceil(SEEDS.length / 5) — listItems CLAMPS
+    // `page` to totalPages, so asking for a page past the end re-serves the
+    // last one and the equality assertion below would fail on the duplicates.
+    // Bump this whenever SEEDS grows.
+    for (let page = 1; page <= 4; page++) {
       paged.push(...(await listItems({ sort: "readiness", dir: "asc", page, pageSize: 5 })).items.map((it) => it.id));
     }
     expect(new Set(paged).size).toBe(SEEDS.length);
@@ -228,5 +257,42 @@ describe("readiness ordering", () => {
         READINESS_ORDER.indexOf(states.get(b) ?? "UNTRIAGED"),
     );
     expect(await idsOf({ sort: "readiness,make,serialNumber", dir: "asc" })).toEqual(expected);
+  });
+});
+
+describe("recipient search", () => {
+  const serialsOf = async (opts: Parameters<typeof listItems>[0]) =>
+    (await listItems({ pageSize: 100, ...opts })).items.map((it) => it.serialNumber);
+
+  it("finds items by surname, first name, and the full name in either order", async () => {
+    // 03 is issued to "Jane Doe" on an open receipt.
+    for (const q of ["doe", "jane", "jane doe", "doe jane"]) {
+      expect(await serialsOf({ search: q, sort: "serialNumber", dir: "asc" })).toContain(
+        `${PREFIX}03`,
+      );
+    }
+  });
+
+  it("requires every token, so a wrong surname does not match on the first name alone", async () => {
+    expect(await serialsOf({ search: "jane smith", sort: "serialNumber", dir: "asc" })).toEqual([]);
+  });
+
+  it("excludes a closed receipt and a returned row — custody has ended", async () => {
+    const hits = await serialsOf({ search: "doe", sort: "serialNumber", dir: "asc" });
+    expect(hits).not.toContain(`${PREFIX}15`); // receipt CLOSED
+    expect(hits).not.toContain(`${PREFIX}16`); // row returned
+    expect(hits.sort()).toEqual([`${PREFIX}03`, `${PREFIX}12`]);
+  });
+
+  it("excludes the same rows on the raw path (a readiness sort)", async () => {
+    // The other filter implementation, reached by sorting on a derived key.
+    const hits = await serialsOf({ search: "doe", sort: "readiness", dir: "asc" });
+    expect(hits.sort()).toEqual([`${PREFIX}03`, `${PREFIX}12`]);
+  });
+
+  it("leaves device-column search untokenized", async () => {
+    // "Delta Systems X1" exists; "delta x1" must NOT match it, because only the
+    // recipient branch splits a query into tokens.
+    expect(await serialsOf({ search: "delta x1", sort: "serialNumber", dir: "asc" })).toEqual([]);
   });
 });

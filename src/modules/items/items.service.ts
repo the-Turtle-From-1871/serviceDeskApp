@@ -13,7 +13,9 @@ import { loadUnitMap, learnUnits, type UnitResolution } from "./units.service";
 import { diffItemFields, type ItemLoggedFields } from "./item-diff";
 import { learnCategories } from "./categories.service";
 import { READINESS_JOINS, READINESS_RANK } from "./readiness.sql";
+import { CUSTODY_FROM, OPEN_CUSTODY_PREDICATE } from "@/modules/transfers/custody.sql";
 import { ItemError } from "./items.errors";
+import { recipientTokens } from "./recipient-search";
 
 export async function createItem(input: NewItemInput, createdById: string): Promise<Item> {
   const data = newItemSchema.parse(input);
@@ -177,6 +179,34 @@ function orderClauseFor({ key, dir }: SortKey): Prisma.ItemOrderByWithRelationIn
  * nullable sortable column — the inconsistency is worse than either rule.
  */
 
+/** The recipient half of the search filter, as SQL.
+ *
+ *  The joins and the custody guards come from custody.sql.ts, the ONE
+ *  definition of live custody — the same fragments READINESS_CASE's DEPLOYED
+ *  branch and holdersForItems embed — so "held by" means one thing across the
+ *  filter, the Readiness badge and the Holder column, by construction rather
+ *  than by three copies happening to agree. Only what is genuinely this query's
+ *  stays local: the correlation to the outer item row and the name match. An
+ *  EXISTS rather than a join so an item on two receipts still counts once and
+ *  cannot duplicate a row.
+ *
+ *  Tokens are AND'd (see recipient-search.ts) and every pattern is a BOUND
+ *  parameter (CLAUDE.md §2). With no tokens the branch renders as FALSE; the
+ *  caller's `${pattern}::text IS NULL OR …` guard has already short-circuited
+ *  the whole group in that case, so this is belt-and-braces rather than a path
+ *  anything reaches. */
+function recipientMatchSql(tokens: string[]): Prisma.Sql {
+  if (tokens.length === 0) return Prisma.sql`FALSE`;
+  const clauses = tokens.map((t) => Prisma.sql`t."receiverName" ILIKE ${`%${t}%`}`);
+  return Prisma.sql`EXISTS (
+      SELECT 1
+      ${CUSTODY_FROM}
+      WHERE ti."itemId" = i."id"
+        AND ${OPEN_CUSTODY_PREDICATE}
+        AND ${Prisma.join(clauses, " AND ")}
+    )`;
+}
+
 /** The raw-SQL twin of listItems' Prisma `where`.
  *
  *  WHY THIS IS THE RISKY PART: two filter implementations drift, and a drifted
@@ -193,7 +223,11 @@ function orderClauseFor({ key, dir }: SortKey): Prisma.ItemOrderByWithRelationIn
  *
  *  Values are BOUND, never interpolated (CLAUDE.md §2); the `::text IS NULL`
  *  guards let one statement serve every filter combination, as itemScopeSql
- *  does for the dashboard. */
+ *  does for the dashboard.
+ *
+ *  The recipient branch is an EXISTS over open hand receipts (recipientMatchSql)
+ *  — the filter now spans a relation, so the Prisma twin above is a nested
+ *  `some`, not another column `contains`. Both must change together. */
 function itemFilterSql(search: string | null, uic: string | null): Prisma.Sql {
   const pattern = search ? `%${search}%` : null;
   return Prisma.sql`
@@ -201,7 +235,8 @@ function itemFilterSql(search: string | null, uic: string | null): Prisma.Sql {
       OR i."deviceName" ILIKE ${pattern}::text
       OR i."make" ILIKE ${pattern}::text
       OR i."model" ILIKE ${pattern}::text
-      OR i."serialNumber"::text ILIKE ${pattern}::text)
+      OR i."serialNumber"::text ILIKE ${pattern}::text
+      OR ${recipientMatchSql(search ? recipientTokens(search) : [])})
     AND (${uic}::text IS NULL OR i."deviceUIC" = ${uic}::text)`;
 }
 
@@ -286,12 +321,38 @@ export async function listItems(opts: {
 
   const filters: Prisma.ItemWhereInput[] = [];
   if (search) {
+    // `search` is trimmed and non-empty here, so this yields at least one token.
+    const tokens = recipientTokens(search);
     filters.push({
       OR: [
         { deviceName: { contains: search, mode: "insensitive" } },
         { make: { contains: search, mode: "insensitive" } },
         { model: { contains: search, mode: "insensitive" } },
         { serialNumber: { contains: search, mode: "insensitive" } },
+        // The recipient named on the item's CURRENT custody — an open receipt
+        // with this row unreturned. Same rule as READINESS_CASE's DEPLOYED
+        // branch, deliberately NOT getHoldingTransfer's stricter
+        // latest-receipt-only rule: this must agree with the Readiness badge
+        // and the Holder column rendered on the same row.
+        //
+        // Tokens are AND'd, so "doe jane" finds "Jane Doe" — see
+        // recipient-search.ts. Whatever changes here changes in itemFilterSql
+        // too, or items.readiness-sort.parity.test.ts fails.
+        {
+          transferItems: {
+            some: {
+              returnedAt: null,
+              line: {
+                transfer: {
+                  status: "OPEN",
+                  AND: tokens.map((t) => ({
+                    receiverName: { contains: t, mode: "insensitive" as const },
+                  })),
+                },
+              },
+            },
+          },
+        },
       ],
     });
   }

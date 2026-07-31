@@ -134,6 +134,7 @@ export function ItemSelectTable({
       {!isHidden("make") && <td data-label="Make">{it.make}</td>}
       {!isHidden("model") && <td data-label="Model">{it.model}</td>}
       {!isHidden("serialNumber") && <td className="mono" data-label="Serial">{it.serialNumber}</td>}
+      {!isHidden("holder") && <td data-label="Holder">{it.holderName ?? <span className="subtle">—</span>}</td>}
       {!isHidden("deviceUIC") && <td className="mono" data-label="UIC">{it.deviceUIC ?? <span className="subtle">—</span>}</td>}
       {!isHidden("deviceCategory") && <td data-label="Category">{it.deviceCategory ?? <span className="subtle">—</span>}</td>}
       {/* Derived server-side (readiness.query.ts), so no client-side narrowing

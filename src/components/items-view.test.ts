@@ -25,6 +25,7 @@ const row = (over: Partial<ItemRow>): ItemRow => ({
   deviceUIC: over.deviceUIC ?? null,
   deviceCategory: over.deviceCategory ?? null,
   readiness: over.readiness ?? "UNTRIAGED",
+  holderName: over.holderName ?? null,
 });
 
 describe("sortItemRows", () => {
@@ -92,10 +93,16 @@ describe("columns", () => {
     expect(SORTABLE_COLUMNS.map((c) => c.key)).toContain("readiness");
   });
 
-  it("makes every displayed column sortable", () => {
-    // The Sort control must not silently omit a column the table renders — a
-    // header you can see and cannot order by reads as a bug.
-    expect(SORTABLE_COLUMNS.map((c) => c.key)).toEqual(ITEM_COLUMNS.map((c) => c.key));
+  it("makes every displayed column sortable except holder", () => {
+    // The Sort control must not silently omit a column the table renders for
+    // no reason — but `holder` is a deliberate exception (see ColumnKey):
+    // it has no column for Prisma to name, so it is displayed without being
+    // offered as a sort key.
+    expect(SORTABLE_COLUMNS.map((c) => c.key)).toEqual(
+      ITEM_COLUMNS.filter((c) => c.key !== "holder").map((c) => c.key),
+    );
+    expect(ITEM_COLUMNS.map((c) => c.key)).toContain("holder");
+    expect(SORTABLE_COLUMNS.map((c) => c.key)).not.toContain("holder");
   });
 
   it("offers exactly the sort keys the server accepts", () => {
