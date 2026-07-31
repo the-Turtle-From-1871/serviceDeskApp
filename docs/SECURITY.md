@@ -417,6 +417,15 @@ queries — `searchItemsBySerial` (citext/trigram cast), the two analytics
 time-series, and the category in-use count — all use a parameterized
 `$queryRaw`; string concatenation into SQL is banned outright.
 
+**Outbound mail headers are hardened against injection.** `buildRawEmail` in
+`src/lib/gmail-oauth-email.ts` strips CR/LF from every header value it writes —
+`From`, `To`, `Cc`, `Subject`, and the attachment filename — before assembling
+the RFC 2822 message. A header value may not contain a raw newline: it would
+terminate the header and let caller-supplied text (a recipient name, a device
+name) forge a new one, including an injected `Bcc`. A value carrying CR/LF is
+collapsed to a space rather than rejected, so the message still sends with
+visibly mangled — not silently altered — content.
+
 **The one place an identifier is spliced into SQL is the `/items` `ORDER BY`,
 and it is allowlisted twice.** A sort key arrives from the querystring and
 becomes a column name in `derivedOrderedItemIds` — a value, not a bound
@@ -464,13 +473,38 @@ items or fire a pickup notification for a non-DCSIM recipient.
 
 ## 6. Secrets & data leakage
 
-**21 files carry `import "server-only"`** — including `authz.ts`, `password.ts`,
-`crypto.ts`, `reset-token.ts`, `password-reset.ts`, and `public-access.ts`. A
-client-side import of any of them becomes a build error.
+**25 files carry `import "server-only"`** — including `authz.ts`, `password.ts`,
+`crypto.ts`, `reset-token.ts`, `password-reset.ts`, `public-access.ts`, and (as
+of 2026-07-31) `gmail-oauth-email.ts`. A client-side import of any of them
+becomes a build error. `gmail-oauth-email.ts` qualifies the same way the others
+do: every importer of `src/lib/email.ts` (which re-exports its sender) is a
+Server Action, service, or route handler — never a Client Component — so
+marking it `server-only` costs nothing and keeps the OAuth client secret and
+refresh token out of any client bundle by construction, not by convention.
 
 **No hardcoded credentials.** Everything via `process.env`: `DATABASE_URL`,
 `AUTH_SECRET`, `CRON_SECRET`, `SIGNING_PRIVATE_KEY`, `APP_URL`,
-`PUBLIC_ACCESS_PIN_ENABLED`, `ADMIN_INBOX_EMAIL`.
+`PUBLIC_ACCESS_PIN_ENABLED`, `ADMIN_INBOX_EMAIL`, `GMAIL_FROM`,
+`GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`.
+
+**Outbound mail is sent via the Gmail API with an OAuth2 refresh token, not an
+SMTP app password.** The SMTP transport (`GmailEmailSender`, selected by
+`GMAIL_USER` + `GMAIL_APP_PASSWORD`) was removed on 2026-07-31; those two vars
+no longer select any sender (`getEmailSender()` ignores them even if a stale
+Vercel env still sets them — see `src/lib/email.test.ts`). The replacement,
+`GmailOAuthSender` (`src/lib/gmail-oauth-email.ts`), authenticates with
+`GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` / `GMAIL_REFRESH_TOKEN` — long-lived
+credentials held only in Vercel environment variables, never in the repo — and
+exchanges them for a short-lived access token per send (cached until near
+expiry). The refresh token is scoped to `gmail.send` only: it can send mail as
+the account but cannot read the mailbox, list messages, or access any other
+Google data. Selection in `getEmailSender()` is by **env presence only** — Gmail
+OAuth is chosen whenever all four `GMAIL_*` vars are set, in preference to
+Resend, with no fallback to another transport if a send later fails. A dead or
+expired refresh token therefore surfaces as a thrown error on every send
+attempt rather than silently rerouting mail through Resend or the log stub; see
+[Known gaps #9](#known-gaps--accepted-risks) for why that refresh token expires
+on a roughly weekly cadence and how it's kept current.
 
 **The signing key is never logged** — failure paths in `src/lib/crypto.ts` log
 the error, never the key.
@@ -1207,6 +1241,26 @@ signal either. Accepted rather than re-metering the route, because putting it
 back behind the proxy's IP bucket is what caused the original bug this
 endpoint exists to fix — the shared secret is the only control this endpoint
 needs, and it does not weaken under volume.
+
+**9. A dead Gmail refresh token stops outbound mail entirely, with no
+fallback.** *Accepted, by design — see [§6](#6-secrets--data-leakage).*
+`getEmailSender()` selects `GmailOAuthSender` by environment presence only and
+never falls back to Resend or the log stub when a send fails, so a rejected
+`invalid_grant` refresh (an expired, revoked, or rotated-out-from-under-it
+token) surfaces as a thrown error on every outbound email until someone
+re-mints `GMAIL_REFRESH_TOKEN`. This is deliberate: silently rerouting mail
+through a different transport, or swallowing the failure, would hide a real
+outage behind a "sent" that never went anywhere.
+The token expires roughly weekly because the Google OAuth consent screen for
+this app is **deliberately kept in Testing publishing status** rather than
+published — an owner decision, recorded in full at
+[Known gaps 0c](#known-gaps--accepted-risks), not a misconfiguration to "fix"
+by itself. The accepted mitigation is the workstation rotation tooling
+documented there (`scripts/gmail-token-rotation/`), which renews the token on
+a schedule and escalates a warning well before the 7-day cliff. Until the
+consent screen is published or the sender moves to Google Workspace (0c's two
+exits), expect this failure mode on a roughly weekly cadence absent that
+tooling running.
 
 ---
 
