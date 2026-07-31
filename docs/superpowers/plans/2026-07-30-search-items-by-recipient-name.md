@@ -973,13 +973,13 @@ git commit -m "feat(items): show the current holder on the items list"
 
 - [ ] **Step 1: Add the changelog entry**
 
-`CHANGELOG.md` already has a `## 2026-07-30` section. Add to its existing `### Added` list (describe the behavior change for a reader, not the diff):
+Add the entry under **today's** date (`## YYYY-MM-DD`, newest section at the top), per CLAUDE.md — create that section with an `### Added` subsection if it does not exist yet; do **not** add to an older date's section. Describe the behavior change for a reader, not the diff:
 
 ```markdown
 - **The items list can now be searched by who is holding the device.** Typing a recipient's name into the search box on the items list returns everything that person currently has signed out — matching on first name, last name, or both, in either order, so "doe jane" finds Jane Doe. Only live custody counts: an item comes back while it is out on an open hand receipt and stops matching once that receipt is closed or the item is returned. The list also gained a **Holder** column showing that name (blank for anything nobody has signed for), so it is visible why each row matched; it can be hidden from the column menu. Devices assigned only through the MDM import, with no hand receipt, are not matched by a name search.
 ```
 
-Add to that section's existing `### Notes`:
+Add to that same section's `### Notes` subsection (create it if new):
 
 ```markdown
 - A new migration adds a trigram index on the hand-receipt recipient name, which the name search needs to stay fast. It must be applied to the production database before this deploys.
