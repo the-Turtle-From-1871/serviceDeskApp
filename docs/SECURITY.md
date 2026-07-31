@@ -394,6 +394,27 @@ queries — `searchItemsBySerial` (citext/trigram cast), the two analytics
 time-series, and the category in-use count — all use a parameterized
 `$queryRaw`; string concatenation into SQL is banned outright.
 
+**The one place an identifier is spliced into SQL is the `/items` `ORDER BY`,
+and it is allowlisted twice.** A sort key arrives from the querystring and
+becomes a column name in `derivedOrderedItemIds` — a value, not a bound
+parameter, so it cannot be parameterized. `parseSortKeys` first drops anything
+outside `ITEM_SORT_COLUMNS`, then `columnForKey` re-checks at the SQL boundary
+with `Object.hasOwn(SORT_COLUMN, key)` — `hasOwn` and not a truthiness test,
+because a plain object inherits `toString`/`constructor`, and a key of
+`"toString"` would otherwise resolve to an inherited function and be spliced in.
+The second check is the load-bearing one: it holds for any future caller that
+builds sort keys some other way. Directions are never interpolated from input
+either — `dir` is narrowed to the literal `ASC`/`DESC`.
+
+**Derived sort keys have no column at all and are refused by `columnForKey`.**
+`readiness` and `auditState` (`DERIVED_SORT_KEYS` in `sort-keys.ts`) order by a
+ranked SQL `CASE` whose state names and ranks are **bound parameters**, so
+nothing about them reaches the statement as text. A caller that forgets to
+branch on them gets a typed `ItemError` rather than a malformed `ORDER BY`.
+`sort-keys.ts` is on the `check-security-docs` watch list because adding a key
+there widens what may be spliced; the `*.sql.ts` fragment files are not, because
+they bind every value and splice nothing.
+
 **Prisma's `mode: "insensitive"` is avoided for exact matches.** It compiles to
 `ILIKE`, so `%` and `_` in the compared value act as WILDCARDS. The category
 in-use check (which decides whether deleting a category is refused) uses

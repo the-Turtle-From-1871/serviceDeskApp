@@ -83,15 +83,19 @@ const FILTERS: { name: string; opts: { search?: string; uic?: string }; size: nu
  *  with no tie left to break. No key pins its blanks — every one rides
  *  Postgres's default nulls ordering on both paths — so the coverage that
  *  matters is the SHAPE of each key: three nullable columns (deviceUIC,
- *  deviceCategory, deviceName), the derived audit key (which maps to
- *  lastAuditedAt on BOTH paths), and an enum key whose ordering is the enum's,
- *  not alphabetical. */
+ *  deviceCategory, deviceName) and an enum key whose ordering is the enum's,
+ *  not alphabetical.
+ *
+ *  `auditState` is deliberately ABSENT. It used to sit here as a key that
+ *  mapped to `lastAuditedAt` on both paths, but it is a DERIVED key now (a
+ *  ranked badge CASE), so it takes the raw path on its own — both sides of this
+ *  comparison would be the same query and the case would assert nothing. Its
+ *  ordering is covered by items.audit-sort.test.ts against real rows. */
 const ORDER_CASES = [
   "serialNumber",
   "deviceUIC,serialNumber",
   "deviceCategory,serialNumber",
   "deviceName,serialNumber",
-  "auditState,serialNumber",
   "status,serialNumber",
 ];
 

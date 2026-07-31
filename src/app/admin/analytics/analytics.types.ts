@@ -93,8 +93,13 @@ export const DEFAULT_GROUP_BY: GroupByKey = "unit";
 export type AuditReadinessSlice = { state: AuditState; count: number };
 
 /** Render/stack order, worst-last. Also the order the palette's adjacent-pair
- *  CVD check was run against — keep them in step. */
-export const AUDIT_STATE_ORDER = ["compliant", "overdue", "never"] as const;
+ *  CVD check was run against — keep them in step.
+ *
+ *  RE-EXPORTED, not redeclared: the `/items` audit sort ranks its badges by this
+ *  same sequence (see AUDIT_ORDER), and two copies would let the table walk the
+ *  states in an order the donut contradicts. The name is kept because the
+ *  palette and the widgets read it. */
+export { AUDIT_ORDER as AUDIT_STATE_ORDER } from "@/modules/audit/audit.status";
 export type CategoryKpi = { category: string; deployed: number; ready: number };
 export type VelocityPoint = { month: string } & Record<string, string | number>;
 
