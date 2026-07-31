@@ -46,8 +46,17 @@ export function HomeSearch() {
   // Only render "No matches" once the current (mode, query) has resolved, so it
   // doesn't flash (or get announced) during the debounce or right after a mode switch.
   const settled = resolvedKey === `${mode}\n${trimmed}`;
+  // The unlock cookie lasts 12 hours, so it can lapse while this page sits open
+  // — the search then comes back refused rather than empty. Saying "No matches"
+  // there is the same confident wrong answer about the property book that the
+  // `failed` branch below exists to avoid, so it gets its own way out.
+  const locked = result.locked === true;
   const noMatches =
-    hasQuery && settled && !failed && (mode === "serial" ? items.length === 0 : receipts.length === 0);
+    hasQuery &&
+    settled &&
+    !failed &&
+    !locked &&
+    (mode === "serial" ? items.length === 0 : receipts.length === 0);
 
   return (
     <div className="stack">
@@ -62,6 +71,12 @@ export function HomeSearch() {
       {/* Type-ahead has no submit, so announce result changes to assistive tech. */}
       <div aria-live="polite" role="status">
         {noMatches && <p className="subtle">No matches.</p>}
+        {hasQuery && settled && locked && (
+          <p role="alert" className="subtle">
+            Your access has expired. <a href="/unlock?next=%2F">Enter the access PIN</a> to search
+            again.
+          </p>
+        )}
         {hasQuery && settled && failed && (
           <p role="alert" className="subtle">
             Search is temporarily unavailable. Please try again in a moment.
