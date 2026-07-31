@@ -4,6 +4,13 @@ import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
 import { readinessForItems } from "@/modules/items/readiness.query";
 import { holdersForItems } from "./holders.query";
 
+/** States live custody can legitimately produce. RETIRED and IN_REPAIR
+ *  outrank the open-receipt DEPLOYED branch in READINESS_CASE
+ *  (src/modules/items/readiness.sql.ts), so an item present in the holders
+ *  map is not guaranteed to read DEPLOYED — see the "uses the same custody
+ *  rule" test below. */
+const CUSTODY_READINESS_STATES = ["DEPLOYED", "IN_REPAIR", "RETIRED"];
+
 const PREFIX = "HOLDERQ-";
 const JAN = new Date("2026-01-01T00:00:00Z");
 const JUN = new Date("2026-06-01T00:00:00Z");
@@ -59,6 +66,15 @@ beforeAll(async () => {
   await seed("CLOSED", admin.id, { receiverName: "Ellen Doe", closed: true });
   await seed("RETURNED", admin.id, { receiverName: "Frank Doe", returned: true });
   await seed("NONE", admin.id);
+  // Live custody (an open, unreturned receipt) AND flagged for service. The
+  // service-queue rule outranks the open-receipt rule in READINESS_CASE, so
+  // this item belongs in the holders map (it has live custody) but must NOT
+  // read DEPLOYED — it reads IN_REPAIR. Mirrors the seed shape in
+  // items.readiness-sort.parity.test.ts (seed 09: flagged + onOpenReceipt).
+  await seed("FLAGGED", admin.id, { receiverName: "Grace Doe" });
+  await prisma.serviceQueueItem.create({
+    data: { itemId: ids.FLAGGED, serviceType: "REPAIR", status: "PENDING" },
+  });
   // Two live receipts for one device: the map holds ONE name, the newer.
   await seed("TWO", admin.id, { receiverName: "Older Holder", createdAt: JAN });
   await prisma.transfer.create({
@@ -105,20 +121,37 @@ describe("holdersForItems", () => {
   it("answers for a whole page in one query, and returns an empty map for no ids", async () => {
     const map = await holdersForItems(Object.values(ids));
     expect(map.get(ids.OPEN)).toBe("Jane Doe");
-    expect(map.size).toBe(2); // OPEN and TWO; the other three have no live custody
+    expect(map.size).toBe(3); // OPEN, TWO, and FLAGGED; the other three have no live custody
     expect((await holdersForItems([])).size).toBe(0);
   });
 
-  it("uses the same custody rule the readiness derivation uses", async () => {
+  it("uses the same custody rule the readiness derivation uses — but custody alone does not guarantee DEPLOYED", async () => {
     // The point of custody.sql.ts: an item is "held" for the Holder column
-    // exactly when readiness calls it DEPLOYED-by-receipt. These two agreed by
-    // coincidence when the predicate was written out twice; they agree by
-    // construction now, and this asserts it end to end.
+    // exactly when it sits on an open, unreturned receipt — the SAME predicate
+    // READINESS_CASE embeds in its DEPLOYED-by-receipt branch. These two agreed
+    // by coincidence when the predicate was written out twice; they agree by
+    // construction now.
+    //
+    // That does NOT mean every item in the holders map reads DEPLOYED: RETIRED
+    // and IN_REPAIR (a PENDING ServiceQueueItem) outrank the open-receipt
+    // branch in READINESS_CASE (src/modules/items/readiness.sql.ts), so a
+    // device turned in for repair while still on an open receipt correctly
+    // reads IN_REPAIR, not Deployed (CLAUDE.md; also exercised end to end by
+    // items.readiness-sort.parity.test.ts, seed 09). FLAGGED is exactly that
+    // shape: live custody (present in the holders map) AND a PENDING
+    // ServiceQueueItem, so readiness must rank it IN_REPAIR.
     const map = await holdersForItems(Object.values(ids));
     const states = await readinessForItems(Object.values(ids));
+    // A map that happened to be empty would satisfy every assertion inside the
+    // loop below by never entering it, so assert non-emptiness and the ids
+    // this test actually depends on before relying on the loop.
+    expect(map.size).toBeGreaterThan(0);
+    expect(map.has(ids.OPEN)).toBe(true);
+    expect(map.has(ids.FLAGGED)).toBe(true);
+    expect(states.get(ids.FLAGGED)).toBe("IN_REPAIR");
     for (const [key, id] of Object.entries(ids)) {
       if (map.has(id)) {
-        expect([key, states.get(id)]).toEqual([key, "DEPLOYED"]);
+        expect([key, CUSTODY_READINESS_STATES.includes(states.get(id) ?? "")]).toEqual([key, true]);
       }
     }
   });

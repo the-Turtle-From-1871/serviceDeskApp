@@ -21,7 +21,11 @@ import { CUSTODY_FROM, OPEN_CUSTODY_PREDICATE } from "./custody.sql";
  * that asymmetry is deliberate (see custody.sql.ts for why).
  *
  * DISTINCT ON picks the most recent open receipt if an item somehow sits on
- * two, so the column shows one name instead of fanning the row out.
+ * two, so the column shows one name instead of fanning the row out. The
+ * trailing `t."id" DESC` is a tie-break for two receipts with the identical
+ * `createdAt` — otherwise the winner is arbitrary and can vary across query
+ * plans, mirroring the `id` tie-breaks `listItems` already uses for the same
+ * reason.
  *
  * Ids are BOUND via Prisma.join, never spliced (CLAUDE.md §2).
  */
@@ -34,7 +38,7 @@ export async function holdersForItems(ids: string[]): Promise<Map<string, string
     ${CUSTODY_FROM}
     WHERE ti."itemId" IN (${Prisma.join(wanted)})
       AND ${OPEN_CUSTODY_PREDICATE}
-    ORDER BY ti."itemId", t."createdAt" DESC
+    ORDER BY ti."itemId", t."createdAt" DESC, t."id" DESC
   `);
   return new Map(rows.map((r) => [r.itemId, r.receiverName]));
 }

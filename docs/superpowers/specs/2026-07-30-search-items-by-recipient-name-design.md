@@ -59,6 +59,14 @@ behaviour the receipt builder should get.**
   reflect live custody. There is no "who had this last year" answer to give.
 - **An item assigned only through CSV/MDM import never matches**, because it was
   never hand-receipted. That is the `currentUserEmail` non-goal above.
+- **The two rules are now visible side by side, not just theoretically
+  divergent.** Before this branch, `getHoldingTransfer`'s stricter rule was the
+  only holder-shaped thing rendered anywhere. Now the Holder column (§4) sits on
+  `/items` using the readiness rule while `/i/<id>` still uses
+  `getHoldingTransfer`. An item on an older OPEN receipt plus a newer CLOSED one
+  shows a Holder on `/items` and none on `/i/<id>` after clicking View. Treat
+  this as a known, deliberate divergence — not a bug to unify — unless a future
+  decision changes which rule the receipt builder should get.
 
 ## 2. Name matching — first, last, or both, in any order
 

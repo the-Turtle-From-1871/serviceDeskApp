@@ -14,6 +14,15 @@
  * Requiring every token to appear (the caller ANDs them) makes the match
  * order-independent, so first name, last name, or both — in any order — work.
  *
+ * LIMITATION — punctuation is kept, not stripped: tokens split on whitespace
+ * only, so `recipientTokens("Doe, Jane")` yields `["Doe,", "Jane"]` (the comma
+ * stays attached to "Doe,"). A query typed as "Doe, Jane" will therefore NOT
+ * match a stored "Jane Doe" — the trailing comma makes the "Doe," token fail a
+ * substring match against "Jane Doe". Searching for the stored value's own
+ * form still works ("Doe," IS a substring of a receipt stored as "Doe,
+ * Marcus"). Stripping punctuation would fix this but is a behaviour change,
+ * deliberately deferred rather than folded into this fix.
+ *
  * Only the RECIPIENT branch tokenizes. deviceName/make/model/serialNumber keep
  * matching the whole trimmed query as one pattern, so `dell 5420` behaves
  * exactly as it always has.

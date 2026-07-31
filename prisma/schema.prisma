@@ -293,12 +293,16 @@ model Transfer {
   // Trigram GIN for the public, per-keystroke receipt-number search
   // (searchReceiptsByNumber), `ILIKE '%q%'`. Needs pg_trgm.
   @@index([receiptNumber(ops: raw("gin_trgm_ops"))], type: Gin, map: "Transfer_receiptNumber_trgm_idx")
-  // Trigram GIN for the recipient-name branch of item search (recipientMatchSql
-  // in items.service.ts / the Prisma `some` twin), `ILIKE '%token%'`. Needs
-  // pg_trgm. Note receiverName is a plain String, NOT citext — so unlike
-  // Item.serialNumber it needs no `::text` cast to reach this index. That cast
-  // exists there only because citext's own ILIKE operator cannot use a text
-  // trigram index; do not copy it here.
+  // Trigram GIN for the recipient-name branch of item search, `ILIKE '%token%'`.
+  // Needs pg_trgm. In practice only the PRISMA path (the `some` twin in
+  // items.service.ts) reaches it: recipientMatchSql's raw-SQL EXISTS is
+  // correlated on `ti."itemId" = i."id"`, so Postgres will almost certainly
+  // drive that one from TransferItem_itemId_idx instead. Cost is bounded
+  // either way (Transfer is small and purged 90 days after close). Note
+  // receiverName is a plain String, NOT citext — so unlike Item.serialNumber
+  // it needs no `::text` cast to reach this index. That cast exists there only
+  // because citext's own ILIKE operator cannot use a text trigram index; do
+  // not copy it here.
   @@index([receiverName(ops: raw("gin_trgm_ops"))], type: Gin, map: "Transfer_receiverName_trgm_idx")
 }
 

@@ -80,8 +80,10 @@ export const SORTABLE_COLUMNS: { key: SortField; label: string }[] = ITEM_COLUMN
 );
 
 const SORT_FIELDS = new Set<string>(SORTABLE_COLUMNS.map((c) => c.key));
-// Visibility and sortability are separate sets on purpose, even while they hold
-// the same keys: hiding a column must never imply you cannot sort by it.
+// Visibility and sortability are separate CONCEPTS on purpose: hiding a column
+// must never imply you cannot sort by it. They also now differ in MEMBERSHIP —
+// COLUMN_KEYS has 10 keys (including "holder"), SORT_FIELDS has 9 — because
+// `holder` is displayable but not server-sortable (see SORTABLE_COLUMNS above).
 const COLUMN_KEYS = new Set<string>(ITEM_COLUMNS.map((c) => c.key));
 
 /** Client-side ordering of rows already in hand. The /items table does NOT use
