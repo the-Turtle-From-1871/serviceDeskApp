@@ -1187,3 +1187,16 @@ input[type="file"].input {
     min-height: var(--tap-lg);
   }
 }
+
+/* Truncate a label INSIDE a .btn. `.btn` is inline-flex with white-space:nowrap,
+   so text-overflow on the button itself does nothing — the label is an anonymous
+   flex item with no box to clip. This gives it one. Without it a long serial in
+   the /items empty-state create button overflows the card horizontally on a
+   phone. */
+.truncate-inline {
+  min-width: 0;
+  max-width: 22rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

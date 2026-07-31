@@ -51,13 +51,50 @@ const optional = z
 const identityItemFields = {
   make: z.string().trim().min(1, "Make is required"),
   model: z.string().trim().min(1, "Model is required"),
-  serialNumber: z.string().trim().min(1, "Serial number is required"),
+  // Bounded because the create form's serial can be PREFILLED FROM A URL
+  // (?serialNumber=…, see the create-from-search flow). Production's longest
+  // real serial is 14 characters, so 64 is generous headroom that cannot
+  // reject a genuine device. Shared with itemIdentitySchema, so it bounds the
+  // admin identity-edit form too.
+  serialNumber: z.string().trim().min(1, "Serial number is required")
+    .max(64, "Serial numbers are limited to 64 characters"),
 } as const;
+
+/** Category cell for the CREATE form. Blank -> undefined like `categoryOptional`
+ *  (there is no prior value to clear on a row that does not exist yet, and
+ *  writing "" would put an empty string into an indexed column that every
+ *  filter and count treats as a value). But over-long names are REJECTED with a
+ *  message like `categoryClearable`, not silently dropped: a form that says
+ *  "Created" while discarding what was typed is the exact bug the note on
+ *  `categoryClearable` warns about.
+ *
+ *  The trailing `.optional()` is load-bearing, not decoration. `createItem`
+ *  re-parses its input through `newItemSchema` as defense at the service
+ *  boundary, so the schema must accept its OWN output — and a blank category's
+ *  output is `undefined`. Without it every create with no category fails on the
+ *  second parse. `categoryOptional` and the `optional` helper end the same way
+ *  for the same reason.
+ *
+ *  Spells out `z.string().trim()` rather than reusing the `clearable` helper
+ *  below, because that helper is declared after `newItemSchema` and a const
+ *  cannot be used before its declaration. */
+const categoryNew = z
+  .string()
+  .trim()
+  .transform((v) => normalizeCategoryName(v))
+  .refine(
+    (v) => v.length <= MAX_CATEGORY_NAME,
+    `Category names are limited to ${MAX_CATEGORY_NAME} characters.`,
+  )
+  .transform((v) => v || undefined)
+  .optional();
 
 export const newItemSchema = z.object({
   ...identityItemFields,
   deviceName: z.string().trim().min(1, "Device name is required"),
   homeUnit: optional,
+  deviceUIC: optional,
+  deviceCategory: categoryNew,
   notes: optional,
 });
 

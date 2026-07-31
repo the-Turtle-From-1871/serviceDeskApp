@@ -28,6 +28,18 @@ export function getItem(id: string) {
   return prisma.item.findUnique({ where: { id } });
 }
 
+/** Resolve an item id from a serial. Used ONLY on the create path's P2002
+ *  branch, to turn "that serial is taken" into a link to the item that took it.
+ *  `serialNumber` is @unique @db.Citext, so this matches regardless of casing
+ *  and can return at most one row. Selects the id alone — the caller needs a
+ *  link, not a device. */
+export function getItemBySerial(serialNumber: string) {
+  return prisma.item.findUnique({
+    where: { serialNumber },
+    select: { id: true },
+  });
+}
+
 // Just the fields needed to render a QR label — avoids pulling admin-only
 // columns (e.g. `notes`) on the logged-in QR-PDF route under the public /i path.
 export function getItemQrFields(id: string) {

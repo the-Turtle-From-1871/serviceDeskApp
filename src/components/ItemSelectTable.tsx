@@ -295,8 +295,26 @@ export function ItemSelectTable({
       {/* Rendered below the toolbar, so the controls that produced an empty
           result stay on screen and the filter can be undone. */}
       {items.length === 0 && (
-        <div className="card empty">
-          No items match {uic ? "this unit and " : ""}your search.
+        <div className="card empty stack">
+          <div>No items match {uic ? "this unit and " : ""}your search.</div>
+          {/* Admin-only because creation is admin-only (createItemAction calls
+              requireAdmin) — the server check is the authority, this is
+              presentation. Deliberately NOT suppressed while a uic filter is
+              active: q + uic can return nothing for an item that exists under a
+              DIFFERENT uic, so this can be clicked for a serial already in the
+              book. That is accepted — the action's P2002 branch names the
+              collision and links to the item — because an admin filtered to a
+              unit may legitimately be adding a device. */}
+          {isAdmin && q.trim() && (
+            <Link
+              href={`/admin/items/new?serialNumber=${encodeURIComponent(q.trim())}${uic ? `&uic=${encodeURIComponent(uic)}` : ""}`}
+              className="btn btn-secondary btn-sm"
+            >
+              <span className="truncate-inline">
+                + Create &ldquo;{q.trim()}&rdquo; as a new item
+              </span>
+            </Link>
+          )}
         </div>
       )}
 

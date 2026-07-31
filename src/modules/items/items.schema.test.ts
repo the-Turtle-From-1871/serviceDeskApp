@@ -3,6 +3,7 @@ import {
   itemDetailsSchema,
   adminItemEditSchema,
   userItemDetailsSchema,
+  newItemSchema,
   MAX_CATEGORY_NAME,
 } from "./items.schema";
 
@@ -165,5 +166,50 @@ describe("importRowSchema", () => {
     const r = importRowSchema.parse({ serialNumber: "A1", compliance: "Compliant", lastLogonDate: "2026-07-01" });
     expect(r.compliance).toBe("Compliant");
     expect(r.lastLogonDate).toBe("2026-07-01");
+  });
+});
+
+describe("newItemSchema — deviceUIC and deviceCategory", () => {
+  const base = { make: "Dell", model: "5540", serialNumber: "ABC123", deviceName: "LT-01" };
+
+  it("retains deviceUIC and deviceCategory instead of stripping them", () => {
+    const parsed = newItemSchema.parse({ ...base, deviceUIC: "WABC01", deviceCategory: "Laptop" });
+    expect(parsed.deviceUIC).toBe("WABC01");
+    expect(parsed.deviceCategory).toBe("Laptop");
+  });
+
+  it("normalizes a category's internal whitespace and trims it", () => {
+    const parsed = newItemSchema.parse({ ...base, deviceCategory: "  Docking   Station  " });
+    expect(parsed.deviceCategory).toBe("Docking Station");
+  });
+
+  it("maps a blank category to undefined rather than an empty string", () => {
+    const parsed = newItemSchema.parse({ ...base, deviceCategory: "   " });
+    expect(parsed.deviceCategory).toBeUndefined();
+  });
+
+  it("REJECTS an over-long category with a message instead of silently dropping it", () => {
+    const result = newItemSchema.safeParse({ ...base, deviceCategory: "x".repeat(MAX_CATEGORY_NAME + 1) });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.message).toMatch(/limited to 60 characters/);
+  });
+
+  // createItem re-parses its own input at the service boundary, so the schema
+  // must accept its own output. Without the trailing .optional() on categoryNew,
+  // a blank category becomes undefined on the first parse and fails z.string()
+  // on the second — i.e. EVERY create without a category would break.
+  it("round-trips its own output when the category is blank", () => {
+    const once = newItemSchema.parse({ ...base, deviceCategory: "" });
+    expect(() => newItemSchema.parse(once)).not.toThrow();
+  });
+
+  it("rejects a serial longer than the bound", () => {
+    const result = newItemSchema.safeParse({ ...base, serialNumber: "x".repeat(65) });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.message).toMatch(/64 characters/);
+  });
+
+  it("still accepts a realistic serial", () => {
+    expect(newItemSchema.parse({ ...base, serialNumber: "5CG1234ABC" }).serialNumber).toBe("5CG1234ABC");
   });
 });

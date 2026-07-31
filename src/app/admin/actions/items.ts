@@ -1,8 +1,10 @@
 "use server";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/authz";
 import {
   createItem,
+  getItemBySerial,
   updateItemFields,
   setItemStatus,
   analyzeImport,
@@ -24,11 +26,74 @@ import type { SkippedRow, UnresolvedRow } from "@/modules/items/import";
 
 export async function createItemAction(_prev: unknown, formData: FormData) {
   const admin = await requireAdmin();
+  // Read off formData, NOT parsed.data: newItemSchema is a z.object() and
+  // strips unknown keys, so these would silently vanish from the parsed result.
+  const fromSearch = formData.get("fromSearch") === "1";
+  const returnUic = String(formData.get("returnUic") ?? "").trim();
   const parsed = newItemSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  const item = await createItem(parsed.data, admin.id);
+  const data = parsed.data;
+
+  let item;
+  try {
+    item = await createItem(data, admin.id);
+  } catch (e) {
+    // P2002 = unique-constraint violation. Item has exactly ONE unique column —
+    // serialNumber, which is @db.Citext — so this can only mean an item already
+    // holds that serial in some casing. Leaned on rather than pre-checked with a
+    // findUnique, which would race. Reachable from the create-from-search flow:
+    // /items?q=X&uic=Y shows "no matches" for an item that exists under a
+    // DIFFERENT uic, and the empty state still offers to create it.
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+      console.error("[createItemAction] serial collision:", e);
+      const existing = await getItemBySerial(data.serialNumber);
+      return {
+        error: `Serial number "${data.serialNumber}" already belongs to an item. Serial numbers are unique and ignore case — open that item instead.`,
+        existingItemId: existing?.id,
+      };
+    }
+    console.error("[createItemAction] unexpected error:", e);
+    return { error: "Something went wrong creating this item. Please try again." };
+  }
+
+  // A category typed directly into the form joins the vocabulary, so the managed
+  // list keeps reflecting what is actually in the fleet. Outside the try, and
+  // swallowing its own failure, because it is a SEPARATE transaction that runs
+  // after the item write has committed — see the fuller note in
+  // src/app/actions/items.ts.
+  if (data.deviceCategory) {
+    try {
+      await learnCategories([data.deviceCategory]);
+    } catch (e) {
+      console.error("[createItemAction] learnCategories failed (item already created):", e);
+    }
+  }
+
+  revalidatePath("/items");
+  // The in-use counts on the category admin page go stale the moment
+  // learnCategories registers a name; analytics counts the fleet.
+  revalidatePath("/admin/categories");
+  revalidatePath("/admin/analytics");
+
+  // OUTSIDE the try/catch above — redirect() works by throwing NEXT_REDIRECT,
+  // and a catch would swallow it into the generic error message.
+  //
+  // The destination is DERIVED, never caller-supplied: the path is hardcoded
+  // and q is read back off the row Prisma just wrote, so there is no redirect
+  // target for anyone to craft. URLSearchParams does the encoding — building
+  // this by concatenation mangles a serial containing &, #, + or a space and
+  // lands the admin on an empty list for the item they just created.
+  if (fromSearch) {
+    const params = new URLSearchParams({ q: item.serialNumber });
+    // Carry the unit filter back only when the new item actually satisfies it —
+    // listItems filters deviceUIC by exact equality, so returning with a filter the
+    // item does not match would hide the very row this redirect exists to show.
+    if (returnUic && item.deviceUIC === returnUic) params.set("uic", returnUic);
+    redirect(`/items?${params}`);
+  }
+
   return { itemId: item.id };
 }
 
