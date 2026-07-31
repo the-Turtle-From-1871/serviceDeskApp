@@ -97,6 +97,18 @@ describe("buildRawEmail body structure", () => {
     expect(mime).toContain("<p>hi</p>\r\n<p>bye</p>");
   });
 
+  it("declares 8bit transfer encoding on the text and html parts and survives a non-ASCII body round-trip", () => {
+    const mime = decode(
+      buildRawEmail({ ...base, text: "Réparation requise", html: "<p>Réparation requise</p>" }, FROM, BOUNDARIES),
+    );
+    const textSection = mime.split('Content-Type: text/plain; charset="UTF-8"')[1];
+    expect(textSection.startsWith("\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")).toBe(true);
+    const htmlSection = mime.split('Content-Type: text/html; charset="UTF-8"')[1];
+    expect(htmlSection.startsWith("\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")).toBe(true);
+    expect(mime).toContain("Réparation requise");
+    expect(mime).toContain("<p>Réparation requise</p>");
+  });
+
   it("generates distinct boundaries when none are supplied", () => {
     const a = decode(buildRawEmail({ ...base, html: "<p>x</p>", attachments: [{ filename: "f.pdf", content: new Uint8Array([1]) }] }, FROM));
     const mixed = a.match(/multipart\/mixed; boundary="([^"]+)"/)?.[1];
@@ -361,19 +373,49 @@ describe("GmailOAuthSender", () => {
 
 describe("gmailOAuthConfigFromEnv", () => {
   const orig = { ...process.env };
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
   afterEach(() => {
     process.env = { ...orig };
+    errorSpy.mockRestore();
   });
 
-  it("returns null when any var is missing", () => {
+  it("returns null and logs nothing when none of the four vars are present", () => {
+    delete process.env.GMAIL_FROM;
+    delete process.env.GMAIL_CLIENT_ID;
+    delete process.env.GMAIL_CLIENT_SECRET;
+    delete process.env.GMAIL_REFRESH_TOKEN;
+    expect(gmailOAuthConfigFromEnv()).toBeNull();
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns null but logs an error naming the missing var when three of four are present", () => {
     process.env.GMAIL_FROM = FROM;
     process.env.GMAIL_CLIENT_ID = "cid";
     process.env.GMAIL_CLIENT_SECRET = "secret";
     delete process.env.GMAIL_REFRESH_TOKEN;
     expect(gmailOAuthConfigFromEnv()).toBeNull();
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy.mock.calls[0][0]).toContain("GMAIL_REFRESH_TOKEN");
   });
 
-  it("returns the config when all four are present", () => {
+  it("returns null and logs an error naming every missing var when only one of four is present", () => {
+    process.env.GMAIL_FROM = FROM;
+    delete process.env.GMAIL_CLIENT_ID;
+    delete process.env.GMAIL_CLIENT_SECRET;
+    delete process.env.GMAIL_REFRESH_TOKEN;
+    expect(gmailOAuthConfigFromEnv()).toBeNull();
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const message = errorSpy.mock.calls[0][0] as string;
+    expect(message).toContain("GMAIL_CLIENT_ID");
+    expect(message).toContain("GMAIL_CLIENT_SECRET");
+    expect(message).toContain("GMAIL_REFRESH_TOKEN");
+  });
+
+  it("returns the config and logs nothing when all four are present", () => {
     process.env.GMAIL_FROM = FROM;
     process.env.GMAIL_CLIENT_ID = "cid";
     process.env.GMAIL_CLIENT_SECRET = "secret";
@@ -384,5 +426,6 @@ describe("gmailOAuthConfigFromEnv", () => {
       clientSecret: "secret",
       refreshToken: "rtok",
     });
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 });

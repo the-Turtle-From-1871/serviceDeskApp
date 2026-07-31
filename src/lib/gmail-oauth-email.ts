@@ -20,12 +20,17 @@ function toCrlf(s: string): string {
   return s.replace(/\r\n|\r|\n/g, CRLF);
 }
 
+// 8bit, not the RFC 2045 default of 7bit: submission is over HTTPS to the
+// Gmail API, not 7-bit SMTP, so declaring 8bit is accurate — and required,
+// since device/unit/person names in the body (like the subject) can carry
+// non-ASCII. Do not base64-encode instead; that would change the wire output
+// other tests already assert on.
 function textPart(text: string): string {
-  return `Content-Type: text/plain; charset="UTF-8"${CRLF}${CRLF}${toCrlf(text)}`;
+  return `Content-Type: text/plain; charset="UTF-8"${CRLF}Content-Transfer-Encoding: 8bit${CRLF}${CRLF}${toCrlf(text)}`;
 }
 
 function htmlPart(html: string): string {
-  return `Content-Type: text/html; charset="UTF-8"${CRLF}${CRLF}${toCrlf(html)}`;
+  return `Content-Type: text/html; charset="UTF-8"${CRLF}Content-Transfer-Encoding: 8bit${CRLF}${CRLF}${toCrlf(html)}`;
 }
 
 // A header value may never contain CR or LF: either would terminate the header
@@ -129,6 +134,10 @@ export function __resetTokenCache(): void {
 }
 
 async function exchange(cfg: GmailOAuthConfig, key: string): Promise<string> {
+  // Bounded: a hung token exchange would otherwise sit forever in the
+  // module-level `inFlight` slot, and every concurrent send awaits that same
+  // promise until the platform kills the function — the least visible failure
+  // mode a no-fallback sender can have.
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -138,6 +147,7 @@ async function exchange(cfg: GmailOAuthConfig, key: string): Promise<string> {
       refresh_token: cfg.refreshToken,
       grant_type: "refresh_token",
     }).toString(),
+    signal: AbortSignal.timeout(10_000),
   });
 
   const text = await res.text();
@@ -192,20 +202,40 @@ export class GmailOAuthSender implements EmailSender {
   async send(msg: EmailMessage): Promise<void> {
     const raw = buildRawEmail(msg, this.cfg.from);
     const token = await getAccessToken(this.cfg);
+    // Bounded for the same reason as the token exchange above — a hang here
+    // must surface as a rejection, not sit open indefinitely.
     const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ raw }),
+      signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) throw new Error(`Gmail send failed: ${res.status} ${await res.text()}`);
   }
 }
 
+// A 1-, 2-, or 3-of-4 configuration is not "not using Gmail" — it is a botched
+// write that falls through to whatever transport env presence picks next
+// (Resend in production), silently sending mail from the wrong sender with no
+// error anywhere. 0-of-4 is the legitimate "not using Gmail" case and must
+// stay quiet; log only the in-between states, and name exactly what's missing
+// so the line is greppable.
 export function gmailOAuthConfigFromEnv(): GmailOAuthConfig | null {
   const from = process.env.GMAIL_FROM;
   const clientId = process.env.GMAIL_CLIENT_ID;
   const clientSecret = process.env.GMAIL_CLIENT_SECRET;
   const refreshToken = process.env.GMAIL_REFRESH_TOKEN;
-  if (from && clientId && clientSecret && refreshToken) return { from, clientId, clientSecret, refreshToken };
+
+  const missing = [
+    !from && "GMAIL_FROM",
+    !clientId && "GMAIL_CLIENT_ID",
+    !clientSecret && "GMAIL_CLIENT_SECRET",
+    !refreshToken && "GMAIL_REFRESH_TOKEN",
+  ].filter((v): v is string => Boolean(v));
+
+  if (missing.length === 0) return { from: from!, clientId: clientId!, clientSecret: clientSecret!, refreshToken: refreshToken! };
+  if (missing.length < 4) {
+    console.error(`gmailOAuthConfigFromEnv: partial GMAIL_* configuration, missing ${missing.join(", ")} — falling through to another email transport`);
+  }
   return null;
 }

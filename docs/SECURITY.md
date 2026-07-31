@@ -477,8 +477,9 @@ items or fire a pickup notification for a non-DCSIM recipient.
 `crypto.ts`, `reset-token.ts`, `password-reset.ts`, `public-access.ts`, and (as
 of 2026-07-31) `gmail-oauth-email.ts`. A client-side import of any of them
 becomes a build error. `gmail-oauth-email.ts` qualifies the same way the others
-do: every importer of `src/lib/email.ts` (which re-exports its sender) is a
-Server Action, service, or route handler — never a Client Component — so
+do: every importer of `src/lib/email.ts` (which returns it from
+`getEmailSender()`) is a Server Action, service, or route handler — never a
+Client Component — so
 marking it `server-only` costs nothing and keeps the OAuth client secret and
 refresh token out of any client bundle by construction, not by convention.
 
