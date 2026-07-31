@@ -1256,11 +1256,12 @@ this app is **deliberately kept in Testing publishing status** rather than
 published — an owner decision, recorded in full at
 [Known gaps 0c](#known-gaps--accepted-risks), not a misconfiguration to "fix"
 by itself. The accepted mitigation is the workstation rotation tooling
-documented there (`scripts/gmail-token-rotation/`), which renews the token on
-a schedule and escalates a warning well before the 7-day cliff. Until the
-consent screen is published or the sender moves to Google Workspace (0c's two
-exits), expect this failure mode on a roughly weekly cadence absent that
-tooling running.
+documented there (`scripts/gmail-token-rotation/`), which *reminds* on a
+6-hourly schedule — escalating from a normal toast at 3 days to critical past
+7 — but the rotation itself is initiated by a person. Until the consent screen
+is published or the sender moves to Google Workspace (0c's two exits), expect
+this failure mode on a roughly weekly cadence absent that person acting on the
+reminder.
 
 ---
 
