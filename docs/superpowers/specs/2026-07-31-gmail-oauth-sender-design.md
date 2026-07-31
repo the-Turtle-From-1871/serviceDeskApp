@@ -180,20 +180,31 @@ makes the log line actionable.
 
 Removed: `GMAIL_USER`, `GMAIL_APP_PASSWORD`.
 
-## 9. Google Cloud console prerequisite (manual, blocking)
+## 9. Google Cloud console prerequisite (manual)
 
 Per Google's OAuth documentation: *projects in 'Testing' status with external user
 types have refresh tokens that expire in 7 days*, unless only basic profile scopes are
 requested. `gmail.send` is not a basic profile scope.
 
-**If the consent screen stays in Testing, mail silently stops every 7 days.** Required
-before this ships:
+**AMENDED 2026-07-31, by owner decision: the consent screen stays in Testing.** An
+earlier revision of this section made "In production" a blocking prerequisite. It is
+not. The 7-day expiry is accepted as an operating cost and handled by separate rotation
+tooling (`2026-07-31-gmail-token-rotation-design.md`), because publishing to production
+with a sensitive scope invites a verification review the project does not want to enter
+yet.
+
+The consequence must be stated plainly wherever a reader could mistake it for a fault:
+**the refresh token dies about weekly, and a person has to re-mint it and push it to
+Vercel.** With no fallback transport (§7), outbound mail stops until they do. Every
+artifact this design touches — the `invalid_grant` error string, `.env.example`,
+`docs/SECURITY.md`, the changelog — says so in those terms. An error message that reads
+"set it to In production" would send the next reader to undo a deliberate decision.
+
+Required before this ships:
 
 1. Enable the Gmail API in project `dcsim-hand-receipt`.
-2. Set the OAuth consent screen publishing status to **In production**. Verification
-   may remain pending — an unverified app shows an "unverified" interstitial during the
-   one-time consent, which is irrelevant for a single self-consenting account, but the
-   publishing status is what governs refresh-token lifetime.
+2. Leave publishing status at **Testing**, and confirm the sending account is listed as
+   a **test user** — a Testing-status app issues tokens only to those.
 3. Mint the refresh token via the OAuth Playground (the client's registered redirect
    URI), scope `https://www.googleapis.com/auth/gmail.send`, offline access.
 
@@ -259,7 +270,7 @@ Branch → PR → the three required checks (`Semgrep SAST`, `Build (next build)
 | Risk | Mitigation |
 | --- | --- |
 | `.mil` delivery is unchanged | Recorded in §2 as expected. Re-test after deploy; if unchanged, the next lever is the attachment/link content test, then Workspace on `dcsim.us`. |
-| Consent screen left in Testing → 7-day silent outage | §9 is blocking. §7 makes the failure loud when it happens. |
+| Refresh token expires weekly (Testing status, accepted §9) | §7 makes the failure loud and names the remedy. Mitigated by the separate rotation tooling. Residual: mail is down between expiry and rotation — this is the accepted cost of the decision, and it is the strongest argument for revisiting In production later. |
 | Code merges before env vars exist → silent Resend fallback | §10 blocking rule; verify with `vercel env ls production`. |
 | Refresh token dies with no fallback | Deliberate. Rollback is restoring the app-password sender from git and re-adding two env vars. |
 | Hand-built MIME is subtly malformed | §11 covers structure; verify a real send with an attachment and an HTML body against a mailbox we control before merging. |

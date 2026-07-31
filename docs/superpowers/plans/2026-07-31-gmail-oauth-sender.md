@@ -523,7 +523,9 @@ describe("getAccessToken", () => {
     );
     await expect(getAccessToken(CFG)).rejects.toThrow(/invalid_grant/);
     await expect(getAccessToken(CFG)).rejects.toThrow(/GMAIL_REFRESH_TOKEN/);
-    await expect(getAccessToken(CFG)).rejects.toThrow(/In production/);
+    // The 7-day expiry is expected, not a misconfiguration — the message must
+    // say so, or every rotation reads as an incident.
+    await expect(getAccessToken(CFG)).rejects.toThrow(/7 days/);
   });
 
   it("surfaces other token errors with status and body", async () => {
@@ -606,8 +608,9 @@ async function exchange(cfg: GmailOAuthConfig, key: string): Promise<string> {
     // here or the log line is unactionable.
     if (text.includes("invalid_grant")) {
       throw new Error(
-        "Gmail OAuth refresh token rejected (invalid_grant). Re-mint GMAIL_REFRESH_TOKEN via the OAuth Playground. " +
-          "If this recurs about weekly, the consent screen is still in Testing status (7-day refresh-token expiry) — set it to In production.",
+        "Gmail OAuth refresh token rejected (invalid_grant). Re-mint GMAIL_REFRESH_TOKEN and redeploy. " +
+          "Roughly weekly is EXPECTED, not a misconfiguration: the consent screen is deliberately left in Testing " +
+          "status, and Google expires a Testing-status consent grant every 7 days. Run the token-rotation tooling.",
       );
     }
     throw new Error(`Google token refresh failed: ${res.status} ${text}`);
@@ -949,7 +952,7 @@ Required in this commit — `src/lib/email.ts` is `WATCHED`. Make these edits:
 
 - **§6 Secrets & data leakage:** replace any mention of the Gmail app password with `GMAIL_REFRESH_TOKEN`, `GMAIL_CLIENT_ID` and `GMAIL_CLIENT_SECRET` — long-lived credentials held only in Vercel env, never in the repo. Note the refresh token grants send-only access (`gmail.send`), not mailbox read.
 - **§5 Injection & output safety:** add the outbound-header control — `src/lib/gmail-oauth-email.ts` strips CR/LF from every MIME header value (`From`, `To`, `Cc`, `Subject`, attachment filename), so caller-supplied text cannot forge headers or inject a `Bcc`.
-- **Known gaps & accepted risks:** add that a dead refresh token stops outbound mail with no fallback, deliberately, so the failure is visible; and that if the OAuth consent screen is left in Testing status the token expires every 7 days.
+- **Known gaps & accepted risks:** add that a dead refresh token stops outbound mail with no fallback, deliberately, so the failure is visible; and that the OAuth consent screen is deliberately kept in **Testing** status, so Google expires the consent grant every 7 days and the refresh token must be re-minted on that cadence by a person. Record it as an accepted operational risk with a named mitigation (the rotation tooling), not as a misconfiguration.
 - Bump **Last reviewed** on line 6 to `2026-07-31`.
 
 - [ ] **Step 7: Verify the security-docs gate passes**
@@ -997,10 +1000,12 @@ EMAIL_FROM="DCSIM <receipts@turtolabs.com>"
 # Requires a Google Cloud OAuth2 client with the Gmail API enabled and a refresh
 # token for the sending account, scope https://www.googleapis.com/auth/gmail.send
 #
-# IMPORTANT: the OAuth consent screen's publishing status must be "In production".
-# While it is "Testing", Google expires the refresh token every 7 days and mail
-# silently stops. Verification may still be pending; publishing status is what
-# governs token lifetime.
+# IMPORTANT: the consent screen is deliberately kept in "Testing" publishing
+# status, so Google expires the consent grant every 7 days. GMAIL_REFRESH_TOKEN
+# therefore has to be re-minted about weekly by a person and pushed to Vercel —
+# this is a known, accepted operating cost, not a misconfiguration. A dead token
+# stops outbound mail (there is no fallback, by design), so treat the rotation as
+# a standing chore. See docs/superpowers/specs/2026-07-31-gmail-token-rotation-design.md.
 #
 # GMAIL_FROM is the From header ("Name <addr>"); the address must be the
 # authenticated account or one of its verified "Send mail as" aliases.
@@ -1046,7 +1051,7 @@ and add to the **Notes** section:
 
 ```markdown
 - Outbound email requires four new environment variables — `GMAIL_FROM`, `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` — which **must be set in Vercel production before this deploys**. Without them the app falls through to the Resend sender, which does not deliver. `GMAIL_USER` and `GMAIL_APP_PASSWORD` are no longer read and should be deleted after the deploy is confirmed working.
-- The Google OAuth consent screen must be set to "In production" publishing status, or Google expires the refresh token every 7 days and outbound mail stops silently.
+- The Google OAuth consent screen is deliberately kept in "Testing" publishing status, so Google expires the consent grant every 7 days. `GMAIL_REFRESH_TOKEN` must be re-minted and updated in Vercel on roughly that cadence, or outbound email stops. This is an accepted operating cost with its own tooling, not a fault to diagnose.
 ```
 
 - [ ] **Step 5: Check `CLAUDE.md` for anything this change contradicts**
@@ -1076,7 +1081,8 @@ Code cannot prove this works; a real send can. Do these in order.
 
 - [ ] **1. Google Cloud console** (project `dcsim-hand-receipt`)
   - Enable the **Gmail API**.
-  - OAuth consent screen → publishing status → **In production**. *Do not skip: Testing status expires the refresh token every 7 days.*
+  - Leave publishing status at **Testing** — this is a deliberate decision (2026-07-31), not an oversight. The consequence is that Google expires the consent grant every 7 days, so the refresh token must be re-minted on that cadence; that cost is accepted and handled by separate rotation tooling. Do not "fix" this by switching to In production without asking.
+  - Confirm the sending account is listed as a **test user** on the consent screen — a Testing-status app only issues tokens to those.
   - Confirm the client's authorized redirect URI includes `https://developers.google.com/oauthplayground/`.
 
 - [ ] **2. Mint the refresh token**
