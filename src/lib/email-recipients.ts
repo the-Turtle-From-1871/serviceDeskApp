@@ -20,11 +20,17 @@
  * per-deployment configuration, so they ship as defaults and need no env var to
  * work. `RECEIPT_CC_EMAILS` overrides them without a code change.
  *
- * NOTE on the army.mil address: mail from this gmail.com sender is not reliably
- * delivered to army.mil (see docs/superpowers/specs/2026-07-31-gmail-oauth-sender-design.md
- * §2 — it is a sender-alignment problem, not an auth one). Copying that address does
- * not fix it, and a silent drop leaves no signal. Treat that copy as best-effort
- * until a message is confirmed received, and do not rely on it as the audit trail.
+ * NOTE on the army.mil address: mail to army.mil WAS being silently dropped, and the
+ * cause is now known — it was not sender alignment, DKIM or SPF. A controlled
+ * four-message test showed plain text, a dcsim.us link and a PDF attachment all
+ * arriving, and only the message carrying a `vercel.app` URL disappearing: the
+ * government network filters that domain. The fix was pointing APP_URL at
+ * https://www.dcsim.us so message bodies stop linking to vercel.app.
+ *
+ * The consequence for this file: any link placed in a custody email must be built
+ * from defaultBaseUrl() (src/lib/base-url.ts), never hardcoded to a deploy URL.
+ * A single vercel.app link in a body is enough to make the whole message vanish for
+ * .mil recipients, with no bounce and no signal.
  */
 export const DEFAULT_RECEIPT_CC_EMAILS = [
   "dcsimservicedesk@gmail.com",
