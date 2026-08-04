@@ -34,7 +34,7 @@
  */
 export const DEFAULT_RECEIPT_CC_EMAILS = [
   "dcsimservicedesk@gmail.com",
-  "ng.hi.hiarng.nbx.dcsim-hand-receipt@army.mil",
+  "ng.hi.hiarng.mbx.dcsim-hand-receipt@army.mil",
 ];
 
 /** Trim, drop blanks, and de-duplicate case-insensitively, preserving order. */

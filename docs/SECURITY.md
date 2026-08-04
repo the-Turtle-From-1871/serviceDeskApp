@@ -526,7 +526,7 @@ so the CC list is a PII disclosure surface, not formatting.
 
 **The record copies ship as defaults in code**, not as required configuration:
 `dcsimservicedesk@gmail.com` (the sending account) and
-`ng.hi.hiarng.nbx.dcsim-hand-receipt@army.mil`. `RECEIPT_CC_EMAILS` overrides
+`ng.hi.hiarng.mbx.dcsim-hand-receipt@army.mil`. `RECEIPT_CC_EMAILS` overrides
 them; an **empty** value disables them, which is deliberately distinct from unset
 (unset means "use the defaults"). Because the defaults are real addresses baked
 into the source, editing that list changes who receives receipt PII with no
