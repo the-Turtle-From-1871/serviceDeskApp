@@ -111,10 +111,11 @@ export function readinessState(s: ReadinessSignals): ReadinessState {
  * Parse the MDM export's free-text last-logon into an instant.
  *
  * `Item.lastLogonDate` is stored verbatim as text ("7/25/2026 1:40:21 AM")
- * because the export's format is not ours to guarantee. Readiness needs to
- * COMPARE it to markedReadyAt, and the dashboard needs to do that across the
- * whole fleet in SQL — so the parse happens once, here, on import, into the
- * denormalized `lastLogonAt` column. Parsing in Postgres instead would abort a
+ * because the export's format is not ours to guarantee. Readiness no longer
+ * compares it to markedReadyAt (see the removed rule above), but analytics and
+ * any reinstatement of that rule need it as an instant across the whole fleet
+ * in SQL — so the parse happens once, here, on import, into the denormalized
+ * `lastLogonAt` column. Parsing in Postgres instead would abort a
  * whole import on the first unexpected format.
  *
  * Returns null rather than throwing on anything unrecognised: an unparseable

@@ -144,8 +144,14 @@ still aging on its own clock.
 .\rotate-gmail-token.ps1 -Mode Rotate   # do it now
 .\rotate-gmail-token.ps1 -Mode Rotate -DryRun   # real consent, then report instead of deploying
 .\rotate-gmail-token.ps1 -Mode Check    # what the scheduled task runs
+.\rotate-gmail-token.ps1 -Mode Rotate -TimeoutSeconds 900   # longer wait at the consent screen
 .\setup.ps1 -Uninstall                  # remove persistence
 ```
+
+`-TimeoutSeconds` (default **300**, range 30–1800) is how long the tool waits for you to
+finish the consent prompt. The default suits a browser already signed in to the sending
+account; raise it when a sign-in or 2FA challenge has to happen first. The timeout message
+tells you to raise it, so the option exists to make that advice actionable.
 
 `-DryRun` is safe: Google permits many concurrent refresh tokens per client, so minting one
 does not invalidate the token production is using.
@@ -155,7 +161,7 @@ does not invalidate the token production is using.
 | Path | What |
 | --- | --- |
 | `%LOCALAPPDATA%\dcsim-gmail-rotation\config.xml` | Secrets, DPAPI-encrypted, bound to this Windows user on this machine. |
-| `%LOCALAPPDATA%\dcsim-gmail-rotation\state.json` | Last rotation time and result. No secrets. |
+| `%LOCALAPPDATA%\dcsim-gmail-rotation\state.json` | `lastSuccessAt`, `lastAttemptAt`, `expiresAt`, `lastResult`. No secrets. The two timestamps are **separate on purpose**: a failed attempt moves `lastAttemptAt` only, so urgency keeps being measured from the token production is actually running. |
 | `%LOCALAPPDATA%\dcsim-gmail-rotation\rotate.log` | Rolling log, 1 MB × 3. No secrets. |
 | `%APPDATA%\...\Start Menu\Programs\DCSIM Gmail Token Rotation.lnk` | Manual launch; also carries the AppUserModelID the toasts need. |
 | `HKCU\Software\Classes\dcsim-gmail-rotate` | Protocol handler the toast button activates. |
@@ -183,6 +189,14 @@ by hand in the Vercel dashboard and redeploy — this tool is a convenience, not
 session; it is registered that way deliberately, because a hidden session can neither show
 a toast nor open a browser. Re-run `setup.ps1` to re-register, and check
 `Get-RotationIntegrationStatus`.
+
+Then read `rotate.log`. Windows drops a toast silently when notifications are switched off
+for this tool's AppUserModelID, so that case is logged explicitly — an `ERROR` line naming
+the setting and the AUMID, ending "*nothing will warn anyone that the Gmail token is
+expiring*". If Windows will not report the setting at all, the toast is shown anyway and a
+`WARN` line records that it could not be checked. That direction is deliberate and was a
+bug once: treating an unreadable setting as "disabled" suppressed **every** reminder,
+including the only one that mattered.
 
 ## A caveat worth knowing
 

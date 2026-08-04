@@ -23,9 +23,9 @@ import {
 //  0. Anti-abuse.
 //       • `/api/auth/*` — rate limited OUTSIDE the `auth()` wrapper (see below).
 //       • `/api/*` and the public PII surface, for callers with no session:
-//         a User-Agent check, then 100/min (API_POLICY), the anti-scraping
-//         limit.
-//  1. Public PII surface (`/`, `/i/*`, `/receipts/*`): the shared 8-digit PIN
+//         a User-Agent check, then 300/min (API_POLICY), the anti-scraping
+//         limit. `/` is in THIS gate, and only this one.
+//  1. Public PII surface (`/i/*`, `/receipts/*` — NOT `/`): the shared 8-digit PIN
 //     gate, active only when PUBLIC_ACCESS_PIN_ENABLED is on. A logged-in user
 //     OR a valid unlock cookie passes; otherwise redirect to /unlock. This is
 //     NOT an authz boundary — real authz stays per-route (requireUser/

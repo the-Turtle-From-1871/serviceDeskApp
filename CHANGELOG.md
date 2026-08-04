@@ -434,6 +434,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Removed
 - Dead Vercel cron config (the 90-day purge runs from GitHub Actions).
 
+### Notes
+- Database: adds the `ItemAudit` table (`20260716000000_item_audit`).
+
 ## 2026-07-15
 
 ### Added
@@ -456,6 +459,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   longer eats a deliberate Enter submit; the phone field clears between
   contacts; `deleteContactAction` no longer leaks raw errors in dev.
 - Corrected the DCSIM-toggle change reporting and gated it on role.
+
+### Notes
+- Database: adds the `ItemEdit` (`20260715000653_item_details_and_edit_history`),
+  `Signature` (`20260715005357_named_signatures`) and `Contact`
+  (`20260715160000_contact_book`) tables.
 
 ## 2026-07-14
 
@@ -508,6 +516,390 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Database: adds migration `20260714184046_add_unit_table`. In production the
   `Unit` table was created and seeded via `prisma/manual/2026-07-14_add_unit_table_prod.sql`
   (idempotent) rather than `db:seed`, to avoid touching the admin account.
-- Additional migrations in this window add the `ServiceQueueItem`, `ItemEdit`,
-  `Signature`, and `ItemAudit` tables and the `dueAt`/`overdueAlertedAt` timer
-  columns on `Transfer` and `ServiceQueueItem`.
+- Database: `20260714212256_item_level_service_queue` reshapes the **existing**
+  `ServiceQueueItem` table (created 2026-07-13 as a receipt-level queue) into the
+  item-level one — it adds the `ServiceType` enum, replaces `READY_TO_ISSUE` with
+  `COMPLETED`, and moves the row's identity from `transferId` to a unique
+  `itemId`. Because a receipt-level row has no item to attach to, **the migration
+  deletes every existing queue row**; anything still queued at the time had to be
+  re-flagged by hand.
+- Database: `20260714234429_user_email_citext` makes `User.email`
+  case-insensitive.
+
+## 2026-07-13
+
+### Added
+- **A service queue for incoming hand receipts** at `/admin/queue` (admin only).
+  Every receipt created lands in it automatically, grouped by the day it
+  arrived, showing the receipt number, its items, the recipient and their unit.
+  Clearing an entry marks it **Ready to issue when needed** rather than deleting
+  it, so nothing about the receipt is lost. Routing a receipt into the queue is
+  best-effort: a queue failure never fails the receipt somebody has just signed.
+- **Closed hand receipts are now permanently deleted 90 days after they close.**
+  A receipt's expiry is stamped at the moment it closes, and a nightly job
+  sweeps the ones that have come due and removes them for good. The same sweep
+  hard-deletes accounts that have been deactivated for three months or more —
+  except where something that must keep its author still points at the account
+  (items they logged, imports they ran), in which case the account is skipped
+  rather than the record being broken.
+
+### Changed
+- **A closed hand receipt is now immutable.** Once a receipt closes it cannot be
+  reopened, edited or otherwise altered; anything that would change it is
+  refused. A receipt counts as closed on either signal — its status or its
+  closing timestamp — so a half-written close still locks it.
+- **"Notify customer — items ready for pickup" is now DCSIM-only on the server
+  too.** The button was already hidden for a non-DCSIM recipient; the request is
+  now rejected outright as well, so it cannot be submitted out of band.
+
+### Security
+- **Resetting a password now signs that account out everywhere.** Previously the
+  reset set a new password but left every existing sign-in alive until it
+  expired on its own — so the very thing a reset is for (someone else has your
+  password) did not actually end their session. Sessions opened before the last
+  password change are now rejected on their next request. Sessions that predate
+  this change are grandfathered, and a database error lets the request through
+  rather than locking everyone out.
+- **The reset link no longer leaks out of the page it lands on.** The reset and
+  forgot-password pages now send no referrer, and the token is stripped from the
+  address bar (and browser history) as soon as the page loads, so the one-time
+  link cannot travel to a third-party site or sit in a shared browser's history.
+- **Requesting a reset no longer reveals whether an address has an account.**
+  The lookup, token creation and email now happen after the response is already
+  on its way, so a registered and an unregistered address take the same time to
+  answer, and a single account can only request one link a minute. Consuming a
+  token is a single atomic step, and an account deactivated after the link was
+  issued is re-checked at the moment it is used.
+
+### Notes
+- New env var **`CRON_SECRET`**. The purge endpoint (`/api/cron/purge`) has no
+  user session, so this shared secret is its only authentication — it is
+  compared in constant time and the endpoint fails closed when the secret is
+  unset. Scheduled daily at 08:00 UTC; it can also be triggered by hand with the
+  same `Authorization: Bearer` header.
+- Migration `20260713200631_ticket_lifecycle_and_service_queue` adds the
+  `ServiceQueueItem` table, `Transfer.closedAt` / `Transfer.purgeAfter` (with an
+  index for the sweep) and `User.deactivatedAt`. Migration `20260713150502` adds
+  `User.passwordChangedAt`.
+- The purge is genuinely destructive and has no undo — a receipt 90 days past
+  closing is gone, PDF and all. The two sweeps run independently, so a failure
+  in one is reported without stopping the other.
+
+## 2026-07-12
+
+### Added
+- **The site can now be verified in Google Search Console**, via a verification
+  token in the page metadata and a verification file at the site root.
+
+### Changed
+- **The browser tab and search-result listing now name the application.** The
+  page title is "Hand Receipt" with a description of what it does, replacing the
+  generic "Service Desk App" placeholder.
+
+## 2026-07-10
+
+### Added
+- **Self-service forgot/reset password.** A link on the sign-in page emails a
+  single-use reset link that expires after an hour; following it sets a new
+  password. The request always answers the same way whether or not the address
+  has an account, so it cannot be used to find out who has one. Only a hash of
+  the link's token is stored — the link itself exists only in the email.
+- **Device Name is now a field on every item**, required when logging or editing
+  one, shown on the item page and on the QR label, and imported as its own CSV
+  column. Existing items with no device name still display and edit normally.
+- **The items list gained a Device Name column, a sort control and a Columns
+  menu.** Device Name leads the table; the toolbar sorts by any field ascending
+  or descending; the Columns menu hides the ones you do not want. Your sort and
+  hidden columns are remembered on that browser.
+- **Print QR labels for a whole selection.** Selecting items on the list and
+  choosing **Print QR codes** opens a printable sheet — 8 labels across with the
+  serial centred beneath each code, about 72 to a page.
+- **"Notify customer — items ready for pickup"** on a hand receipt page. It
+  emails the customer a list of the items waiting for them and reports success
+  or failure inline.
+- **Privacy Policy and Terms of Service pages**, linked from a new site-wide
+  footer.
+- **An archival copy of receipt email to a records inbox.** When
+  `ADMIN_INBOX_EMAIL` is set, every new receipt and every return is copied there
+  with the signed PDF attached, independently of the parties' own email — so the
+  records copy still goes out when both parties are DCSIM or the customer has no
+  address on file.
+- **Contact numbers format themselves as you type**, as `(xxx)-xxx-xxxx`, on the
+  receipt builder, the registration form and the admin new-user form. Backspace
+  still works one character at a time.
+
+### Changed
+- **Customer email now says which of three things happened.** Subjects carry the
+  classification and the receipt number — **NEW** for a new receipt, **UPDATED**
+  for a partial return, **CLOSED** for the return that closes it — and the
+  bodies are short: the items issued, the returned/not-returned split, or the
+  full list at closing, each with the link to view or download the receipt. The
+  regulatory boilerplate is gone.
+- **The items list is wider on large screens**, so device names and the row
+  actions stop wrapping. Other pages keep the narrower layout.
+
+### Fixed
+- **The return that closes a receipt no longer takes a quantity column of its
+  own on the PDF.** It was drawing a column showing a zero balance *and* the
+  CLOSED watermark and closing attestation for the same event. Only partial
+  returns — the ones that leave a balance — get a column now.
+- **The Privacy Policy and Terms pages were redirecting anonymous visitors to
+  the sign-in page.** They are public pages and now open for everyone.
+- **The pickup-notify button no longer disappears when the customer has no email
+  on file.** It stays visible and explains why it is unavailable, instead of the
+  option silently not existing.
+- **The password-reset email is now sent as HTML as well as plain text.** A
+  text-only message whose entire content is a tokenised link is a classic spam
+  signature and was being deferred or filtered; one reset arrived in one inbox
+  and never landed in another.
+- The file-picker button on the CSV import form is vertically centred in its
+  field.
+
+### Notes
+- A Gmail-based email sender was added and reverted the same day; sending stayed
+  on Resend. (It returns for good on 2026-07-31.)
+- New table `PasswordResetToken` holds only the SHA-256 hash of each link's
+  token. New env var **`ADMIN_INBOX_EMAIL`** — unset means no archival copies
+  are sent, which is the previous behaviour.
+
+## 2026-07-09
+
+### Added
+- **Property returns, partial and full.** An admin opens a hand receipt, checks
+  off the serials physically coming back, and the receipt records exactly that —
+  a partial return leaves the rest outstanding and the receipt open; returning
+  the last item closes it. Every return is written to a ledger, so a receipt
+  carries the whole history of how it was cleared rather than just its current
+  state.
+- **The receipt page shows what has come back.** Returned items are struck
+  through, a **CLOSED** banner appears once the last one is in, and a section
+  below lists each return with who processed it and when.
+- **The hand receipt PDF records the return history across the DA 2062 quantity
+  columns.** Each return takes the next column (A is the recipient's original
+  signature, B–F the returning technicians), with that transaction's signature
+  and date in its own column, rather than overwriting column A. A closed receipt
+  is watermarked **CLOSED**, with the accepting technician's attestation set
+  parallel to the watermark beneath it. Every signed column is capped with guard
+  bars so entries cannot be added to it afterwards.
+- **Technician signatures.** A return cannot be submitted without the processing
+  technician signing for it; the signature can be saved to their profile and
+  managed from the account page, so it does not have to be redrawn every time.
+  The technician who accepts a return is named on the receipt page and on the
+  PDF.
+- **The signed PDF is attached to receipt and return email**, and return
+  notifications go to the customer with the desk copied.
+
+### Fixed
+- **Two people processing the same return at once can no longer return the same
+  item twice.** Returns for one receipt are now serialised, and the closing
+  stamp is written only if it is still unset — so the second attempt sees the
+  first one's result instead of double-counting it.
+- The "who currently holds this" lookup was reading custody from the wrong end
+  of a receipt's history.
+
+## 2026-07-08
+
+### Added
+- **Mass item import from a CSV.** An admin uploads a spreadsheet and the whole
+  file is written in one transaction — either every valid row lands or none
+  does. Column headings are matched regardless of spacing and capitalisation,
+  rows missing required values are reported rather than silently skipped, and a
+  serial that appears twice in the file is only created once. Each import is
+  recorded as a batch, listed on the admin audit page with who ran it, when, and
+  how many rows it created. The file size is capped so a runaway upload cannot
+  be submitted.
+
+## 2026-07-07
+
+### Added
+- **A hand receipt can now carry several items instead of exactly one.** Items
+  are selected from the items list and built into one receipt at
+  `/receipts/new`, where identical make-and-model items are grouped onto a
+  single line with a quantity, the way a DA 2062 is actually written. The PDF
+  renders every line with its own authorised and issued quantities; the
+  recipient's signature and date still read up column A beneath the last row.
+  A receipt is capped at 10 item lines, with the description text shrunk to stay
+  inside the form's boxes.
+- **Preview PDF** alongside Download, on the receipt page and straight after
+  creating one — it opens in the browser's own viewer instead of downloading.
+
+### Changed
+- **Receipt email is now just the receipt number as the subject**, with a short
+  body and the link on its own line, sent from a named sender rather than a bare
+  address.
+
+### Removed
+- **The single-item transfer flow.** Issuing one item is now the same flow as
+  issuing ten, so the item-scoped transfer page and its action are gone.
+
+### Notes
+- New `TransferLine` / `TransferItem` tables hold a receipt's lines and the
+  items on them; existing single-item receipts were migrated into the new shape
+  without data loss.
+
+## 2026-07-06
+
+### Added
+- **The home search returns results as you type.** Both serial-number and
+  receipt-number modes show a list of matches while typing — no Search button,
+  no page reload — and clicking one opens it. Results are announced to screen
+  readers, and "No matches" is held back until the search has actually settled,
+  so it no longer flashes mid-word or when switching modes.
+- **A staff-only detail block on the item page.** Signed-in staff see the fuller
+  record — including who logged the item — while the public page keeps to what
+  it always showed. A **View** action on the items list links straight to it.
+- **A consistent navigation bar on every page**, scoped to the viewer's role,
+  with the current section highlighted. The five separately-written page headers
+  are now one component.
+- **A mobile layout.** The header collapses to a hamburger menu, tables restack
+  into readable cards on phones, and the viewport is declared so the site is no
+  longer rendered as a shrunken desktop page.
+
+### Changed
+- **Signing out returns to the search page** rather than a dead end, and the
+  sign-in page has a way back to it.
+- **Item notes are admin-only.** The rest of an item's details stay visible to
+  all staff.
+
+### Fixed
+- **Receipt-number search now matches as you type.** It was an exact-match
+  lookup, so a partial receipt number found nothing until the last character
+  was typed — unlike serial search beside it.
+- The item page now reads the current holder from the item's latest completed
+  receipt rather than the first one it happened to load.
+
+### Security
+- **Search results no longer carry anything the results do not show.** The
+  query returns only the receipt number and item summary, so signature images
+  and party details are not shipped to the browser on every keystroke.
+- **The navigation bar re-reads role and active status from the database**
+  instead of trusting the signed-in token, so a demotion or deactivation is
+  reflected immediately rather than at the next sign-in.
+- **Sensitive server modules are marked server-only**, so the database client,
+  password hashing and the authorization helpers cannot be pulled into a browser
+  bundle by accident. Unexpected errors in server actions now log the detail on
+  the server and return a generic message.
+- **The seed script no longer contains a default admin password.** It requires
+  the credentials to be supplied through the environment and refuses to run
+  without them.
+
+## 2026-07-02
+
+### Added
+- **Hand receipts are now created on one device, from a shared item list.** The
+  two-device handshake is gone (see Removed): a technician picks the item, types
+  both parties — rank, name, unit, contact, and whether each side is DCSIM — and
+  the recipient signs on the same screen. The receipt is written as a completed
+  record on the spot, with both parties snapshotted onto it so later edits to an
+  account cannot change what the signed document says. The next receipt for an
+  item pre-fills its sender from whoever last received it.
+- **Public hand-receipt lookup.** Anyone holding a receipt number can find the
+  receipt, read it, and download its PDF without signing in — the point being
+  that the recipient is usually not a staff member.
+- **A public item page and item QR labels.** Each item has a page at `/i/<id>`
+  and a printable QR label pointing at it, so a code stuck to a laptop leads to
+  that laptop's record. Admins get the printable label pages.
+- **Home search with a mode dropdown** — look up by serial number or by receipt
+  number from the same box. Serial results are capped at 50.
+- **Sequential receipt numbers.** Receipts are numbered `HR-000001` upward from
+  a database sequence, replacing the random identifiers issued earlier in the
+  day, so the numbering is legible and gapless.
+- **Receipt email.** A receipt link is emailed to the parties when one is
+  created, through a pluggable sender (Resend in production, a logging stub
+  locally). Sending is best-effort — a mail failure never undoes a receipt that
+  has already been signed.
+- **The DA 2062 now carries both parties**, with unit and contact number on the
+  FROM/TO name line, sized to fit the box.
+
+### Changed
+- **Items are simpler.** Asset tag is gone and "home location" is now **home
+  unit**. New-user records carry a unit and contact number.
+- **Signing in lands on the receipt flow**, not the public search page — a
+  successful login used to look like it had done nothing.
+
+### Removed
+- **The two-device custody handshake.** Initiating a transfer to another account
+  and waiting for them to accept, decline or cancel it — along with the
+  standard-user dashboard of incoming and outgoing transfers, the admin override
+  reassignment, and the per-item pending-transfer lock — is replaced by the
+  single-device flow above. A recipient no longer needs an account at all.
+
+### Notes
+- Self-registration was removed with the two-device flow and re-enabled later
+  the same day, since a peer initiating a receipt still needs an account.
+- The single-item kiosk page at `/new` shipped and was retired within the day in
+  favour of starting from the shared item list.
+
+## 2026-07-01
+
+### Added
+- **A drawn signature completes a transfer.** The recipient signs on screen to
+  accept custody, and the signature is stored with the transfer record.
+- **A dashboard for standard users** showing what they hold and what is coming
+  in or going out.
+- **Admin user management** — create accounts, change roles, deactivate — plus
+  an audit view of every transfer, and the ability to reassign an item to
+  someone directly when the normal handshake is not possible.
+- **A printable DA Form 2062 hand receipt per transfer**, filled per the
+  official field guidance: the item's description carries its serial, quantities
+  read down column A, and the recipient's signature and date are rotated to read
+  up that column, the way a hand receipt is actually signed. Black guard bars
+  fill the empty cells above and below the signed block so entries cannot be
+  added afterwards. A single-page item QR PDF downloads from the QR page.
+- **Self-service password change** at `/account`, so the seeded admin password
+  can be rotated from the application rather than the database.
+- **Self-registration**, a searchable person picker, and a **rank** field
+  separate from the name — rank and name are snapshotted onto a transfer
+  together, so the hand receipt's FROM/TO lines read the way the form expects.
+
+### Changed
+- **Every date and time is displayed in Hawaii Standard Time**, on screen and on
+  the hand receipt. Timestamps are still stored in UTC; only the display moved.
+- **A full visual restyle** — a coherent design system across every screen,
+  replacing the framework's starter styling.
+- **Email addresses are normalised to lowercase** on sign-in and on account
+  creation, so capitalisation can no longer keep someone out of their own
+  account.
+
+### Security
+- **A demotion or deactivation now takes effect on the account's very next
+  request**, rather than whenever their sign-in happened to expire. An admin
+  cannot demote or deactivate their own account, now that those changes bite
+  immediately.
+- **Every admin page checks admin rights itself**, in addition to the section
+  guard around them.
+- **A submitted signature is validated** — it must be a PNG image and under
+  5 MB — before it is stored.
+
+### Fixed
+- Two people starting a transfer for the same item at the same moment now get a
+  clear "already pending" message instead of a server error.
+
+### Notes
+- Deployment targets Vercel with Supabase Postgres: a pooled connection at
+  runtime and a direct one for migrations, with the client generated at build
+  time. Note that Vercel's free tier refuses to build a commit whose author
+  email is not linked to a GitHub account on the team.
+
+## 2026-06-30
+
+### Added
+- **The first working version of the application.** An administrator signs in
+  with an email and password, and every page other than sign-in requires a
+  session; accounts carry a role (`ADMIN` or `USER`) that decides what they can
+  reach.
+- **An equipment catalogue.** Admins log an item with its make, model, serial
+  number and asset tag, search the list, edit it, and retire it when it leaves
+  the fleet. Retiring is a status change, not a deletion — the item's history
+  survives it.
+- **A QR code per item**, with a printable page carrying the code and the item's
+  details, so a code stuck to a device leads to that device's record.
+- **A public item page** showing an item's read-only details, reachable without
+  signing in — the page a scanned QR code opens.
+- **Custody transfers between accounts.** The holder starts a transfer to
+  another person, who accepts or declines it; either party can cancel while it
+  is pending. An item can only have one transfer pending at a time — enforced by
+  the database, not just by the application — so two people cannot start one for
+  the same item at once. An admin can reassign an item outright when the normal
+  handshake is not possible, and every item carries the full history of who held
+  it and when.

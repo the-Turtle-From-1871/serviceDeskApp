@@ -3,7 +3,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $CsvPath,
 
-    [string] $Uri = "https://servicedeskapp.vercel.app/api/items/import",
+    # Custom domain, not the *.vercel.app deploy URL — the latter is blocked on
+    # the government network, so a managed machine gets a connection failure.
+    [string] $Uri = "https://www.dcsim.us/api/items/import",
 
     [string] $Secret = $env:MDM_IMPORT_SECRET,
 

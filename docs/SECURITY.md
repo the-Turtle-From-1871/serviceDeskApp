@@ -3,7 +3,7 @@
 A living inventory of every security control in this app — what it does, where
 it lives, and why. **Maintained over time**; see [Keeping this current](#keeping-this-current).
 
-**Last reviewed: 2026-07-31**
+**Last reviewed: 2026-08-04**
 
 Related: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`../CLAUDE.md`](../CLAUDE.md) · [`password-reset-hardening.md`](./password-reset-hardening.md)
 
@@ -20,9 +20,9 @@ Related: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`../CLAUDE.md`](../CLAUDE.md
 | Database | RLS deny-all, but **app-layer is the real boundary** |
 | CI | Semgrep SAST + build + security-docs check, all three required to merge to `main` |
 | Accountability | Receipts sealed + attributed; **server-attested, not user non-repudiation** |
-| Rate limiting | Composite `(IP, email)`: 5 auth failures / 15 min under a 60 / IP ceiling; 300 requests / min anonymous; global botnet detector |
-| Bot defence | Cloudflare Turnstile on login + reset (config-gated); anonymous non-browser agents refused |
-| Biggest gap | **No Redis provisioned yet**, so the limiter runs per-instance |
+| Rate limiting | Composite `(IP, email)`: 5 auth failures / 15 min under a 60 / IP ceiling; 300 requests / min anonymous; global botnet detector. **Live on Upstash Redis in prod since 2026-07-29** |
+| Bot defence | Cloudflare Turnstile on login + reset (config-gated; **keys live in prod since 2026-07-29**); anonymous non-browser agents refused |
+| Biggest gap | **No authentication event log, and most privileged mutations record no actor** — see [Known gaps #7](#known-gaps--accepted-risks) |
 
 Jump to: [1 Authentication](#1-authentication) · [2 Authorization](#2-authorization) ·
 [3 Public surface](#3-public-surface--the-pin-gate) · [4 Password reset](#4-password-reset) ·
@@ -158,7 +158,7 @@ Authorization is **role-based** (`ADMIN` / `USER`), never ownership-based —
 inventory, receipts, and the queue are shared org-wide.
 
 **Every Server Action and Route Handler starts with `requireUser()` or
-`requireAdmin()`** — never a bare `auth()`. Roughly 52 call sites. Throws a typed
+`requireAdmin()`** — never a bare `auth()`. Roughly 60 call sites. Throws a typed
 `AuthError` (`UNAUTHENTICATED` / `FORBIDDEN`). `src/lib/authz.ts`
 
 **Role and `isActive` are re-read from the DB on every protected request.** The
@@ -484,9 +484,10 @@ marking it `server-only` costs nothing and keeps the OAuth client secret and
 refresh token out of any client bundle by construction, not by convention.
 
 **No hardcoded credentials.** Everything via `process.env`: `DATABASE_URL`,
-`AUTH_SECRET`, `CRON_SECRET`, `SIGNING_PRIVATE_KEY`, `APP_URL`,
-`PUBLIC_ACCESS_PIN_ENABLED`, `ADMIN_INBOX_EMAIL`, `GMAIL_FROM`,
-`GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`.
+`AUTH_SECRET`, `CRON_SECRET`, `MDM_IMPORT_SECRET`, `SIGNING_PRIVATE_KEY`,
+`APP_URL`, `PUBLIC_ACCESS_PIN_ENABLED`, `ADMIN_INBOX_EMAIL`, `GMAIL_FROM`,
+`GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`,
+`TURNSTILE_SECRET_KEY`, `KV_REST_API_URL` / `KV_REST_API_TOKEN`.
 
 **Outbound mail is sent via the Gmail API with an OAuth2 refresh token, not an
 SMTP app password.** The SMTP transport (`GmailEmailSender`, selected by
@@ -506,6 +507,15 @@ expired refresh token therefore surfaces as a thrown error on every send
 attempt rather than silently rerouting mail through Resend or the log stub; see
 [Known gaps #9](#known-gaps--accepted-risks) for why that refresh token expires
 on a roughly weekly cadence and how it's kept current.
+
+**The `nodemailer` dependency is gone too, as of 2026-08-04.** The SMTP *code*
+went on 2026-07-31; the package was kept a little longer as a rollback route and
+nothing imported it in the interim. Removing it closes a tracked advisory
+covering SMTP command injection and CRLF header injection — closed by deleting
+the code path rather than upgrading it, so that class of bug cannot return
+through this dependency. `npm ls nodemailer` is the check; the app has no SMTP
+client at all now, and re-adding one would reopen both the advisory and the
+app-password credential the OAuth sender replaced.
 
 **The signing key is never logged** — failure paths in `src/lib/crypto.ts` log
 the error, never the key.
@@ -705,11 +715,20 @@ login gate before the handler can even read the `Authorization` header — same
 reasoning as the `api/cron` exclusion above. Real authorization is the bearer
 check inside the handler, not the proxy.
 
-**Declares `maxDuration = 300`** (the Hobby ceiling) because `commitImport`'s
-transaction is configured `maxWait: 5_000` + `timeout: 50_000`, consumed
-sequentially — a shorter function budget would let the platform kill the
-function mid-transaction instead of letting it abort cleanly into the route's
-catch block.
+**Declares `maxDuration = 60`**, and the invariant is
+`maxDuration > pre-transaction work + maxWait + timeout`. `commitImport`'s
+interactive transaction is configured `maxWait: 5_000` (pool acquire) +
+`timeout: 40_000`, consumed sequentially — 45s — leaving ~15s for the work that
+happens in the same invocation *before* the transaction opens (`req.formData()`
+buffering the upload, `getImportActor()`, `file.text()`, and the two parallel
+load queries inside `commitImport`) plus unwind. A shorter budget would let the
+platform kill the function mid-transaction — or before it even reaches one —
+instead of letting it abort cleanly into the route's catch block. **60 is
+deliberate, not a "safe" round number:** Vercel rejects an unsupported
+`maxDuration` at *deploy* time, which `next build` in CI cannot catch, so the
+first place an unverified higher value fails is the production deployment.
+Raise it only once a measured production run needs more *and* the plan's real
+ceiling is confirmed.
 
 **Errors don't leak internals** — generic `"Import failed"` / a specific but
 non-sensitive parse error, plus a server log.
@@ -784,10 +803,17 @@ current` job before it merged.
 `Build (next build)`, `Security docs current`), `strict` mode (the branch must be
 up to date). Admin bypass exists for emergencies only.
 
-**An `xhigh` review marker is required before pushing** — per-commit, so a new
-commit needs a fresh review. Note this is a **Claude Code hook**
-(`.claude/hooks/xhigh-review-gate.sh`), so it constrains agent tool calls, not a
-human pushing from their own terminal. There are no git hooks installed.
+**There is no pre-push review gate — it was removed on 2026-07-30.** An `xhigh`
+review marker used to be required per-commit, enforced by a Claude Code
+`PreToolUse` hook (`.claude/hooks/xhigh-review-gate.sh` + its
+`.claude/settings.json` entry). Both are gone, so **nothing blocks a push**.
+Running `/code-review xhigh` on a branch before opening a PR is still expected,
+but it is a convention now, not enforcement. Two things worth knowing: a stale
+`.git/xhigh-review-ok` file may still sit in a local clone (it is **inert** and
+means nothing), and `.claude/settings.json` is untracked local config, so
+removing the hook in one clone does not remove it from anyone else's — check
+your own if a push is unexpectedly blocked. The only enforced gates are the
+three required CI checks above, and they run on the PR, not on the push.
 
 **This document is itself CI-enforced.** The `Security docs current` job runs
 `scripts/check-security-docs.mjs` on every PR and fails it when a watched
@@ -936,8 +962,12 @@ does **not** refund: a crash is not evidence the credentials were right.
   time a colleague unlocked legitimately. It is no longer refunded; a successful
   unlock costs one of the five, which the budget absorbs. The reset-submit
   bucket gained a **token hash** instead, which makes it the caller's own and
-  therefore safe to refund — and stops five people with expired links locking
-  out a sixth holding a valid one.
+  stops five people with expired links locking out a sixth holding a valid one.
+  That bucket is nonetheless **not** refunded on success, and deliberately so:
+  a successful reset *consumes* the token the bucket is keyed on, so the freed
+  attempts could never be spent by anyone — refunding would buy nothing but the
+  O(keyspace) `SCAN` below. The login refund is the one that is genuinely
+  reusable, because the email persists.
 - *Accepted cost:* the refund is `resetUsedTokens`, which on Upstash `SCAN`s for
   the identifier's keys — O(keyspace), not O(1). It runs only on SUCCESS, tens
   of times a day, never on the failure path an attacker controls. Do not move it
@@ -958,6 +988,17 @@ limit exists for anonymous scraping of the public surface and is applied there.
 Knowing the caller is signed in needs the session read, but that costs little
 for the traffic being shed: an anonymous request carries no session cookie, so
 Auth.js short-circuits before any JWT decode or database query.
+
+**The `/api/*` arm of that anonymous limit currently guards nothing, and that is
+worth knowing rather than trusting.** Gate 0b meters anonymous callers on the
+public surface **or** any `/api/*` path — but the app has exactly three API
+routes today, and none of them reach it: `/api/auth/*` returns from gate 0a
+before the wrapper runs, and `/api/cron/*` and `/api/items/import` are excluded
+from the matcher entirely (each authenticates with its own constant-time bearer
+compare; see [§8](#8-background-jobs-cron) and
+[Known gaps #8a](#known-gaps--accepted-risks)). The clause is correct code kept
+for the next route added under `/api/`, which will inherit the limit by default
+— it is not a control anything may lean on today.
 
 **`/api/cron/*` is deliberately excluded** from the proxy matcher. It
 authenticates with a constant-time `CRON_SECRET` compare and is called once a
@@ -1184,22 +1225,35 @@ the whole bypass. The lever is unsetting `TURNSTILE_SECRET_KEY`, which disables
 the check everywhere.
 
 **0. The bot defences are config-gated and spoofable, in that order.**
-⚠️ *Owed to a human: provision the Turnstile keys.*
-Until `NEXT_PUBLIC_TURNSTILE_SITE_KEY` + `TURNSTILE_SECRET_KEY` are set, no
-CAPTCHA runs ([§13](#13-captcha--cloudflare-turnstile)) — and because Turnstile
-is what the botnet detector escalates to, the detector is **alerting only**, not
-a mitigation. Separately, the User-Agent filter ([§12](#12-rate-limiting)) is
+*Resolved for production 2026-07-29; still true of any environment without keys.*
+Both `NEXT_PUBLIC_TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` **are set in
+production** — verified by hand, real keys, real browser, sign-in works — so the
+CAPTCHA runs and the botnet detector's escalation is a real mitigation rather
+than a log line. The gate remains config-shaped, which is the residual risk:
+anywhere those two vars are unset (dev, CI, a fresh preview, or prod after a
+mistaken deletion) no CAPTCHA runs at all ([§13](#13-captcha--cloudflare-turnstile)),
+and because Turnstile is what the botnet detector escalates to, the detector
+silently degrades to **alerting only**. Nothing warns about that state except
+`turnstileConfigured()`. Note also that unsetting `TURNSTILE_SECRET_KEY` is the
+documented recovery lever (Known gap 0a) and needs a redeploy to fully take
+effect, since `NEXT_PUBLIC_*` is inlined at build time.
+Separately, the User-Agent filter ([§12](#12-rate-limiting)) is
 defeated by one line in a scraper; it is deliberately a coarse filter for the
 lazy majority, not a control, and it must never be the thing something else
 relies on.
 
 **1. Rate limiting is only as good as the store behind it, and it fails open.**
-⚠️ *Owed to a human: provision the Redis store.*
-[§12](#12-rate-limiting) ships the limiter and every call site, but until a
-Marketplace Redis integration is attached to the Vercel project
-(`KV_REST_API_URL` / `KV_REST_API_TOKEN`), production runs the **per-instance
-in-memory fallback**, which throttles only requests that happen to land on the
-same warm lambda. Two further accepted properties, both deliberate: a Redis
+*Store provisioned 2026-07-29; the fail-open and IP-identifier properties remain
+accepted.*
+The Upstash Marketplace Redis integration **is** attached to the Vercel project
+(`KV_REST_API_URL` / `KV_REST_API_TOKEN`), so production runs the shared sliding
+window rather than the per-instance in-memory fallback — confirmed behaviourally,
+not just by config: a production lockout decayed at a window boundary, which only
+the Upstash weighted counter does ([§12](#12-rate-limiting)); the in-memory log
+would have held the full 15 minutes. If those vars are ever lost the app does not
+fail — it silently drops back to the **per-instance fallback**, which throttles
+only requests landing on the same warm lambda; `rateLimitStoreConfigured()` is
+what reports which is live. Two further accepted properties, both deliberate: a Redis
 outage **allows** traffic rather than locking the desk out, and the identifier
 is the client IP taken from `x-vercel-forwarded-for` → `x-forwarded-for` →
 `x-real-ip` — forgeable if this app is ever served without a proxy that
@@ -1279,7 +1333,7 @@ secret-guessing against it costs nothing to attempt and leaves no trace.**
 *Accepted.* Excluding the route from `src/proxy.ts`'s matcher (needed so the
 route's own session-less request isn't redirected to `/login` before the
 handler can read the `Authorization` header, [§8](#8-background-jobs-cron))
-also removes it from the proxy's 100/min anonymous rate limit
+also removes it from the proxy's 300/min anonymous rate limit
 ([§12](#12-rate-limiting)) and the automation User-Agent filter, same as
 `api/cron`. There is no per-attempt log of a rejected guess either — only
 `console.error` on an unexpected failure, not on a routine 401. In practice
@@ -1313,6 +1367,24 @@ is published or the sender moves to Google Workspace (0c's two exits), expect
 this failure mode on a roughly weekly cadence absent that person acting on the
 reminder.
 
+**10. Everyone copied on a custody email can see the other addresses on it.**
+*Accepted, and a deliberate change of behaviour on 2026-08-04.* A receipt,
+return or pickup notice is now **one message to the customer with a CC list**
+([§6](#6-secrets--data-leakage)) rather than a separate message per party. CC is
+not BCC, so each recipient learns every other address on the receipt — including
+the `army.mil` records mailbox and, where a receipt is between two outside
+parties, the other party's address. This is intended (the parties are named on
+the document the message carries), but it is a disclosure the previous
+one-message-per-recipient behaviour did not make. Two knock-ons: the CC list
+ships as **defaults in code** rather than required configuration, so editing
+`DEFAULT_RECEIPT_CC_EMAILS` changes who receives receipt PII with no config
+change and no deploy-time signal — which is why `src/lib/email-recipients.ts` is
+on the watch list — and one message means one delivery outcome, so a single hard
+rejection can now cost every recipient the notice. Switching the copies off is
+`RECEIPT_CC_EMAILS=""` (deliberately distinct from unset, which means "use the
+defaults"); moving them to BCC would be a behaviour change requiring a decision,
+since the reply-all thread is the point of the change.
+
 ---
 
 ## Keeping this current
@@ -1333,10 +1405,29 @@ node scripts/check-security-docs.mjs <baseRef>
 Exit codes: `0` pass or bypassed · `1` policy violation · `2` config problem
 (e.g. the base ref isn't fetched — never silently treated as a pass).
 
-**The watch list is at the top of `scripts/check-security-docs.mjs`.** It
-currently covers `authz.ts`, `auth.ts`, `proxy.ts`, `password.ts`,
-`password-reset.ts`, `reset-token.ts`, `actions/auth.ts`, `public-access*.ts`,
-`crypto.ts`, `email.ts`, `api/cron/**`, `next.config.ts`, and `ci.yml`.
+**The watch list is at the top of `scripts/check-security-docs.mjs`** (exported as
+`WATCHED`, and asserted by `scripts/check-security-docs.test.mjs`). It currently
+covers, by area:
+
+- **authn / session** — `auth.ts`, `lib/authz.ts`, `lib/session-freshness.ts`,
+  `modules/users/users.service.ts`, `lib/password.ts`, `app/actions/auth.ts`
+- **password reset** — `lib/password-reset.ts`, `lib/reset-token.ts`
+- **the public PIN gate** — `src/proxy.ts`, `lib/public-access*.ts` (including
+  `-cookie` and `-guard`), `app/actions/search.ts`, `app/actions/unlock.ts`,
+  `app/admin/actions/public-access.ts`
+- **anti-abuse** — `lib/rate-limit.ts`, `lib/auth-velocity.ts`,
+  `lib/turnstile.ts`, `components/TurnstileWidget.tsx`, and the four pages/forms
+  that decide whether the challenge is rendered and whether a tokenless form can
+  be submitted
+- **allowlists** — `modules/items/sort-keys.ts` (the ORDER BY identifiers),
+  `app/admin/actions/readiness.ts` (the hand-settable readiness targets)
+- **session-less writes** — `app/api/cron/**`, `lib/cron-auth.ts`,
+  `app/api/items/import/route.ts`, `modules/items/import-actor.ts`
+- **outbound mail** — `lib/email.ts`, `lib/email-recipients.ts`,
+  `lib/gmail-oauth-email.ts`
+- **infrastructure** — `next.config.ts`, `.github/workflows/ci.yml`,
+  `scripts/gmail-token-rotation/` (directory-wide)
+
 **A new security-relevant file must be added there**, or it escapes the guardrail
 silently — that list is the one part of this system that can rot without
 anything complaining.

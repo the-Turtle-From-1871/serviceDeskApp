@@ -303,7 +303,7 @@ describe("proxy — rate limiting", () => {
       vi.stubEnv("PUBLIC_ACCESS_PIN_ENABLED", "false");
     });
 
-    it("throttles anonymous scraping of item pages at 100/min per IP", async () => {
+    it("throttles anonymous scraping of item pages at API_POLICY.limit per IP", async () => {
       const hit = () => runIp(ipRequest({ path: "/i/abc", ip: "6.0.0.1" }));
       for (let i = 0; i < API_POLICY.limit; i++) {
         expect((await hit()).status, `request ${i + 1}`).not.toBe(429);

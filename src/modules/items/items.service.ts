@@ -493,10 +493,12 @@ export const MAX_BULK_ITEMS = 500;
  *
  * This is the ONLY hand-set readiness signal; everything else is derived (see
  * modules/items/readiness.ts). It stamps `markedReadyAt = now`, which reads as
- * "Ready to deploy" until something contradicts it — an open hand receipt, a
- * service flag, or an MDM logon dated AFTER the stamp. That last case is why
- * this is a timestamp and not a boolean: the marking expires on its own once
- * the device is used again, instead of quietly going stale.
+ * "Ready to deploy" until a deliberate act contradicts it — an open hand
+ * receipt, a service flag, retirement, or an explicit clear. MDM telemetry does
+ * NOT override it: a device on our own shelf produces logons routinely, so the
+ * rule that let a newer logon expire the stamp was removed. It stays a
+ * timestamp rather than a boolean so the marking can be COMPARED to other dated
+ * signals, and so "when did we last have hands on this" stays answerable.
  *
  * Writes only rows that are not already marked at this instant, so re-running
  * it is a no-op rather than churn. There is no history table to keep in step

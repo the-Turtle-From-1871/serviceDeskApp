@@ -14,7 +14,9 @@
         - name: Trigger the purge endpoint
           env:
             CRON_SECRET: ${{ secrets.CRON_SECRET }}
-            PURGE_URL: https://servicedeskapp.vercel.app/api/cron/purge
+            # Canonical custom domain, so this keeps working if the vercel.app
+            # deploy URL is ever retired.
+            PURGE_URL: https://www.dcsim.us/api/cron/purge
           run: |
             set -euo pipefail
             if [ -z "${CRON_SECRET}" ]; then

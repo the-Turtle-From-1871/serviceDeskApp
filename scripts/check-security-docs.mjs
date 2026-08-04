@@ -52,7 +52,7 @@ export const WATCHED = [
   [/^src\/lib\/public-access(-cookie|-guard)?\.ts$/, "the public PIN gate (§3)"],
   [/^src\/app\/actions\/search\.ts$/, "the public search action's own PIN check (§3)"],
   [/^src\/app\/actions\/unlock\.ts$/, "the unlock action + cookie flags, anti-guessing delay (§3)"],
-  // The policy numbers (5/15min, 60/15min, 100/min), the composite key shape,
+  // The policy numbers (5/15min, 60/15min, 300/min), the composite key shape,
   // the spend-then-refund split and the fail-OPEN behavior are all posture, not
   // implementation detail — changing any of them changes what the app is
   // protected against.

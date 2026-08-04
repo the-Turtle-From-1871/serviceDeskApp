@@ -77,12 +77,14 @@ const DEMO_LOGON_USER = "demo.user@example.mil";
 function signalsFor(readiness: DemoReadiness, now: number, day: number) {
   switch (readiness) {
     case "deployed": {
-      // Shelved, then used again since. This is the case that proves
-      // markedReadyAt self-expires rather than going stale — a logon NEWER
-      // than the stamp outranks it.
+      // In a soldier's hands with no hand receipt on file — the ~1,053 devices
+      // that predate the app. Rule 5 (has an MDM last-logon user) is what fires.
+      // `markedReadyAt` MUST stay null: rule 4 outranks rule 5, so a stamp here
+      // would derive to READY_TO_DEPLOY and this bucket would seed empty. (It
+      // used to carry one, back when a newer logon could expire the stamp.)
       const logon = new Date(now - 3 * day);
       return {
-        markedReadyAt: new Date(now - 40 * day),
+        markedReadyAt: null,
         lastLogonUserPrincipalName: DEMO_LOGON_USER,
         lastLogonDate: mdmDate(logon),
         lastLogonAt: logon,
