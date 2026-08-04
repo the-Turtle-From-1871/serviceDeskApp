@@ -517,6 +517,38 @@ must never enter list, search, or type-ahead queries.
 `"Something went wrong. Please try again."` to the user, full `console.error`
 server-side.
 
+### Who is copied on custody email (`src/lib/email-recipients.ts`)
+
+Every custody email — new hand receipt, return, pickup — is now **one message**
+addressed to the customer and copying a fixed set of record addresses. That
+message carries party names, contact details and the **signed hand-receipt PDF**,
+so the CC list is a PII disclosure surface, not formatting.
+
+**The record copies ship as defaults in code**, not as required configuration:
+`dcsimservicedesk@gmail.com` (the sending account) and
+`ng.hi.hiarng.nbx.dcsim-hand-receipt@army.mil`. `RECEIPT_CC_EMAILS` overrides
+them; an **empty** value disables them, which is deliberately distinct from unset
+(unset means "use the defaults"). Because the defaults are real addresses baked
+into the source, editing that list changes who receives receipt PII with no
+config change and no deploy-time signal — which is why the file is on the
+`check-security-docs` watch list.
+
+**Recipients can see each other.** CC is not BCC: every party on a receipt learns
+the other addresses on it. That is intended here (the parties are named on the
+document itself) but it is a change from the previous behaviour, where each
+recipient got a separate message and could not see the others.
+
+**One message means one delivery outcome.** Previously a bad address cost only
+that recipient their copy. Now a hard rejection can cost everyone the message.
+Sends remain best-effort and swallowed for receipts and returns so a mail failure
+never rolls back a committed custody change; the pickup notice still throws so
+the operator who triggered it is told.
+
+**The `army.mil` copy is not a reliable audit trail.** Mail from this gmail.com
+sender is not dependably delivered to `army.mil` — a sender-alignment problem, not
+an authentication one. A silent drop leaves no signal, so that copy must not be
+relied upon as the record until a message is confirmed received.
+
 ### Workstation-held deploy credentials (`scripts/gmail-token-rotation/`)
 
 Local Windows tooling that rotates the Gmail OAuth refresh token and pushes it to

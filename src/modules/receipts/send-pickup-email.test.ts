@@ -6,6 +6,7 @@ import {
   pickupItems,
   type PickupEmailArgs,
 } from "./send-pickup-email";
+import { DEFAULT_RECEIPT_CC_EMAILS } from "@/lib/email-recipients";
 import type { EmailMessage } from "@/lib/email";
 
 const args: PickupEmailArgs = {
@@ -31,6 +32,26 @@ describe("sendPickupEmail", () => {
     expect(msg.text).toContain("Panasonic Toughbook (SN SN-B)");
     expect(msg.text).toContain("Items ready (2)");
     expect(msg.text).toContain(args.receiptUrl);
+  });
+
+  it("copies the record addresses", async () => {
+    const send = vi.fn(async (_m: EmailMessage) => {});
+    await sendPickupEmail(args, { sender: { send } });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0].cc).toEqual(DEFAULT_RECEIPT_CC_EMAILS);
+  });
+
+  it("has no CC when the record copies are disabled", async () => {
+    const prev = process.env.RECEIPT_CC_EMAILS;
+    process.env.RECEIPT_CC_EMAILS = "";
+    try {
+      const send = vi.fn(async (_m: EmailMessage) => {});
+      await sendPickupEmail(args, { sender: { send } });
+      expect(send.mock.calls[0][0].cc).toBeUndefined();
+    } finally {
+      if (prev === undefined) delete process.env.RECEIPT_CC_EMAILS;
+      else process.env.RECEIPT_CC_EMAILS = prev;
+    }
   });
 
   it("propagates a send failure so the caller can report it", async () => {
