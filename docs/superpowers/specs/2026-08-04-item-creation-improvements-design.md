@@ -9,12 +9,15 @@
 Three unrelated gaps around logging a device into inventory:
 
 1. **Typing a make, model or unit is unassisted, and the assistance that does
-   exist is invisible on a phone.** The new-item form already feeds `<datalist>`
-   suggestions to Category and Home unit, but `<datalist>` does not render on
-   mobile browsers, and the technicians who log devices work from phones. Make,
-   Model and Unit (UIC) have no suggestions at all on any device. The result is
-   the drift this app spends real effort preventing elsewhere: `Dell` and
-   `DELL`, `Latitude 5420` and `Latitude5420`, one unit spelled two ways.
+   exist is invisible on a phone.** Four surfaces edit item fields — the
+   creation form, the admin edit form, the item detail card, and the identity
+   form — and between them the `<datalist>` coverage is arbitrary: Category has
+   one on three of them, Home unit on two, UIC and Make/Model on none. Worse,
+   `<datalist>` does not render on mobile browsers at all, and the technicians
+   who log devices work from phones. So the assistance is missing where it
+   exists and invisible where it does not. The result is the drift this app
+   spends real effort preventing elsewhere: `Dell` and `DELL`, `Latitude 5420`
+   and `Latitude5420`, one unit spelled two ways.
 2. **A wrong row cannot be removed.** Retire is the only lifecycle control. A
    duplicate created by a fat-fingered serial, or a row imported from a bad CSV,
    stays in the property book forever as a retired ghost that still appears in
@@ -26,9 +29,9 @@ Three unrelated gaps around logging a device into inventory:
 
 ## Goal
 
-Suggestions that work identically on phone and desktop across all five
-catalogue fields; an admin-only permanent delete with an explicit confirmation;
-and a route from the confirmation screen straight to the new item.
+Suggestions that work identically on phone and desktop, on every catalogue field
+of every surface that edits one; an admin-only permanent delete with an explicit
+confirmation; and a route from the confirmation screen straight to the new item.
 
 ## Non-goals
 
@@ -40,6 +43,11 @@ and a route from the confirmation screen straight to the new item.
   be stricter than the importer.
 - **No delete for non-admins**, and no bulk delete.
 - **No change to Retire.** Delete sits beside it; neither replaces the other.
+- **No change to which fields each role may edit.** Suggestions are added to
+  fields that are already editable on each surface; the `USER`-editable set stays
+  exactly two fields, and make/model/serial stay confined to the identity form.
+- **No suggestions on user or contact forms.** `NewUserForm` and
+  `ContactBookSection` also use `<datalist>`; they are outside this change.
 
 ---
 
@@ -176,10 +184,57 @@ actively wrong.
 `page.tsx` gains `listItemFieldSuggestions()` to its existing
 `Promise.all([listCategoryNames(), listUnits()])`.
 
-> **Out of scope, deliberately:** the admin edit form (`EditItemForm.tsx`) and
-> the item detail card (`ItemDetailsCard.tsx`) also use `<datalist>` and have
-> the same mobile problem. Converting them is a natural follow-up but is not
-> part of this change, which is scoped to item *creation*.
+### 1.8 The other three surfaces
+
+The same component replaces every remaining `<datalist>` on an item field, and
+fills the gaps where no suggestion existed at all. Today's coverage is uneven in
+a way that has no design behind it — it is simply where someone happened to add
+a `list=` attribute:
+
+| Surface | Home unit | UIC | Category | Make / Model |
+|---|---|---|---|---|
+| `NewItemForm` | datalist | — | datalist | — |
+| `EditItemForm` (`/admin/items/<id>/edit`) | — | — | datalist | n/a |
+| `ItemDetailsCard` (`/i/<id>`) | datalist | — | datalist | n/a |
+| `EditItemIdentityForm` | n/a | n/a | n/a | — |
+
+After this change every cell that is not `n/a` is a `SuggestCombobox`. Three
+consequences worth stating:
+
+- **`EditItemForm` and `ItemDetailsCard` gain Home unit and UIC suggestions they
+  never had.** On the edit form that means `page.tsx` must now fetch
+  `listUnits()` as well — it currently fetches only `listCategoryNames()`.
+- **`EditItemIdentityForm` gains Make and Model.** `serialNumber` stays a plain
+  input, for the same reason it does on the creation form: it is an identity,
+  not a vocabulary, and suggesting one would be actively wrong. This form is
+  deliberately friction-ful because correcting a serial rewrites what existing
+  signed receipts appear to describe — suggestions do not reduce that friction,
+  they only make the make/model corrections beside it consistent.
+- **`n/a` means the field is not on that form**, not that it was overlooked.
+  `editableItemFields` is exactly seven fields and does not include
+  make/model/serial; those live only in the identity form. That separation is
+  load-bearing and this change does not touch it.
+
+The three fields a `USER` can reach (`currentUserEmail`, `currentPosition`, and
+nothing else) get **no** suggestions. `currentUserEmail` holds free text like
+`"SGT Smith"` on badly-imported rows and is not an email-validated field;
+`currentPosition` is prose. Neither is a vocabulary.
+
+### 1.9 Non-admins must not receive the vocabularies
+
+`/i/<id>` is a **public** page (behind the shared PIN for logged-out visitors,
+but not behind a login). It already guards its vocabulary fetches:
+
+```ts
+isAdmin ? listCategoryNames() : []
+```
+
+Every new suggestion source must follow that pattern — `listUnits()` and
+`listItemFieldSuggestions()` are fetched on that page **only when `isAdmin`**.
+The fields they feed are admin-only, so a non-admin should neither pay for the
+query nor receive the catalogue. This is not a change to what the page exposes;
+it is the existing guard applied to new data, and skipping it would widen the
+public surface by accident.
 
 ---
 
@@ -334,10 +389,19 @@ The `fromSearch` / `returnUic` hidden inputs stay as they are — read off
 | `src/components/DeleteItemButton.tsx` | **new** — button + `<dialog>` |
 | `src/app/admin/items/new/NewItemForm.tsx` | five comboboxes; datalists removed; confirmation screen |
 | `src/app/admin/items/new/page.tsx` | fetch the three new vocabularies |
+| `src/app/admin/items/[itemId]/edit/EditItemForm.tsx` | three comboboxes; datalist removed |
+| `src/app/admin/items/[itemId]/edit/EditItemIdentityForm.tsx` | make + model comboboxes |
+| `src/app/admin/items/[itemId]/edit/page.tsx` | add `listUnits()` + `listItemFieldSuggestions()` |
+| `src/app/i/[itemId]/ItemDetailsCard.tsx` | three comboboxes; both datalists removed |
+| `src/app/i/[itemId]/page.tsx` | UIC suggestions, **admin-only** like the existing fetches |
 | `src/app/admin/actions/items.ts` | `deleteItemAction`; drop the from-search redirect |
 | `src/components/ItemSelectTable.tsx` | Delete beside Retire |
 | `src/modules/items/items.service.ts` | `listItemFieldSuggestions`, `deleteItem` |
 | `prisma/schema.prisma` + migration | `TransferItem.itemId` nullable, `SetNull` |
+
+No `<datalist>` remains on any item field after this change. The two remaining
+uses in the repo — `NewUserForm.tsx` and `ContactBookSection.tsx` — are user and
+contact fields, not item fields, and are out of scope.
 
 ## 5. Testing
 
@@ -362,7 +426,14 @@ freely typed text when nothing is highlighted, Escape dropping the highlight.
 **Real browser, mobile viewport:** `npm run build` and jsdom have no layout
 engine and are not evidence for any of this. The suggestion list overlaying
 rather than reflowing, the 44px tap targets, and the `<dialog>` on a phone must
-be seen in a real browser.
+be seen in a real browser — on **all four** surfaces, since they sit in
+different layouts (a form grid, a card inside the public item page, and a
+compact identity card) and the absolutely-positioned dropdown can overflow
+differently in each.
+
+**Non-admin check:** load `/i/<id>` signed out and as a `USER` and confirm the
+page ships no unit, UIC, make or model vocabulary — the fields are admin-only
+and the fetches are guarded on `isAdmin`.
 
 ## 6. Documentation
 
@@ -372,12 +443,15 @@ Per the project rule, in the same commit as the code:
   suggestions, the permanent delete, and the "open this item" choice; a
   `Changed` entry for the from-search path no longer redirecting. A **Notes**
   subsection for the migration and its migrate-before-merge requirement.
-- **`README.md`** — the item-registry bullet gains suggestions and delete.
+- **`README.md`** — the item-registry bullet gains suggestions (on every item
+  edit surface, working on mobile) and delete.
 - **`docs/ARCHITECTURE.md`** — the `TransferItem` description in Supporting
   models gains the nullable `itemId` and *why* detaching is safe; the Item
   section gains delete alongside retire.
-- **`docs/SECURITY.md`** — a new admin-only destructive capability, and the
-  fact that deleting an item does **not** delete receipt evidence.
+- **`docs/SECURITY.md`** — a new admin-only destructive capability, the fact
+  that deleting an item does **not** delete receipt evidence, and a note that
+  the item page's suggestion vocabularies stay behind its existing `isAdmin`
+  guard so the public surface does not widen.
 - **`scripts/check-security-docs.mjs`** — add
   `src/app/admin/actions/items.ts` to the watch list. It is not currently
   watched and is about to carry a permanent-delete action; the sibling
