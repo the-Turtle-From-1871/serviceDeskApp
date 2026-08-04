@@ -544,10 +544,14 @@ Sends remain best-effort and swallowed for receipts and returns so a mail failur
 never rolls back a committed custody change; the pickup notice still throws so
 the operator who triggered it is told.
 
-**The `army.mil` copy is not a reliable audit trail.** Mail from this gmail.com
-sender is not dependably delivered to `army.mil` — a sender-alignment problem, not
-an authentication one. A silent drop leaves no signal, so that copy must not be
-relied upon as the record until a message is confirmed received.
+**Links in these messages must come from `defaultBaseUrl()`, never a hardcoded
+deploy URL.** Mail to `army.mil` was being silently dropped, and the cause was the
+`vercel.app` URL in the message body, not authentication: a controlled four-message
+test showed plain text, a `dcsim.us` link and a PDF attachment all delivered, while
+only the message containing a `vercel.app` URL vanished. The government network
+filters that domain, with no bounce and no signal. `APP_URL` now points at
+`https://www.dcsim.us`, and a single hardcoded deploy URL in a body would silently
+reintroduce the failure for every `.mil` recipient.
 
 ### Workstation-held deploy credentials (`scripts/gmail-token-rotation/`)
 
