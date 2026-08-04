@@ -106,6 +106,12 @@ export const WATCHED = [
   // attributed to without any doc noticing.
   [/^src\/modules\/items\/import-actor\.ts$/, "the automated-import service-account resolver (§8)"],
   [/^src\/lib\/email\.ts$/, "outbound email escaping (§4, §6)"],
+  // Decides WHO receives every custody email -- and those messages carry party
+  // names, contact details and the signed hand-receipt PDF. Adding an address
+  // here silently widens who sees receipt PII, which is a disclosure change even
+  // though the file reads like plumbing. The built-in default list is the point:
+  // it ships addresses, so editing it changes real recipients with no config.
+  [/^src\/lib\/email-recipients\.ts$/, "who is copied on custody email, and the PII that carries (§6, §9)"],
   // Holds a long-lived send credential and builds raw MIME headers. The CR/LF
   // strip in buildRawEmail is the only thing stopping caller-supplied text from
   // forging headers, and it is one deleted regex away from being gone.

@@ -39,9 +39,9 @@ You need, before starting:
 | --- | --- |
 | A **Desktop app** OAuth client id + secret | Google Cloud console → Credentials. Installed-app clients accept loopback redirects, which is what allows automatic code capture. |
 | Gmail API enabled | Google Cloud console → APIs, project `dcsim-hand-receipt`. |
-| A Vercel API token | Vercel → Account Settings → Tokens. Create it with **no expiry** — an expiring token trades one treadmill for two. |
+| A Vercel API token | [vercel.com/account/tokens](https://vercel.com/account/tokens), with the scope selector on your **personal account**. In the **Scope** dropdown pick the team, then **the individual project** — picking "All Projects" silently makes it team-scoped instead. Choose the longest expiry offered; Vercel has no never-expires option. Copy it at once (`vcp_…`, shown only once). |
 | The Vercel project id | Vercel → Project → Settings → General. |
-| The Vercel team id | Only if the project sits under a team. Leave blank for a personal account. |
+| The Vercel team id | **Leave blank.** A project-scoped token carries its own team and project, so no `teamId` is sent. Only needed if you deliberately used a full-account token. |
 | A Vercel Deploy Hook URL | Vercel → Project → Settings → Git → Deploy Hooks, targeting `main`. |
 
 Then:
@@ -54,6 +54,42 @@ cd scripts\gmail-token-rotation
 `setup.ps1` needs **no elevation** and will warn you if you run it elevated. It prompts for
 each value, stores them encrypted, and registers the scheduled task, the protocol handler
 and the Start Menu shortcut.
+
+### Supplying values without prompts
+
+Every setting resolves in this order — **parameter → environment variable → existing
+config → prompt**:
+
+| Setting | Parameter | Environment variable |
+| --- | --- | --- |
+| OAuth client id | `-ClientId` | `DCSIM_ROTATION_CLIENT_ID` |
+| OAuth client secret | `-ClientSecret` | `DCSIM_ROTATION_CLIENT_SECRET` |
+| Vercel API token | `-VercelToken` | `DCSIM_ROTATION_VERCEL_TOKEN` |
+| Vercel project id | `-VercelProjectId` | `DCSIM_ROTATION_VERCEL_PROJECT_ID` |
+| Vercel team id | `-VercelTeamId` | `DCSIM_ROTATION_VERCEL_TEAM_ID` |
+| Deploy hook URL | `-DeployHookUrl` | `DCSIM_ROTATION_DEPLOY_HOOK_URL` |
+| Env var name | `-EnvVarName` | `DCSIM_ROTATION_ENV_VAR_NAME` |
+| Env target | `-EnvTarget` | `DCSIM_ROTATION_ENV_TARGET` |
+
+Fix one value without retyping the rest:
+
+```powershell
+.\setup.ps1 -DeployHookUrl (Read-Host 'hook' -AsSecureString)
+```
+
+Fully unattended — `-NonInteractive` never prompts and fails with the name of anything
+missing:
+
+```powershell
+$env:DCSIM_ROTATION_VERCEL_TOKEN = 'vcp_...'
+.\setup.ps1 -VercelProjectId 'prj_...' -NonInteractive
+```
+
+**Pass secrets through the environment, not the command line.** The three secret
+parameters are `[SecureString]` on purpose. A secret typed as a plain argument is written
+to PSReadLine's `ConsoleHost_history.txt` and is visible in the process command line to
+anything that can enumerate processes — it leaks to disk and to other users on the
+machine. Environment variables appear in neither.
 
 Verify, then seed the first token:
 

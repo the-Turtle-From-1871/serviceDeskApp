@@ -1,4 +1,5 @@
 import { getEmailSender, type EmailSender } from "@/lib/email";
+import { addressCustodyEmail } from "@/lib/email-recipients";
 
 export const PICKUP_SUBJECT = "DCSIM Service Desk - Items Ready for Pickup";
 
@@ -56,10 +57,14 @@ function body(a: PickupEmailArgs): string {
   ].join("\n");
 }
 
-// Notifies the customer that the items on their hand receipt are ready for
-// pickup. Unlike the automatic receipt/return emails, errors are NOT swallowed:
-// this is a staff-initiated action, so the caller reports success/failure.
+// Notifies the customer that the items on their hand receipt are ready for pickup,
+// copying the record addresses. Unlike the automatic receipt/return emails, errors
+// are NOT swallowed: this is a staff-initiated action, so the caller reports
+// success/failure. That also means the record copies share the customer's delivery
+// outcome — if the send throws, the operator is told and can retry.
 export async function sendPickupEmail(args: PickupEmailArgs, deps: { sender?: EmailSender } = {}): Promise<void> {
   const sender = deps.sender ?? getEmailSender();
-  await sender.send({ to: args.customerEmail, subject: PICKUP_SUBJECT, text: body(args) });
+  const { to, cc } = addressCustodyEmail([args.customerEmail]);
+  if (!to) throw new Error("No pickup recipient: the customer has no email address and no record copies are configured.");
+  await sender.send({ to, cc, subject: PICKUP_SUBJECT, text: body(args) });
 }

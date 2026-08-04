@@ -30,8 +30,24 @@ rotation is fully unattended. The countervailing unknown is whether Testing stat
 expiry retires the *grant* as well as the *token* — if it does, consent re-renders.
 
 Documentation cannot settle this; only a live rotation can. So `Get-GoogleRefreshToken`
-attempts the **silent path first** (§6) and records which path succeeded. This section is to
-be rewritten to state the observed answer once the first rotations have run.
+attempts the **silent path first** (§6) and records which path succeeded.
+
+### Observed so far (first rotation, 2026-08-04) — still inconclusive
+
+The first successful rotation used the **consent path**. `prompt=none` returned
+`interaction_required` in under a second, twice.
+
+**This does not answer the question.** At that point no grant existed at all — it was the
+account's first ever authorization of this client, so Google had nothing to approve
+silently and `interaction_required` is the only answer it could have given. What it does
+confirm is that the silent attempt is *cheap*: it failed in well under a second and cost
+nothing, exactly as the `prompt=none` design intended.
+
+**The real test is the second rotation**, around 2026-08-07, when a live grant exists and
+the browser holds a Google session. If `UsedSilentPath` is `true` there, the consent click
+disappears for good and this section should be rewritten to say so. If it is `false`, the
+Testing-status 7-day expiry retires the grant itself rather than only the token, and the
+click is permanent.
 
 What is settled either way: automating the click by driving a browser through Google
 sign-in is out of scope and will not be built (§2).
@@ -132,6 +148,14 @@ Authorization is attempted twice, silent first (§1):
 
 Which path succeeded is logged and returned as `UsedSilentPath`. That log line is the
 evidence that resolves §1.
+
+**Identifying our own deployment — verified against the live API on 2026-08-04.** The
+deploy hook returns a *job* id that is not a deployment id and cannot be looked up, so
+`Wait-VercelDeployment` matches `meta.deployHookId` against the hook URL's last path
+segment. That field is real but undocumented, so it was written as a preference with a
+timestamp heuristic behind it. The first live rotation logged `matched our deploy hook id`
+and the fallback never fired, confirming the assumption. The heuristic remains as a
+backstop should Vercel stop populating the field.
 6. **Validate before touching production:** abort unless the response carries a
    `refresh_token` and a `scope` containing `gmail.send`.
 7. Upsert `GMAIL_REFRESH_TOKEN` in the Vercel project, target `production`.

@@ -517,6 +517,38 @@ must never enter list, search, or type-ahead queries.
 `"Something went wrong. Please try again."` to the user, full `console.error`
 server-side.
 
+### Who is copied on custody email (`src/lib/email-recipients.ts`)
+
+Every custody email — new hand receipt, return, pickup — is now **one message**
+addressed to the customer and copying a fixed set of record addresses. That
+message carries party names, contact details and the **signed hand-receipt PDF**,
+so the CC list is a PII disclosure surface, not formatting.
+
+**The record copies ship as defaults in code**, not as required configuration:
+`dcsimservicedesk@gmail.com` (the sending account) and
+`ng.hi.hiarng.nbx.dcsim-hand-receipt@army.mil`. `RECEIPT_CC_EMAILS` overrides
+them; an **empty** value disables them, which is deliberately distinct from unset
+(unset means "use the defaults"). Because the defaults are real addresses baked
+into the source, editing that list changes who receives receipt PII with no
+config change and no deploy-time signal — which is why the file is on the
+`check-security-docs` watch list.
+
+**Recipients can see each other.** CC is not BCC: every party on a receipt learns
+the other addresses on it. That is intended here (the parties are named on the
+document itself) but it is a change from the previous behaviour, where each
+recipient got a separate message and could not see the others.
+
+**One message means one delivery outcome.** Previously a bad address cost only
+that recipient their copy. Now a hard rejection can cost everyone the message.
+Sends remain best-effort and swallowed for receipts and returns so a mail failure
+never rolls back a committed custody change; the pickup notice still throws so
+the operator who triggered it is told.
+
+**The `army.mil` copy is not a reliable audit trail.** Mail from this gmail.com
+sender is not dependably delivered to `army.mil` — a sender-alignment problem, not
+an authentication one. A silent drop leaves no signal, so that copy must not be
+relied upon as the record until a message is confirmed received.
+
 ### Workstation-held deploy credentials (`scripts/gmail-token-rotation/`)
 
 Local Windows tooling that rotates the Gmail OAuth refresh token and pushes it to
@@ -534,11 +566,21 @@ repository, and `state.json` / `rotate.log` are asserted secret-free: error
 bodies from Google and Vercel are scrubbed of the token value, the bearer token
 and the full hook URL before they reach a log line or a thrown message.
 
-**The Vercel API token is account-wide.** Vercel personal tokens cannot be scoped
-to a single project, so this token can read, modify and deploy anything in the
-account. It is created with no expiry deliberately — an expiring token would
-trade one rotation treadmill for two. This is the highest-value secret on that
-workstation; see Known gaps.
+**The Vercel API token is project-scoped.** Vercel offers three scoping levels —
+Full Account, Team, and Project — and this tool uses a **Project**-scoped token,
+which denies any request to another project, to a team-level resource, or to a
+user-level resource. A leak of this token therefore exposes one project's
+environment variables and deployments, not the account. Create it at
+`vercel.com/account/tokens`, selecting the individual project rather than "All
+Projects" (which produces a team-scoped token instead).
+
+Because Vercel infers team and project from a scoped token, `VercelTeamId` is
+left null in the config and no `teamId` parameter is sent.
+
+**The token expires.** Vercel does not offer a non-expiring token; the longest
+available expiry applies. That is a second, annual renewal on top of the 7-day
+one — noted in Known gaps rather than hidden, because when it lapses the
+symptom is a 403 from the Vercel call and a failed rotation, not a mail outage.
 
 **It can deploy production unattended.** A successful rotation writes
 `GMAIL_REFRESH_TOKEN` and fires a deploy hook, so `main` ships without a human
@@ -1103,16 +1145,19 @@ challenge.
 
 Tracked deliberately, so nobody re-discovers them as new findings.
 
-**0c. An account-wide Vercel API token sits on a technician workstation, and it
-can deploy production unattended.** ⚠️ *Accepted; two exits exist.*
+**0c. A Vercel API token and a deploy hook sit on a technician workstation, and
+together they can deploy production unattended.** ⚠️ *Accepted; two exits exist.*
 `scripts/gmail-token-rotation/` ([§6](#6-secrets--data-leakage)) needs a Vercel
 token to write `GMAIL_REFRESH_TOKEN` and a deploy hook to make it take effect.
-Vercel personal tokens **cannot be scoped to one project**, so the token can
-modify or deploy anything in the account, and it is created with no expiry on
-purpose. It is DPAPI-encrypted and bound to one Windows user on one machine, but
-anyone with that user's live session can use it, and a successful rotation ships
-`main` to production with nobody watching — which collides with the
+The token is **project-scoped**, so the blast radius is this one project rather
+than the whole account, and both it and the hook URL are DPAPI-encrypted and
+bound to one Windows user on one machine. What remains is that anyone with that
+user's live session can trigger a production deploy, and that a successful
+rotation ships `main` with nobody watching — which collides with the
 migrate-before-push rule (`DEPLOY.md`).
+The token also expires (Vercel offers no non-expiring option), so there is a
+second, annual renewal. It fails safe: an expired token surfaces as a 403 and a
+failed rotation, never as silently mis-sent mail.
 The root cause is that the Google OAuth consent screen is deliberately left in
 **Testing** status, which caps refresh tokens at 7 days. Both exits remove the
 tooling entirely rather than mitigating it: publish the consent screen (free,
