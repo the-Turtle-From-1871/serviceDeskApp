@@ -3,6 +3,20 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-08-04
+
+### Fixed
+- **The token rotation tool's reminders never appeared.** The check that was meant to detect "notifications are switched off for this app" was itself suppressing every notification, because Windows PowerShell does not reliably report that setting and an unreadable value was treated as "switched off". It now only suppresses when Windows explicitly says notifications are disabled, and shows the reminder whenever the setting cannot be read. The old behaviour blocked the first notification raised by any process, which is exactly the one the scheduled task raises — so the every-6-hours reminder would never have fired at all.
+- **A failed renewal no longer reports that mail is down.** Cancelling or missing the browser prompt was recorded in a way that made the tool report "outbound mail is DOWN" every six hours from then on, even though the credential in use still had days left. The tool now tracks when it last *succeeded* separately from when it last *tried*, so a failed attempt keeps the reminders coming without overstating how urgent they are.
+- **`setup.ps1` no longer hangs when run without a console.** It now says so immediately and explains where to run it, instead of looping on an unanswerable prompt until killed.
+
+### Changed
+- **`setup.ps1` accepts every value as a parameter or environment variable**, so it can run unattended or be corrected one field at a time without retyping the rest. Prompting remains the default when a value is not supplied; `-NonInteractive` turns a missing value into a clear failure naming what to provide. Secrets should be passed through the environment rather than as command-line arguments, which are written to shell history and visible to other processes; see `scripts/gmail-token-rotation/README.md`.
+- **The consent wait is configurable** via `-TimeoutSeconds` on `rotate-gmail-token.ps1`. The timeout message advised raising it, but no such option existed.
+
+### Notes
+- The Vercel API token this tool uses should be **project-scoped**, not account-wide — Vercel supports Project, Team and Full Account scopes, and a project-scoped token cannot reach any other project and needs no team id. Earlier notes said project scoping was unavailable, which was wrong. Vercel offers no non-expiring token, so the expiry date is worth recording: when it lapses, renewal fails loudly with a 403 rather than mis-sending mail.
+
 ## 2026-07-31
 
 ### Added
@@ -24,7 +38,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Outbound email requires four new environment variables — `GMAIL_FROM`, `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` — which **must be set in Vercel production before this deploys**. Without them the app falls through to the Resend sender, which does not deliver. `GMAIL_USER` and `GMAIL_APP_PASSWORD` are no longer read and should be deleted after the deploy is confirmed working.
 - Selection between the two senders is by environment-variable presence only, never by a send failure: if `GMAIL_REFRESH_TOKEN` is set but has expired, sending fails rather than quietly rerouting through Resend. The 7-day expiry itself, and the rotation tooling that keeps the token current, are described in the Added and Notes entries above — this is the same token.
 - A new migration adds a trigram index on the hand-receipt recipient name, which the name search needs to stay fast. It must be applied to the production database before this deploys.
-- The Gmail token rotation tool is opt-in and installed per workstation; nothing changes for anyone who does not run its `setup.ps1`. Installing it needs a **Desktop app** OAuth client in the `dcsim-hand-receipt` Google Cloud project (installed-app clients accept the loopback redirect the tool captures on), the Gmail API enabled, a Vercel API token created with **no expiry**, the Vercel project id, and a Deploy Hook URL targeting `main`. Secrets are stored encrypted per Windows user under `%LOCALAPPDATA%`, never in the repository.
+- The Gmail token rotation tool is opt-in and installed per workstation; nothing changes for anyone who does not run its `setup.ps1`. Installing it needs a **Desktop app** OAuth client in the `dcsim-hand-receipt` Google Cloud project (installed-app clients accept the loopback redirect the tool captures on), the Gmail API enabled, a **project-scoped** Vercel API token (created at `vercel.com/account/tokens` by picking the individual project in the Scope dropdown, not "All Projects" — a project-scoped token cannot reach any other project, and needs no team id), the Vercel project id, and a Deploy Hook URL targeting `main`. Vercel offers no non-expiring token, so note the expiry date: when it lapses, rotation fails loudly with a 403 rather than mis-sending mail. Secrets are stored encrypted per Windows user under `%LOCALAPPDATA%`, never in the repository.
 - **Once installed, production can redeploy without a human present** — every renewal fires the deploy hook, shipping whatever is on `main` at that moment. Apply database migrations at merge time rather than deferring them to the next manual deploy; with this installed there may not be one. See `DEPLOY.md`.
 - The 7-day expiry this tool works around disappears entirely if the Google consent screen is published, or if the sender moves to Google Workspace on `dcsim.us`. Both are recorded in `docs/SECURITY.md` under Known gaps.
 

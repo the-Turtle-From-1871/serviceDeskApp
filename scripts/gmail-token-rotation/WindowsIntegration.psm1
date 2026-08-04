@@ -418,8 +418,14 @@ function Get-NotificationSettingRemedy {
     [CmdletBinding()]
     [OutputType([string])]
     param(
-        [Parameter(Mandatory = $true)] [string] $Setting
+        # AllowEmptyString: a mandatory non-empty [string] threw here when Setting came back
+        # empty, turning a diagnostic helper into a second failure on top of the first.
+        [Parameter(Mandatory = $true)] [AllowEmptyString()] [string] $Setting
     )
+
+    if ([string]::IsNullOrWhiteSpace($Setting)) {
+        return 'Windows did not report a notification setting for this app, so it could not be checked.'
+    }
 
     if ($Setting -eq 'DisabledForApplication') {
         return "Notifications are switched off for THIS app. Settings > System > Notifications > '$($script:AppDisplayName)' -- switch it back on."
@@ -515,23 +521,33 @@ function Show-RotationToast {
         # only signal that exists, and it must be read BEFORE showing. Without this
         # one accidental Settings toggle makes the tool permanently and invisibly
         # mute while the token expires, which is worse than not having the tool.
+        # This check FAILS OPEN, and that is load-bearing. Windows PowerShell 5.1's WinRT
+        # projection does not reliably surface ToastNotifier.Setting -- on this machine it
+        # comes back as an EMPTY STRING rather than a NotificationSetting value. The first
+        # version of this guard treated anything that was not 'Enabled' as disabled, so an
+        # unreadable setting suppressed every toast and the tool went completely silent:
+        # the guard became the outage it existed to prevent. Refusing to notify because we
+        # could not confirm we are allowed to notify is strictly worse than the silent drop
+        # being guarded against. So: only an EXPLICIT disabled value blocks the toast.
         $setting = ''
         try {
             $setting = [string] $notifier.Setting
         }
         catch {
-            Write-RotationLog -Level 'ERROR' -Message "Toast NOT delivered (level=$Level): could not read the notification setting for AUMID '$($script:Aumid)' ($($_.Exception.Message)). Re-run setup.ps1 to reinstall the Start Menu shortcut. Nobody was told the Gmail token needs rotating."
-            return $false
+            $setting = ''
+            Write-RotationLog -Level 'WARN' -Message "Could not read the notification setting for AUMID '$($script:Aumid)' ($($_.Exception.Message)); showing the toast anyway."
         }
 
-        if ($setting -ne 'Enabled') {
+        if (-not [string]::IsNullOrWhiteSpace($setting) -and $setting -ne 'Enabled') {
             Write-RotationLog -Level 'ERROR' -Message "Toast NOT delivered (level=$Level): Windows reports notification setting '$setting' for '$($script:AppDisplayName)' (AUMID $($script:Aumid)). $(Get-NotificationSettingRemedy -Setting $setting) Until that is undone nothing will warn anyone that the Gmail token is expiring."
             return $false
         }
 
         $notifier.Show($toast)
 
-        Write-RotationLog -Level 'INFO' -Message "Toast shown (level=$Level, actionable=$([bool]$Actionable), setting=$setting)."
+        $reported = $setting
+        if ([string]::IsNullOrWhiteSpace($reported)) { $reported = 'unreadable (assumed enabled)' }
+        Write-RotationLog -Level 'INFO' -Message "Toast shown (level=$Level, actionable=$([bool]$Actionable), setting=$reported)."
         return $true
     }
     catch {

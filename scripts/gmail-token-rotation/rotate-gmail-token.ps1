@@ -50,6 +50,14 @@ param(
     [Parameter(ParameterSetName = 'Run')]
     [switch] $DryRun,
 
+    # How long to wait for the human to finish the consent prompt. The default suits a
+    # browser already signed in to the sending account; raise it when a sign-in is needed
+    # first. Exposed because the timeout error explicitly tells the operator to raise
+    # -TimeoutSeconds, and advice you cannot act on is worse than no advice.
+    [Parameter(ParameterSetName = 'Run')]
+    [ValidateRange(30, 1800)]
+    [int] $TimeoutSeconds = 300,
+
     [Parameter(Mandatory = $true, ParameterSetName = 'Verify')]
     [switch] $Verify
 )
@@ -281,7 +289,8 @@ function Invoke-RotateMode {
     Write-RotationLog -Level 'INFO' -Message 'Rotation started.'
 
     try {
-        $token = Get-GoogleRefreshToken -ClientId $config.ClientId -ClientSecret $config.ClientSecret
+        $token = Get-GoogleRefreshToken -ClientId $config.ClientId -ClientSecret $config.ClientSecret `
+                                        -TimeoutSeconds $script:TimeoutSeconds
     }
     catch {
         $message = $_.Exception.Message
