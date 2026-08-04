@@ -125,9 +125,13 @@ model Item {
   // service queue, open hand receipts, and MDM last-logon.
   //
   // `markedReadyAt` is the ONE piece an operator sets by hand: "this is back in
-  // our possession". A TIMESTAMP rather than a boolean on purpose — a logon
-  // newer than this instant means the device has been used since it was
-  // shelved, so the marking self-expires instead of going stale.
+  // our possession". A TIMESTAMP rather than a boolean on purpose — it lets the
+  // marking be COMPARED to other dated signals and makes "when did we last have
+  // hands on this" answerable. It does NOT self-expire: the rule that let a
+  // newer logon override it was removed, because a device on our own shelf
+  // produces logons routinely (imaging, MDM check-in, a test before reissue).
+  // The marking stands until a deliberate act supersedes it — an open receipt,
+  // a service flag, retirement, or an explicit clear.
   markedReadyAt              DateTime?
   createdBy                  User              @relation("CreatedItems", fields: [createdById], references: [id])
   createdById                String
@@ -139,8 +143,11 @@ model Item {
   // auditState itself is derived/time-dependent and not stored, so it can't be an
   // ORDER BY, but this column can. Null = never audited — and it is ordered as
   // a VALUE, not pinned: no sort key pins its blanks, so nulls swap ends with
-  // the direction (see orderClauseFor). The Audit sort is therefore by recency,
-  // not by badge severity.
+  // the direction (see orderClauseFor). NOTE: the /items Audit sort no longer
+  // uses this column for ordering — `auditState` is a DERIVED sort key ranked by
+  // badge severity in SQL (auditRankSql / AUDIT_ORDER), so a timestamp that is
+  // near-unique per row can't swallow the secondary sort key. This column still
+  // backs the badge itself and the dashboard aggregate.
   lastAuditedAt              DateTime?
 
   serviceQueueItem ServiceQueueItem?

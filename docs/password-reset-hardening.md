@@ -4,6 +4,11 @@ Follow-up to the code review of the self-service forgot/reset-password feature
 (commits `81dce9b` + `7478e8e`). This document records what was changed, how it
 was verified, and the decisions still owed to a human.
 
+**Re-verified against the code 2026-08-04.** Every fix below is still present and
+still shaped as described. The one thing that changed is the follow-up this
+document ended on — production-grade rate limiting — which shipped on
+2026-07-29; see [Third pass](#third-pass--the-follow-up-rate-limiting-shipped-done-2026-07-29).
+
 ## Scope
 
 Reviewed diff: `git diff c73c56d...HEAD`. The feature itself was sound
@@ -78,13 +83,52 @@ Safe because the Next 16 proxy/middleware runs on the **Node.js runtime**
   with the token. Fully removing it would need a token→HttpOnly-cookie exchange
   with a redirect to a clean URL — intentionally deferred.
 
+## Third pass — the follow-up rate limiting shipped (DONE, 2026-07-29)
+
+The section below used to read "Still owed to a human: production-grade rate
+limiting". That work landed on 2026-07-29 and is live in production on Upstash
+Redis. Verified against the current code; the canonical description is
+[`SECURITY.md` §12](./SECURITY.md#12-rate-limiting) and this is only how it
+attaches to the reset flow.
+
+- **`src/lib/rate-limit.ts` is the one limiter module.** `AUTH_POLICY` 5 / 15 min,
+  `AUTH_SPRAY_POLICY` 60 / 15 min (the per-IP ceiling), `UNLOCK_POLICY`
+  20 / 15 min, `API_POLICY` 300 / min for anonymous callers. Do not hand-roll a
+  second one; add a *scope* to `rateLimitKey` instead.
+- **Both reset actions are metered, on composite keys.**
+  `requestPasswordResetAction` spends `(reset-request, ip, hash(email))` under
+  the `(reset-request, ip)` ceiling; `resetPasswordAction` spends
+  `(reset-submit, ip, hash(token))` under its own ceiling. The identity half is
+  always hashed by `rateLimitIdentity` — for the submit path that is required
+  rather than tidy, because the raw token is itself a secret. Both spend the
+  **narrow** bucket first and the shared ceiling second, so one address cannot
+  lock out everyone behind a shared NAT egress.
+- **`requestPasswordResetAction` never refunds.** The abuse there is volume
+  itself, so every well-formed request costs a token; the refusal is IP-shaped,
+  not account-shaped, so it still leaks nothing about whether an address is
+  registered. `resetPasswordAction` does not refund either — a successful reset
+  consumes the token its bucket is keyed on, so the freed attempts are
+  unspendable and a refund would only cost a Redis `SCAN`.
+- **The 60-second per-account cooldown (#1) is still there and still separate.**
+  It sits in the deferred `after()` work and throttles mail-bombing a *known*
+  address; the limiter throttles the request surface. Neither replaces the other.
+- **Distributed abuse is covered by `src/lib/auth-velocity.ts`** — a failed
+  reset-token submission calls `recordAuthFailure()`, so a botnet spread thin
+  enough to stay under every per-IP bucket still raises the app-wide alert. It
+  alerts and escalates; it deliberately never blocks.
+- **Cloudflare Turnstile now guards this form too** (`/forgot-password` *and*
+  `/reset-password`), checked after the limiter and before any expensive work.
+  `/reset-password` is the surface where a correct guess is an outright account
+  takeover, and it was the last one to get a challenge.
+
 ## Still owed to a human (NOT done)
 
-### Production-grade rate limiting
-The per-account cooldown handles email-bombing of a *known* address. It does
-**not** provide IP-based or global throttling (enumeration probing, distributed
-abuse). A real limiter (e.g. Upstash/Redis or an edge-middleware throttle) is
-infrastructure and was left as a follow-up.
+### The raw token still reaches access logs
+The residual recorded under #8 above is unchanged: the initial
+`GET /reset-password?token=…` is still written to server/proxy access logs.
+`no-referrer` and address-bar scrubbing mitigate onward leakage; the full fix
+(a token→HttpOnly-cookie exchange with a redirect to a clean URL) remains
+deferred. Tracked as [`SECURITY.md` Known gap 3](./SECURITY.md#known-gaps--accepted-risks).
 
 ## Not addressed here
 

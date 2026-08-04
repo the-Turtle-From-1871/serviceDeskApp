@@ -40,15 +40,17 @@ $env:DIRECT_URL="<supabase-5432-url>"; $env:DATABASE_URL="<supabase-6543-url>"; 
 $env:SEED_ADMIN_EMAIL="admin@yourorg.com"; $env:SEED_ADMIN_PASSWORD="<strong-password>"; npm run db:seed
 ```
 
-> The app has no password-reset UI yet, so set `SEED_ADMIN_PASSWORD` to a strong
-> value here — that is the admin's real password.
+> Set `SEED_ADMIN_PASSWORD` to a strong value here — it is the admin's real
+> password from first sign-in. It *can* be changed afterwards (`/account` →
+> Change password, or `/forgot-password` once email is configured), but the
+> seeded value is live in the meantime, so don't seed a placeholder.
 
 ## 4. Import the project in Vercel
 
 1. https://vercel.com → **Add New… → Project** (import the GitHub repo) or run
    `npx vercel` from the project root.
 2. Framework is auto-detected as Next.js. Leave the build command as-is
-   (`package.json` runs `prisma generate && next build`).
+   (`package.json` runs `copy-wasm && prisma generate && next build`).
 3. Add **Environment Variables** (Production):
 
    | Name           | Value                                                   |
@@ -56,8 +58,39 @@ $env:SEED_ADMIN_EMAIL="admin@yourorg.com"; $env:SEED_ADMIN_PASSWORD="<strong-pas
    | `DATABASE_URL` | Supabase **transaction pooler** URL (6543, `pgbouncer=true`) |
    | `DIRECT_URL`   | Supabase **session/direct** URL (5432)                  |
    | `AUTH_SECRET`  | a fresh secret — run `npx auth secret`                  |
-   | `APP_URL`      | your deployed URL, e.g. `https://<app>.vercel.app`      |
+   | `APP_URL`      | the **custom domain**, `https://www.dcsim.us` — see the warning below |
    | `CRON_SECRET`  | long random value (`openssl rand -hex 32`) — authenticates the purge cron (see §6) |
+
+   🚨 **`APP_URL` must NOT be a `vercel.app` URL in production.** Mail to
+   `army.mil` was being dropped with no bounce and no signal; a controlled
+   four-message test proved the cause was the **link in the message body**, not
+   the sender, DKIM or SPF — plain text, a `dcsim.us` link and a PDF attachment
+   all arrived, and only the message carrying a `vercel.app` URL vanished. The
+   government network filters that domain. `APP_URL` is what builds every link
+   in a custody email (and every QR code), so pointing it at the Vercel domain
+   silently breaks receipt delivery to the people the app exists for. Any link
+   in an email must come from `defaultBaseUrl()` (`src/lib/base-url.ts`), never
+   a hardcoded deploy URL.
+
+   Transactional email — the app sends hand receipts, returns, pickup notices,
+   password resets and overdue alerts, so this is not optional in practice:
+
+   | Name           | Value                                                   |
+   |----------------|---------------------------------------------------------|
+   | `GMAIL_FROM` / `GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` / `GMAIL_REFRESH_TOKEN` | The Gmail API sender (OAuth2, scope `gmail.send`). **All four or none** — a partial set falls through to the next sender. The consent screen is kept in *Testing* status, so Google expires the grant every ~7 days and the refresh token must be re-minted and pushed to Vercel; `scripts/gmail-token-rotation` automates that (see the note in §Notes). |
+   | `RESEND_API_KEY` / `EMAIL_FROM` | The alternative sender, used only when the Gmail vars are absent. Both required. |
+   | `RECEIPT_CC_EMAILS` | Comma-separated record copies on every custody email. **Unset is not "off"** — it uses the built-in defaults in `src/lib/email-recipients.ts`. Set it to an empty value to actually disable the copies. |
+   | `ADMIN_INBOX_EMAIL` | Extra copy on new receipts and returns, and the destination for overdue alerts. **Unset means the nightly overdue sweep sends nothing and stamps nothing.** |
+   | `G6_SERVICE_DESK_EMAIL` | Extra copy on return notifications (partial and full). |
+
+   With no sender configured at all, mail is written to the server log and
+   nothing is queued or retried — receipts appear to send and never arrive.
+
+   ⚠️ **A refreshed `GMAIL_REFRESH_TOKEN` needs a REDEPLOY to take effect** —
+   setting it in the dashboard and walking away leaves the running deployment on
+   the dead token and outbound mail stays broken. This is exactly what
+   `scripts/gmail-token-rotation` fires a Deploy Hook for; doing it by hand means
+   updating the value *and* redeploying.
 
    Optional, but both are **owed** before this is really hardened — see
    [`docs/SECURITY.md`](docs/SECURITY.md) Known gaps #0 and #1:
@@ -76,40 +109,71 @@ $env:SEED_ADMIN_EMAIL="admin@yourorg.com"; $env:SEED_ADMIN_PASSWORD="<strong-pas
    widget appears on `/login`. (Redis is different: `KV_REST_API_*` are read at
    request time, so those take effect on the next request.)
 
-4. **Deploy.** First deploy: you may not know the final URL yet — deploy once,
-   copy the assigned domain into `APP_URL`, then redeploy so QR codes encode it.
+   Also optional, but decide about them deliberately rather than by omission:
+
+   | Name           | Value                                                   |
+   |----------------|---------------------------------------------------------|
+   | `SIGNING_PRIVATE_KEY` | Ed25519 PKCS#8 PEM that signs each receipt's tamper-evidence seal. Paste the multi-line PEM as-is into Vercel. Unset means receipts are created **unsealed** — silently, and not retroactively fixable for receipts already written. See [`docs/SECURITY.md` §7](docs/SECURITY.md#7-cryptographic-receipt-seal). |
+   | `PUBLIC_ACCESS_PIN_ENABLED` | `"true"` puts an admin-set 8-digit PIN in front of `/i/*` and `/receipts/<n>` for logged-out visitors. `/` stays open (Google's OAuth branding review requires a publicly readable home page). The PIN itself is set in-app at `/admin`, stored bcrypt-hashed. |
+   | `MDM_IMPORT_SECRET` | Bearer secret for the machine-driven import endpoint — see §7. |
+   | `RATE_LIMIT_DISABLED` | **Never set this in a deployed environment.** It turns off the rate limiter *and* the browser check. Local work only. |
+
+4. **Deploy.** Then point the custom domain at the project and set `APP_URL` to
+   it (`https://www.dcsim.us`), and redeploy so QR codes and email links encode
+   the right origin. Do not leave `APP_URL` on the assigned `*.vercel.app`
+   domain — see the warning in step 3.
 
 ## 5. Verify
 
 - Visit the site → you should be redirected to `/login`.
 - Sign in with the seeded admin, create an item, print its QR, and scan it with a
   phone → it should open `https://<APP_URL>/i/<id>`.
+- Build a hand receipt to a real address and confirm the message **arrives**,
+  not just that the app reports success. With no sender configured the send is
+  logged and swallowed, and a `vercel.app` link in the body makes the message
+  disappear for `.mil` recipients with no bounce.
 
-## 6. Background data purge (automatic cleanup)
+## 6. Nightly maintenance worker (purge + overdue alerts)
 
-A scheduled worker permanently deletes stale records:
+One scheduled endpoint does four things in a single run:
 
-- **Closed receipts** — 90 days after a receipt (`Transfer`) is closed.
-- **Deactivated accounts** — 3 months after a user is deactivated. Users still
-  referenced by items/receipts are **skipped** (reported as `skippedCount`), never
-  force-deleted.
+- **Purge closed receipts** — 90 days after a receipt (`Transfer`) is closed.
+- **Purge deactivated accounts** — 3 months after a user is deactivated. Users
+  still referenced by items/receipts are **skipped** (reported as
+  `skippedCount`), never force-deleted.
+- **Alert on overdue hand receipts** — one email to `ADMIN_INBOX_EMAIL` per open
+  receipt whose return deadline has lapsed, stamped so it never re-alerts.
+- **Alert on overdue service-queue items** — the same, for pending service work
+  past its deadline.
 
-**How it runs.** `vercel.json` defines a Vercel Cron that calls
-`/api/cron/purge` daily at **08:00 UTC**. The endpoint has no user session, so it
-authenticates with a shared secret instead:
+**How it runs: GitHub Actions, not Vercel Cron.** `.github/workflows/purge-cron.yml`
+curls `/api/cron/purge` daily at **08:23 UTC** and fails the workflow run on any
+non-`200` or a body without `"ok":true` — so a broken secret is visible in the
+Actions tab instead of silent.
 
-- Set `CRON_SECRET` (Production env, step 4) to a long random value —
-  `openssl rand -hex 32`. Vercel automatically attaches it as
-  `Authorization: Bearer <CRON_SECRET>` on scheduled calls.
-- If `CRON_SECRET` is **unset**, the endpoint fails closed (every call → `401`)
-  and **nothing is ever purged** — a silent no-op. Setting it is required for the
-  cleanup to happen at all.
-- Vercel runs Crons on a schedule only on **Pro** plans. On Hobby, the schedule
-  won't auto-fire — trigger it manually (below).
+There is **no `vercel.json` and no Vercel Cron.** Vercel only runs Crons on a
+schedule on **Pro** plans; on Hobby the schedule never fired and the purge
+silently never ran, which is why this moved to Actions. Don't "restore" a
+`vercel.json` cron — it would double-run the sweep on Pro and do nothing on Hobby.
 
-**Trigger it manually** — the same call the scheduler makes. Replace
-`<CRON_SECRET>` with the value from Vercel (do **not** hardcode the secret into
-committed scripts), and `<APP_URL>` with the deployed domain:
+The endpoint has no user session, so it authenticates with a shared secret:
+
+- Set `CRON_SECRET` to the **same** long random value (`openssl rand -hex 32`) in
+  **two** places: Vercel (Production env, step 4) and the GitHub repository
+  secrets (Settings → Secrets and variables → Actions). A mismatch shows up as a
+  `401` in the workflow log.
+- If `CRON_SECRET` is **unset in Vercel**, the endpoint fails closed (every call
+  → `401`) and **nothing is ever purged or alerted** — a silent no-op. Setting it
+  is required for any of this to happen at all.
+- Pushing `.github/workflows/*` needs the `workflow` token scope
+  (`gh auth refresh -s workflow`); a plain `repo`-scoped token is rejected.
+
+**Trigger it manually** — or just run the workflow from the Actions tab
+(**Nightly purge (cron)** → *Run workflow*, which `workflow_dispatch` enables).
+By hand it is the same call the scheduler makes; the route accepts `GET` (what
+the workflow sends) and `POST` alike. Replace `<CRON_SECRET>` with the value from
+Vercel (do **not** hardcode the secret into committed scripts), and `<APP_URL>`
+with the deployed domain:
 
 ```bash
 # bash / macOS / Linux
@@ -126,19 +190,25 @@ Invoke-RestMethod -Method Post -Uri "https://<APP_URL>/api/cron/purge" `
 Success is HTTP `200` with a JSON summary:
 
 ```json
-{"ok":true,"transfers":{"deletedCount":0},"users":{"deletedCount":0,"skippedCount":0}}
+{"ok":true,"transfers":{"deletedCount":0},"users":{"deletedCount":0,"skippedCount":0},"alerts":{"overdueTransfers":0,"overdueService":0}}
 ```
 
 - `deletedCount` — records permanently removed on this run.
 - `skippedCount` — accounts old enough to purge but kept because they still have
   attached items/receipts.
+- `alerts.*` — overdue emails sent this run. These stay `0` when
+  `ADMIN_INBOX_EMAIL` is unset, because nothing is alerted and nothing is
+  stamped — so a lapse is not "missed", it just waits for the inbox to be
+  configured.
 - A wrong or missing secret returns `401` and touches nothing.
 
 > ⚠️ This endpoint **permanently deletes** eligible data — there is no undo. It is
 > safe to call anytime (it only removes records past their retention window) but it
-> is **not** a dry run. The route is intentionally excluded from the auth
-> middleware (`src/proxy.ts` matcher) so the cron isn't redirected to `/login`;
-> its only protection is `CRON_SECRET`, so keep that value secret.
+> is **not** a dry run. The route is intentionally excluded from the proxy's
+> matcher (`src/proxy.ts`) so the cron isn't redirected to `/login` and isn't
+> starved by a per-IP rate-limit bucket shared with unrelated traffic; its only
+> protection is the constant-time `CRON_SECRET` compare, so keep that value
+> secret.
 
 ## 7. Automated MDM import (optional)
 
@@ -255,7 +325,7 @@ instant, the real import will be fine; see the note below on why.
 ```powershell
 $env:MDM_IMPORT_SECRET = "<the value you set in Vercel>"
 
-Invoke-RestMethod -Uri "https://servicedeskapp.vercel.app/api/items/import" `
+Invoke-RestMethod -Uri "https://www.dcsim.us/api/items/import" `
   -Method Post `
   -Headers @{ Authorization = "Bearer $env:MDM_IMPORT_SECRET" } `
   -Form @{ file = Get-Item .\fleet.csv }
@@ -303,14 +373,25 @@ nothing is ever deleted, so a bad import is a correction, never a loss.
 
 ## Notes / caveats
 
-- **Change the admin password**: there is no in-app password change yet; the
-  seeded value is the live password. Seed with a strong one (step 3).
+- **Change the admin password after first sign-in**: `/account` → Change
+  password. Until then the seeded value is the live password, so seed a strong
+  one (step 3).
+- **`main` is branch-protected, and deploys come from it.** Merging needs a PR
+  with all **three** required checks green — `Semgrep SAST`, `Build (next build)`
+  and `Security docs current` (`.github/workflows/ci.yml`; the first two run on
+  push and PR, the third on PRs only because it diffs against the merge base).
+  `strict` is on, so the branch must be up to date with `main`. Vercel deploys
+  production on merge. Admins can bypass in an emergency
+  (`enforce_admins: false`), but the default path is branch → PR → green → merge.
 - **Prepared statements**: we use Prisma's `pg` driver adapter, which is safe
   with Supabase's transaction pooler. If you ever see a "prepared statement
   already exists" error, point `DATABASE_URL` at the **session pooler** (5432)
   instead — no code change needed.
-- **Migrations on later schema changes**: re-run `npm run db:deploy` with the
-  Supabase URLs (the app build does *not* auto-migrate, by design).
+- **Migrate BEFORE the merge deploys** (later schema changes): re-run
+  `npm run db:deploy` with the Supabase URLs. `next build` never runs
+  `migrate deploy` — by design — so merging code that `SELECT`s a column the
+  production database does not have yet breaks the site the moment Vercel
+  finishes deploying. Apply the migration first, then merge.
 - **Pooled vs direct**: the app uses the transaction pooler (serverless opens
   many connections); migrations use the session/direct connection. Mixing them
   up is the most common failure.
@@ -325,7 +406,7 @@ nothing is ever deleted, so a bad import is a correction, never a loss.
   `scripts/gmail-token-rotation` is installed on a workstation, it fires a Deploy
   Hook every ~3 days to push a refreshed `GMAIL_REFRESH_TOKEN` into production.
   That deploys **whatever is on `main` at that moment, with nobody watching** —
-  which interacts badly with the migrate-before-push rule two bullets up. If you
+  which interacts badly with the migrate-before-merge rule above. If you
   merge schema-dependent code and defer `npm run db:deploy`, the rotation will
   deploy it for you within three days. Apply migrations at merge time, not "before
   the next deploy": with this installed there is no next *manual* deploy to gate on.

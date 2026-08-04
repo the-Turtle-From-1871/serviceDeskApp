@@ -203,10 +203,11 @@ export function planImport(
       }
       const data: Record<string, string | Date | null> = {};
       for (const c of allChanges) data[c.field] = c.to;
-      // Keep the parsed instant in step with the raw text. readiness compares
-      // lastLogonAt to markedReadyAt, so a refreshed lastLogonDate whose
-      // lastLogonAt went stale would leave a device reading "Ready" after it
-      // had plainly been used again.
+      // Keep the parsed instant in step with the raw text. Readiness no longer
+      // compares lastLogonAt to markedReadyAt (that rule was removed), but the
+      // column still backs analytics and is what a reinstated rule would read —
+      // so a refreshed lastLogonDate whose lastLogonAt went stale would leave
+      // the two disagreeing about the same device.
       if (data.lastLogonDate !== undefined) {
         data.lastLogonAt = parseLastLogonAt(data.lastLogonDate as string | null);
       }

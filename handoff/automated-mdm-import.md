@@ -29,8 +29,19 @@ $env:MDM_IMPORT_SECRET = "paste-the-secret-here"
 **Step 2 — send the file.** From the folder holding `Send-MdmImport.ps1`:
 
 ```powershell
-.\Send-MdmImport.ps1 -CsvPath C:\path\to\fleet.csv
+.\Send-MdmImport.ps1 -CsvPath C:\path\to\fleet.csv -Uri "https://www.dcsim.us/api/items/import"
 ```
+
+> ⚠️ **Pass `-Uri` unless your copy of the script is dated 2026-08-04 or later.**
+> The app's address is now `https://www.dcsim.us`, and the script in the
+> repository defaults to it as of 2026-08-04 — but a copy taken before that
+> defaults to `https://servicedeskapp.vercel.app`, which the government network
+> **blocks** — so on a `.mil`-managed machine the run fails to connect rather than
+> importing anything. The Vercel address still works from an unfiltered network,
+> which is exactly why this is worth checking rather than assuming: it can look
+> fine when you test it from home and fail on the machine that runs the schedule.
+> Check yours with `Select-String -Path .\Send-MdmImport.ps1 -Pattern 'vercel\.app'`
+> — any output means pass `-Uri`.
 
 **Step 3 — read what it prints.** Green "Import succeeded" with counts means it
 worked. Red "FAILED" tells you what to fix, and nothing was imported.
@@ -74,7 +85,7 @@ Then point a Task Scheduler action at:
 
 ```
 Program:    powershell.exe
-Arguments:  -NoProfile -ExecutionPolicy Bypass -File "C:\path\to\Send-MdmImport.ps1" -CsvPath "C:\path\to\fleet.csv" -LogPath "C:\path\to\import.log"
+Arguments:  -NoProfile -ExecutionPolicy Bypass -File "C:\path\to\Send-MdmImport.ps1" -CsvPath "C:\path\to\fleet.csv" -LogPath "C:\path\to\import.log" -Uri "https://www.dcsim.us/api/items/import"
 ```
 
 The script exits non-zero on any failure, so Task Scheduler shows a red "Last Run
@@ -100,7 +111,7 @@ end does the sending.
 
 | You need | Where it comes from |
 | --- | --- |
-| The app's URL | `https://servicedeskapp.vercel.app` |
+| The app's URL | `https://www.dcsim.us` — **not** the old `servicedeskapp.vercel.app`, which the government network blocks |
 | A secret value | The app owner generates it and gives it to you |
 | Your export as a `.csv` file | Your existing Intune/MDM export |
 
@@ -116,7 +127,7 @@ the script, and not in email or chat.
 an `Authorization` header:
 
 ```
-POST https://servicedeskapp.vercel.app/api/items/import
+POST https://www.dcsim.us/api/items/import
 Authorization: Bearer <secret>
 Content-Type: multipart/form-data
 ```
@@ -134,7 +145,7 @@ $headers = @{ Authorization = "Bearer $env:MDM_IMPORT_SECRET" }
 $form    = @{ file = Get-Item .\fleet.csv }
 
 $result = Invoke-RestMethod `
-  -Uri "https://servicedeskapp.vercel.app/api/items/import" `
+  -Uri "https://www.dcsim.us/api/items/import" `
   -Method Post -Headers $headers -Form $form
 
 $result | ConvertTo-Json -Depth 5
@@ -146,7 +157,7 @@ rather than the file's contents.
 ### curl
 
 ```bash
-curl -X POST "https://servicedeskapp.vercel.app/api/items/import" \
+curl -X POST "https://www.dcsim.us/api/items/import" \
   -H "Authorization: Bearer $MDM_IMPORT_SECRET" \
   -F "file=@fleet.csv"
 ```
@@ -287,6 +298,7 @@ re-importing unchanged rows does nothing.
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
+| Cannot connect / times out, but the same command works from home | The request is going to `servicedeskapp.vercel.app`, which the government network blocks | Send to `https://www.dcsim.us/api/items/import` — pass `-Uri` if your script still defaults to the old address (§0, §2) |
 | `401` every time | Secret mismatch, or a trailing newline on the value in Vercel | Re-copy the value; confirm the header is `Bearer <secret>` |
 | `200` but the body is **HTML**, not JSON | The request was redirected to the login page | Tell the app owner — the endpoint's exemption from the login gate has been lost. **This one is dangerous: the job looks successful while importing nothing.** |
 | `500` on every request | The service account is missing from the database | Apply the migration named in section 6 |
