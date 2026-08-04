@@ -417,6 +417,15 @@ queries — `searchItemsBySerial` (citext/trigram cast), the two analytics
 time-series, and the category in-use count — all use a parameterized
 `$queryRaw`; string concatenation into SQL is banned outright.
 
+**Outbound mail headers are hardened against injection.** `buildRawEmail` in
+`src/lib/gmail-oauth-email.ts` strips CR/LF from every header value it writes —
+`From`, `To`, `Cc`, `Subject`, and the attachment filename — before assembling
+the RFC 2822 message. A header value may not contain a raw newline: it would
+terminate the header and let caller-supplied text (a recipient name, a device
+name) forge a new one, including an injected `Bcc`. A value carrying CR/LF is
+collapsed to a space rather than rejected, so the message still sends with
+visibly mangled — not silently altered — content.
+
 **The one place an identifier is spliced into SQL is the `/items` `ORDER BY`,
 and it is allowlisted twice.** A sort key arrives from the querystring and
 becomes a column name in `derivedOrderedItemIds` — a value, not a bound
@@ -464,13 +473,39 @@ items or fire a pickup notification for a non-DCSIM recipient.
 
 ## 6. Secrets & data leakage
 
-**21 files carry `import "server-only"`** — including `authz.ts`, `password.ts`,
-`crypto.ts`, `reset-token.ts`, `password-reset.ts`, and `public-access.ts`. A
-client-side import of any of them becomes a build error.
+**25 files carry `import "server-only"`** — including `authz.ts`, `password.ts`,
+`crypto.ts`, `reset-token.ts`, `password-reset.ts`, `public-access.ts`, and (as
+of 2026-07-31) `gmail-oauth-email.ts`. A client-side import of any of them
+becomes a build error. `gmail-oauth-email.ts` qualifies the same way the others
+do: every importer of `src/lib/email.ts` (which returns it from
+`getEmailSender()`) is a Server Action, service, or route handler — never a
+Client Component — so
+marking it `server-only` costs nothing and keeps the OAuth client secret and
+refresh token out of any client bundle by construction, not by convention.
 
 **No hardcoded credentials.** Everything via `process.env`: `DATABASE_URL`,
 `AUTH_SECRET`, `CRON_SECRET`, `SIGNING_PRIVATE_KEY`, `APP_URL`,
-`PUBLIC_ACCESS_PIN_ENABLED`, `ADMIN_INBOX_EMAIL`.
+`PUBLIC_ACCESS_PIN_ENABLED`, `ADMIN_INBOX_EMAIL`, `GMAIL_FROM`,
+`GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`.
+
+**Outbound mail is sent via the Gmail API with an OAuth2 refresh token, not an
+SMTP app password.** The SMTP transport (`GmailEmailSender`, selected by
+`GMAIL_USER` + `GMAIL_APP_PASSWORD`) was removed on 2026-07-31; those two vars
+no longer select any sender (`getEmailSender()` ignores them even if a stale
+Vercel env still sets them — see `src/lib/email.test.ts`). The replacement,
+`GmailOAuthSender` (`src/lib/gmail-oauth-email.ts`), authenticates with
+`GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` / `GMAIL_REFRESH_TOKEN` — long-lived
+credentials held only in Vercel environment variables, never in the repo — and
+exchanges them for a short-lived access token per send (cached until near
+expiry). The refresh token is scoped to `gmail.send` only: it can send mail as
+the account but cannot read the mailbox, list messages, or access any other
+Google data. Selection in `getEmailSender()` is by **env presence only** — Gmail
+OAuth is chosen whenever all four `GMAIL_*` vars are set, in preference to
+Resend, with no fallback to another transport if a send later fails. A dead or
+expired refresh token therefore surfaces as a thrown error on every send
+attempt rather than silently rerouting mail through Resend or the log stub; see
+[Known gaps #9](#known-gaps--accepted-risks) for why that refresh token expires
+on a roughly weekly cadence and how it's kept current.
 
 **The signing key is never logged** — failure paths in `src/lib/crypto.ts` log
 the error, never the key.
@@ -481,6 +516,45 @@ must never enter list, search, or type-ahead queries.
 **Clients get generic errors; servers get the stack trace.** e.g.
 `"Something went wrong. Please try again."` to the user, full `console.error`
 server-side.
+
+### Workstation-held deploy credentials (`scripts/gmail-token-rotation/`)
+
+Local Windows tooling that rotates the Gmail OAuth refresh token and pushes it to
+Vercel production. It is **not** part of the deployed app and runs on one
+technician workstation, but it holds credentials that can write production.
+
+**What it stores, and where.** `%LOCALAPPDATA%\dcsim-gmail-rotation\config.xml`,
+written with `Export-CliXml`. The OAuth client secret, the Vercel API token and
+the deploy hook URL are held as `SecureString`, so DPAPI encrypts them bound to
+that Windows user on that machine — the file is inert if copied elsewhere. The
+tool additionally attempts to strip inherited ACEs from the file, but that is
+best-effort: a failure is logged as a warning and does not abort, so DPAPI is
+the control being relied on, not the ACL. Nothing is stored in the
+repository, and `state.json` / `rotate.log` are asserted secret-free: error
+bodies from Google and Vercel are scrubbed of the token value, the bearer token
+and the full hook URL before they reach a log line or a thrown message.
+
+**The Vercel API token is account-wide.** Vercel personal tokens cannot be scoped
+to a single project, so this token can read, modify and deploy anything in the
+account. It is created with no expiry deliberately — an expiring token would
+trade one rotation treadmill for two. This is the highest-value secret on that
+workstation; see Known gaps.
+
+**It can deploy production unattended.** A successful rotation writes
+`GMAIL_REFRESH_TOKEN` and fires a deploy hook, so `main` ships without a human
+present. The repo's migrate-before-push rule assumes the opposite; see `DEPLOY.md`.
+
+**Execution trigger.** `HKCU\Software\Classes\dcsim-gmail-rotate` lets the toast
+notification launch a rotation. The registered command is fully literal — an
+absolute `powershell.exe`, an absolute quoted script path, `-File` last — and
+`%1` is deliberately omitted, so no caller-supplied text reaches the command
+line and a stray positional would fail parameter binding rather than execute.
+Any same-user process could already run the script directly, so no trust
+boundary is crossed. Nothing in the tool requires or acquires elevation.
+
+**The consent click is not automated and must not be.** Driving a browser
+through Google sign-in would require the account password and a 2FA bypass on
+disk, and breaches Google's ToS.
 
 ---
 
@@ -1029,6 +1103,24 @@ challenge.
 
 Tracked deliberately, so nobody re-discovers them as new findings.
 
+**0c. An account-wide Vercel API token sits on a technician workstation, and it
+can deploy production unattended.** ⚠️ *Accepted; two exits exist.*
+`scripts/gmail-token-rotation/` ([§6](#6-secrets--data-leakage)) needs a Vercel
+token to write `GMAIL_REFRESH_TOKEN` and a deploy hook to make it take effect.
+Vercel personal tokens **cannot be scoped to one project**, so the token can
+modify or deploy anything in the account, and it is created with no expiry on
+purpose. It is DPAPI-encrypted and bound to one Windows user on one machine, but
+anyone with that user's live session can use it, and a successful rotation ships
+`main` to production with nobody watching — which collides with the
+migrate-before-push rule (`DEPLOY.md`).
+The root cause is that the Google OAuth consent screen is deliberately left in
+**Testing** status, which caps refresh tokens at 7 days. Both exits remove the
+tooling entirely rather than mitigating it: publish the consent screen (free,
+immediate), or move the sender to Google Workspace on `dcsim.us`, where a service
+account with domain-wide delegation needs no refresh token at all. Until one is
+taken, this risk is the price of the workaround. Revisit whenever the `.mil`
+deliverability work moves.
+
 **0a. A visitor whose network blocks Cloudflare cannot sign in at all** once
 Turnstile is configured. ⚠️ *Accepted, with an operational lever.*
 The server leg fails OPEN (an unreachable Cloudflare lets the submission
@@ -1150,6 +1242,27 @@ signal either. Accepted rather than re-metering the route, because putting it
 back behind the proxy's IP bucket is what caused the original bug this
 endpoint exists to fix — the shared secret is the only control this endpoint
 needs, and it does not weaken under volume.
+
+**9. A dead Gmail refresh token stops outbound mail entirely, with no
+fallback.** *Accepted, by design — see [§6](#6-secrets--data-leakage).*
+`getEmailSender()` selects `GmailOAuthSender` by environment presence only and
+never falls back to Resend or the log stub when a send fails, so a rejected
+`invalid_grant` refresh (an expired, revoked, or rotated-out-from-under-it
+token) surfaces as a thrown error on every outbound email until someone
+re-mints `GMAIL_REFRESH_TOKEN`. This is deliberate: silently rerouting mail
+through a different transport, or swallowing the failure, would hide a real
+outage behind a "sent" that never went anywhere.
+The token expires roughly weekly because the Google OAuth consent screen for
+this app is **deliberately kept in Testing publishing status** rather than
+published — an owner decision, recorded in full at
+[Known gaps 0c](#known-gaps--accepted-risks), not a misconfiguration to "fix"
+by itself. The accepted mitigation is the workstation rotation tooling
+documented there (`scripts/gmail-token-rotation/`), which *reminds* on a
+6-hourly schedule — escalating from a normal toast at 3 days to critical past
+7 — but the rotation itself is initiated by a person. Until the consent screen
+is published or the sender moves to Google Workspace (0c's two exits), expect
+this failure mode on a roughly weekly cadence absent that person acting on the
+reminder.
 
 ---
 

@@ -106,8 +106,21 @@ export const WATCHED = [
   // attributed to without any doc noticing.
   [/^src\/modules\/items\/import-actor\.ts$/, "the automated-import service-account resolver (§8)"],
   [/^src\/lib\/email\.ts$/, "outbound email escaping (§4, §6)"],
+  // Holds a long-lived send credential and builds raw MIME headers. The CR/LF
+  // strip in buildRawEmail is the only thing stopping caller-supplied text from
+  // forging headers, and it is one deleted regex away from being gone.
+  [/^src\/lib\/gmail-oauth-email\.ts$/, "outbound mail header injection guard + the OAuth send credential (§5, §6)"],
   [/^next\.config\.ts$/, "security response headers (§4)"],
   [/^\.github\/workflows\/ci\.yml$/, "the CI security gates (§11)"],
+  // Not deployed code — local Windows tooling. Watched anyway because it holds a
+  // Google OAuth client secret, an account-wide Vercel API token and a deploy hook
+  // URL on a workstation, and because a successful run WRITES a production
+  // environment variable and triggers a production deploy with no human present.
+  // The DPAPI storage decision, the log-scrubbing and the "%1 is omitted from the
+  // protocol handler" reasoning ARE the posture here, and all three live only in
+  // these files. Directory-wide on purpose: any new file in this tool inherits the
+  // same credential access.
+  [/^scripts\/gmail-token-rotation\//, "workstation-held deploy credentials and unattended production writes (§6)"],
 ];
 
 function git(args) {
