@@ -379,6 +379,32 @@ backslashes, anything not starting with `/`, the protocol-relative `//host` and
 **Public endpoints stay read-only and PII-minimal** (login, home search, receipt
 and item lookup) — never widen without explicit review.
 
+**A signed link admits its holder to ONE receipt, past the PIN, and it is
+checked LAST.** The notification emails and the QR printed on the DA 2062 both
+carry `?k=<token>` on the receipt URL, where the token is
+`hmac(AUTH_SECRET, "rl:" + receiptNumber)` — domain-separated from the unlock
+cookie's own HMAC (which signs a bare expiry) so a value minted for one purpose
+can never verify as the other. `src/proxy.ts` evaluates it inside the same
+`isPinGatedPath` branch as the PIN, but only *after* the logged-in and
+unlock-cookie checks have both already said no — a technician or a visitor who
+already typed the PIN is never narrowed down to a single receipt by clicking a
+link in their inbox. A verified token redirects to the same URL with `k`
+stripped (so it never sits in the address bar, a Referer header, or a shared
+screen) and sets a grant cookie — `__Secure-pub_receipt` / `pub_receipt`,
+`httpOnly`, `secure` in production, `sameSite: "lax"`, `path: "/"` — naming
+that one receipt number. The grant covers exactly the receipt page and its PDF
+and nothing beyond: every check re-verifies the cookie's signature against the
+*current* path's receipt number, so a grant for `HR-000123` fails closed on
+`HR-000456` or on any `/i/*` page. The cookie's 12-hour life
+(`UNLOCK_MAX_AGE_SECONDS`, shared with the unlock cookie) is a sitting length,
+**not** the link's lifetime — the link itself does not expire; re-clicking the
+emailed link re-mints the grant. **`publicAccessAllowed()` is deliberately NOT
+widened by this** — it is the entire gate on `liveSearchAction`, i.e. on the
+searchable item and receipt catalog, and it still reads only the unlock cookie,
+so holding a receipt grant opens that one receipt page and buys no search
+access. `src/lib/receipt-link-token.ts`, `src/lib/web-hmac.ts`, covered by
+`src/proxy.test.ts` and `src/lib/public-access-guard.test.ts`.
+
 ---
 
 ## 4. Password reset
@@ -1424,6 +1450,18 @@ The mitigation is UI-only: `DeleteItemButton` shows a prominent warning naming
 the current holder (from `ItemRow.holderName`, already derived server-side —
 no added query) before an admin can confirm, but nothing server-side refuses
 or even logs the deletion of a signed-out item.
+
+**12. The scoped receipt link never expires, and there is no per-receipt
+revocation.** *Accepted, by design of the capability token.* A forwarded email
+or a photographed QR opens that one receipt indefinitely — for an open receipt,
+forever; for a closed one, until the 90-day purge deletes the row and
+`getTransferByReceiptNumber` has nothing left to render. The only revocation
+lever is rotating `AUTH_SECRET`, and that is a blunt instrument: it also
+invalidates every live session and every unlock cookie, not just this one
+link. Scoping revocation to a single receipt would need a per-receipt salt
+stored on the row — a schema change — so the token could be invalidated by
+clearing that column rather than by rotating the app-wide secret. Not done
+here; tracked for if a leaked link is ever reported.
 
 ---
 

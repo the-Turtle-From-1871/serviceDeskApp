@@ -30,6 +30,9 @@ describe("check-security-docs WATCHED list", () => {
     // unwatched change to either silently re-opens the item/receipt catalog.
     "src/lib/public-access-guard.ts",
     "src/app/actions/search.ts",
+    // The scoped receipt-link bypass and the shared crypto primitives under it.
+    "src/lib/receipt-link-token.ts",
+    "src/lib/web-hmac.ts",
   ];
 
   it.each(introducedThisBranch)("covers %s", (path) => {

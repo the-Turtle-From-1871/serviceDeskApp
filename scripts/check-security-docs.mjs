@@ -50,6 +50,13 @@ export const WATCHED = [
   // public). The last one is the whole gate for that action, so it must not be
   // able to change quietly.
   [/^src\/lib\/public-access(-cookie|-guard)?\.ts$/, "the public PIN gate (§3)"],
+  // The scoped receipt link: its signing scope, its domain separator, and the
+  // fact that it does not expire ARE the posture. The grant it mints is the one
+  // way into the PII surface that needs neither a session nor the PIN.
+  [/^src\/lib\/receipt-link-token\.ts$/, "the scoped receipt-link bypass (§3)"],
+  // The HMAC + constant-time compare behind BOTH the unlock cookie and the
+  // receipt link token. A change here changes both at once.
+  [/^src\/lib\/web-hmac\.ts$/, "the Web-Crypto primitives behind the PIN gate (§3)"],
   [/^src\/app\/actions\/search\.ts$/, "the public search action's own PIN check (§3)"],
   [/^src\/app\/actions\/unlock\.ts$/, "the unlock action + cookie flags, anti-guessing delay (§3)"],
   // The policy numbers (5/15min, 60/15min, 300/min), the composite key shape,

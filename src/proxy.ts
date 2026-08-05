@@ -5,6 +5,7 @@ import {
   verifyUnlockValue,
   unlockCookieName,
   sanitizeNext,
+  UNLOCK_MAX_AGE_SECONDS,
 } from "@/lib/public-access-cookie";
 import {
   API_POLICY,
@@ -15,6 +16,13 @@ import {
   rateLimitKey,
   type RateLimitVerdict,
 } from "@/lib/rate-limit";
+import {
+  RECEIPT_LINK_PARAM,
+  receiptGrantCookieName,
+  receiptGrantValue,
+  verifyReceiptGrantValue,
+  verifyReceiptLinkToken,
+} from "@/lib/receipt-link-token";
 
 // This proxy carries THREE gates (Next 16 allows a single proxy export). Next 16
 // `proxy` (renamed from `middleware`) runs on the Node.js runtime, so `@/auth`
@@ -26,10 +34,10 @@ import {
 //         a User-Agent check, then 300/min (API_POLICY), the anti-scraping
 //         limit. `/` is in THIS gate, and only this one.
 //  1. Public PII surface (`/i/*`, `/receipts/*` — NOT `/`): the shared 8-digit PIN
-//     gate, active only when PUBLIC_ACCESS_PIN_ENABLED is on. A logged-in user
-//     OR a valid unlock cookie passes; otherwise redirect to /unlock. This is
-//     NOT an authz boundary — real authz stays per-route (requireUser/
-//     requireAdmin).
+//     gate, active only when PUBLIC_ACCESS_PIN_ENABLED is on. A logged-in user,
+//     a valid unlock cookie, OR a signed link token naming that one receipt
+//     passes; otherwise redirect to /unlock. This is NOT an authz boundary —
+//     real authz stays per-route (requireUser/requireAdmin).
 //  2. Every other matched route (`/items`, `/admin/*`, `/account`, …): the
 //     app's pre-existing coarse login gate — a session is required, else
 //     redirect to /login.
@@ -88,9 +96,26 @@ function isApiAuthPath(pathname: string): boolean {
  * a plain-text 403 rather than `/login`. Authorization was never the issue
  * (`requireUser` runs in-page regardless); the routing was.
  */
+// One regex, two uses: the gate membership test and the receipt number the
+// scoped-link branch needs. Splitting them into two patterns would let the set
+// of gated paths and the set of link-openable paths drift apart.
+const RECEIPT_PATH = /^\/receipts\/(?!new(?:\/|$))([^/]+)(?:\/pdf)?$/;
+
 const isPinGatedPath = (pathname: string) =>
-  pathname.startsWith("/i/") ||
-  /^\/receipts\/(?!new(?:\/|$))[^/]+(?:\/pdf)?$/.test(pathname);
+  pathname.startsWith("/i/") || RECEIPT_PATH.test(pathname);
+
+/**
+ * The receipt number a path is asking for, or null when the path names no
+ * single receipt (every `/i/*` page, and the staff builder at `/receipts/new`).
+ *
+ * Deliberately NOT decoded. The token is signed over the receipt number exactly
+ * as `receiptUrl()` writes it into the link, and receipt numbers are
+ * `HR-<digits>` — nothing that needs escaping. Decoding would add a throw on
+ * malformed input (`%zz`) inside the proxy for no gain.
+ */
+function receiptNumberFromPath(pathname: string): string | null {
+  return RECEIPT_PATH.exec(pathname)?.[1] ?? null;
+}
 
 /**
  * `/` is public but NOT PIN-gated, and the split is deliberate.
@@ -216,6 +241,55 @@ const authGatedProxy = auth(async (req) => {
     if (shouldAllowPublic({ flagEnabled, loggedIn, unlockValid })) {
       return NextResponse.next();
     }
+
+    // A link WE generated for ONE receipt admits its holder to that receipt
+    // without the shared PIN — the notification emails and the QR printed on the
+    // DA 2062 both carry one. See docs/SECURITY.md §3.
+    //
+    // ORDER IS LOAD-BEARING: this runs AFTER the logged-in and unlock-cookie
+    // decision above, never before. Those are the broad grants; a technician or
+    // a visitor who already typed the PIN must not be narrowed to a single
+    // receipt by clicking a link in their inbox.
+    //
+    // Scope is enforced by the signature, not by this branch: a token verifies
+    // against exactly the receipt number it was minted for, and `/i/*` yields no
+    // receipt number at all, so nothing here can reach the device catalog.
+    const linkedReceipt = flagEnabled && !loggedIn ? receiptNumberFromPath(pathname) : null;
+    if (linkedReceipt) {
+      const presentedToken = req.nextUrl.searchParams.get(RECEIPT_LINK_PARAM);
+      if (await verifyReceiptLinkToken(linkedReceipt, presentedToken, secret)) {
+        // Redirect to the same page without the token, remembering the grant in
+        // a cookie. Three things this buys, all of which break without it: the
+        // token leaves the address bar (so it is not copied out of a shared
+        // screen, or leaked in a Referer), the PDF download link on the page
+        // works without carrying it, and a refresh does not depend on it.
+        const clean = req.nextUrl.clone();
+        clean.searchParams.delete(RECEIPT_LINK_PARAM);
+        const res = NextResponse.redirect(clean);
+        res.cookies.set(
+          receiptGrantCookieName(secure),
+          receiptGrantValue(linkedReceipt, presentedToken as string),
+          {
+            httpOnly: true,
+            secure,
+            sameSite: "lax",
+            path: "/",
+            // NOT the link's lifetime — the link never expires. This only has to
+            // outlive one sitting; re-clicking the emailed link re-grants.
+            maxAge: UNLOCK_MAX_AGE_SECONDS,
+          },
+        );
+        return res;
+      }
+      // No token, or a bad one: fall back to a grant already in the jar. It is
+      // re-verified against THIS path's receipt number, so a grant for another
+      // receipt simply does not apply and drops through to /unlock below.
+      const grant = req.cookies.get(receiptGrantCookieName(secure))?.value;
+      if (await verifyReceiptGrantValue(grant, linkedReceipt, secret)) {
+        return NextResponse.next();
+      }
+    }
+
     const url = new URL("/unlock", req.url);
     url.searchParams.set("next", sanitizeNext(pathname + search));
     const res = NextResponse.redirect(url);
