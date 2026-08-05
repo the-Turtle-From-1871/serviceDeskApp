@@ -5,7 +5,7 @@ import { processReturn } from "@/modules/returns/returns.service";
 import { sendReturnEmail } from "@/modules/returns/send-return-email";
 import { getTransferByReceiptNumber } from "@/modules/transfers/transfers.service";
 import { renderReceiptPdf } from "@/modules/receipts/render";
-import { receiptUrl } from "@/modules/items/qr";
+import { receiptLinkUrl } from "@/modules/items/qr";
 import type { ReturnPlan } from "@/modules/returns/plan";
 import { signatureError } from "@/lib/signature";
 import { getOwnedSignature } from "@/modules/signatures/signatures.service";
@@ -75,7 +75,7 @@ export async function processReturnAction(_prev: unknown, formData: FormData): P
       await sendReturnEmail({
         receiver: res.receiver,
         receiptNumber: res.receiptNumber,
-        receiptUrl: receiptUrl(res.receiptNumber),
+        receiptUrl: await receiptLinkUrl(res.receiptNumber),
         kind: res.plan.kind,
         returned,
         remaining,

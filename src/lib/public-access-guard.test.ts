@@ -17,6 +17,11 @@ import {
   UNLOCK_TTL_MS,
   UNLOCK_CLOCK_SKEW_MS,
 } from "@/lib/public-access-cookie";
+import {
+  receiptGrantCookieName,
+  receiptGrantValue,
+  signReceiptLinkToken,
+} from "@/lib/receipt-link-token";
 
 const SECRET = "test-secret";
 
@@ -102,5 +107,14 @@ describe("publicAccessAllowed", () => {
     vi.stubEnv("PUBLIC_ACCESS_PIN_ENABLED", "false");
     await publicAccessAllowed();
     expect(session).not.toHaveBeenCalled();
+  });
+
+  it("is NOT satisfied by a receipt grant cookie", async () => {
+    // The grant opens one receipt page. It must never reach this function,
+    // which is the entire gate on liveSearchAction — i.e. on the searchable
+    // item and receipt catalog.
+    const token = await signReceiptLinkToken("HR-000123", SECRET);
+    cookieJar[receiptGrantCookieName(false)] = receiptGrantValue("HR-000123", token);
+    expect(await publicAccessAllowed()).toBe(false);
   });
 });

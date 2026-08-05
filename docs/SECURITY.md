@@ -379,6 +379,68 @@ backslashes, anything not starting with `/`, the protocol-relative `//host` and
 **Public endpoints stay read-only and PII-minimal** (login, home search, receipt
 and item lookup) — never widen without explicit review.
 
+**A signed link admits its holder to ONE receipt, past the PIN, and it is
+checked LAST.** The notification emails and the QR printed on the DA 2062 both
+carry `?k=<token>` on the receipt URL, where the token is
+`hmac(AUTH_SECRET, "rl:" + receiptNumber.toUpperCase())` — the uppercasing
+matches `getTransferByReceiptNumber`'s case-insensitive lookup, so a link whose
+path got lowercased anywhere in transit (mail client, QR scanner, manual
+retyping) still verifies. The domain prefix separates this signature space
+from the unlock cookie's own HMAC (which signs a bare expiry) so a value
+minted for one purpose can never verify as the other. `src/proxy.ts` evaluates
+it inside the same `isPinGatedPath` branch as the PIN, but only *after* the
+logged-in and unlock-cookie checks have both already said no.
+
+**That ordering means the strip-and-redirect below is NOT something every
+recipient gets.** It runs only on the anonymous, PIN-locked path that reaches
+this far. A logged-in technician — often the one who built the very receipt,
+and on the CC line of the email carrying the link — or a visitor who already
+holds a valid unlock cookie returns earlier, at the existing
+`shouldAllowPublic` check, and is served the page with `?k=<token>` still
+sitting in the address bar for the rest of that visit. **That population is
+covered by a second control instead:** `next.config.ts` sets
+`Referrer-Policy: no-referrer` on `/receipts/*`, the same rule already used
+for the reset-password token and for the identical reason — a raw,
+non-expiring capability sitting in the URL must not ride along in a `Referer`
+header to any subresource or outbound link the page renders. `/i/*` carries no
+token and is deliberately not covered. So the two controls are complementary,
+not overlapping: the redirect below removes the token from the address bar
+where the anonymous path allows it, and `Referrer-Policy` keeps whatever is
+left in the address bar — on every path, anonymous or not — from leaking
+onward. For the population that IS anonymous and PIN-locked: a verified token
+also redirects to the same URL with `k` stripped (so it does not stay in the
+address bar to be copied off a shared screen or carried by the PDF download
+link) and sets a grant cookie —
+`__Secure-pub_receipt` / `pub_receipt`, `httpOnly`, `secure` in production,
+`sameSite: "lax"`, `path: "/"` — naming that one receipt number. The grant
+covers exactly the receipt page and its PDF and nothing beyond: every check
+re-verifies the cookie's signature against the *current* path's receipt
+number, so a grant for `HR-000123` fails closed on `HR-000456` or on any
+`/i/*` page.
+
+**The grant cookie's 12-hour life is enforced by the browser only — the
+cookie's own value carries no signed expiry.** Unlike the unlock cookie
+(`<expMs>.<hmac(...)>`, whose age is checked server-side by
+`verifyUnlockValue`'s ceiling rule), `receiptGrantValue` is just
+`<receiptNumber>.<token>` with nothing dated in it, so `verifyReceiptGrantValue`
+accepts it at any age — a cookie replayed past its `Max-Age` (extracted from
+browser storage and resent by a client that ignores it) is accepted
+indefinitely. This grants nothing beyond what the underlying link already
+grants, since that link never expires either: the 12-hour figure
+(`UNLOCK_MAX_AGE_SECONDS`, shared with the unlock cookie) only bounds how long
+an ordinary browser keeps the grant before the visitor would need to click the
+link again — it is a sitting length, not the link's lifetime.
+**`publicAccessAllowed()` is deliberately NOT widened by this** — it is the
+entire gate on `liveSearchAction`, i.e. on the searchable item and receipt
+catalog, and it still reads only the unlock cookie, so holding a receipt grant
+opens that one receipt page and buys no search access.
+`src/lib/receipt-link-token.ts`, `src/lib/web-hmac.ts`, covered by
+`src/proxy.test.ts`, `src/lib/public-access-guard.test.ts`,
+`src/lib/receipt-link-token.test.ts` (the module's own round-trip,
+cross-receipt, tamper and domain-separation suite) and
+`tests/next.config.test.ts` (the `Referrer-Policy` control introduced in this
+same section).
+
 ---
 
 ## 4. Password reset
@@ -416,7 +478,8 @@ skipped with a server-side log rather than emailing a dead relative URL.
 no-referrer` on `/reset-password` and `/forgot-password` (`next.config.ts`), plus
 `history.replaceState` scrubbing `?token=…` from the address bar on mount
 (`ResetPasswordForm.tsx`). The hidden form field still carries it, so submission
-is unaffected.
+is unaffected. `next.config.ts` carries the same `Referrer-Policy` rule for
+`/receipts/*`, protecting the receipt-link token — see [§3](#3-public-surface--the-pin-gate).
 
 **Email and password are Zod-validated before hashing**, and email content is
 HTML-escaped by `escapeHtml()` in `src/lib/email.ts` (which escapes `'` too).
@@ -1424,6 +1487,43 @@ The mitigation is UI-only: `DeleteItemButton` shows a prominent warning naming
 the current holder (from `ItemRow.holderName`, already derived server-side —
 no added query) before an admin can confirm, but nothing server-side refuses
 or even logs the deletion of a signed-out item.
+
+**12. The scoped receipt link never expires, and there is no per-receipt
+revocation.** *Accepted, by design of the capability token.* The leak channel
+is sharper than "a forwarded email or a photographed QR": **the application
+itself mints and hands out one of these tokens to anyone who can currently
+read a receipt.** Concretely, someone holding only the shared PIN can
+enumerate `HR-%06d` (sequential numbering is an accepted requirement — see
+§3), fetch `GET /receipts/<n>/pdf` for each one at up to the 300/min anonymous
+budget, decode the QR baked into every PDF, and come away holding a permanent,
+PIN-free capability for every receipt in the system — not just the one they
+were sent. **The incremental harm this branch adds is persistence, not first
+access:** that same PIN holder could already open and download every one of
+those PDFs before this change: nothing about *what* is reachable grew, only
+*for how long* a copy of the access remains valid once obtained. The
+practical consequence: **rotating the PIN is not an effective containment
+step** against a leaked or harvested set of links — the tokens keep working
+regardless of the PIN's value — so the only revocation lever is rotating
+`AUTH_SECRET`, which is a blunt instrument for a different reason: it also
+invalidates every live session and every unlock cookie, and (since this
+branch) permanently breaks every link already emailed and every QR already
+printed on a handed-out DA 2062, because paper in someone's hand cannot be
+re-issued (see `DEPLOY.md`). Scoping revocation to a single receipt would need
+a per-receipt salt stored on the row — a schema change — so the token could be
+invalidated by clearing that column rather than by rotating the app-wide
+secret. Not done here; tracked for if a leaked link is ever reported. A
+forwarded email or a photographed QR is still the ordinary way a link reaches
+someone who never had the PIN at all — the harvesting path above is the
+sharper case worth naming for a PIN holder turned insider threat, or a PIN
+leak that predates this feature.
+Same channel as Known gap 3: the initial `GET /receipts/<n>?k=<token>` still
+reaches server/proxy access logs, and a corporate mail gateway that rewrites
+or prefetches links (Microsoft SafeLinks and similar) will fetch it
+automatically, landing the token in that gateway's logs too. The reassuring
+half, unlike the reset token: this token is idempotent rather than single-use,
+so a gateway prefetch does not burn it for the real recipient the way it would
+a one-time reset link — the cost is purely that more parties end up holding a
+copy of a value that, per the paragraph above, never expires on its own.
 
 ---
 
