@@ -2,7 +2,7 @@ import "server-only";
 import { getTransferByReceiptNumber } from "@/modules/transfers/transfers.service";
 import { getClosingReturn, listReturnsForReceipt } from "@/modules/returns/returns.service";
 import { buildHandReceiptPdf, type ReceiptParty } from "@/modules/receipts/hand-receipt";
-import { receiptUrl } from "@/modules/items/qr";
+import { receiptLinkUrl } from "@/modules/items/qr";
 
 // Build a line's successive quantity-column values (DA 2062 columns A–F): column
 // A is the issued qty, and each return TRANSACTION is the next column with the
@@ -63,7 +63,11 @@ export async function renderReceiptPdf(receiptNumber: string): Promise<Uint8Arra
     receiptNumber: t.receiptNumber,
     status: t.status,
     createdAt: t.createdAt,
-    receiptUrl: receiptUrl(t.receiptNumber),
+    // Carries the scoped link token: this URL is encoded into the QR printed on
+    // the receipt, and scanning the paper you are holding should not demand the
+    // PIN. It is QR-only — buildHandReceiptPdf prints no text URL beside it — so
+    // the token's length costs nothing legibility-wise.
+    receiptUrl: await receiptLinkUrl(t.receiptNumber),
     receiverSignature: t.receiverSignature,
     lines: t.lines.map((ln) => {
       const serials = ln.items.map((it) => it.serialNumber);

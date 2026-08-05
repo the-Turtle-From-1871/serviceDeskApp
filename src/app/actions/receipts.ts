@@ -7,7 +7,7 @@ import { isTransferClosed } from "@/modules/transfers/lifecycle";
 import { sendReceiptEmails } from "@/modules/receipts/send-receipt-email";
 import { sendPickupEmail, customerParty, pickupItems } from "@/modules/receipts/send-pickup-email";
 import { renderReceiptPdf } from "@/modules/receipts/render";
-import { receiptUrl } from "@/modules/items/qr";
+import { receiptLinkUrl } from "@/modules/items/qr";
 import { upsertServiceRequest } from "@/modules/service-queue/service-queue.service";
 import { parseServiceMap } from "@/modules/service-queue/service-form";
 import { parseReceiptForm } from "./receipts.parse";
@@ -102,7 +102,7 @@ export async function createReceiptAction(_prev: unknown, formData: FormData) {
       const items = (full?.lines ?? []).flatMap((ln) => ln.items.map((it) => ({ make: ln.make, model: ln.model, serialNumber: it.serialNumber })));
       await sendReceiptEmails({
         sender: parsed.data.sender, receiver: parsed.data.receiver,
-        receiptNumber: t.receiptNumber, receiptUrl: receiptUrl(t.receiptNumber), items,
+        receiptNumber: t.receiptNumber, receiptUrl: await receiptLinkUrl(t.receiptNumber), items,
         pdf,
       });
     } catch (err) { console.error("[createReceiptAction] receipt email failed:", err); }
@@ -158,7 +158,7 @@ export async function notifyPickupAction(_prev: unknown, formData: FormData) {
       customerName: customer.name,
       customerEmail: customer.email,
       receiptNumber: t.receiptNumber,
-      receiptUrl: receiptUrl(t.receiptNumber),
+      receiptUrl: await receiptLinkUrl(t.receiptNumber),
       items,
     });
   } catch (e) {
