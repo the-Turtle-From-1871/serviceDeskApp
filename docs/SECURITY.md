@@ -3,7 +3,7 @@
 A living inventory of every security control in this app — what it does, where
 it lives, and why. **Maintained over time**; see [Keeping this current](#keeping-this-current).
 
-**Last reviewed: 2026-08-04**
+**Last reviewed: 2026-08-05**
 
 Related: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`../CLAUDE.md`](../CLAUDE.md) · [`password-reset-hardening.md`](./password-reset-hardening.md)
 
@@ -58,6 +58,25 @@ reveals whether an address is registered. `src/app/actions/auth.ts` → `loginAc
 `User.passwordChangedAt`; if the DB stamp is newer than the token's claim, the
 `jwt` callback returns `null`, which clears the session cookies. Deleted accounts
 revoke the same way. `src/auth.ts`
+
+> **All three** password-mutation paths stamp the column, and the claim above is
+> only true because they do: `resetPasswordWithToken`
+> (`src/lib/password-reset.ts`), `setUserActive` on deactivation, and
+> `changeUserPassword` — the self-service change at `/account`.
+> **`changeUserPassword` did NOT stamp it until 2026-08-05**, so for a period a
+> user who changed their password because they believed it was compromised
+> updated the hash while the attacker's stolen JWT stayed valid for the rest of
+> its 10-hour absolute window. That is the one remediation this app offers a
+> worried user, and it silently did nothing. `users.service.test.ts` now pins
+> the stamp on the success path *and* pins its absence on the wrong-current-
+> password path — stamping on a refusal would let anyone who can reach the form
+> log the real owner out.
+>
+> Because the stamp revokes the caller's own token too, `changePasswordAction`
+> calls `signOut({ redirectTo: "/login?passwordChanged=1" })` and the login page
+> explains what happened. A password change is now a full sign-out everywhere,
+> by design — if that is ever "fixed" back to keeping the caller signed in, it
+> must be done by re-issuing a fresh token, never by dropping the stamp.
 
 **Deactivation revokes the token too, not just the authz check.**
 `setUserActive` stamps `passwordChangedAt` alongside `deactivatedAt` when an
