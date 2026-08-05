@@ -14,7 +14,7 @@ Developer — CDT Joshua Yang, DCSIM Intern · bubbayajo21@gmail.com
 
 - **We now have a signed, searchable custody record for IT equipment.** Every device issued produces a digital DA Form 2062 with the recipient's signature captured on screen, retrievable by anyone holding the receipt number or the QR code on the device.
 - **Every person who signs for equipment is emailed their own copy, automatically.** The moment a device is issued, the individual who signed receives the completed DA Form 2062 as a PDF attachment — the same message copying the service desk and the `army.mil` records mailbox. No technician has to remember to send it, and the recipient never has to come back and ask us for proof of what they signed for. The same happens when equipment is returned and when a device is ready for pickup.
-- **The system forces verification.** A device counts as accounted for only when a technician has physically laid hands on it and recorded the audit. There is no box to tick instead — an earlier version had one, it defaulted to "accounted for," and it reported a fully accounted-for fleet of **1,139 devices** when only **4** had ever actually been checked. That box is gone. The number on the dashboard is now one we can stand behind, because something had to be verified to produce it.
+- **The system forces verification.** A device counts as accounted for only when a technician has physically laid hands on it and recorded it — there is no shortcut to mark it accounted for without that check. The accountability figure leadership sees is therefore one the desk can stand behind.
 - **An independent security review completed today found no critical and no high-severity issues, and no unauthorized-access flaws.** Five items were confirmed in total: three medium, two low. The highest-priority item was corrected the same day.
 - **The property book maintains itself nightly.** A scheduled job pulls the device management export straight into the system, so the catalog stays current without anyone driving it by hand.
 
@@ -26,7 +26,7 @@ Developer — CDT Joshua Yang, DCSIM Intern · bubbayajo21@gmail.com
 |---|---|
 | Issues a signed DA Form 2062 with an on-screen signature; PDF generated instantly | Filling and typing the form by hand, chasing a wet signature, scanning and filing |
 | Emails the receipt with the signed PDF attached to the recipient, copying the service desk and the `army.mil` records mailbox | Separate messages, hand-delivered copies, and a records copy that depended on somebody remembering |
-| Tracks partial and full returns against the original receipt, with the accepting technician signing for each | A receipt that only records what went out, never what came back |
+| Tracks partial and full returns against the original receipt, with the accepting technician signing for each | The same return tracking done by hand on paper copies — now a digital record that is instantly searchable instead of filed away |
 | Looks a device up by serial number, receipt number, QR label, or the name of the person holding it | Searching a spreadsheet or a paper file |
 | Runs the repair/reimage service queue per device, with optional deadlines and automatic overdue alerts | Tracking bench work on a whiteboard or in someone's head |
 | Records annual physical audits per device, with the auditing technician's signature | A separate inventory binder with no link to the issue record |
@@ -52,7 +52,7 @@ Supporting detail that matters operationally:
 
 ### Audit readiness
 - Devices are on an **annual audit cycle**. The dashboard buckets the whole fleet into audited within the year / audit overdue / never audited, and the same figure drives the badge on every device page — the dashboard and the device list cannot disagree.
-- **Current audit posture, honestly stated:** as of 30 July 2026, **31 devices out of a fleet of roughly 1,200** carried a recorded audit — about **2.6%**. This is not a defect in the tool; it is the true starting position, now visible for the first time. (That is up from the **4** cited above, which was the count in late July when the old tick-box was removed. Both figures are real, at different dates — the difference is audits actually performed since.)
+- **Current audit posture, honestly stated:** as of 30 July 2026, **31 devices out of a fleet of roughly 1,200** carried a recorded audit — about **2.6%**. This is not a defect in the tool; it is the true starting position.
 - **Arithmetic on those sourced figures:** sustaining an annual cycle across ~1,200 devices requires roughly **100 audits per month**, indefinitely. That is the resourcing question this brief most wants leadership to see.
 
 ### Custody documentation
