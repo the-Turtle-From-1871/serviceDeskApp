@@ -106,3 +106,30 @@ test("changeUserPassword rejects a wrong current password", async () => {
     code: "INVALID_CURRENT",
   });
 });
+
+// The whole point of changing a password you believe is compromised is to lock
+// the other party out. Sessions are stateless JWTs, so auth.ts's jwt callback
+// revoking on passwordChangedAt is the ONLY thing that can do that — a change
+// that updates the hash alone leaves the stolen token valid for the rest of its
+// 10-hour absolute window. This shipped that way once; pin it.
+test("changeUserPassword stamps passwordChangedAt to revoke live tokens", async () => {
+  const u = await createUser({ name: "Pat", email: "pat@x.co", password: "password123", role: "USER", ...base });
+  expect(u.passwordChangedAt).toBeNull();
+
+  const before = Date.now();
+  await changeUserPassword(u.id, "password123", "newpassword456");
+
+  const [after] = await listUsers();
+  expect(after.passwordChangedAt).not.toBeNull();
+  expect(after.passwordChangedAt!.getTime()).toBeGreaterThanOrEqual(before - 1000);
+});
+
+// A refused change must not revoke anything: stamping on the failure path would
+// hand anyone who can reach the form a way to log the account's real owner out.
+test("changeUserPassword leaves passwordChangedAt alone when the current password is wrong", async () => {
+  const u = await createUser({ name: "Pat", email: "pat@x.co", password: "password123", role: "USER", ...base });
+  await expect(changeUserPassword(u.id, "wrongpassword", "newpassword456")).rejects.toBeTruthy();
+
+  const [after] = await listUsers();
+  expect(after.passwordChangedAt).toBeNull();
+});

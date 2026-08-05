@@ -6,8 +6,12 @@ export function ChangePasswordForm() {
   const [state, action, pending] = useActionState(changePasswordAction, undefined);
   const done = !!(state && "ok" in state && state.ok);
 
+  // Normally unreachable: a successful change revokes every existing session
+  // (including this one) and changePasswordAction redirects to /login. Kept as
+  // an honest fallback in case the redirect does not happen — the message must
+  // not claim the old session is still good, because it is not.
   if (done) {
-    return <p className="alert-success">Your password has been changed. It takes effect the next time you sign in.</p>;
+    return <p className="alert-success">Your password has been changed. Sign in again with your new password.</p>;
   }
 
   return (

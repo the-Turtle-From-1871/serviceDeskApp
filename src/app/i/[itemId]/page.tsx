@@ -283,7 +283,7 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
                     {/* `prefetch={false}`: this list is unbounded — an old item
                         carries dozens of receipts — and every prefetch is a real
                         request to `/receipts/*`, which is inside the anonymous
-                        100/min anti-scraping budget (docs/SECURITY.md §12). A
+                        300/min anti-scraping budget (docs/SECURITY.md §12). A
                         logged-out soldier opening one busy item page would spend
                         the whole unit's shared budget on links nobody clicked.
                         These are historical records, not a hot path. */}

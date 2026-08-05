@@ -59,6 +59,21 @@ export function listUsers(): Promise<User[]> {
 // Self-service password change: verify the caller's current password before
 // setting the new hash. Throws PasswordChangeError("INVALID_CURRENT") when the
 // current password does not match (or the user no longer exists).
+//
+// Stamps passwordChangedAt for the same reason setUserActive does, and it is
+// NOT optional here: sessions are stateless JWTs with no revocation list, so
+// this column is the only lever that invalidates an already-issued token. A
+// user who changes their password because they believe it is compromised is
+// performing the one remediation this app offers — without the stamp the
+// attacker's stolen token survives the change and keeps full role-appropriate
+// access until the 10-hour absolute bound from the ORIGINAL sign-in expires.
+// The other two password-mutation paths (resetPasswordWithToken, and
+// setUserActive on deactivation) already stamp it; this one being the odd one
+// out was a silent hole, not a deliberate exemption.
+//
+// Note this revokes the CALLER's own token too, which is why
+// changePasswordAction signs them out and sends them to /login rather than
+// leaving them to discover it on their next navigation.
 export async function changeUserPassword(
   id: string,
   currentPassword: string,
@@ -70,7 +85,7 @@ export async function changeUserPassword(
   }
   await prisma.user.update({
     where: { id },
-    data: { passwordHash: await hashPassword(newPassword) },
+    data: { passwordHash: await hashPassword(newPassword), passwordChangedAt: new Date() },
   });
 }
 

@@ -3,6 +3,14 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-08-05
+
+### Security
+- **Changing your password now signs you out everywhere, on every device.** Until now it only replaced the stored password: anyone already signed in as you — on a shared workstation, a borrowed laptop, or with a copied session — stayed signed in, with all of your access, for up to ten more hours. Changing your password is the thing you do when you think someone else is in your account, and it did not actually put them out. It does now. The change takes effect immediately for every existing session, including your own, so you are returned to the sign-in page and asked to sign in again with the new password; the sign-in page says why rather than looking like an unexplained logout. An admin-initiated reset and a deactivated account already worked this way — the self-service change on `/account` was the one path that did not.
+
+### Notes
+- No migration, config, or env change. `User.passwordChangedAt` already existed and is already the revocation signal read on every request.
+
 ## 2026-08-04
 
 ### Added
@@ -289,7 +297,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   stored, so it can't be an `ORDER BY` directly); the audit badge reads the same
   column, so sort and display always agree.
 - **Audit signatures on the item page are hidden by default.** In the Audit
-  history on an item's page (`/i/<id>`, already staff-only), each auditor's
+  history on an item's page (`/i/<id>`, whose Audit card is staff-only — the
+  page itself is public behind the PIN gate), each auditor's
   signature is now behind a **Show signature** button instead of shown inline —
   the auditor's name and date stay visible. The signature image is no longer
   shipped in the page payload at all; clicking Show fetches just that one image

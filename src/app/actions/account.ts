@@ -1,5 +1,6 @@
 "use server";
 import { z } from "zod";
+import { signOut } from "@/auth";
 import { requireUser } from "@/lib/authz";
 import { changeUserPassword, updateUserSignature } from "@/modules/users/users.service";
 import { PasswordChangeError } from "@/modules/users/users.errors";
@@ -30,6 +31,18 @@ export async function changePasswordAction(_prev: unknown, formData: FormData) {
     console.error("[changePasswordAction] unexpected error:", e);
     return { error: "Something went wrong. Please try again." };
   }
+
+  // changeUserPassword stamps passwordChangedAt, which revokes every JWT issued
+  // before this instant — including the one this request arrived on. Sign the
+  // caller out explicitly so they land on /login with an explanation, rather
+  // than getting silently bounced on whatever they clicked next.
+  //
+  // Deliberately OUTSIDE the try above: signOut redirects by throwing
+  // NEXT_REDIRECT, and that catch would swallow it into a generic error toast
+  // while the password had in fact already changed.
+  await signOut({ redirectTo: "/login?passwordChanged=1" });
+  // Unreachable — signOut always throws to redirect. Kept so the action's
+  // return type stays honest for useActionState.
   return { ok: true };
 }
 

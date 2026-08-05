@@ -29,7 +29,7 @@ export function HomeSearch() {
         setResolvedKey(key);
         setFailed(false);
       } catch {
-        // A failure is NOT an empty result. The anonymous 100/min proxy bucket
+        // A failure is NOT an empty result. The anonymous 300/min proxy bucket
         // is shared by everyone behind one egress IP, so a throttled search
         // used to land here and render "No matches." — telling a logged-out
         // soldier their serial number does not exist, which is a confident

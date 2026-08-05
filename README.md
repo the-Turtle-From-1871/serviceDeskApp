@@ -63,7 +63,9 @@ cp .env.example .env
 
 # 4. Apply migrations and seed an admin
 npm run db:migrate
-npm run db:seed        # admin@example.com / ChangeMe123!  (override via SEED_ADMIN_*)
+#    SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD are REQUIRED — the seed throws
+#    without them. There is no default admin account and no default password.
+npm run db:seed
 
 # 5. Run
 npm run dev            # http://localhost:3000
@@ -80,7 +82,7 @@ create it once with `CREATE DATABASE handreceipt_test;`.
 | `DIRECT_URL`   | Direct connection for `prisma migrate deploy` (prod only).         |
 | `AUTH_SECRET`  | Signs Auth.js JWTs. Generate with `npx auth secret`. **Rotating it now also permanently invalidates every printed/emailed receipt QR and link** (it signs the per-receipt link token — see `DEPLOY.md` and `docs/SECURITY.md` Known gap 12), not just live sessions and unlock cookies. |
 | `PUBLIC_ACCESS_PIN_ENABLED` | `"true"` gates the public PII surface (`/i/*` and `/receipts/<n>` + its PDF) behind the admin-set 8-digit PIN for logged-out users. Absent/`false` = open access. Also the kill-switch. **`/` is deliberately NOT gated** — the home page must be readable by a logged-out stranger (Google's OAuth branding review requires it); the type-ahead behind it calls `publicAccessAllowed()` itself, so the search is gated even though the page is not. |
-| `APP_URL`      | Absolute base URL, used to build scannable QR links **and every link in an outbound email**. In production this must be the custom domain (`https://www.dcsim.us`) — a `vercel.app` link in a message body makes `army.mil` silently drop the mail. Falls back to Vercel's injected domain when unset. |
+| `APP_URL`      | Absolute base URL, used to build scannable QR links **and every link in an outbound email**. In production this must be the custom domain (`https://www.dcsim.us`) — a `vercel.app` link in a message body makes `army.mil` silently drop the mail. Falls back to Vercel's injected domain when unset — `VERCEL_PROJECT_PRODUCTION_URL`, then `VERCEL_URL` (`src/lib/base-url.ts`). Both are injected by the platform; you never set them yourself, and relying on that fallback in production is exactly the `vercel.app` failure described above. |
 | `SIGNING_PRIVATE_KEY` | Ed25519 PKCS#8 PEM that signs each receipt's tamper-evidence seal. Best-effort — unset means receipts are created unsealed. Verification (admin-only) derives the public key from it; no separate public-key var. The key is server-held, so the seal attests attribution rather than proving user-level non-repudiation — see [`docs/SECURITY.md` §7](docs/SECURITY.md#7-cryptographic-receipt-seal) and Known gaps #6. |
 | `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Redis store for rate limiting, injected by a Vercel Marketplace Redis integration (`UPSTASH_REDIS_REST_*` also accepted). **Unset still works** — the limiter falls back to per-instance counters, which is fine locally and is not the production posture. |
 | `RATE_LIMIT_DISABLED` | `"true"` turns off the limiter and the browser check. Local work only. |
@@ -111,7 +113,7 @@ inline.
 | `npm run db:deploy`  | `prisma migrate deploy` (prod)             |
 | `npm run db:seed`    | Seed the admin account                     |
 | `npm run db:seed:e2e` | Seed the fixtures the Playwright suite expects |
-| `npm run db:seed:analytics` | **Dev only.** Populate categories, UICs, readiness *signals* (service flags, on-hand marks, MDM last-logon) and demo closed receipts so the analytics dashboard renders locally. Overwrites those fields, so it **refuses any non-local `DATABASE_URL`** — a `NODE_ENV` check alone would not have stopped it, since `tsx` leaves that unset. |
+| `npm run db:seed:analytics` | **Dev only.** Populate categories, UICs, readiness *signals* (service flags, on-hand marks, MDM last-logon) and demo closed receipts so the analytics dashboard renders locally. Overwrites those fields, so it **refuses any non-local `DATABASE_URL`** — a `NODE_ENV` check alone would not have stopped it, since `tsx` leaves that unset. The refusal is overridable with `ALLOW_NONLOCAL_DEMO_SEED=1`; that override exists for a deliberate staging run and should never be set in a shell that can reach production. |
 | `npm run db:reset`   | Reset the local dev DB                     |
 | `npm run lint`    | ESLint                                        |
 

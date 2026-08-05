@@ -18,7 +18,16 @@ import { turnstileWidgetSiteKey } from "@/lib/turnstile";
 // so the page cannot be prerendered into a state that disagrees with it.
 export const dynamic = "force-dynamic";
 
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ passwordChanged?: string }>;
+}) {
+  // Set by changePasswordAction, which signs the user out because changing a
+  // password revokes every live session. Without this note the redirect reads
+  // as "the app logged me out for no reason".
+  const justChangedPassword = (await searchParams).passwordChanged === "1";
+
   return (
     <div className="center-screen">
       <div className="card stack" style={{ width: "100%", maxWidth: 380 }}>
@@ -31,6 +40,11 @@ export default function LoginPage() {
           <h1 className="page-title" style={{ fontSize: 20 }}>Sign in</h1>
           <p className="subtle">Sign in to log items and create hand receipts.</p>
         </div>
+        {justChangedPassword && (
+          <p className="alert-success">
+            Your password has been changed, and you were signed out everywhere. Sign in with your new password.
+          </p>
+        )}
         <LoginForm turnstileSiteKey={turnstileWidgetSiteKey()} />
       </div>
     </div>

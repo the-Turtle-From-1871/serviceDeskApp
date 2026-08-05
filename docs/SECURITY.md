@@ -3,7 +3,7 @@
 A living inventory of every security control in this app — what it does, where
 it lives, and why. **Maintained over time**; see [Keeping this current](#keeping-this-current).
 
-**Last reviewed: 2026-08-04**
+**Last reviewed: 2026-08-05**
 
 Related: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`../CLAUDE.md`](../CLAUDE.md) · [`password-reset-hardening.md`](./password-reset-hardening.md)
 
@@ -58,6 +58,25 @@ reveals whether an address is registered. `src/app/actions/auth.ts` → `loginAc
 `User.passwordChangedAt`; if the DB stamp is newer than the token's claim, the
 `jwt` callback returns `null`, which clears the session cookies. Deleted accounts
 revoke the same way. `src/auth.ts`
+
+> **All three** password-mutation paths stamp the column, and the claim above is
+> only true because they do: `resetPasswordWithToken`
+> (`src/lib/password-reset.ts`), `setUserActive` on deactivation, and
+> `changeUserPassword` — the self-service change at `/account`.
+> **`changeUserPassword` did NOT stamp it until 2026-08-05**, so for a period a
+> user who changed their password because they believed it was compromised
+> updated the hash while the attacker's stolen JWT stayed valid for the rest of
+> its 10-hour absolute window. That is the one remediation this app offers a
+> worried user, and it silently did nothing. `users.service.test.ts` now pins
+> the stamp on the success path *and* pins its absence on the wrong-current-
+> password path — stamping on a refusal would let anyone who can reach the form
+> log the real owner out.
+>
+> Because the stamp revokes the caller's own token too, `changePasswordAction`
+> calls `signOut({ redirectTo: "/login?passwordChanged=1" })` and the login page
+> explains what happened. A password change is now a full sign-out everywhere,
+> by design — if that is ever "fixed" back to keeping the caller signed in, it
+> must be done by re-issuing a fresh token, never by dropping the stamp.
 
 **Deactivation revokes the token too, not just the authz check.**
 `setUserActive` stamps `passwordChangedAt` alongside `deactivatedAt` when an
@@ -228,11 +247,23 @@ type-ahead) stay behind that page's existing `isAdmin` gate, so this feature
 does not widen the public, unauthenticated surface. *Last reviewed: 2026-08-04.*
 
 **Admin-only capabilities:** returns, user management, named signatures,
-service-queue mutations, receipt timers, audits, analytics, category
-management, permanent item deletion.
+service-queue mutations, receipt timers, **recording** an audit, analytics,
+category management, permanent item deletion.
+
+> **"Audits" is split, and this line used to blur it.** *Recording* an audit is
+> admin-only. *Revealing a stored audit signature* is `requireUser()` —
+> `revealAuditSignatureAction` (`src/app/actions/audit.ts:11`), so any signed-in
+> technician can reveal any auditor's signature image. That is **deliberate**,
+> not an oversight: the decision is recorded in `CHANGELOG.md` (2026-07-30,
+> "Any signed-in staff member can reveal it"), and the same `Signature` blobs
+> already reach *unauthenticated* visitors on public receipt pages and PDFs, so
+> the staff-wide read is a strictly smaller audience than the app already
+> accepts. The code is right; this summary was the imprecise part.
 
 **An admin cannot deactivate or demote themselves.** Both take effect live, so
-either would revoke their own access. `src/app/admin/actions/users.ts:24,35`
+either would revoke their own access. The guards are the two early returns at
+`src/app/admin/actions/users.ts:26` and `:37` (previously cited here as `:24,35`,
+which are the comment lines above them).
 
 **The proxy's login gate is a convenience, not the boundary.** `src/proxy.ts`
 redirects unauthenticated requests for `/items`, `/admin/*`, `/account` to
@@ -592,6 +623,19 @@ attempt rather than silently rerouting mail through Resend or the log stub; see
 [Known gaps #9](#known-gaps--accepted-risks) for why that refresh token expires
 on a roughly weekly cadence and how it's kept current.
 
+> **A PARTIAL `GMAIL_*` set is a different, worse failure than a dead token, and
+> this section used to describe only the latter.** Selection is by env presence,
+> so if any one of the four is missing, `gmailOAuthConfigFromEnv` returns null
+> and — with `RESEND_API_KEY` also unset — `getEmailSender()` falls through to
+> **`LogEmailSender`**, which is not merely a no-op: it **writes the whole
+> message body to the platform log** and reports success. That means
+> password-reset links and receipt-link capability tokens (`?k=`) get printed
+> into logs, while no mail is delivered and nothing throws. The blast radius is
+> limited — the log audience already holds `AUTH_SECRET` and `DATABASE_URL`, and
+> the total absence of delivered mail makes the state self-announcing — but the
+> stub must not be thought of as a silent drain. Set all four `GMAIL_*` vars or
+> none. Recorded as gap **U5** of the 2026-08-05 security assessment.
+
 **The `nodemailer` dependency is gone too, as of 2026-08-04.** The SMTP *code*
 went on 2026-07-31; the package was kept a little longer as a rollback route and
 nothing imported it in the interim. Removing it closes a tracked advisory
@@ -725,11 +769,26 @@ TAMPERED.
 app-wide `SIGNING_PRIVATE_KEY`; no key material is held by the technician. So the
 seal is **tamper evidence plus an attribution claim**, not a signature *by* the
 named person: it proves *a process holding the app's key asserted that user X
-created this receipt, and the record is unaltered since*. It does not prove X
-consented, because anyone holding the key can mint a valid seal naming any
-`sealedByUserId`. Describe it as "tamper-evident and attributed", not as
+created this receipt, and the sealed fields are unaltered since*. It does not
+prove X consented, because anyone holding the key can mint a valid seal naming
+any `sealedByUserId`. Describe it as "tamper-evident and attributed", not as
 user-level non-repudiation — see
 [Known gaps #6](#known-gaps--accepted-risks).
+
+**Know exactly which fields the seal covers.** The wording above used to read
+"the record is unaltered since", which is broader than the manifest actually is.
+The manifest is built in `src/modules/transfers/seal.ts` and does **not** bind
+`qtyAuth`, `qtyIssued`, `unitOfIssue`, `lineNo`, `itemSummary` or `createdAt` —
+all of which are printed on the DA 2062. A direct database write to one of those
+columns would not make verification fail. No application path writes them after
+creation, `unitOfIssue` is the constant `"EA"`, and the quantities derive from
+the sealed serial list printed beside them, so the practical exposure is small —
+but the *claim* must match the manifest. Note the UI already gets this right on
+the failure path ("a sealed field was altered", `ReceiptSealVerify.tsx:11`) while
+its success string is looser ("the receipt is intact"). **If you widen or narrow
+the manifest, update this paragraph in the same commit** — and note `seal.ts` is
+NOT yet on the `check-security-docs` watch list, so nothing will remind you
+(gap **U2** of the 2026-08-05 assessment).
 
 ---
 
@@ -845,7 +904,26 @@ written in the same transaction as the change it describes.
 - Every table is **RLS enabled with no policy** = deny-all for the `anon` /
   `authenticated` PostgREST roles.
 - The **`rls_auto_enable` event trigger** makes new tables inherit RLS-enabled
-  automatically. See `prisma/migrations/20260721170000_public_access_setting/migration.sql`.
+  automatically — **in the live database only. It is NOT in version control.**
+  This entry previously cited
+  `prisma/migrations/20260721170000_public_access_setting/migration.sql` as its
+  home; that file contains only a `CREATE TABLE`, an index and a foreign key.
+  Searching all 41 migrations for `CREATE EVENT TRIGGER`, `ENABLE ROW LEVEL
+  SECURITY` or `CREATE POLICY` returns **nothing**, and `prisma/manual/2026-07-20_lockdown_anon_grants.sql`
+  only `REVOKE`s execute on the function — it does not define it. Consequences,
+  stated plainly:
+  - **Any environment rebuilt from `prisma migrate deploy` cannot reproduce the
+    deny-all posture described above.** A fresh database would have the tables
+    but not the trigger.
+  - The lockdown was a **one-shot `REVOKE` with no `ALTER DEFAULT PRIVILEGES`**,
+    so two tables created after it — `PublicAccessSetting` (which holds the
+    public PIN's bcrypt hash) and `DeviceCategory` — were never covered by it.
+  - **Nobody has verified the live database.** The claim that the trigger exists
+    in production rests on this document, not on an observation.
+  Getting this DDL into a tracked migration, then verifying production, is
+  backlog item **B12** and is recorded as gap **U3** of the 2026-08-05 security
+  assessment. Until then, treat this bullet as *intent*, not as a control you
+  can rely on.
 - The **Supabase Data API and anon key stay unused** — no Supabase JS client, no
   anon key in the app.
 - **Never disable RLS** on a table (that exposes it to the public anon key) and
@@ -1571,6 +1649,25 @@ covers, by area:
 **A new security-relevant file must be added there**, or it escapes the guardrail
 silently — that list is the one part of this system that can rot without
 anything complaining.
+
+> **Audited 2026-08-05. All 37 patterns still match a real file** (no dead
+> entries). But four security-relevant files **are NOT covered**, and each can
+> therefore change without this document being touched:
+>
+> | Unwatched file | Why it matters |
+> |---|---|
+> | `src/modules/transfers/seal.ts` | Defines **which fields the receipt seal binds**. `lib/crypto.ts` is watched, but the manifest — the thing that decides what "unaltered" means in §7 — is not. It can be narrowed silently. |
+> | `src/lib/signature.ts` | The shared signature validator (PNG prefix + 250 KB cap) behind three of the four signature entry points. Its limits are a stated control. |
+> | `prisma/schema.prisma` | Carries the RLS posture comments and the uniqueness/nullability constraints several controls rest on. No `prisma/` path is watched at all. |
+> | `scripts/check-security-docs.mjs` | **The guardrail does not watch itself.** The watch list can be narrowed in a PR that passes its own check. |
+>
+> This is gap **U9** (with **U2** for `seal.ts`) of the 2026-08-05 security
+> assessment and backlog item **B17**. It is recorded rather than fixed here
+> because adding entries changes what future PRs are blocked on — a policy
+> change the team should make deliberately, not a documentation correction.
+> Previous audit (2026-08-04) reported 30 patterns with nothing escaping; the
+> list has grown to 37 since, and these four were added to the codebase without
+> being added to it.
 
 **Bypass:** put `[skip security-doc]` in a commit message when a change genuinely
 doesn't alter the posture (a rename, a comment, a mechanical refactor). The check
