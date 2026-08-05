@@ -127,8 +127,10 @@ be a confident wrong answer about the property book. The item and receipt
 pages it links to — `/i/<id>`, `/receipts/<rn>` (view) and
 `/receipts/<rn>/pdf` (download) — are still gated in `src/proxy.ts`, which
 admits **three** grants: a logged-in session, a valid unlock cookie, or (since
-2026-08-04) a signed receipt-link token or grant cookie naming that one
-`/receipts/<rn>` path (`src/lib/receipt-link-token.ts`). The first two route
+2026-08-04) a signed receipt-link token or grant cookie naming one receipt —
+which opens that receipt's two paths, `/receipts/<rn>` and its
+`/receipts/<rn>/pdf`, and nothing else (`src/lib/receipt-link-token.ts`).
+The first two route
 through the shared `shouldAllowPublic`, so the proxy and `liveSearchAction`
 cannot drift on those. **The receipt-link grant deliberately does not** —
 `publicAccessAllowed()` (the guard behind `liveSearchAction`) reads only the
