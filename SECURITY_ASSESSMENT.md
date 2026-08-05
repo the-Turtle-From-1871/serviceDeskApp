@@ -1,10 +1,14 @@
 # Security Assessment
 
-**Application:** inventoryApp — hand-receipt / property-book system (Next.js 16 App Router, React 19, TypeScript 5, Prisma 7 / PostgreSQL, Auth.js v5)
+**Application:** DCSIM Hand Receipt System (repository `inventoryApp`) — Next.js 16 App Router, React 19, TypeScript 5, Prisma 7 / PostgreSQL, Auth.js v5
 **Revision assessed:** `ff4857fd363fa548b7d639a7afd95b3c1d8363ad` (branch `feat/receipt-link-pin-bypass`)
 **Date:** 2026-08-05
 **Method:** Static, read-only multi-agent source review (Claude Security plugin) — inventory, threat model, 12 parallel researchers across component × lens cells, a three-lens verification panel (reachability / impact / defenses, 2-of-3 to survive), and an adversarial refutation pass against every survivor.
 **Working tree state:** Only `package.json` / `package-lock.json` modified (one devDependency addition, `@testing-library/jest-dom` — not runtime-relevant).
+
+**Points of contact**
+Application maintainer — SPC Xiaolan Lin, DCSIM Service Desk IT Specialist · xiaolan.lin.mil@army.mil
+Developer — CDT Joshua Yang, DCSIM Intern · bubbayajo21@gmail.com
 
 > **Nothing was executed.** No build, no test run, no running server, no HTTP requests, and no live database or deployed-environment access. Every conclusion below is derived from reading application source and installed dependency source. Section 10 states precisely what this leaves unverified.
 
