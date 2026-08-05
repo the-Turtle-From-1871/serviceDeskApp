@@ -193,7 +193,13 @@ sorting by **Audit** orders by the *badge* (compliant / overdue / never), not by
 recently the audit happened; inside a badge, order comes from whatever you picked as your
 second sort column.
 
-You can also **scan a QR label** with the in-app scanner to jump straight to a device.
+To reach a device by its QR label, **point a standard phone camera at it** — the label
+encodes the item's page URL (`/i/<id>`, `src/modules/items/qr.ts:33-34`), so the phone opens
+that page directly, no app feature involved. The **in-app scanner is a different tool**: it
+lives only in the hand-receipt builder, its button reads **"Scan to add"**
+(`src/app/receipts/new/ReceiptBuilderForm.tsx:481`), and it resolves a scan to *add that
+device to the receipt you are building* (`lookupScannedItem`, `src/app/actions/scan.ts`) — it
+is not a general "jump to a device" navigator.
 
 #### Creating a hand receipt
 
