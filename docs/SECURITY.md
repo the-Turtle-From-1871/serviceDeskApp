@@ -435,7 +435,11 @@ entire gate on `liveSearchAction`, i.e. on the searchable item and receipt
 catalog, and it still reads only the unlock cookie, so holding a receipt grant
 opens that one receipt page and buys no search access.
 `src/lib/receipt-link-token.ts`, `src/lib/web-hmac.ts`, covered by
-`src/proxy.test.ts` and `src/lib/public-access-guard.test.ts`.
+`src/proxy.test.ts`, `src/lib/public-access-guard.test.ts`,
+`src/lib/receipt-link-token.test.ts` (the module's own round-trip,
+cross-receipt, tamper and domain-separation suite) and
+`tests/next.config.test.ts` (the `Referrer-Policy` control introduced in this
+same section).
 
 ---
 
@@ -1485,16 +1489,33 @@ no added query) before an admin can confirm, but nothing server-side refuses
 or even logs the deletion of a signed-out item.
 
 **12. The scoped receipt link never expires, and there is no per-receipt
-revocation.** *Accepted, by design of the capability token.* A forwarded email
-or a photographed QR opens that one receipt indefinitely — for an open receipt,
-forever; for a closed one, until the 90-day purge deletes the row and
-`getTransferByReceiptNumber` has nothing left to render. The only revocation
-lever is rotating `AUTH_SECRET`, and that is a blunt instrument: it also
-invalidates every live session and every unlock cookie, not just this one
-link. Scoping revocation to a single receipt would need a per-receipt salt
-stored on the row — a schema change — so the token could be invalidated by
-clearing that column rather than by rotating the app-wide secret. Not done
-here; tracked for if a leaked link is ever reported.
+revocation.** *Accepted, by design of the capability token.* The leak channel
+is sharper than "a forwarded email or a photographed QR": **the application
+itself mints and hands out one of these tokens to anyone who can currently
+read a receipt.** Concretely, someone holding only the shared PIN can
+enumerate `HR-%06d` (sequential numbering is an accepted requirement — see
+§3), fetch `GET /receipts/<n>/pdf` for each one at up to the 300/min anonymous
+budget, decode the QR baked into every PDF, and come away holding a permanent,
+PIN-free capability for every receipt in the system — not just the one they
+were sent. **The incremental harm this branch adds is persistence, not first
+access:** that same PIN holder could already open and download every one of
+those PDFs before this change: nothing about *what* is reachable grew, only
+*for how long* a copy of the access remains valid once obtained. The
+practical consequence: **rotating the PIN is not an effective containment
+step** against a leaked or harvested set of links — the tokens keep working
+regardless of the PIN's value — so the only revocation lever is rotating
+`AUTH_SECRET`, which is a blunt instrument for a different reason: it also
+invalidates every live session and every unlock cookie, and (since this
+branch) permanently breaks every link already emailed and every QR already
+printed on a handed-out DA 2062, because paper in someone's hand cannot be
+re-issued (see `DEPLOY.md`). Scoping revocation to a single receipt would need
+a per-receipt salt stored on the row — a schema change — so the token could be
+invalidated by clearing that column rather than by rotating the app-wide
+secret. Not done here; tracked for if a leaked link is ever reported. A
+forwarded email or a photographed QR is still the ordinary way a link reaches
+someone who never had the PIN at all — the harvesting path above is the
+sharper case worth naming for a PIN holder turned insider threat, or a PIN
+leak that predates this feature.
 Same channel as Known gap 3: the initial `GET /receipts/<n>?k=<token>` still
 reaches server/proxy access logs, and a corporate mail gateway that rewrites
 or prefetches links (Microsoft SafeLinks and similar) will fetch it

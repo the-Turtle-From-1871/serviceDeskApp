@@ -125,9 +125,18 @@ the entire gate on the public search**, not defence in depth. A refusal
 returns `{ locked: true }`, never an empty result, because "No matches" would
 be a confident wrong answer about the property book. The item and receipt
 pages it links to — `/i/<id>`, `/receipts/<rn>` (view) and
-`/receipts/<rn>/pdf` (download) — are still gated in `src/proxy.ts`. Both
-paths route their decision through the same `shouldAllowPublic`, so the proxy
-and the action cannot drift.
+`/receipts/<rn>/pdf` (download) — are still gated in `src/proxy.ts`, which
+admits **three** grants: a logged-in session, a valid unlock cookie, or (since
+2026-08-04) a signed receipt-link token or grant cookie naming that one
+`/receipts/<rn>` path (`src/lib/receipt-link-token.ts`). The first two route
+through the shared `shouldAllowPublic`, so the proxy and `liveSearchAction`
+cannot drift on those. **The receipt-link grant deliberately does not** —
+`publicAccessAllowed()` (the guard behind `liveSearchAction`) reads only the
+unlock cookie and is pinned by a test to refuse a receipt grant
+(`src/lib/public-access-guard.test.ts`). The proxy and the guard now admit
+different populations **on purpose**: the receipt grant opens the one receipt
+it was minted for and must never widen into search access over the item and
+receipt catalog.
 
 ## Receipt lifecycle & returns
 

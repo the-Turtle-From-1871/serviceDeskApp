@@ -57,7 +57,7 @@ $env:SEED_ADMIN_EMAIL="admin@yourorg.com"; $env:SEED_ADMIN_PASSWORD="<strong-pas
    |----------------|---------------------------------------------------------|
    | `DATABASE_URL` | Supabase **transaction pooler** URL (6543, `pgbouncer=true`) |
    | `DIRECT_URL`   | Supabase **session/direct** URL (5432)                  |
-   | `AUTH_SECRET`  | a fresh secret — run `npx auth secret`                  |
+   | `AUTH_SECRET`  | a fresh secret — run `npx auth secret`. **Rotating it is no longer a cheap operation** — besides signing out every session and retiring every unlock cookie, it also signs the per-receipt link token baked into every notification email already sent and every QR already printed on a handed-out DA 2062 (`src/modules/receipts/render.ts`). Rotation permanently breaks all of those: paper in someone's hand cannot be re-issued, and there is no per-receipt revocation (`docs/SECURITY.md`, Known gap 12). |
    | `APP_URL`      | the **custom domain**, `https://www.dcsim.us` — see the warning below |
    | `CRON_SECRET`  | long random value (`openssl rand -hex 32`) — authenticates the purge cron (see §6) |
 

@@ -201,6 +201,49 @@ amplification anyone could drive.
 - `CLAUDE.md` §1 — extend the 2026-07-22 PIN-gate update note to record that
   links we generate for a specific receipt bypass the PIN for that receipt only.
 
-## Open questions
+## Design decision recorded after the fact: redirect-first, not render-first
 
-None. All decisions above are locked.
+A valid `?k=` is always answered with a 307 redirect (§2, step 2) — the proxy
+never renders the receipt on the request that carries the token. This was an
+implicit choice during implementation, not one of the decisions locked above,
+so it is recorded here now.
+
+**The alternative that was not chosen:** render the page immediately on the
+token-bearing request, `Set-Cookie` the grant alongside it, and scrub `?k=`
+from the visible URL client-side with `history.replaceState` once the page has
+mounted. This is exactly the pattern already in production for the password-
+reset token — `src/app/reset-password/ResetPasswordForm.tsx` checks
+`window.location.search.includes("token=")` and calls
+`window.history.replaceState(null, "", "/reset-password")` — so it was an
+available, precedented option, not a hypothetical.
+
+**Why the redirect was chosen instead:**
+
+- A cleaner address bar. The redirect target never contains `k=` at all, even
+  transiently, versus the reset-password pattern where the token is present in
+  the address bar (and in `document.referrer` for that one navigation, absent
+  the `Referrer-Policy` fix) until client JS runs and rewrites it.
+- No reliance on client JS. The redirect is a server response; the grant is
+  usable on the very next request regardless of whether the browser executes
+  or blocks scripts. The `replaceState` pattern is inert if JS fails to run —
+  survivable for a password reset (the user is still looking at the right
+  form), less obviously so for a receipt link.
+
+**The tradeoff this creates, and why it was accepted:** the 307 is a hard
+fail for a browser that accepts the `Set-Cookie` on the redirect response but
+then does not send it back on the follow-up request — which happens with some
+in-app mail-client browsers (Gmail/Outlook's in-app viewers, certain webview
+wrappers) and with hardened privacy modes that block cookies set on a
+redirect hop. That recipient lands on `/unlock` holding a link that verified
+as valid but produced no usable session, with no way to retry short of typing
+the shared PIN or asking for a fresh link. The render-first alternative would
+not have this failure mode, because the grant is usable immediately on the
+same response that already has the content.
+
+**Disposition:** accepted as a known edge case, not a bug to fix by switching
+patterns. It is being checked by hand in a real browser (per the project rule
+that jsdom and `next build` are not evidence for this kind of behavior) rather
+than guarded by an automated test in this round. If it turns out to affect a
+meaningful share of recipients in practice, the fix is to switch this one flow
+to the render-then-scrub pattern — not to weaken or remove the redirect for
+everyone else.
