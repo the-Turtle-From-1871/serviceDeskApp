@@ -6,6 +6,7 @@ import {
   getItemBySerial,
   updateItemFields,
   setItemStatus,
+  deleteItem,
   analyzeImport,
   commitImport,
   markItemsReady,
@@ -251,6 +252,36 @@ export async function toggleItemStatusAction(formData: FormData) {
   const next = formData.get("status") === "RETIRED" ? "RETIRED" : "ACTIVE";
   await setItemStatus(id, next);
   revalidatePath("/items");
+}
+
+// Permanent delete — ADMIN-only, no undo. Offered beside Retire for a row that
+// should never have existed (a duplicate from a mistyped serial, a bad CSV
+// row); Retire is the reversible option for a device that is simply out of
+// service. deleteItem() itself enforces NO permissions (see its docstring in
+// items.service.ts) — this action is the entire authorization boundary.
+//
+// Hand receipts are unaffected: TransferItem.itemId is nullable with
+// ON DELETE SET NULL, so a receipt line detaches from the deleted item but
+// keeps its own snapshot (serialNumber/make/model on the line, signatures on
+// the transfer) exactly as issued.
+export async function deleteItemAction(formData: FormData) {
+  await requireAdmin();
+  const id = String(formData.get("id") ?? "");
+  if (!id) return { error: "No item was specified." };
+  try {
+    await deleteItem(id);
+  } catch (e) {
+    // P2025 = record not found. A double submit, or two admins on the same row.
+    // Not an error worth alarming anyone with: the outcome they asked for holds.
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2025") {
+      revalidatePath("/items");
+      return;
+    }
+    console.error("[deleteItemAction] unexpected error:", e);
+    return { error: "Something went wrong deleting this item. Please try again." };
+  }
+  revalidatePath("/items");
+  revalidatePath("/admin/analytics");
 }
 
 function readCsvFile(formData: FormData): { file: File } | { error: string } {

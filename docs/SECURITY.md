@@ -207,8 +207,29 @@ respectively, and must stay unforgeable by hand. Widening that enum is a
 security change, not a feature toggle — which is why the file is on the
 `check-security-docs` watch list.
 
+**Permanent item deletion is `requireAdmin()`-gated and has no undo.**
+`deleteItemAction` (`src/app/admin/actions/items.ts`) is the sole caller of
+`deleteItem()` (`src/modules/items/items.service.ts`), which enforces no
+authorization of its own by design — the Server Action is the entire boundary.
+Offered on `/items` next to Retire, for a row that should never have existed
+(a duplicate from a mistyped serial, a bad CSV row); Retire remains the
+reversible option for a device that is simply out of service. **It does NOT
+delete receipt evidence:** `TransferItem.itemId` is nullable
+(`ON DELETE SET NULL`), so deleting an item detaches — never cascades to — any
+`TransferItem` row pointing at it. Every hand receipt keeps the serial number,
+make and model it was issued with (snapshotted on `TransferLine`/`TransferItem`
+at creation, not looked up from `Item`) and its signatures, unaffected. A
+double-submit or two admins racing the same row surfaces as Prisma `P2025`
+(already gone) and is treated as the requested outcome, not an error. The
+item's own `ServiceQueueItem`/`ItemEdit`/`ItemAudit` rows ARE cascade-deleted
+(`ON DELETE CASCADE`) — they describe the item, which is gone. `/i/<id>`'s
+admin-only suggestion vocabularies (units/categories/make-model-UIC
+type-ahead) stay behind that page's existing `isAdmin` gate, so this feature
+does not widen the public, unauthenticated surface. *Last reviewed: 2026-08-04.*
+
 **Admin-only capabilities:** returns, user management, named signatures,
-service-queue mutations, receipt timers, audits, analytics, category management.
+service-queue mutations, receipt timers, audits, analytics, category
+management, permanent item deletion.
 
 **An admin cannot deactivate or demote themselves.** Both take effect live, so
 either would revoke their own access. `src/app/admin/actions/users.ts:24,35`

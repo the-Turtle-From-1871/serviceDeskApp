@@ -6,6 +6,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { AuditLight } from "@/components/AuditLight";
 import { MarkReadyButton } from "@/components/MarkReadyButton";
 import { ReadinessControls } from "@/components/ReadinessControls";
+import { DeleteItemButton } from "@/components/DeleteItemButton";
 import { toggleItemStatusAction } from "@/app/admin/actions/items";
 import { MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW } from "@/modules/transfers/receipt-lines";
 import {
@@ -155,6 +156,9 @@ export function ItemSelectTable({
               <input type="hidden" name="status" value={it.status === "RETIRED" ? "ACTIVE" : "RETIRED"} />
               <button type="submit" className={`btn btn-sm ${it.status === "RETIRED" ? "btn-secondary" : "btn-danger"}`}>{it.status === "RETIRED" ? "Reactivate" : "Retire"}</button>
             </form>
+          )}
+          {isAdmin && (
+            <DeleteItemButton id={it.id} make={it.make} model={it.model} serialNumber={it.serialNumber} />
           )}
         </div>
       </td>

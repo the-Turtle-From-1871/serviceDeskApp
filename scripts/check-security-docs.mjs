@@ -91,10 +91,12 @@ export const WATCHED = [
   // and IN_REPAIR so those two cannot be asserted by hand — widening it would
   // let a POST forge "this is issued out" / "this is in repair", which is a
   // security event even though the file reads like ordinary feature code.
-  // NOTE the contrast with admin/actions/items.ts, which is NOT watched: that
-  // file churns for unrelated reasons, and watching it would train people to
-  // reach for [skip security-doc].
   [/^src\/app\/admin\/actions\/readiness\.ts$/, "the hand-settable readiness allowlist (§2)"],
+  // item create/edit/delete actions — permanent delete is admin-only (§2). Was
+  // deliberately UNWATCHED (the file churns for unrelated reasons); that
+  // tradeoff no longer holds now that it carries deleteItemAction, an
+  // irreversible admin-only write, so it joins the other action files above.
+  [/^src\/app\/admin\/actions\/items\.ts$/, "item create/edit/delete actions — permanent delete is admin-only (§2)"],
   [/^src\/app\/api\/cron\//, "cron authentication (§8)"],
   [/^src\/lib\/cron-auth\.ts$/, "the shared secret check for session-less routes (§8)"],
   [/^src\/app\/api\/items\/import\/route\.ts$/, "the secret-authenticated machine import endpoint (§8)"],

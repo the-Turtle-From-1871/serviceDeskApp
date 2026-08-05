@@ -8,7 +8,7 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/items",
   useSearchParams: () => new URLSearchParams(),
 }));
-vi.mock("@/app/admin/actions/items", () => ({ toggleItemStatusAction: vi.fn() }));
+vi.mock("@/app/admin/actions/items", () => ({ toggleItemStatusAction: vi.fn(), deleteItemAction: vi.fn() }));
 
 // This suite runs without vitest `globals: true`, so @testing-library/react's
 // auto-cleanup (which checks for a global `afterEach`) never registers.
