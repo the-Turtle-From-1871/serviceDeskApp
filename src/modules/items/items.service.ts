@@ -753,6 +753,23 @@ export function retireItem(id: string): Promise<Item> {
   return setItemStatus(id, "RETIRED");
 }
 
+/**
+ * Permanently delete an item. There is no undo; Retire is the reversible one.
+ *
+ * A single delete does the whole job. ServiceQueueItem, ItemEdit and ItemAudit
+ * are ON DELETE CASCADE — item-scoped history that has nothing to describe once
+ * the item is gone — and TransferItem is ON DELETE SET NULL, so hand receipts
+ * keep every line they were signed with.
+ *
+ * No ItemEdit row is written for the deletion: it would belong to the item
+ * being deleted, and would cascade away in the same statement.
+ *
+ * Enforces NO permissions — the calling Server Action owns the admin guard.
+ */
+export async function deleteItem(id: string): Promise<void> {
+  await prisma.item.delete({ where: { id } });
+}
+
 export type SerialSearchHit = { id: string; make: string; model: string; serialNumber: string; status: ItemStatus };
 
 export function searchItemsBySerial(q: string): Promise<SerialSearchHit[]> {

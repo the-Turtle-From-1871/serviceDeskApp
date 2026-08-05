@@ -10,7 +10,9 @@ import {
   retireItem,
   setItemStatus,
   listItemFieldSuggestions,
+  deleteItem,
 } from "./items.service";
+import { createTransfer, getTransferByReceiptNumber } from "@/modules/transfers/transfers.service";
 
 let adminId: string;
 const base = { deviceName: "Radio", homeUnit: undefined, notes: undefined } as const;
@@ -155,4 +157,51 @@ test("listItemFieldSuggestions omits blank and whitespace-only values", async ()
 
   expect(s.deviceUIC).toEqual([]);
   expect(s.make).toEqual(["Dell"]);
+});
+
+test("deleteItem removes the item", async () => {
+  const item = await createItem({ ...base, make: "Dell", model: "XPS", serialNumber: "S1" }, adminId);
+  await deleteItem(item.id);
+  expect(await getItem(item.id)).toBeNull();
+});
+
+test("deleting an item leaves its hand receipts intact", async () => {
+  const item = await createItem({ ...base, make: "Dell", model: "XPS", serialNumber: "SN-KEEP" }, adminId);
+  const transfer = await createTransfer({
+    itemIds: [item.id],
+    lines: [],
+    sender: { isDcsim: true, name: "DCSIM Desk" },
+    receiver: { isDcsim: false, name: "Doe, Jane", rank: "SGT", unit: "A Co", contact: "(808)-555-0101", email: "jane@x.co" },
+    receiverSignature: "data:image/png;base64,iVBORw0KGgo=",
+    createdByUserId: adminId,
+  });
+
+  await deleteItem(item.id);
+
+  // The line survives, detached, with its serial snapshot untouched.
+  const rows = await prisma.transferItem.findMany();
+  expect(rows).toHaveLength(1);
+  expect(rows[0].itemId).toBeNull();
+  expect(rows[0].serialNumber).toBe("SN-KEEP");
+
+  // And the receipt still renders everything the DA 2062 prints.
+  const receipt = await getTransferByReceiptNumber(transfer.receiptNumber);
+  expect(receipt?.lines[0].make).toBe("Dell");
+  expect(receipt?.lines[0].model).toBe("XPS");
+  expect(receipt?.lines[0].items[0].serialNumber).toBe("SN-KEEP");
+});
+
+test("deleteItem cascades the item's own history", async () => {
+  const item = await createItem({ ...base, make: "Dell", model: "XPS", serialNumber: "S1" }, adminId);
+  // ItemEdit stores a JSON diff array plus a denormalized editor name — there
+  // are no field/oldValue/newValue columns.
+  await prisma.itemEdit.create({
+    data: {
+      itemId: item.id,
+      editedByName: "Admin",
+      changes: [{ field: "notes", from: null, to: "x" }],
+    },
+  });
+  await deleteItem(item.id);
+  expect(await prisma.itemEdit.count()).toBe(0);
 });
