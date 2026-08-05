@@ -17,6 +17,26 @@ describe("partySchema", () => {
     const r = partySchema.safeParse({ isDcsim: false, name: "No Fields" });
     expect(r.success).toBe(false);
   });
+  // Rank is optional on purpose — the book holds civilians and contractors with
+  // no rank, and requiring one made inventing a value the only way to file a
+  // receipt. Blank and absent must both survive, and both must normalise to
+  // undefined so `transfers.service`'s `rank ?? null` stores a real NULL rather
+  // than an empty string that would print as a leading space on the PDF.
+  it("accepts a non-DCSIM party with no rank", () => {
+    const { rank: _rank, ...noRank } = fullParty;
+    const r = partySchema.safeParse(noRank);
+    expect(r.success).toBe(true);
+    expect(r.success && r.data.rank).toBeUndefined();
+  });
+  it("treats a blank rank as absent rather than an empty string", () => {
+    const r = partySchema.safeParse({ ...fullParty, rank: "   " });
+    expect(r.success).toBe(true);
+    expect(r.success && r.data.rank).toBeUndefined();
+  });
+  it("still rejects a non-DCSIM party missing unit, even with a rank", () => {
+    const { unit: _unit, ...noUnit } = fullParty;
+    expect(partySchema.safeParse(noUnit).success).toBe(false);
+  });
   it("rejects a non-DCSIM party with an invalid email", () => {
     const r = partySchema.safeParse({ ...fullParty, email: "not-an-email" });
     expect(r.success).toBe(false);

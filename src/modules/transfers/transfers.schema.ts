@@ -29,7 +29,15 @@ export const partySchema = z
   })
   .superRefine((p, ctx) => {
     if (p.isDcsim) return; // DCSIM side only needs a technician name
-    const required = ["rank", "unit", "contact", "email"] as const;
+    // `rank` is deliberately NOT here. The book holds civilians, contractors and
+    // outside agency staff who have no rank at all, and requiring one made the
+    // only way past it to invent a value — which then prints on a signed
+    // receipt. Every consumer already treats it as absent-able: `formatParty`
+    // and the three PDF name lines all render name-only when it is null, and
+    // `transfers.service` writes `rank ?? null`. Unit, contact and email stay
+    // required — those identify who holds the property, and a receipt without
+    // them cannot be followed up.
+    const required = ["unit", "contact", "email"] as const;
     for (const f of required) {
       if (!p[f]) ctx.addIssue({ code: "custom", path: [f], message: `${f} is required` });
     }

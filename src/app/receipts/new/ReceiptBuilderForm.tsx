@@ -99,7 +99,13 @@ function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, 
         // Capped: this field is outside .form-grid, so on the wide builder page
         // it would otherwise stretch to the full ~1190px card.
         <div className="field" style={{ maxWidth: 360 }}>
-          <label className="label" htmlFor={`${role}-name`}>{isDcsim ? "DCSIM technician name" : "Name"}</label>
+          {/* "(Last, First)" is the ask, not decoration: this name is printed on
+              the signed receipt and is what a later search matches against, so a
+              party entered "Jane Doe" and one entered "Doe, Jane" are the same
+              person filed two ways. The label is the only place the convention
+              can be stated — the field accepts free text (contacts carry
+              imported names in both orders) and nothing reformats it. */}
+          <label className="label" htmlFor={`${role}-name`}>{isDcsim ? "DCSIM technician name" : "Name (Last, First)"}</label>
           {showCombobox ? (
             <ContactCombobox
               id={`${role}-name`}
@@ -121,7 +127,12 @@ function PartyFields({ role, prefill, isDcsim, onIsDcsimChange, hideName, name, 
               boxes. Sighted users saw the labels; the accessibility tree didn't
               have them. ids are namespaced by role, like `${role}-name` above,
               since both parties render this fieldset. */}
-          <div className="field"><label className="label" htmlFor={`${role}-rank`}>Rank</label><input id={`${role}-rank`} className="input" name={`${role}Rank`} value={rank} onChange={(e) => setRank(e.target.value)} required /></div>
+          {/* No `required` on rank, unlike its three neighbours: the book holds
+              civilians and contractors who have none, and the browser constraint
+              made inventing one the only way to submit. `partySchema` drops it
+              from its required list to match — a client-only relaxation would
+              just move the refusal server-side. */}
+          <div className="field"><label className="label" htmlFor={`${role}-rank`}>Rank</label><input id={`${role}-rank`} className="input" name={`${role}Rank`} value={rank} onChange={(e) => setRank(e.target.value)} /></div>
           <div className="field"><label className="label" htmlFor={`${role}-unit`}>Unit</label><input id={`${role}-unit`} className="input" name={`${role}Unit`} value={unit} onChange={(e) => setUnit(e.target.value)} required /></div>
           <div className="field"><label className="label" htmlFor={`${role}-contact`}>Contact number</label><PhoneInput id={`${role}-contact`} name={`${role}Contact`} value={contact} onChange={setContact} required /></div>
           <div className="field"><label className="label" htmlFor={`${role}-email`}>Email</label><input id={`${role}-email`} className="input" type="email" name={`${role}Email`} value={email} onChange={(e) => setEmail(e.target.value)} required /></div>
