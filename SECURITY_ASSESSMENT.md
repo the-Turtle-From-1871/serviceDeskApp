@@ -3,14 +3,14 @@
 **Application:** DCSIM Hand Receipt System (repository `inventoryApp`) — Next.js 16 App Router, React 19, TypeScript 5, Prisma 7 / PostgreSQL, Auth.js v5
 **Revision assessed:** `ff4857fd363fa548b7d639a7afd95b3c1d8363ad` (branch `feat/receipt-link-pin-bypass`)
 **Date:** 2026-08-05
-**Method:** Static, read-only multi-agent source review (Claude Security plugin) — inventory, threat model, 12 parallel researchers across component × lens cells, a three-lens verification panel (reachability / impact / defenses, 2-of-3 to survive), and an adversarial refutation pass against every survivor.
+**Method:** Static, read-only multi-agent source review (Claude Security plugin) — inventory, threat model, 12 parallel researchers across component × lens cells, a three-lens verification panel (reachability / impact / defenses, 2-of-3 to survive), and an adversarial refutation pass against every survivor. **Followed on 2026-08-05 by a targeted dynamic pass** against a *local* instance, executing the code behind F2, F3 and F5 to convert them from reasoned to observed; results are inline in each finding and the method and its limits are in §10.
 **Working tree state:** Only `package.json` / `package-lock.json` modified (one devDependency addition, `@testing-library/jest-dom` — not runtime-relevant).
 
 **Points of contact**
 Application maintainer — SPC Xiaolan Lin, DCSIM Service Desk IT Specialist · xiaolan.lin.mil@army.mil
 Developer — CDT Joshua Yang, DCSIM Intern · bubbayajo21@gmail.com
 
-> **Nothing was executed.** No build, no test run, no running server, no HTTP requests, and no live database or deployed-environment access. Every conclusion below is derived from reading application source and installed dependency source. Section 10 states precisely what this leaves unverified.
+> **Scope of execution.** The original review executed nothing — every finding was derived from reading application and dependency source. A **targeted dynamic pass on 2026-08-05** then executed the code behind **F2, F3 and F5 only**, on a *local* instance, to harden those three; each carries an inline "DYNAMIC VERIFICATION" block with the observed result. **Nothing was run against production or any deployed environment, and no live database was inspected** — so every "check production" item in §10 remains open. All other findings and the entire accepted-risk adjudication remain static conclusions.
 
 ---
 
@@ -108,7 +108,7 @@ No schema or callback change is needed — the revocation machinery at `src/auth
 
 ### F2 — Any non-WinAnsi character in a receipt party field permanently breaks that receipt's public PDF
 
-**Severity: Medium** · CWE-248 Uncaught Exception · A04:2021 · Lens: input validation · **Verified: CONFIRMED**
+**Severity: Medium** · CWE-248 Uncaught Exception · A04:2021 · Lens: input validation · **Verified: CONFIRMED (observed dynamically 2026-08-05)**
 
 **Location:** `src/modules/receipts/hand-receipt.ts:279-281` (also `:263`, `:265`, `:304`; fallback at `:169`)
 
@@ -138,11 +138,24 @@ No schema or callback change is needed — the revocation machinery at `src/auth
 
 **Related sink:** the same class affects `src/modules/items/qr-sheet.ts:32-39` via `serialNumber`, which would break `/admin/items/qr-sheet/pdf` for an entire admin selection.
 
----
+> **DYNAMIC VERIFICATION — OBSERVED 2026-08-05.** `buildHandReceiptPdf` was executed against a battery of party names on a local instance. This is no longer a prediction:
+>
+> | Input | Result |
+> |---|---|
+> | control (all-ASCII) | rendered OK, 287 KB |
+> | receiver name `Nguyễn Văn A` | **THREW** — `WinAnsi cannot encode "ễ" (0x1ec5)` |
+> | receiver name `Kaleiʻokalani` | **THREW** — `"ʻ" (0x02bb)` — the ʻokina, in essentially every Hawaiian proper name |
+> | receiver name `Michał` | **THREW** — `"ł" (0x0142)` |
+> | **sender** name (non-DCSIM) | **THREW** — the sender field is fatal too, not only the receiver |
+> | receiver **unit** ` Keʻelikōlani Co` | **THREW** — `"ō" (0x014d)` |
+> | receiver email `josé@…`, rank, `line.make` "Dellé" | rendered OK — `é` (0x00e9) **is** in cp1252 |
+> | `O’Brien` (curly apostrophe U+2019), `Smith–Jones` (en dash) | rendered OK — both **are** in cp1252 |
+>
+> The throw is a hard `Error` from the installed pdf-lib, so the route (no try/catch) returns 500 permanently. **Observation refines the exposure:** the trigger is any code point outside cp1252 in the **sender name, receiver name, or unit** fields; fields carrying only cp1252 characters (including the curly apostrophe and é that phones and copy-paste produce constantly) survive. The ʻokina result is the one that makes this a certainty rather than a risk for a Hawaii ARNG property book.
 
 ### F3 — Receipt signature accepts a 5 MB unvalidated PNG that is decoded on the public PDF route
 
-**Severity: Medium** · CWE-409 Improper Handling of Highly Compressed Data · A04:2021 · Lens: input validation · **Verified: CONFIRMED (mechanism corrected by adversarial pass)**
+**Severity: Medium** · CWE-409 Improper Handling of Highly Compressed Data · A04:2021 · Lens: input validation · **Verified: CONFIRMED (observed dynamically 2026-08-05; remediation sharpened)**
 
 **Location:** `src/modules/transfers/transfers.schema.ts:67-70`; decoded at `src/modules/receipts/hand-receipt.ts:156` (fires first) and `:291`
 
@@ -164,7 +177,21 @@ No schema or callback change is needed — the revocation machinery at `src/auth
 
 **The validation inconsistency, verified independently for this report.** The application has a shared signature validator, `signatureError` (`src/lib/signature.ts:5`), capping at `MAX_SIGNATURE_LEN = 250_000`. It is used on **three** paths — the account saved-signature action (`src/app/actions/account.ts:51`), the returns action (`src/app/actions/returns.ts:44`), and the saved-signature schema (`src/modules/signatures/signatures.schema.ts:10`). The **receipt path alone** skips it and uses `MAX_SIGNATURE_BYTES = 5_000_000` (`src/modules/transfers/transfers.schema.ts:5`) — **20× larger, on the one signature path whose output is publicly reachable.** Note also that `src/modules/signatures/signatures.schema.ts:4-6` comments that saved signatures *"obey the same rule as every other signature in the app"*, which is inaccurate.
 
-**Remediation.** Validate at write time, not render time. Route `receiverSignature` through the shared `signatureError` (or at minimum lower `MAX_SIGNATURE_BYTES` to `MAX_SIGNATURE_LEN`), and extend `src/lib/signature.ts` to base64-decode the payload, check PNG magic bytes, and read IHDR width/height — rejecting anything whose pixel count exceeds a signature-sized bound (a drawn signature is a few hundred pixels tall). Placing it in `signatureError` means all four entry points inherit it and the documented invariant becomes true.
+**Remediation.** Validate at write time, not render time. Route `receiverSignature` through the shared `signatureError`, **and** extend `src/lib/signature.ts` to base64-decode the payload, check PNG magic bytes, and read IHDR width/height — rejecting anything whose pixel count exceeds a signature-sized bound (a drawn signature is a few hundred pixels tall). See the dynamic result below for why the size-cap half of this is not optional to get right: routing through `signatureError` alone does **not** close F3.
+
+> **DYNAMIC VERIFICATION — OBSERVED 2026-08-05.** A structurally valid PNG whose 13-byte IHDR declares huge dimensions but whose IDAT is near-empty was crafted and fed to `buildHandReceiptPdf` on a local instance, measuring wall-clock per request:
+>
+> | Crafted PNG (declared) | Source bytes | Wall-clock | Outcome |
+> |---|---|---|---|
+> | 100×100 | ~90 B | 0.8 s | OK |
+> | 4000×4000 (61 MB RGBA) | ~90 B | 4.5 s | OK |
+> | 8000×8000 (244 MB) | ~90 B | 15.9 s | OK |
+> | 12000×12000 (549 MB) | **94 B** | **39.6 s** | OK |
+>
+> Three things observation establishes that reading could not:
+> 1. **It completes; it does not crash.** No `RangeError`, no OOM kill on this host — ~40 seconds of real CPU from a 94-byte input, producing a valid PDF. The `try/catch` at `hand-receipt.ts:290` is therefore irrelevant (as the adversarial pass argued), and the mechanism is confirmed to be **CPU/time**, not a catchable throw. On the **unauthenticated** `/receipts/<n>/pdf` route this is repeatable at will.
+> 2. **The 20× cap gap is a red herring for F3.** The malicious payload is 94 bytes — under even the 250 KB shared limit. `signatureError` returned `ACCEPTED` for it. **So lowering `MAX_SIGNATURE_BYTES`, or routing through `signatureError`, does not mitigate this attack** — the amplification is entirely in the IHDR, which any tiny file can set.
+> 3. **Only the IHDR dimension check closes it.** This upgrades the remediation from "either/or" to "the dimension check is mandatory; the cap and the shared-validator routing are hygiene that do not, by themselves, help here." Corrected in the remediation above.
 
 ---
 
@@ -199,7 +226,7 @@ This is the `Promise.all(ids.map(id => prisma...))` pattern that `CLAUDE.md` ban
 
 ### F5 — Login response time discloses whether an account exists
 
-**Severity: Low** · CWE-208 Observable Timing Discrepancy · A07:2021 · Lens: data handling safety · **Verified: CONFIRMED**
+**Severity: Low** · CWE-208 Observable Timing Discrepancy · A07:2021 · Lens: data handling safety · **Verified: CONFIRMED (measured dynamically 2026-08-05: ~309 ms)**
 
 **Location:** `src/auth.ts:35-37`
 
@@ -220,6 +247,15 @@ This is the `Promise.all(ids.map(id => prisma...))` pattern that `CLAUDE.md` ban
 **Why Low.** Yields account enumeration only, against a small admin-provisioned roster, and is throttled and CAPTCHA-gated. Real, but low yield.
 
 **Remediation.** Equalize the work: when no active user is found, compare the submitted password against a fixed dummy bcrypt hash at the same cost before returning `null`, so both branches pay one compare. This mirrors treatment the reset surface already received deliberately — see `src/app/actions/auth.ts:307-343`, commented *"FIX #2 (timing side-channel)"*.
+
+> **DYNAMIC VERIFICATION — MEASURED 2026-08-05.** `bcrypt.compare` at the app's configured cost (`COST = 12`, `src/lib/password.ts:4`) was timed on a local instance and compared against the no-user branch, which returns before any bcrypt call:
+>
+> | Branch | Per-request cost |
+> |---|---|
+> | unknown / inactive account (returns at `auth.ts:35`) | ~0 ms (one indexed `findUnique`, no bcrypt) |
+> | live account, wrong password (reaches `verifyPassword`) | **~309 ms** |
+>
+> The delta is the **entire ~309 ms bcrypt compare** — not a sub-millisecond sliver. That is far above network jitter, so the enumeration oracle is genuinely usable by a patient attacker, not merely theoretical. Severity stays **Low** for the reasons above (small admin-provisioned roster, composite `(ip, email-hash)` limiter, Turnstile), but the *magnitude* is now measured rather than assumed: this is a clean 300 ms signal, and the dummy-compare remediation removes it entirely.
 
 ---
 
@@ -404,7 +440,7 @@ These are the accepted-or-unnoticed risks that **nothing currently records**. Ea
 
 ### Not covered — stated plainly
 
-1. **Nothing was executed.** No build, no tests, no running server, no requests. Specifically unmeasured: the actual millisecond delta in **F5**, the exact memory threshold in **F3**, and whether F3's allocation surfaces as a catchable `RangeError` or a container kill.
+1. **The static review executed nothing** — no build, no tests, no running server, no requests. The three items this originally left unmeasured have since been **closed by the 2026-08-05 dynamic pass** (local instance): F5's delta is **~309 ms** (a full bcrypt cost-12 compare); F3 **completes rather than crashing** — ~40 s of CPU at a 12000×12000 declared IHDR from a 94-byte input, so it is neither a catchable `RangeError` nor (on that host) an OOM kill, but a time/CPU amplification; and F2 **throws a hard pdf-lib error** on any non-cp1252 code point in the sender name, receiver name, or unit. What remains genuinely unexecuted: everything against production, and the resource behaviour under a real host's memory ceiling and concurrency rather than a single local process.
 2. **No live database or infrastructure access.** Could not check whether the `rls_auto_enable` trigger exists in production, whether the Supabase Data API is enabled, whether default anon privileges were restored on post-lockdown tables, or whether a legacy `admin@example.com` row survives. **Three items in this report end in "check production":** the RLS trigger, anon grants on `PublicAccessSetting` / `DeviceCategory`, and that legacy admin account.
 3. **No deployed-environment configuration.** Could not verify which env vars are actually set in Vercel — whether Turnstile keys, the Upstash pair, or a complete `GMAIL_*` set are live is asserted from documentation, not observed.
 4. **One framework behaviour left partly open.** Next 16 was confirmed to resolve Server Actions per-route rather than globally (from `.next/server/server-reference-manifest.json` and `node_modules/next/dist/server/app-render/manifests-singleton.js:150-183`), closing a proposed cross-route rate-limit bypass. One residual could not be ruled out: whether a Vercel deployment sets `__NEXT_PRIVATE_ORIGIN` such that the internal forwarded hop skips the middleware layer. Settling it requires a deployed build.

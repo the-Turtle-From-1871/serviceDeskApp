@@ -1078,6 +1078,7 @@ Twenty-one tickets, organised by theme. Each states the need, an approach, the f
 | [B19](#b19--broaden-end-to-end-browser-coverage) | Broaden end-to-end browser coverage | Technical debt | M | P2 |
 | [B20](#b20--u6--add-the-target-database-guard-to-seed-e2ets) | U6 — add the target-database guard to `seed-e2e.ts` | Security | S | P3 |
 | [B21](#b21--ui-audit-accessibility-mobile-and-consistency) | UI audit — accessibility, mobile and consistency | UI/UX | M | P2 |
+| [B22](#b22--resolve-the-stranded-testing-libraryjest-dom-dependency) | Resolve the stranded `@testing-library/jest-dom` dependency | Technical debt | S | P3 |
 
 ---
 
@@ -2029,6 +2030,44 @@ to reach for the sanctioned `[skip security-doc]` bypass and blunts the guardrai
 watching the security-relevant slice narrowly — a `prisma/manual/` directory rule plus a pattern
 matching `POLICY|ROW LEVEL SECURITY|GRANT|REVOKE|EVENT TRIGGER` in migration content — rather
 than the whole directory.
+
+---
+
+#### B22 — Resolve the stranded `@testing-library/jest-dom` dependency
+
+**Problem.** `@testing-library/jest-dom@^7.0.0` is in `devDependencies` and installed in
+`node_modules`, but **nothing imports it and it is not wired up**. It is not in
+`vitest.config.ts`'s `setupFiles` (which loads only `tests/helpers/setup-env.ts`), so its
+matchers — `toBeInTheDocument()`, `toBeDisabled()`, `toHaveAttribute()` — do not exist even
+for a test that tries to use them.
+
+Meanwhile **two test files carry comments asserting it is not installed** and work around its
+absence:
+
+- `src/app/login/LoginForm.test.tsx:36` — *"jest-dom is not installed here, so assert on the
+  DOM property directly."*
+- `src/components/SuggestCombobox.test.tsx:7` — the same note.
+
+So the repository now contains a dependency that is present but unusable, and comments that
+say it is absent. Both cannot be right, and whichever a future reader believes, they lose.
+Provenance is unclear: the change was uncommitted in the working tree as of 2026-08-05 and
+predates that session, which is why it is not in any commit.
+
+**Approach.** Pick one and finish it — do not leave the third state.
+
+- **Finish it:** add `@testing-library/jest-dom/vitest` to `setupFiles` in
+  `vitest.config.ts:31`, then delete the two comments and simplify the assertions they guard.
+  Note the suite is `environment: "node"` with jsdom opted in per-file via a
+  `// @vitest-environment jsdom` docblock, so the setup import must tolerate running under
+  the node environment too, or be scoped to the component tests.
+- **Revert it:** `git checkout package.json package-lock.json && npm install`. The two
+  comments then become true again and nothing else changes.
+
+**Files.** `package.json`, `package-lock.json`, `vitest.config.ts:31`,
+`src/app/login/LoginForm.test.tsx:36`, `src/components/SuggestCombobox.test.tsx:7`.
+**Effort:** S. **Priority:** P3 — no runtime impact whatsoever; this is purely about the next
+reader not being misled. Worth doing alongside **B18**, since running the suite in CI is the
+change most likely to expose whichever choice is made here.
 
 ---
 
