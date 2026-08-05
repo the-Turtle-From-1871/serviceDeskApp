@@ -26,6 +26,19 @@ export const RECEIPT_LINK_PARAM = "k";
  */
 const DOMAIN = "rl:";
 
+/**
+ * Normalize receipt number to uppercase. Matches getTransferByReceiptNumber
+ * (src/modules/transfers/transfers.service.ts:110), which looks receipts up
+ * case-insensitively, so `/receipts/hr-000123` and `/receipts/HR-000123` render
+ * the same page. Without normalization, a link whose path got lowercased anywhere
+ * in transit (mail client, QR scanner, manual retyping) would fail the token
+ * check and send the recipient to the PIN prompt — the exact failure this token
+ * exists to prevent.
+ */
+function normalizeReceiptNumber(receiptNumber: string): string {
+  return receiptNumber.toUpperCase();
+}
+
 // Mirror the unlock cookie's convention: __Secure- over HTTPS.
 export function receiptGrantCookieName(secure: boolean): string {
   return secure ? "__Secure-pub_receipt" : "pub_receipt";
@@ -39,7 +52,7 @@ export async function signReceiptLinkToken(receiptNumber: string, secret: string
   // no receipt number.
   if (!secret) throw new Error("AUTH_SECRET is required to sign a receipt link token");
   if (!receiptNumber) throw new Error("a receipt number is required to sign a receipt link token");
-  return hmac(secret, DOMAIN + receiptNumber);
+  return hmac(secret, DOMAIN + normalizeReceiptNumber(receiptNumber));
 }
 
 /** Constant-time check that `token` was minted for exactly `receiptNumber`. */
@@ -49,7 +62,7 @@ export async function verifyReceiptLinkToken(
   secret: string,
 ): Promise<boolean> {
   if (!secret || !token || !receiptNumber) return false;
-  const expected = await hmac(secret, DOMAIN + receiptNumber);
+  const expected = await hmac(secret, DOMAIN + normalizeReceiptNumber(receiptNumber));
   return safeEqual(token, expected);
 }
 
@@ -80,6 +93,6 @@ export async function verifyReceiptGrantValue(
   if (dot <= 0) return false;
   const named = value.slice(0, dot);
   const token = value.slice(dot + 1);
-  if (!token || named !== receiptNumber) return false;
+  if (!token || normalizeReceiptNumber(named) !== normalizeReceiptNumber(receiptNumber)) return false;
   return verifyReceiptLinkToken(named, token, secret);
 }

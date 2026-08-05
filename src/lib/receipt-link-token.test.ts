@@ -63,6 +63,18 @@ describe("receipt link token", () => {
     const sig = cookie.slice(cookie.indexOf(".") + 1);
     expect(await verifyReceiptLinkToken(exp, sig, SECRET)).toBe(false);
   });
+
+  it("normalizes receipt numbers to uppercase so case variations verify", async () => {
+    const token = await signReceiptLinkToken(HR, SECRET);
+    expect(await verifyReceiptLinkToken("hr-000123", token, SECRET)).toBe(true);
+    expect(await verifyReceiptLinkToken("Hr-000123", token, SECRET)).toBe(true);
+  });
+
+  it("still refuses a token for a different receipt even when case-normalized", async () => {
+    const token = await signReceiptLinkToken(HR, SECRET);
+    expect(await verifyReceiptLinkToken("HR-000456", token, SECRET)).toBe(false);
+    expect(await verifyReceiptLinkToken("hr-000456", token, SECRET)).toBe(false);
+  });
 });
 
 describe("receipt grant cookie", () => {
@@ -81,6 +93,12 @@ describe("receipt grant cookie", () => {
     const token = await signReceiptLinkToken(HR, SECRET);
     const value = receiptGrantValue(HR, token);
     expect(await verifyReceiptGrantValue(value, "HR-000456", SECRET)).toBe(false);
+  });
+
+  it("normalizes receipt numbers so a grant verifies when the path is lowercased", async () => {
+    const token = await signReceiptLinkToken(HR, SECRET);
+    const value = receiptGrantValue(HR, token);
+    expect(await verifyReceiptGrantValue(value, "hr-000123", SECRET)).toBe(true);
   });
 
   it("refuses a grant whose receipt number was swapped but signature kept", async () => {
