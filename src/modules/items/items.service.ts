@@ -433,6 +433,55 @@ export async function listItemUics(
   return rows.map((r) => r.deviceUIC).filter((u): u is string => u !== null);
 }
 
+export type ItemFieldSuggestions = { make: string[]; model: string[]; deviceUIC: string[] };
+
+/**
+ * The free-text catalogue vocabularies, for the suggestion comboboxes.
+ *
+ * Make, model and UIC have no managed list (unlike Category and Unit), so the
+ * vocabulary IS what the fleet already holds. Category and Home unit are NOT
+ * sourced here on purpose: they come from listCategoryNames()/listUnits(), so
+ * the picker agrees with the screens that curate them and cannot resurrect a
+ * name an admin deleted.
+ *
+ * ONE query, three UNION ALL arms — not a query per field, and not a query per
+ * row. Ordered by frequency so the makes actually in use head an 8-row list.
+ * The per-field cap is a guard against a future dirty import turning this into
+ * an unbounded payload, not a reflection of today's counts (16 makes, 53
+ * models, ~44 UICs).
+ *
+ * COUNT(*)::int, not COUNT(*): Postgres counts are bigint, which Prisma hands
+ * back as BigInt and JSON.stringify refuses to serialize.
+ */
+const SUGGESTION_CAP = 200;
+
+export async function listItemFieldSuggestions(): Promise<ItemFieldSuggestions> {
+  const rows = await prisma.$queryRaw<{ field: string; value: string; n: number }[]>(Prisma.sql`
+    (SELECT 'make' AS field, "make" AS value, COUNT(*)::int AS n
+       FROM "Item" WHERE btrim(COALESCE("make", '')) <> ''
+       GROUP BY "make" ORDER BY n DESC, value ASC LIMIT ${SUGGESTION_CAP})
+    UNION ALL
+    (SELECT 'model' AS field, "model" AS value, COUNT(*)::int AS n
+       FROM "Item" WHERE btrim(COALESCE("model", '')) <> ''
+       GROUP BY "model" ORDER BY n DESC, value ASC LIMIT ${SUGGESTION_CAP})
+    UNION ALL
+    (SELECT 'deviceUIC' AS field, "deviceUIC" AS value, COUNT(*)::int AS n
+       FROM "Item" WHERE btrim(COALESCE("deviceUIC", '')) <> ''
+       GROUP BY "deviceUIC" ORDER BY n DESC, value ASC LIMIT ${SUGGESTION_CAP})
+  `);
+
+  // Sorted in JS rather than trusting the UNION ALL to preserve each arm's
+  // ORDER BY — Postgres does not guarantee the output order of a set operation,
+  // only the order WITHIN each parenthesized arm's LIMIT.
+  const bucket = (field: string) =>
+    rows
+      .filter((r) => r.field === field)
+      .sort((a, b) => b.n - a.n || a.value.localeCompare(b.value))
+      .map((r) => r.value);
+
+  return { make: bucket("make"), model: bucket("model"), deviceUIC: bucket("deviceUIC") };
+}
+
 export type ItemEditor = { id: string; name: string };
 
 /** Columns the CSV importer may write in its batched UPDATE.

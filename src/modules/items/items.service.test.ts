@@ -9,6 +9,7 @@ import {
   updateItemFields,
   retireItem,
   setItemStatus,
+  listItemFieldSuggestions,
 } from "./items.service";
 
 let adminId: string;
@@ -130,4 +131,28 @@ test("getItemBySerial finds an item by serial REGARDLESS of casing (citext) and 
 
 test("getItemBySerial returns null for a serial that does not exist", async () => {
   expect(await getItemBySerial("NO-SUCH-SERIAL")).toBeNull();
+});
+
+test("listItemFieldSuggestions returns distinct values, most-used first", async () => {
+  await createItem({ ...base, make: "Dell", model: "Latitude 5420", serialNumber: "S1", deviceUIC: "WPME10" }, adminId);
+  await createItem({ ...base, make: "Dell", model: "Latitude 5420", serialNumber: "S2", deviceUIC: "WPME10" }, adminId);
+  await createItem({ ...base, make: "HP", model: "EliteBook", serialNumber: "S3", deviceUIC: "WPME11" }, adminId);
+
+  const s = await listItemFieldSuggestions();
+
+  // Dell appears twice, HP once — frequency decides the order, so the make an
+  // admin actually logs is the first suggestion rather than the alphabetical one.
+  expect(s.make).toEqual(["Dell", "HP"]);
+  expect(s.model).toEqual(["Latitude 5420", "EliteBook"]);
+  expect(s.deviceUIC).toEqual(["WPME10", "WPME11"]);
+});
+
+test("listItemFieldSuggestions omits blank and whitespace-only values", async () => {
+  await createItem({ ...base, make: "Dell", model: "XPS", serialNumber: "S1", deviceUIC: "  " }, adminId);
+  await createItem({ ...base, make: "Dell", model: "XPS", serialNumber: "S2" }, adminId);
+
+  const s = await listItemFieldSuggestions();
+
+  expect(s.deviceUIC).toEqual([]);
+  expect(s.make).toEqual(["Dell"]);
 });
