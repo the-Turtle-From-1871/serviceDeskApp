@@ -382,27 +382,49 @@ and item lookup) — never widen without explicit review.
 **A signed link admits its holder to ONE receipt, past the PIN, and it is
 checked LAST.** The notification emails and the QR printed on the DA 2062 both
 carry `?k=<token>` on the receipt URL, where the token is
-`hmac(AUTH_SECRET, "rl:" + receiptNumber)` — domain-separated from the unlock
-cookie's own HMAC (which signs a bare expiry) so a value minted for one purpose
-can never verify as the other. `src/proxy.ts` evaluates it inside the same
-`isPinGatedPath` branch as the PIN, but only *after* the logged-in and
-unlock-cookie checks have both already said no — a technician or a visitor who
-already typed the PIN is never narrowed down to a single receipt by clicking a
-link in their inbox. A verified token redirects to the same URL with `k`
-stripped (so it never sits in the address bar, a Referer header, or a shared
-screen) and sets a grant cookie — `__Secure-pub_receipt` / `pub_receipt`,
-`httpOnly`, `secure` in production, `sameSite: "lax"`, `path: "/"` — naming
-that one receipt number. The grant covers exactly the receipt page and its PDF
-and nothing beyond: every check re-verifies the cookie's signature against the
-*current* path's receipt number, so a grant for `HR-000123` fails closed on
-`HR-000456` or on any `/i/*` page. The cookie's 12-hour life
-(`UNLOCK_MAX_AGE_SECONDS`, shared with the unlock cookie) is a sitting length,
-**not** the link's lifetime — the link itself does not expire; re-clicking the
-emailed link re-mints the grant. **`publicAccessAllowed()` is deliberately NOT
-widened by this** — it is the entire gate on `liveSearchAction`, i.e. on the
-searchable item and receipt catalog, and it still reads only the unlock cookie,
-so holding a receipt grant opens that one receipt page and buys no search
-access. `src/lib/receipt-link-token.ts`, `src/lib/web-hmac.ts`, covered by
+`hmac(AUTH_SECRET, "rl:" + receiptNumber.toUpperCase())` — the uppercasing
+matches `getTransferByReceiptNumber`'s case-insensitive lookup, so a link whose
+path got lowercased anywhere in transit (mail client, QR scanner, manual
+retyping) still verifies. The domain prefix separates this signature space
+from the unlock cookie's own HMAC (which signs a bare expiry) so a value
+minted for one purpose can never verify as the other. `src/proxy.ts` evaluates
+it inside the same `isPinGatedPath` branch as the PIN, but only *after* the
+logged-in and unlock-cookie checks have both already said no.
+
+**That ordering means the strip-and-redirect below is NOT something every
+recipient gets.** It runs only on the anonymous, PIN-locked path that reaches
+this far. A logged-in technician — often the one who built the very receipt,
+and on the CC line of the email carrying the link — or a visitor who already
+holds a valid unlock cookie returns earlier, at the existing
+`shouldAllowPublic` check, and is served the page with `?k=<token>` still
+sitting in the address bar, untouched. For the population that IS anonymous
+and PIN-locked: a verified token redirects to the same URL with `k` stripped
+(so it does not stay in the address bar to be copied off a shared screen or
+carried by the PDF download link) and sets a grant cookie —
+`__Secure-pub_receipt` / `pub_receipt`, `httpOnly`, `secure` in production,
+`sameSite: "lax"`, `path: "/"` — naming that one receipt number. The grant
+covers exactly the receipt page and its PDF and nothing beyond: every check
+re-verifies the cookie's signature against the *current* path's receipt
+number, so a grant for `HR-000123` fails closed on `HR-000456` or on any
+`/i/*` page.
+
+**The grant cookie's 12-hour life is enforced by the browser only — the
+cookie's own value carries no signed expiry.** Unlike the unlock cookie
+(`<expMs>.<hmac(...)>`, whose age is checked server-side by
+`verifyUnlockValue`'s ceiling rule), `receiptGrantValue` is just
+`<receiptNumber>.<token>` with nothing dated in it, so `verifyReceiptGrantValue`
+accepts it at any age — a cookie replayed past its `Max-Age` (extracted from
+browser storage and resent by a client that ignores it) is accepted
+indefinitely. This grants nothing beyond what the underlying link already
+grants, since that link never expires either: the 12-hour figure
+(`UNLOCK_MAX_AGE_SECONDS`, shared with the unlock cookie) only bounds how long
+an ordinary browser keeps the grant before the visitor would need to click the
+link again — it is a sitting length, not the link's lifetime.
+**`publicAccessAllowed()` is deliberately NOT widened by this** — it is the
+entire gate on `liveSearchAction`, i.e. on the searchable item and receipt
+catalog, and it still reads only the unlock cookie, so holding a receipt grant
+opens that one receipt page and buys no search access.
+`src/lib/receipt-link-token.ts`, `src/lib/web-hmac.ts`, covered by
 `src/proxy.test.ts` and `src/lib/public-access-guard.test.ts`.
 
 ---
@@ -1462,6 +1484,14 @@ link. Scoping revocation to a single receipt would need a per-receipt salt
 stored on the row — a schema change — so the token could be invalidated by
 clearing that column rather than by rotating the app-wide secret. Not done
 here; tracked for if a leaked link is ever reported.
+Same channel as Known gap 3: the initial `GET /receipts/<n>?k=<token>` still
+reaches server/proxy access logs, and a corporate mail gateway that rewrites
+or prefetches links (Microsoft SafeLinks and similar) will fetch it
+automatically, landing the token in that gateway's logs too. The reassuring
+half, unlike the reset token: this token is idempotent rather than single-use,
+so a gateway prefetch does not burn it for the real recipient the way it would
+a one-time reset link — the cost is purely that more parties end up holding a
+copy of a value that, per the paragraph above, never expires on its own.
 
 ---
 

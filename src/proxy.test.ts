@@ -14,6 +14,7 @@ import {
   unlockCookieName,
   UNLOCK_TTL_MS,
   UNLOCK_CLOCK_SKEW_MS,
+  UNLOCK_MAX_AGE_SECONDS,
 } from "@/lib/public-access-cookie";
 import {
   API_POLICY,
@@ -538,6 +539,12 @@ describe("proxy — scoped receipt link", () => {
       await signReceiptLinkToken(receiptNumber, SECRET),
     ),
   });
+  /** Pull one cookie's value out of a Set-Cookie header, as a browser jar would. */
+  const cookieValueFromSetCookie = (setCookie: string | null, name: string): string => {
+    const match = new RegExp(`(?:^|;\\s*)${name}=([^;]+)`).exec(setCookie ?? "");
+    if (!match) throw new Error(`no ${name} cookie in Set-Cookie header: ${setCookie}`);
+    return match[1];
+  };
 
   it("admits a valid ?k= link, stripping the token and remembering the grant", async () => {
     const res = await run(request({ path: `/receipts/${HR}?k=${await link()}` }));
@@ -555,18 +562,35 @@ describe("proxy — scoped receipt link", () => {
     expect(location).not.toContain("k=");
   });
 
+  it("pins sameSite, path and maxAge on the grant cookie", async () => {
+    // sameSite: "lax" is load-bearing: the click that lands here is a
+    // cross-site top-level navigation (a link opened from an email client),
+    // and under "strict" the browser would withhold the cookie when following
+    // this very redirect — every recipient would land back on /unlock, and
+    // this suite would stay green throughout because none of the other tests
+    // simulate a cross-site navigation. Losing maxAge silently turns a
+    // 12-hour grant into a cookie that outlives the browser session.
+    const res = await run(request({ path: `/receipts/${HR}?k=${await link()}` }));
+    const setCookie = res.headers.get("set-cookie") ?? "";
+    expect(setCookie).toMatch(/;\s*Path=\//);
+    expect(setCookie).toMatch(/;\s*SameSite=Lax/i);
+    expect(setCookie).toMatch(new RegExp(`;\\s*Max-Age=${UNLOCK_MAX_AGE_SECONDS}\\b`));
+  });
+
   it("sets the grant cookie with the Secure ATTRIBUTE in production", async () => {
     // Same prod-only blind spot as the unlock cookie: a __Secure- prefixed
     // cookie sent without the attribute is dropped by the browser outright, so
     // the grant would never stick and every recipient would still see /unlock.
-    // Matched as an attribute (`; Secure`), never as a substring — the cookie is
-    // NAMED __Secure-pub_receipt, so toContain("Secure") passes on the name.
+    // Matched as an ATTRIBUTE (`;\s*Secure(\s*;|\s*$)`), never as a substring
+    // of the cookie NAME — mirrors the established pattern for the unlock
+    // cookie's own equivalent test above, which a bare toContain("Secure")
+    // cannot fail (the cookie is named __Secure-pub_receipt).
     vi.stubEnv("NODE_ENV", "production");
     const res = await run(request({ path: `/receipts/${HR}?k=${await link()}` }));
     const setCookie = res.headers.get("set-cookie") ?? "";
     expect(setCookie).toContain(receiptGrantCookieName(true));
-    expect(setCookie).toContain("; Secure");
-    expect(setCookie).toContain("HttpOnly");
+    expect(setCookie).toMatch(/;\s*Secure(\s*;|\s*$)/);
+    expect(setCookie).toMatch(/;\s*HttpOnly(\s*;|\s*$)/);
   });
 
   it("admits the receipt page and its PDF on the grant cookie alone", async () => {
@@ -598,9 +622,56 @@ describe("proxy — scoped receipt link", () => {
     expect(res.headers.get("set-cookie")).toBeNull();
   });
 
-  it("does not let a link token unlock the receipt BUILDER", async () => {
-    // /receipts/new is staff-only and is deliberately outside the PIN gate; it
-    // must keep falling through to the login redirect, not the unlock page.
+  it("does not let an invalid ?k= clobber an existing valid grant for the same receipt", async () => {
+    // A bad or stray token on the URL fails verification and falls back to
+    // whatever grant is already in the cookie jar — it never gets a chance to
+    // overwrite it, because the branch that would overwrite it is the one that
+    // just failed.
+    const res = await run(
+      request({ path: `/receipts/${HR}?k=not-a-signature`, cookies: await grant() }),
+    );
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("holds only one grant at a time: opening receipt B's link overwrites A's grant", async () => {
+    // Intended behavior, not a bug: the grant is a single named cookie, so a
+    // second link click is a second Set-Cookie under the same name — a real
+    // browser jar replaces rather than accumulates. Receipt A then needs its
+    // own link clicked again.
+    const HR2 = "HR-000456";
+    const cookieName = receiptGrantCookieName(false);
+
+    const firstRes = await run(request({ path: `/receipts/${HR}?k=${await link()}` }));
+    const grantAfterFirst = cookieValueFromSetCookie(firstRes.headers.get("set-cookie"), cookieName);
+    expect(
+      (await run(request({ path: `/receipts/${HR}`, cookies: { [cookieName]: grantAfterFirst } })))
+        .headers.get("location"),
+    ).toBeNull();
+
+    // The browser presents whatever it currently holds — A's grant — while
+    // navigating to B's link.
+    const secondRes = await run(
+      request({ path: `/receipts/${HR2}?k=${await link(HR2)}`, cookies: { [cookieName]: grantAfterFirst } }),
+    );
+    const grantAfterSecond = cookieValueFromSetCookie(secondRes.headers.get("set-cookie"), cookieName);
+
+    expect(
+      (await run(request({ path: `/receipts/${HR}`, cookies: { [cookieName]: grantAfterSecond } })))
+        .headers.get("location"),
+    ).toContain("/unlock");
+    expect(
+      (await run(request({ path: `/receipts/${HR2}`, cookies: { [cookieName]: grantAfterSecond } })))
+        .headers.get("location"),
+    ).toBeNull();
+  });
+
+  it("is unaffected by a ?k= token on /receipts/new — the negative lookahead already keeps that path out of this gate, still falling through to /login", async () => {
+    // This does NOT exercise the token-verification branch at all: /receipts/new
+    // never matches RECEIPT_PATH, so receiptNumberFromPath returns null and this
+    // gate is never entered. It would pass identically with this entire branch
+    // deleted — it guards the negative lookahead in RECEIPT_PATH, not the token
+    // check.
     const res = await run(request({ path: `/receipts/new?k=${await link("new")}` }));
     expect(res.headers.get("location")).toContain("/login");
   });

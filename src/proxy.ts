@@ -85,6 +85,11 @@ function isApiAuthPath(pathname: string): boolean {
   return pathname === "/api/auth" || pathname.startsWith("/api/auth/");
 }
 
+// One regex, two uses: the gate membership test and the receipt number the
+// scoped-link branch needs. Splitting them into two patterns would let the set
+// of gated paths and the set of link-openable paths drift apart.
+const RECEIPT_PATH = /^\/receipts\/(?!new(?:\/|$))([^/]+)(?:\/pdf)?$/;
+
 /**
  * The pages that expose item/receipt PII: an item page, and a receipt (or its
  * PDF). These are what the PIN gate walls off.
@@ -96,11 +101,6 @@ function isApiAuthPath(pathname: string): boolean {
  * a plain-text 403 rather than `/login`. Authorization was never the issue
  * (`requireUser` runs in-page regardless); the routing was.
  */
-// One regex, two uses: the gate membership test and the receipt number the
-// scoped-link branch needs. Splitting them into two patterns would let the set
-// of gated paths and the set of link-openable paths drift apart.
-const RECEIPT_PATH = /^\/receipts\/(?!new(?:\/|$))([^/]+)(?:\/pdf)?$/;
-
 const isPinGatedPath = (pathname: string) =>
   pathname.startsWith("/i/") || RECEIPT_PATH.test(pathname);
 
@@ -249,7 +249,12 @@ const authGatedProxy = auth(async (req) => {
     // ORDER IS LOAD-BEARING: this runs AFTER the logged-in and unlock-cookie
     // decision above, never before. Those are the broad grants; a technician or
     // a visitor who already typed the PIN must not be narrowed to a single
-    // receipt by clicking a link in their inbox.
+    // receipt by clicking a link in their inbox. The flip side is NOT a
+    // guarantee this branch makes: only requests that reach this far (anonymous,
+    // no valid unlock cookie) ever get their `?k=` stripped below. A logged-in
+    // technician — often the one who built this very receipt, and on the CC line
+    // of the email carrying the link — or an already-unlocked visitor is served
+    // the page above with the token still sitting in the address bar, verbatim.
     //
     // Scope is enforced by the signature, not by this branch: a token verifies
     // against exactly the receipt number it was minted for, and `/i/*` yields no
@@ -259,10 +264,10 @@ const authGatedProxy = auth(async (req) => {
       const presentedToken = req.nextUrl.searchParams.get(RECEIPT_LINK_PARAM);
       if (await verifyReceiptLinkToken(linkedReceipt, presentedToken, secret)) {
         // Redirect to the same page without the token, remembering the grant in
-        // a cookie. Three things this buys, all of which break without it: the
-        // token leaves the address bar (so it is not copied out of a shared
-        // screen, or leaked in a Referer), the PDF download link on the page
-        // works without carrying it, and a refresh does not depend on it.
+        // a cookie. Two things this buys for the population that reaches here:
+        // the token leaves the address bar (so it is not copied out of a shared
+        // screen) and off the PDF download link, and a refresh does not depend
+        // on it.
         const clean = req.nextUrl.clone();
         clean.searchParams.delete(RECEIPT_LINK_PARAM);
         const res = NextResponse.redirect(clean);
@@ -286,6 +291,12 @@ const authGatedProxy = auth(async (req) => {
       // receipt simply does not apply and drops through to /unlock below.
       const grant = req.cookies.get(receiptGrantCookieName(secure))?.value;
       if (await verifyReceiptGrantValue(grant, linkedReceipt, secret)) {
+        // Returns here, before the `check.retire` cleanup further down — so a
+        // visitor holding both a valid grant AND a stale-but-genuine unlock
+        // cookie keeps resending the dead unlock cookie on every request to
+        // this one receipt. Harmless, not a gap: the grant is what admits them
+        // here, not the unlock cookie, and it self-heals the moment they hit
+        // any other gated path (that request reaches the retire branch below).
         return NextResponse.next();
       }
     }
