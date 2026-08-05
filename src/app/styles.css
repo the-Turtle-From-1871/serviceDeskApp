@@ -66,6 +66,28 @@
 @source "../components/ui";
 @source "./admin/analytics";
 
+/* Narrow @source is necessary but NOT sufficient, and this is the proof:
+   `.container` was being generated anyway, from inside the scanned
+   directories. The extractor reads raw file TEXT, not JSX semantics, so it
+   harvested the candidate from `data-slot="table-container"` in table.tsx —
+   and from the word "container" sitting in that file's prose comments.
+
+   The damage was app-wide and invisible in review: Tailwind's `.container`
+   (width:100% plus max-widths at each breakpoint) outranks the `legacy`
+   layer, so it beat globals.css's `max-width: 960px` on EVERY pre-existing
+   page, widening them to 1024/1280/1536px on desktop.
+
+   Renaming the slot would not have fixed it — the comments alone regenerate
+   the candidate, and the next person to write the English word "container"
+   in these directories re-breaks every page in the app. So the exclusion is
+   declared here instead: `@source not inline(...)` refuses the candidate
+   however it is spelled in source. globals.css keeps `.container` for the
+   legacy pages; Tailwind simply never emits a rival.
+
+   If a future Tailwind-native page genuinely wants a centered max-width
+   wrapper, give it `mx-auto max-w-*` rather than deleting this line. */
+@source not inline("container");
+
 /* ------------------------------------------------------------
    shadcn/ui design tokens, mapped onto the ledger palette that
    globals.css already defines. Single source of truth: these are
@@ -125,4 +147,38 @@
 
   --font-sans: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* ------------------------------------------------------------
+   Custom animations.
+
+   Registering `--animate-*` here is what makes the matching
+   `animate-*` utility exist; the @keyframes must live INSIDE the
+   @theme block or Tailwind won't emit them alongside it.
+
+   Deliberately a SEPARATE, non-`inline` @theme block: `inline`
+   substitutes a variable's value at use sites, which is right for
+   the colour aliases above (they forward to globals.css tokens
+   that can be re-tuned) and wrong here — this is a literal
+   animation shorthand with nothing to forward to.
+
+   Names are prefixed to stay clear of anything Tailwind ships, per
+   the collision warning at the top of this file.
+
+   The sweep translates by percentages of the INDICATOR's own width,
+   so the distances below assume the `w-2/5` in progress.tsx: -100%
+   parks it fully off the left edge, and 250% (2.5 x 40% = one full
+   track width) carries it fully off the right.
+   ------------------------------------------------------------ */
+@theme {
+  --animate-search-sweep: search-sweep 1.1s ease-in-out infinite;
+
+  @keyframes search-sweep {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(250%);
+    }
+  }
 }

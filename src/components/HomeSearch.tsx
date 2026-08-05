@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { liveSearchAction, type LiveSearchResult } from "@/app/actions/search";
+import { Progress } from "@/components/ui/progress";
 
 export function HomeSearch() {
   const [mode, setMode] = useState<"serial" | "receipt">("serial");
@@ -46,6 +47,13 @@ export function HomeSearch() {
   // Only render "No matches" once the current (mode, query) has resolved, so it
   // doesn't flash (or get announced) during the debounce or right after a mode switch.
   const settled = resolvedKey === `${mode}\n${trimmed}`;
+  // Derived, not a third piece of state: "not settled" already means the held
+  // result does not correspond to what is in the box, which covers BOTH halves
+  // of the wait — the 250ms debounce and the round trip after it. Tracking a
+  // separate `pending` flag would be a second source of truth that could
+  // disagree with `settled` on the mode-switch and out-of-order-response paths
+  // this component already handles.
+  const pending = hasQuery && !settled;
   // The unlock cookie lasts 12 hours, so it can lapse while this page sits open
   // — the search then comes back refused rather than empty. Saying "No matches"
   // there is the same confident wrong answer about the property book that the
@@ -67,6 +75,21 @@ export function HomeSearch() {
         </select>
         <input className="input" aria-label="Search" placeholder="Start typing…" value={query} onChange={(e) => setQuery(e.target.value)} />
       </div>
+
+      {/* Deliberately OUTSIDE the aria-live region below: a progress bar that
+          re-renders on every keystroke would spam a screen reader with
+          announcements, and the results region already narrates the outcome.
+          Kept mounted for the whole time there is a query — collapsing it when
+          the search settles would bounce the results list by 2px on every
+          keystroke. `value={0}` is the settled (empty track) state; `null` is
+          Radix's indeterminate state, which is what animates. */}
+      {hasQuery && (
+        <Progress
+          value={pending ? null : 0}
+          aria-hidden={!pending}
+          aria-label={pending ? "Searching" : undefined}
+        />
+      )}
 
       {/* Type-ahead has no submit, so announce result changes to assistive tech. */}
       <div aria-live="polite" role="status">

@@ -119,7 +119,7 @@ const dcsimBox = (p: "Sender" | "Recipient") => party(p).getByRole("checkbox") a
 // unlabeled fields and quietly lose the guarantee — see the a11y test below.
 async function fillParty(user: ReturnType<typeof userEvent.setup>, p: "Sender" | "Recipient") {
   const q = party(p);
-  const name = q.getByLabelText("Name") as HTMLInputElement;
+  const name = q.getByLabelText("Name (Last, First)") as HTMLInputElement;
   if (!name.value) await user.type(name, p === "Sender" ? "Jane Doe" : "Bob Smith");
   await user.type(q.getByLabelText("Rank"), "SGT");
   await user.type(q.getByLabelText("Unit"), "A Co");
@@ -202,7 +202,7 @@ describe("ReceiptBuilderForm — the DCSIM checkbox survives a failed submit", (
     renderForm();
 
     for (const p of ["Sender", "Recipient"] as const) {
-      for (const label of ["Name", "Rank", "Unit", "Contact number", "Email"]) {
+      for (const label of ["Name (Last, First)", "Rank", "Unit", "Contact number", "Email"]) {
         expect(party(p).getByLabelText(label)).toBeDefined();
       }
     }
