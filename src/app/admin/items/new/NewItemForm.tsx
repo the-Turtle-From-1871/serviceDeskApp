@@ -2,6 +2,8 @@
 import { useActionState } from "react";
 import Link from "next/link";
 import { createItemAction } from "@/app/admin/actions/items";
+import { SuggestCombobox } from "@/components/SuggestCombobox";
+import type { ItemFieldSuggestions } from "@/modules/items/items.service";
 
 const fields = [
   ["make", "Make", true],
@@ -19,14 +21,30 @@ export function NewItemForm({
   returnUic = "",
   categories = [],
   units = [],
+  suggestions,
 }: {
   serialNumber?: string;
   cameFromSearch?: boolean;
   returnUic?: string;
   categories?: string[];
   units?: string[];
+  suggestions: ItemFieldSuggestions;
 }) {
   const [state, action, pending] = useActionState(createItemAction, undefined);
+
+  // Which vocabulary feeds which field. Category and Home unit come from the
+  // MANAGED lists (/admin/categories, /admin/units) rather than from observed
+  // item values — sourcing them from DISTINCT Item would resurrect names an
+  // admin deliberately deleted and make the picker disagree with the screens
+  // that curate them. Make/model/UIC have no managed list, so their vocabulary
+  // is what the fleet already holds.
+  const optionsFor: Record<string, string[] | undefined> = {
+    make: suggestions.make,
+    model: suggestions.model,
+    deviceUIC: suggestions.deviceUIC,
+    homeUnit: units,
+    deviceCategory: categories,
+  };
 
   // Only reachable when the form was NOT opened from a search — that path
   // redirects to /items instead of returning, so it never renders this.
@@ -58,34 +76,25 @@ export function NewItemForm({
             <label className="label" htmlFor={name}>
               {label}{req && <span className="req"> *</span>}
             </label>
-            <input
-              id={name}
-              className="input"
-              name={name}
-              required={req}
-              defaultValue={
-                name === "serialNumber" ? serialNumber
-                : name === "deviceUIC" ? returnUic
-                : undefined
-              }
-              list={
-                name === "deviceCategory" ? "device-category-options"
-                : name === "homeUnit" ? "home-unit-options"
-                : undefined
-              }
-            />
+            {optionsFor[name] ? (
+              <SuggestCombobox
+                id={name}
+                name={name}
+                options={optionsFor[name]!}
+                required={req}
+                defaultValue={name === "deviceUIC" ? returnUic : ""}
+              />
+            ) : (
+              <input
+                id={name}
+                className="input"
+                name={name}
+                required={req}
+                defaultValue={name === "serialNumber" ? serialNumber : undefined}
+              />
+            )}
           </div>
         ))}
-        {/* Suggestions only — both fields stay free text. An unknown category is
-            registered on save (the CSV import can introduce one, so the form
-            must not be stricter); an unknown unit is not, because a Unit is
-            keyed on an abbreviation a typed full name does not carry. */}
-        <datalist id="device-category-options">
-          {categories.map((c) => <option key={c} value={c} />)}
-        </datalist>
-        <datalist id="home-unit-options">
-          {units.map((u) => <option key={u} value={u} />)}
-        </datalist>
         <div className="field col-span-2">
           <label className="label" htmlFor="notes">Notes</label>
           <textarea id="notes" className="textarea" name="notes" placeholder="Optional details about this item" />

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { requireAdmin, AuthError } from "@/lib/authz";
 import { listCategoryNames } from "@/modules/items/categories.service";
 import { listUnits } from "@/modules/items/units.service";
+import { listItemFieldSuggestions } from "@/modules/items/items.service";
 import { firstParam } from "@/lib/search-params";
 import { NewItemForm } from "./NewItemForm";
 
@@ -27,7 +28,11 @@ export default async function NewItemPage({
   const prefill = (firstParam(sp.serialNumber) ?? "").trim();
   const returnUic = (firstParam(sp.uic) ?? "").trim();
 
-  const [categories, units] = await Promise.all([listCategoryNames(), listUnits()]);
+  const [categories, units, suggestions] = await Promise.all([
+    listCategoryNames(),
+    listUnits(),
+    listItemFieldSuggestions(),
+  ]);
 
   return (
     <div className="stack">
@@ -42,6 +47,7 @@ export default async function NewItemPage({
         returnUic={returnUic}
         categories={categories}
         units={units.map((u) => u.fullName)}
+        suggestions={suggestions}
       />
     </div>
   );

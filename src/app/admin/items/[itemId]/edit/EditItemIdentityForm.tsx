@@ -1,6 +1,8 @@
 "use client";
 import { useActionState } from "react";
 import { updateItemIdentityAction } from "@/app/admin/actions/items";
+import { SuggestCombobox } from "@/components/SuggestCombobox";
+import type { ItemFieldSuggestions } from "@/modules/items/items.service";
 
 // The identity-correction form: make / model / serialNumber, exactly the fields
 // `itemIdentitySchema` declares.
@@ -24,9 +26,16 @@ const fields = [
   ["serialNumber", "Serial number"],
 ] as const;
 
-export function EditItemIdentityForm({ item }: { item: IdentityValues }) {
+export function EditItemIdentityForm({ item, suggestions }: { item: IdentityValues; suggestions: ItemFieldSuggestions }) {
   const [state, action, pending] = useActionState(updateItemIdentityAction, undefined);
   const saved = !!(state && "ok" in state && state.ok);
+
+  const optionsFor: Record<string, string[] | undefined> = {
+    make: suggestions.make,
+    model: suggestions.model,
+    // serialNumber is deliberately absent: it is an identity, not a vocabulary,
+    // and suggesting one would be actively wrong.
+  };
 
   return (
     <form action={action} className="card stack">
@@ -44,13 +53,23 @@ export function EditItemIdentityForm({ item }: { item: IdentityValues }) {
             <label className="label" htmlFor={`identity-${name}`}>
               {label}<span className="req"> *</span>
             </label>
-            <input
-              id={`identity-${name}`}
-              className="input"
-              name={name}
-              required
-              defaultValue={item[name]}
-            />
+            {optionsFor[name] ? (
+              <SuggestCombobox
+                id={`identity-${name}`}
+                name={name}
+                options={optionsFor[name]!}
+                required
+                defaultValue={item[name]}
+              />
+            ) : (
+              <input
+                id={`identity-${name}`}
+                className="input"
+                name={name}
+                required
+                defaultValue={item[name]}
+              />
+            )}
           </div>
         ))}
       </div>
