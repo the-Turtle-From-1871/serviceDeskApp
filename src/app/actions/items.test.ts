@@ -5,6 +5,7 @@ const requireAdmin = vi.fn();
 const updateItemFields = vi.fn();
 const createItem = vi.fn();
 const getItemBySerial = vi.fn();
+const deleteItem = vi.fn();
 const learnCategories = vi.fn();
 const revalidatePath = vi.fn();
 
@@ -20,6 +21,7 @@ vi.mock("@/modules/items/items.service", () => ({
   updateItemFields: (id: string, data: unknown, editor: unknown) => updateItemFields(id, data, editor),
   createItem: (data: unknown, createdById: string) => createItem(data, createdById),
   getItemBySerial: (serial: string) => getItemBySerial(serial),
+  deleteItem: (id: string) => deleteItem(id),
   setItemStatus: vi.fn(),
   analyzeImport: vi.fn(),
   commitImport: vi.fn(),
@@ -54,7 +56,7 @@ import { updateItemDetailsAction } from "./items";
 // its own action; it lives in the admin actions module but shares every mock
 // above, so it is covered here alongside the surface it is deliberately kept
 // out of.
-import { updateItemIdentityAction, createItemAction } from "@/app/admin/actions/items";
+import { updateItemIdentityAction, createItemAction, deleteItemAction } from "@/app/admin/actions/items";
 import { Prisma } from "@prisma/client";
 
 const ADMIN = { id: "a1", role: "ADMIN" as const, name: "Admin" };
@@ -83,6 +85,7 @@ beforeEach(() => {
   learnCategories.mockResolvedValue(1);
   createItem.mockResolvedValue({ id: "new-1", serialNumber: "ABC123" });
   getItemBySerial.mockResolvedValue(null);
+  deleteItem.mockResolvedValue(undefined);
 });
 
 describe("updateItemDetailsAction — role-gated fields", () => {
@@ -435,5 +438,33 @@ describe("createItemAction", () => {
     const result = await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "WABC01" }));
     expect(result.itemId).toBe("new-1");
     expect(result.searchHref).toBe("/items?q=ABC123");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// deleteItemAction — permanent delete. deleteItem() itself enforces NO
+// permissions (see its docstring in items.service.ts), so requireAdmin() here
+// is the ENTIRE authorization boundary. The point of these tests is not just
+// that a rejection throws (that would be true even if the guard ran after the
+// delete) but that the destructive call never happens when it rejects.
+// ---------------------------------------------------------------------------
+
+describe("deleteItemAction", () => {
+  it("calls requireAdmin BEFORE any write, and never calls deleteItem when it rejects", async () => {
+    requireAdmin.mockRejectedValue(new Error("FORBIDDEN"));
+    await expect(deleteItemAction(fd({ id: "item-1" }))).rejects.toThrow("FORBIDDEN");
+    expect(requireAdmin).toHaveBeenCalledTimes(1);
+    expect(deleteItem).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("deletes the item by id when requireAdmin resolves", async () => {
+    requireAdmin.mockResolvedValue(ADMIN);
+    const res = await deleteItemAction(fd({ id: "item-1" }));
+    expect(res).toBeUndefined();
+    expect(deleteItem).toHaveBeenCalledTimes(1);
+    expect(deleteItem).toHaveBeenCalledWith("item-1");
+    expect(revalidatePath).toHaveBeenCalledWith("/items");
+    expect(revalidatePath).toHaveBeenCalledWith("/admin/analytics");
   });
 });

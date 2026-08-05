@@ -158,7 +158,13 @@ export function ItemSelectTable({
             </form>
           )}
           {isAdmin && (
-            <DeleteItemButton id={it.id} make={it.make} model={it.model} serialNumber={it.serialNumber} />
+            <DeleteItemButton
+              id={it.id}
+              make={it.make}
+              model={it.model}
+              serialNumber={it.serialNumber}
+              holderName={it.holderName}
+            />
           )}
         </div>
       </td>

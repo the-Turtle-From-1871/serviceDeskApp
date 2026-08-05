@@ -13,6 +13,7 @@ import {
   deleteItem,
 } from "./items.service";
 import { createTransfer, getTransferByReceiptNumber } from "@/modules/transfers/transfers.service";
+import { processReturn } from "@/modules/returns/returns.service";
 
 let adminId: string;
 const base = { deviceName: "Radio", homeUnit: undefined, notes: undefined } as const;
@@ -189,6 +190,40 @@ test("deleting an item leaves its hand receipts intact", async () => {
   expect(receipt?.lines[0].make).toBe("Dell");
   expect(receipt?.lines[0].model).toBe("XPS");
   expect(receipt?.lines[0].items[0].serialNumber).toBe("SN-KEEP");
+});
+
+// The worst outcome this feature could produce: a receipt becoming impossible
+// to close because someone deleted the device it was issued against.
+// TransferItem.itemId -> null (ON DELETE SET NULL) must not stop
+// processReturn from operating on the detached line — it works off
+// TransferItem, never joins back to Item.
+test("a return still closes the receipt after its item has been deleted", async () => {
+  const item = await createItem({ ...base, make: "Dell", model: "XPS", serialNumber: "SN-RETURN" }, adminId);
+  const transfer = await createTransfer({
+    itemIds: [item.id],
+    lines: [],
+    sender: { isDcsim: true, name: "DCSIM Desk" },
+    receiver: { isDcsim: false, name: "Doe, Jane", rank: "SGT", unit: "A Co", contact: "(808)-555-0101", email: "jane@x.co" },
+    receiverSignature: "data:image/png;base64,iVBORw0KGgo=",
+    createdByUserId: adminId,
+  });
+
+  await deleteItem(item.id);
+
+  const detachedLine = await prisma.transferItem.findFirstOrThrow();
+  expect(detachedLine.itemId).toBeNull();
+
+  const res = await processReturn({
+    receiptNumber: transfer.receiptNumber,
+    selectedItemIds: [detachedLine.id],
+    signature: "data:image/png;base64,iVBORw0KGgo=",
+    processedBy: { id: adminId, name: "Admin", email: "a@x.co" },
+  });
+  if ("error" in res) throw new Error(res.error);
+  expect(res.plan.kind).toBe("FULL");
+
+  const after = await getTransferByReceiptNumber(transfer.receiptNumber);
+  expect(after?.status).toBe("CLOSED");
 });
 
 test("deleteItem cascades the item's own history", async () => {

@@ -1406,6 +1406,25 @@ rejection can now cost every recipient the notice. Switching the copies off is
 defaults"); moving them to BCC would be a behaviour change requiring a decision,
 since the reply-all thread is the point of the change.
 
+**11. Deleting an item currently signed out on an open hand receipt is
+permitted, by design — warn, don't block.** *Accepted product decision.*
+`deleteItemAction` (`src/app/admin/actions/items.ts`) does not check custody
+before calling `deleteItem()`, and `deleteItem()` itself enforces no business
+rule beyond the admin gate — see [§2](#2-authorization). The receipt keeps its
+own record (`TransferItem.itemId` is nullable with `ON DELETE SET NULL`, so
+the line detaches but its serial/make/model snapshot and the transfer's
+signatures render exactly as issued), and `processReturn` still operates on
+that detached line and can still close the receipt. What is lost is on the
+**item** side: the property-book row and its `/i/<id>` page disappear, so a
+printed QR label already affixed to that physical device stops resolving to
+anything, and a later MDM import matching on that serial creates a brand-new
+item row with a new id — the deleted row's audit and edit history does not
+carry forward, because it was cascade-deleted with the row it belonged to.
+The mitigation is UI-only: `DeleteItemButton` shows a prominent warning naming
+the current holder (from `ItemRow.holderName`, already derived server-side —
+no added query) before an admin can confirm, but nothing server-side refuses
+or even logs the deletion of a signed-out item.
+
 ---
 
 ## Keeping this current
