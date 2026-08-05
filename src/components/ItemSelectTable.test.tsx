@@ -71,3 +71,62 @@ describe("ItemSelectTable — empty state", () => {
     expect(screen.getByText(/No items match/i)).toBeTruthy();
   });
 });
+
+// Regression coverage for the closed-<dialog> layout bug (fix round 1):
+// `dialog:not([open]) { display: none }` is a UA type-selector rule, which any
+// author class selector (.card => display:block, .stack => display:flex)
+// outranks regardless of specificity within the class — so a closed <dialog>
+// carrying either class renders anyway, full-size, on top of the row's
+// buttons. jsdom has no layout engine and cannot measure the resulting
+// 375x375 box or the intercepted click a real browser catches; what it CAN
+// assert is the structural invariant that prevents it: the styling classes
+// live on a wrapper INSIDE the dialog, never on the <dialog> element itself.
+describe("ItemSelectTable — delete dialog structure (closed-dialog layout regression)", () => {
+  const ROW = {
+    id: "item-1",
+    deviceName: "Laptop 1",
+    make: "Dell",
+    model: "L5420",
+    serialNumber: "SN1",
+    status: "ACTIVE" as const,
+    auditState: null,
+    deviceUIC: null,
+    deviceCategory: null,
+    readiness: "UNTRIAGED" as const,
+    holderName: null,
+  };
+
+  function renderRow() {
+    return render(
+      <ItemSelectTable
+        items={[ROW]}
+        isAdmin
+        q=""
+        sort={null}
+        dir="asc"
+        page={1}
+        totalPages={1}
+        sortKeys={[]}
+        uic=""
+        uics={[]}
+        categories={[]}
+      />,
+    );
+  }
+
+  it("puts the dialog's styling classes on an inner wrapper, never on <dialog> itself", () => {
+    const { container } = renderRow();
+    const dialog = container.querySelector("dialog");
+    expect(dialog).not.toBeNull();
+    // The whole bug was an author class (.card / .stack, from globals.css)
+    // landing directly on the <dialog>, which beats the UA's
+    // `dialog:not([open]) { display: none }` and renders it while closed.
+    expect(dialog!.getAttribute("class")).toBeNull();
+    // The card styling must still exist, just one level in.
+    const wrapper = dialog!.querySelector(":scope > .card.stack");
+    expect(wrapper).not.toBeNull();
+    // And the dialog content (e.g. the confirmation copy) lives inside that
+    // wrapper, not as a direct child of <dialog> alongside it.
+    expect(wrapper!.textContent).toMatch(/Delete this item permanently/i);
+  });
+});
