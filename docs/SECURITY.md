@@ -397,10 +397,20 @@ this far. A logged-in technician — often the one who built the very receipt,
 and on the CC line of the email carrying the link — or a visitor who already
 holds a valid unlock cookie returns earlier, at the existing
 `shouldAllowPublic` check, and is served the page with `?k=<token>` still
-sitting in the address bar, untouched. For the population that IS anonymous
-and PIN-locked: a verified token redirects to the same URL with `k` stripped
-(so it does not stay in the address bar to be copied off a shared screen or
-carried by the PDF download link) and sets a grant cookie —
+sitting in the address bar for the rest of that visit. **That population is
+covered by a second control instead:** `next.config.ts` sets
+`Referrer-Policy: no-referrer` on `/receipts/*`, the same rule already used
+for the reset-password token and for the identical reason — a raw,
+non-expiring capability sitting in the URL must not ride along in a `Referer`
+header to any subresource or outbound link the page renders. `/i/*` carries no
+token and is deliberately not covered. So the two controls are complementary,
+not overlapping: the redirect below removes the token from the address bar
+where the anonymous path allows it, and `Referrer-Policy` keeps whatever is
+left in the address bar — on every path, anonymous or not — from leaking
+onward. For the population that IS anonymous and PIN-locked: a verified token
+also redirects to the same URL with `k` stripped (so it does not stay in the
+address bar to be copied off a shared screen or carried by the PDF download
+link) and sets a grant cookie —
 `__Secure-pub_receipt` / `pub_receipt`, `httpOnly`, `secure` in production,
 `sameSite: "lax"`, `path: "/"` — naming that one receipt number. The grant
 covers exactly the receipt page and its PDF and nothing beyond: every check
@@ -464,7 +474,8 @@ skipped with a server-side log rather than emailing a dead relative URL.
 no-referrer` on `/reset-password` and `/forgot-password` (`next.config.ts`), plus
 `history.replaceState` scrubbing `?token=…` from the address bar on mount
 (`ResetPasswordForm.tsx`). The hidden form field still carries it, so submission
-is unaffected.
+is unaffected. `next.config.ts` carries the same `Referrer-Policy` rule for
+`/receipts/*`, protecting the receipt-link token — see [§3](#3-public-surface--the-pin-gate).
 
 **Email and password are Zod-validated before hashing**, and email content is
 HTML-escaped by `escapeHtml()` in `src/lib/email.ts` (which escapes `'` too).

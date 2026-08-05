@@ -125,7 +125,10 @@ export const WATCHED = [
   // strip in buildRawEmail is the only thing stopping caller-supplied text from
   // forging headers, and it is one deleted regex away from being gone.
   [/^src\/lib\/gmail-oauth-email\.ts$/, "outbound mail header injection guard + the OAuth send credential (§5, §6)"],
-  [/^next\.config\.ts$/, "security response headers (§4)"],
+  // Already watched for the reset-token Referrer-Policy (§4); this branch adds
+  // the identical control for the receipt-link token (§3) to the same file —
+  // the reason is widened rather than duplicating the regex entry.
+  [/^next\.config\.ts$/, "security response headers: reset-token + receipt-link-token Referrer-Policy (§3, §4)"],
   [/^\.github\/workflows\/ci\.yml$/, "the CI security gates (§11)"],
   // Not deployed code — local Windows tooling. Watched anyway because it holds a
   // Google OAuth client secret, an account-wide Vercel API token and a deploy hook

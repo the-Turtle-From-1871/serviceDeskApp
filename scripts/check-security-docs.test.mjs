@@ -33,6 +33,11 @@ describe("check-security-docs WATCHED list", () => {
     // The scoped receipt-link bypass and the shared crypto primitives under it.
     "src/lib/receipt-link-token.ts",
     "src/lib/web-hmac.ts",
+    // Already watched pre-branch (for the reset-token Referrer-Policy), but
+    // this branch adds the receipt-link token's own Referrer-Policy rule to
+    // the same file — pinned here so a regression dropping either rule (or
+    // the entry itself) doesn't slip through unnoticed on this branch's PR.
+    "next.config.ts",
   ];
 
   it.each(introducedThisBranch)("covers %s", (path) => {
