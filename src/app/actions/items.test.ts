@@ -5,6 +5,7 @@ const requireAdmin = vi.fn();
 const updateItemFields = vi.fn();
 const createItem = vi.fn();
 const getItemBySerial = vi.fn();
+const deleteItem = vi.fn();
 const learnCategories = vi.fn();
 const revalidatePath = vi.fn();
 
@@ -20,6 +21,7 @@ vi.mock("@/modules/items/items.service", () => ({
   updateItemFields: (id: string, data: unknown, editor: unknown) => updateItemFields(id, data, editor),
   createItem: (data: unknown, createdById: string) => createItem(data, createdById),
   getItemBySerial: (serial: string) => getItemBySerial(serial),
+  deleteItem: (id: string) => deleteItem(id),
   setItemStatus: vi.fn(),
   analyzeImport: vi.fn(),
   commitImport: vi.fn(),
@@ -48,18 +50,13 @@ vi.mock("@/modules/items/items.errors", () => ({
   },
 }));
 vi.mock("next/cache", () => ({ revalidatePath: (p: string) => revalidatePath(p) }));
-vi.mock("next/navigation", () => ({
-  redirect: (url: string) => {
-    throw Object.assign(new Error(`NEXT_REDIRECT:${url}`), { digest: "NEXT_REDIRECT" });
-  },
-}));
 
 import { updateItemDetailsAction } from "./items";
 // The admin edit page's separate identity form (make/model/serialNumber) has
 // its own action; it lives in the admin actions module but shares every mock
 // above, so it is covered here alongside the surface it is deliberately kept
 // out of.
-import { updateItemIdentityAction, createItemAction } from "@/app/admin/actions/items";
+import { updateItemIdentityAction, createItemAction, deleteItemAction } from "@/app/admin/actions/items";
 import { Prisma } from "@prisma/client";
 
 const ADMIN = { id: "a1", role: "ADMIN" as const, name: "Admin" };
@@ -88,6 +85,7 @@ beforeEach(() => {
   learnCategories.mockResolvedValue(1);
   createItem.mockResolvedValue({ id: "new-1", serialNumber: "ABC123" });
   getItemBySerial.mockResolvedValue(null);
+  deleteItem.mockResolvedValue(undefined);
 });
 
 describe("updateItemDetailsAction — role-gated fields", () => {
@@ -384,38 +382,38 @@ describe("createItemAction", () => {
   it("returns to the filtered list when the form came from a search", async () => {
     requireAdmin.mockResolvedValue(ADMIN);
     createItem.mockResolvedValue({ id: "new-1", serialNumber: "ABC123" });
-    await expect(
-      createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "" })),
-    ).rejects.toThrow("NEXT_REDIRECT:/items?q=ABC123");
+    const result = await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "" }));
+    expect(result.itemId).toBe("new-1");
+    expect(result.searchHref).toBe("/items?q=ABC123");
   });
 
   it("carries the unit filter back with it when the new item matches it", async () => {
     requireAdmin.mockResolvedValue(ADMIN);
     createItem.mockResolvedValue({ id: "new-1", serialNumber: "ABC123", deviceUIC: "WABC01" });
-    await expect(
-      createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "WABC01" })),
-    ).rejects.toThrow("NEXT_REDIRECT:/items?q=ABC123&uic=WABC01");
+    const result = await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "WABC01" }));
+    expect(result.itemId).toBe("new-1");
+    expect(result.searchHref).toBe("/items?q=ABC123&uic=WABC01");
   });
 
   // Concatenation would produce ?q=A&B C — a different search, matching nothing.
   it("percent-encodes a serial containing URL metacharacters", async () => {
     requireAdmin.mockResolvedValue(ADMIN);
     createItem.mockResolvedValue({ id: "new-1", serialNumber: "A&B C#1" });
-    await expect(
-      createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1" })),
-    ).rejects.toThrow("NEXT_REDIRECT:/items?q=A%26B+C%231");
+    const result = await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1" }));
+    expect(result.itemId).toBe("new-1");
+    expect(result.searchHref).toBe("/items?q=A%26B+C%231");
   });
 
   it("does NOT redirect when the form was opened directly", async () => {
     requireAdmin.mockResolvedValue(ADMIN);
-    await expect(createItemAction(undefined, fd(NEW_ITEM))).resolves.toEqual({ itemId: "new-1" });
+    const result = await createItemAction(undefined, fd(NEW_ITEM));
+    expect(result.itemId).toBe("new-1");
+    expect(result.searchHref).toBeUndefined();
   });
 
-  // A collision returns early in the try/catch regardless of where redirect()
-  // sits relative to it — this test proves the collision surfaces its error
-  // rather than the redirect swallowing past it. It is the success-path tests
-  // above (asserting NEXT_REDIRECT is thrown) that prove redirect() actually
-  // sits outside the try/catch.
+  // A collision returns early in the try/catch and is surfaced as an error,
+  // while the success paths (which assert searchHref is set) prove that the
+  // link is only built when the item is successfully created.
   it("does NOT redirect when the serial collided", async () => {
     requireAdmin.mockResolvedValue(ADMIN);
     createItem.mockRejectedValue(
@@ -429,16 +427,44 @@ describe("createItemAction", () => {
   it("drops the unit filter from the redirect when the new item's deviceUIC is null", async () => {
     requireAdmin.mockResolvedValue(ADMIN);
     createItem.mockResolvedValue({ id: "new-1", serialNumber: "ABC123", deviceUIC: null });
-    await expect(
-      createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "WABC01" })),
-    ).rejects.toThrow("NEXT_REDIRECT:/items?q=ABC123");
+    const result = await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "WABC01" }));
+    expect(result.itemId).toBe("new-1");
+    expect(result.searchHref).toBe("/items?q=ABC123");
   });
 
   it("drops the unit filter from the redirect when the new item's deviceUIC differs from it", async () => {
     requireAdmin.mockResolvedValue(ADMIN);
     createItem.mockResolvedValue({ id: "new-1", serialNumber: "ABC123", deviceUIC: "WXYZ02" });
-    await expect(
-      createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "WABC01" })),
-    ).rejects.toThrow("NEXT_REDIRECT:/items?q=ABC123");
+    const result = await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "WABC01" }));
+    expect(result.itemId).toBe("new-1");
+    expect(result.searchHref).toBe("/items?q=ABC123");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// deleteItemAction — permanent delete. deleteItem() itself enforces NO
+// permissions (see its docstring in items.service.ts), so requireAdmin() here
+// is the ENTIRE authorization boundary. The point of these tests is not just
+// that a rejection throws (that would be true even if the guard ran after the
+// delete) but that the destructive call never happens when it rejects.
+// ---------------------------------------------------------------------------
+
+describe("deleteItemAction", () => {
+  it("calls requireAdmin BEFORE any write, and never calls deleteItem when it rejects", async () => {
+    requireAdmin.mockRejectedValue(new Error("FORBIDDEN"));
+    await expect(deleteItemAction(fd({ id: "item-1" }))).rejects.toThrow("FORBIDDEN");
+    expect(requireAdmin).toHaveBeenCalledTimes(1);
+    expect(deleteItem).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("deletes the item by id when requireAdmin resolves", async () => {
+    requireAdmin.mockResolvedValue(ADMIN);
+    const res = await deleteItemAction(fd({ id: "item-1" }));
+    expect(res).toBeUndefined();
+    expect(deleteItem).toHaveBeenCalledTimes(1);
+    expect(deleteItem).toHaveBeenCalledWith("item-1");
+    expect(revalidatePath).toHaveBeenCalledWith("/items");
+    expect(revalidatePath).toHaveBeenCalledWith("/admin/analytics");
   });
 });

@@ -2,6 +2,8 @@
 import { useActionState } from "react";
 import Link from "next/link";
 import { updateItemAction } from "@/app/admin/actions/items";
+import { SuggestCombobox } from "@/components/SuggestCombobox";
+import type { ItemFieldSuggestions } from "@/modules/items/items.service";
 
 // Exactly the fields `adminItemEditSchema` declares. make/model/serialNumber
 // are NOT editable here (or on the item detail card) — an item's identity is
@@ -22,16 +24,32 @@ const fields = [
   ["homeUnit", "Home unit", false],
   ["deviceUIC", "Unit (UIC)", false],
   // Category groups the fleet in analytics and filters the items table. Free
-  // text so a new class of device needs no migration; the datalist below just
+  // text so a new class of device needs no migration; the combobox below just
   // nudges toward existing spellings.
   ["deviceCategory", "Category", false],
   ["currentUserEmail", "Current user email", false],
   ["currentPosition", "Current position", false],
 ] as const;
 
-export function EditItemForm({ item, categories = [] }: { item: ItemValues; categories?: string[] }) {
+export function EditItemForm({
+  item,
+  categories = [],
+  units = [],
+  suggestions,
+}: {
+  item: ItemValues;
+  categories?: string[];
+  units?: string[];
+  suggestions: ItemFieldSuggestions;
+}) {
   const [state, action, pending] = useActionState(updateItemAction, undefined);
   const saved = !!(state && "ok" in state && state.ok);
+
+  const optionsFor: Record<string, string[] | undefined> = {
+    homeUnit: units,
+    deviceUIC: suggestions.deviceUIC,
+    deviceCategory: categories,
+  };
 
   return (
     <form action={action} className="card stack">
@@ -42,35 +60,37 @@ export function EditItemForm({ item, categories = [] }: { item: ItemValues; cate
             <label className="label" htmlFor={name}>
               {label}{req && <span className="req"> *</span>}
             </label>
-            <input
-              id={name}
-              className="input"
-              name={name}
-              // NOT type="email", deliberately. The CSV importer copies
-              // `assignedUser` into currentUserEmail verbatim with no email
-              // validation (import.ts), so plenty of live rows hold a name like
-              // "SGT Smith". type="email" makes the browser refuse to submit a
-              // non-blank invalid value, which would block saving Device Name,
-              // UIC, Category or Notes on exactly the badly-imported rows this
-              // page exists to clean up. The server schema is `clearable` and
-              // does not validate an address either — the client must not be
-              // stricter than the thing that stores it. inputMode still gets
-              // the right keyboard on a phone.
-              inputMode={name === "currentUserEmail" ? "email" : undefined}
-              placeholder={name === "currentUserEmail" ? "e.g. jane.doe@unit.mil" : undefined}
-              required={req}
-              defaultValue={item[name] ?? ""}
-              list={name === "deviceCategory" ? "device-category-options" : undefined}
-            />
+            {optionsFor[name] ? (
+              <SuggestCombobox
+                id={name}
+                name={name}
+                options={optionsFor[name]!}
+                required={req}
+                defaultValue={item[name] ?? ""}
+              />
+            ) : (
+              <input
+                id={name}
+                className="input"
+                name={name}
+                // NOT type="email", deliberately. The CSV importer copies
+                // `assignedUser` into currentUserEmail verbatim with no email
+                // validation (import.ts), so plenty of live rows hold a name like
+                // "SGT Smith". type="email" makes the browser refuse to submit a
+                // non-blank invalid value, which would block saving Device Name,
+                // UIC, Category or Notes on exactly the badly-imported rows this
+                // page exists to clean up. The server schema is `clearable` and
+                // does not validate an address either — the client must not be
+                // stricter than the thing that stores it. inputMode still gets
+                // the right keyboard on a phone.
+                inputMode={name === "currentUserEmail" ? "email" : undefined}
+                placeholder={name === "currentUserEmail" ? "e.g. jane.doe@unit.mil" : undefined}
+                required={req}
+                defaultValue={item[name] ?? ""}
+              />
+            )}
           </div>
         ))}
-        {/* Suggestions only — the field stays free text, so a new category can
-            be typed without anyone editing code. */}
-        <datalist id="device-category-options">
-          {categories.map((c) => (
-            <option key={c} value={c} />
-          ))}
-        </datalist>
         <div className="field col-span-2">
           <label className="label" htmlFor="notes">Notes</label>
           <textarea id="notes" className="textarea" name="notes" defaultValue={item.notes ?? ""} />

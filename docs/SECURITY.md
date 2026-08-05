@@ -207,8 +207,29 @@ respectively, and must stay unforgeable by hand. Widening that enum is a
 security change, not a feature toggle — which is why the file is on the
 `check-security-docs` watch list.
 
+**Permanent item deletion is `requireAdmin()`-gated and has no undo.**
+`deleteItemAction` (`src/app/admin/actions/items.ts`) is the sole caller of
+`deleteItem()` (`src/modules/items/items.service.ts`), which enforces no
+authorization of its own by design — the Server Action is the entire boundary.
+Offered on `/items` next to Retire, for a row that should never have existed
+(a duplicate from a mistyped serial, a bad CSV row); Retire remains the
+reversible option for a device that is simply out of service. **It does NOT
+delete receipt evidence:** `TransferItem.itemId` is nullable
+(`ON DELETE SET NULL`), so deleting an item detaches — never cascades to — any
+`TransferItem` row pointing at it. Every hand receipt keeps the serial number,
+make and model it was issued with (snapshotted on `TransferLine`/`TransferItem`
+at creation, not looked up from `Item`) and its signatures, unaffected. A
+double-submit or two admins racing the same row surfaces as Prisma `P2025`
+(already gone) and is treated as the requested outcome, not an error. The
+item's own `ServiceQueueItem`/`ItemEdit`/`ItemAudit` rows ARE cascade-deleted
+(`ON DELETE CASCADE`) — they describe the item, which is gone. `/i/<id>`'s
+admin-only suggestion vocabularies (units/categories/make-model-UIC
+type-ahead) stay behind that page's existing `isAdmin` gate, so this feature
+does not widen the public, unauthenticated surface. *Last reviewed: 2026-08-04.*
+
 **Admin-only capabilities:** returns, user management, named signatures,
-service-queue mutations, receipt timers, audits, analytics, category management.
+service-queue mutations, receipt timers, audits, analytics, category
+management, permanent item deletion.
 
 **An admin cannot deactivate or demote themselves.** Both take effect live, so
 either would revoke their own access. `src/app/admin/actions/users.ts:24,35`
@@ -1384,6 +1405,25 @@ rejection can now cost every recipient the notice. Switching the copies off is
 `RECEIPT_CC_EMAILS=""` (deliberately distinct from unset, which means "use the
 defaults"); moving them to BCC would be a behaviour change requiring a decision,
 since the reply-all thread is the point of the change.
+
+**11. Deleting an item currently signed out on an open hand receipt is
+permitted, by design — warn, don't block.** *Accepted product decision.*
+`deleteItemAction` (`src/app/admin/actions/items.ts`) does not check custody
+before calling `deleteItem()`, and `deleteItem()` itself enforces no business
+rule beyond the admin gate — see [§2](#2-authorization). The receipt keeps its
+own record (`TransferItem.itemId` is nullable with `ON DELETE SET NULL`, so
+the line detaches but its serial/make/model snapshot and the transfer's
+signatures render exactly as issued), and `processReturn` still operates on
+that detached line and can still close the receipt. What is lost is on the
+**item** side: the property-book row and its `/i/<id>` page disappear, so a
+printed QR label already affixed to that physical device stops resolving to
+anything, and a later MDM import matching on that serial creates a brand-new
+item row with a new id — the deleted row's audit and edit history does not
+carry forward, because it was cascade-deleted with the row it belonged to.
+The mitigation is UI-only: `DeleteItemButton` shows a prominent warning naming
+the current holder (from `ItemRow.holderName`, already derived server-side —
+no added query) before an admin can confirm, but nothing server-side refuses
+or even logs the deletion of a signed-out item.
 
 ---
 

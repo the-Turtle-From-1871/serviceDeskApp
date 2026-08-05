@@ -9,7 +9,11 @@ import {
   updateItemFields,
   retireItem,
   setItemStatus,
+  listItemFieldSuggestions,
+  deleteItem,
 } from "./items.service";
+import { createTransfer, getTransferByReceiptNumber } from "@/modules/transfers/transfers.service";
+import { processReturn } from "@/modules/returns/returns.service";
 
 let adminId: string;
 const base = { deviceName: "Radio", homeUnit: undefined, notes: undefined } as const;
@@ -130,4 +134,109 @@ test("getItemBySerial finds an item by serial REGARDLESS of casing (citext) and 
 
 test("getItemBySerial returns null for a serial that does not exist", async () => {
   expect(await getItemBySerial("NO-SUCH-SERIAL")).toBeNull();
+});
+
+test("listItemFieldSuggestions returns distinct values, most-used first", async () => {
+  await createItem({ ...base, make: "Dell", model: "Latitude 5420", serialNumber: "S1", deviceUIC: "WPME10" }, adminId);
+  await createItem({ ...base, make: "Dell", model: "Latitude 5420", serialNumber: "S2", deviceUIC: "WPME10" }, adminId);
+  await createItem({ ...base, make: "HP", model: "EliteBook", serialNumber: "S3", deviceUIC: "WPME11" }, adminId);
+
+  const s = await listItemFieldSuggestions();
+
+  // Dell appears twice, HP once — frequency decides the order, so the make an
+  // admin actually logs is the first suggestion rather than the alphabetical one.
+  expect(s.make).toEqual(["Dell", "HP"]);
+  expect(s.model).toEqual(["Latitude 5420", "EliteBook"]);
+  expect(s.deviceUIC).toEqual(["WPME10", "WPME11"]);
+});
+
+test("listItemFieldSuggestions omits blank and whitespace-only values", async () => {
+  await createItem({ ...base, make: "Dell", model: "XPS", serialNumber: "S1", deviceUIC: "  " }, adminId);
+  await createItem({ ...base, make: "Dell", model: "XPS", serialNumber: "S2" }, adminId);
+
+  const s = await listItemFieldSuggestions();
+
+  expect(s.deviceUIC).toEqual([]);
+  expect(s.make).toEqual(["Dell"]);
+});
+
+test("deleteItem removes the item", async () => {
+  const item = await createItem({ ...base, make: "Dell", model: "XPS", serialNumber: "S1" }, adminId);
+  await deleteItem(item.id);
+  expect(await getItem(item.id)).toBeNull();
+});
+
+test("deleting an item leaves its hand receipts intact", async () => {
+  const item = await createItem({ ...base, make: "Dell", model: "XPS", serialNumber: "SN-KEEP" }, adminId);
+  const transfer = await createTransfer({
+    itemIds: [item.id],
+    lines: [],
+    sender: { isDcsim: true, name: "DCSIM Desk" },
+    receiver: { isDcsim: false, name: "Doe, Jane", rank: "SGT", unit: "A Co", contact: "(808)-555-0101", email: "jane@x.co" },
+    receiverSignature: "data:image/png;base64,iVBORw0KGgo=",
+    createdByUserId: adminId,
+  });
+
+  await deleteItem(item.id);
+
+  // The line survives, detached, with its serial snapshot untouched.
+  const rows = await prisma.transferItem.findMany();
+  expect(rows).toHaveLength(1);
+  expect(rows[0].itemId).toBeNull();
+  expect(rows[0].serialNumber).toBe("SN-KEEP");
+
+  // And the receipt still renders everything the DA 2062 prints.
+  const receipt = await getTransferByReceiptNumber(transfer.receiptNumber);
+  expect(receipt?.lines[0].make).toBe("Dell");
+  expect(receipt?.lines[0].model).toBe("XPS");
+  expect(receipt?.lines[0].items[0].serialNumber).toBe("SN-KEEP");
+});
+
+// The worst outcome this feature could produce: a receipt becoming impossible
+// to close because someone deleted the device it was issued against.
+// TransferItem.itemId -> null (ON DELETE SET NULL) must not stop
+// processReturn from operating on the detached line — it works off
+// TransferItem, never joins back to Item.
+test("a return still closes the receipt after its item has been deleted", async () => {
+  const item = await createItem({ ...base, make: "Dell", model: "XPS", serialNumber: "SN-RETURN" }, adminId);
+  const transfer = await createTransfer({
+    itemIds: [item.id],
+    lines: [],
+    sender: { isDcsim: true, name: "DCSIM Desk" },
+    receiver: { isDcsim: false, name: "Doe, Jane", rank: "SGT", unit: "A Co", contact: "(808)-555-0101", email: "jane@x.co" },
+    receiverSignature: "data:image/png;base64,iVBORw0KGgo=",
+    createdByUserId: adminId,
+  });
+
+  await deleteItem(item.id);
+
+  const detachedLine = await prisma.transferItem.findFirstOrThrow();
+  expect(detachedLine.itemId).toBeNull();
+
+  const res = await processReturn({
+    receiptNumber: transfer.receiptNumber,
+    selectedItemIds: [detachedLine.id],
+    signature: "data:image/png;base64,iVBORw0KGgo=",
+    processedBy: { id: adminId, name: "Admin", email: "a@x.co" },
+  });
+  if ("error" in res) throw new Error(res.error);
+  expect(res.plan.kind).toBe("FULL");
+
+  const after = await getTransferByReceiptNumber(transfer.receiptNumber);
+  expect(after?.status).toBe("CLOSED");
+});
+
+test("deleteItem cascades the item's own history", async () => {
+  const item = await createItem({ ...base, make: "Dell", model: "XPS", serialNumber: "S1" }, adminId);
+  // ItemEdit stores a JSON diff array plus a denormalized editor name — there
+  // are no field/oldValue/newValue columns.
+  await prisma.itemEdit.create({
+    data: {
+      itemId: item.id,
+      editedByName: "Admin",
+      changes: [{ field: "notes", from: null, to: "x" }],
+    },
+  });
+  await deleteItem(item.id);
+  expect(await prisma.itemEdit.count()).toBe(0);
 });

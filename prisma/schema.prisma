@@ -332,8 +332,15 @@ model TransferItem {
   id             String       @id @default(cuid())
   line           TransferLine @relation(fields: [transferLineId], references: [id], onDelete: Cascade)
   transferLineId String
-  item           Item         @relation(fields: [itemId], references: [id])
-  itemId         String
+  // NULLABLE, ON DELETE SET NULL — deleting an item DETACHES its receipt lines
+  // rather than being refused (this was RESTRICT) or destroying them (Cascade).
+  // Receipts survive intact because they never join Item: the page and the DA
+  // 2062 render `serialNumber` here plus make/model on TransferLine, all
+  // snapshots taken when the receipt was created. processReturn selects on
+  // `id`, not `itemId`, so a detached row is still returnable and a receipt
+  // cannot become un-closable because someone deleted a device.
+  item           Item?        @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  itemId         String?
   serialNumber   String
   returnedAt     DateTime?
 

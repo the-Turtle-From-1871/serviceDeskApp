@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getItemWithCreator } from "@/modules/items/items.service";
+import { getItemWithCreator, listItemFieldSuggestions } from "@/modules/items/items.service";
 import { readinessForItem } from "@/modules/items/readiness.query";
 import { READINESS_LABEL } from "@/modules/items/readiness";
 import { MarkReadyButton } from "@/components/MarkReadyButton";
@@ -30,7 +30,7 @@ import { DueBadge } from "@/components/DueBadge";
 export default async function PublicItemPage({ params }: { params: Promise<{ itemId: string }> }) {
   const { itemId } = await params;
   // All fetches depend only on itemId (known up front), so run them together.
-  const [item, user, receipts, currentHolder, qr, service, units, lastEdit, audits, readiness] = await Promise.all([
+  const [item, user, receipts, currentHolder, qr, service, lastEdit, audits, readiness] = await Promise.all([
     getItemWithCreator(itemId),
     getCurrentUser(),
     listReceiptsForItem(itemId),
@@ -45,7 +45,6 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
     // (unstable_cache in qr.ts) — the QR for an item id never changes.
     itemQrDataUrl(itemId).catch((e) => { console.error("[item-page] QR generation failed:", e); return ""; }),
     getServiceRequestForItem(itemId),
-    listUnits(),
     prisma.itemEdit.findFirst({ where: { itemId }, orderBy: { createdAt: "desc" } }),
     getAuditsForItem(itemId),
     // Readiness is derived, and deliberately from the SAME SQL the dashboard
@@ -59,13 +58,18 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
   if (!item) notFound();
   const loggedIn = !!user && user.isActive;
   const isAdmin = user?.role === "ADMIN";
-  // Both are admin-only inputs to the cards below, so neither query runs for
+  // All admin-only inputs to the cards below, so none of these queries run for
   // anyone else; when they do run they run together, not one after the other.
-  const [signatures, categories] = await Promise.all([
+  // `/i/<id>` is public — an unguarded fetch here would ship the unit and UIC
+  // catalogue to a logged-out visitor even though the fields that use them are
+  // admin-only.
+  const [signatures, units, categories, suggestions] = await Promise.all([
     isAdmin && item.status === "ACTIVE" ? listSignatures(user!.id) : [],
+    isAdmin ? listUnits() : [],
     // The picker offers the MANAGED vocabulary, not whatever strings happen to
     // be on items — same source as the admin edit page.
     isAdmin ? listCategoryNames() : [],
+    isAdmin ? listItemFieldSuggestions() : { make: [], model: [], deviceUIC: [] },
   ]);
   const now = new Date();
   const auditLightState = item.status === "RETIRED" ? null : auditState(audits[0]?.createdAt ?? null, now);
@@ -125,6 +129,7 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
             isAdmin={isAdmin}
             units={isAdmin ? units : []}
             categories={categories}
+            suggestions={suggestions}
             dateLogged={formatDateTimeHST(item.createdAt)}
             loggedBy={item.createdBy ? formatParty({ isDcsim: false, name: item.createdBy.name, rank: item.createdBy.rank, unit: null }) : "—"}
             handReceiptHolder={

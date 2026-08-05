@@ -1,6 +1,8 @@
 "use client";
 import { useActionState, useState } from "react";
 import { updateItemDetailsAction } from "@/app/actions/items";
+import { SuggestCombobox } from "@/components/SuggestCombobox";
+import type { ItemFieldSuggestions } from "@/modules/items/items.service";
 
 export type ItemDetailsValues = {
   id: string;
@@ -24,6 +26,9 @@ type Props = {
   // The MANAGED device-category vocabulary, for the picker below. Suggestions
   // only — Item.deviceCategory stays free text on purpose.
   categories: string[];
+  // The free-text catalogue vocabularies (make/model/UIC), for the same
+  // suggestion mechanism. Admin-only, like `units` and `categories` above.
+  suggestions: ItemFieldSuggestions;
   // Pre-formatted on the server so this component stays free of date/party logic.
   dateLogged: string;
   loggedBy: string;
@@ -33,7 +38,7 @@ type Props = {
 
 const dash = <span className="subtle">—</span>;
 
-export function ItemDetailsCard({ item, isAdmin, units, categories, dateLogged, loggedBy, handReceiptHolder, lastEdited }: Props) {
+export function ItemDetailsCard({ item, isAdmin, units, categories, suggestions, dateLogged, loggedBy, handReceiptHolder, lastEdited }: Props) {
   const [editing, setEditing] = useState(false);
   const [state, action, pending] = useActionState(updateItemDetailsAction, undefined);
 
@@ -84,41 +89,35 @@ export function ItemDetailsCard({ item, isAdmin, units, categories, dateLogged, 
                 </div>
                 <div className="field">
                   <label className="label" htmlFor="ed-homeUnit">Home unit</label>
-                  <input
+                  <SuggestCombobox
                     id="ed-homeUnit"
-                    className="input"
                     name="homeUnit"
-                    list="ed-units"
-                    autoComplete="off"
+                    options={units.map((u) => u.fullName)}
                     placeholder="Search units…"
                     defaultValue={item.homeUnit ?? ""}
                   />
-                  <datalist id="ed-units">
-                    {units.map((u) => <option key={u.abbreviation} value={u.fullName}>{u.abbreviation}</option>)}
-                  </datalist>
                 </div>
                 <div className="field">
                   <label className="label" htmlFor="ed-deviceUIC">Unit (UIC)</label>
-                  <input id="ed-deviceUIC" className="input" name="deviceUIC" defaultValue={item.deviceUIC ?? ""} />
+                  <SuggestCombobox
+                    id="ed-deviceUIC"
+                    name="deviceUIC"
+                    options={suggestions.deviceUIC}
+                    defaultValue={item.deviceUIC ?? ""}
+                  />
                 </div>
                 <div className="field">
                   <label className="label" htmlFor="ed-deviceCategory">Category</label>
-                  {/* Same shape as Home unit: free text with the managed
-                      vocabulary as SUGGESTIONS, never a locked <select> — an
-                      unregistered category must stay typeable (it is learned
-                      into the list on save). */}
-                  <input
+                  {/* Free text with the managed vocabulary as SUGGESTIONS, never
+                      a locked <select> — an unregistered category must stay
+                      typeable (it is learned into the list on save). */}
+                  <SuggestCombobox
                     id="ed-deviceCategory"
-                    className="input"
                     name="deviceCategory"
-                    list="ed-categories"
-                    autoComplete="off"
+                    options={categories}
                     placeholder="e.g. Laptop"
                     defaultValue={item.deviceCategory ?? ""}
                   />
-                  <datalist id="ed-categories">
-                    {categories.map((c) => <option key={c} value={c} />)}
-                  </datalist>
                 </div>
               </>
             )}
