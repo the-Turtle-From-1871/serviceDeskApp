@@ -5,6 +5,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-08-04
 
+### Added
+- **Make, model, unit and category now suggest what the property book already holds**, everywhere an item is edited — the new-item form, the admin edit page, the item detail card and the identity card. Start typing and matching values appear, most-used first; anything not on the list is still accepted, so a device nobody has logged before is never blocked. Category and Home unit suggest from the managed lists at `/admin/categories` and `/admin/units`; make, model and UIC suggest from the values already in use.
+- **Admins can now permanently delete an item**, alongside Retire on the items list. It is for rows that should never have existed — a duplicate from a mistyped serial, a bad CSV import — and it asks for confirmation first, naming the device. Deleting an item removes it from inventory along with its audit and edit history. **Hand receipts are not affected:** every receipt keeps the serial number, make, model and signatures it was issued with, because a receipt records what was signed for at the time rather than looking the device up afresh. Retire remains the reversible option for a device that is simply out of service.
+- **After logging an item you can go straight to it.** The confirmation screen now offers "Open this item" alongside "Add another" and "Back to items", so adding a note or printing a label no longer means searching for the device you just created.
+
+### Changed
+- **Creating an item from a search result no longer jumps straight back to the list.** It now shows the same confirmation screen as every other path, with an extra link back to the search you came from — so both routes behave the same way and the new "open this item" choice is available from either.
+
+### Fixed
+- **Suggestions now appear on a phone.** The previous suggestion lists used a browser feature (`<datalist>`) that mobile browsers do not display at all, so anyone working from a handset saw nothing — which is most of the people logging devices. Coverage was also uneven: category suggested on three screens, home unit on two, UIC and make/model nowhere.
+
+### Notes
+- Database: adds `20260804190000_transfer_item_nullable_item`, which lets a hand-receipt line outlive the item it points at. **Apply it to production before this merges** — a `next build` never runs `migrate deploy`, and the deployed code deletes items on the assumption the constraint has changed.
+
 ### Changed
 - **Receipt, return and pickup notices are now a single email instead of several.** Creating a hand receipt used to send a separate message to each party and another to the records inbox, and a return sent the customer one message and the records inbox a second copy of the same thing. All three notices now go out as **one message to the customer, copying** `dcsimservicedesk@gmail.com` and `ng.hi.hiarng.mbx.dcsim-hand-receipt@army.mil` — plus the records inbox and the G6 desk where those are configured. One receipt now means one email thread everyone can reply to, rather than several unconnected copies. Where a receipt is between two outside parties, both are on the message: the recipient on the To line, the other copied.
 - Two consequences worth knowing. Everyone copied on a receipt can now see the other addresses on it, which was not true when each got a separate message. And because it is one message, a delivery failure can now cost every recipient the notice rather than just the one bad address; receipt and return mail still never blocks or reverses the custody change it describes.
