@@ -1,7 +1,10 @@
-// Zero imports; uses only Web Crypto globals (crypto.subtle, btoa, TextEncoder),
-// so it is safe to import from anywhere — the src/proxy.ts proxy (Node runtime
-// in Next 16) and Node server actions alike.
+// Imports nothing but @/lib/web-hmac, which is itself zero-import and uses only
+// Web Crypto globals (crypto.subtle, btoa, TextEncoder) — so this file is safe
+// to import from anywhere: the src/proxy.ts proxy (Node runtime in Next 16) and
+// Node server actions alike.
 // Web Crypto only — do NOT import bcrypt, Prisma, node:crypto, or server-only here.
+
+import { hmac, safeEqual } from "@/lib/web-hmac";
 
 export const UNLOCK_MAX_AGE_SECONDS = 12 * 60 * 60; // 12 hours
 export const UNLOCK_TTL_MS = UNLOCK_MAX_AGE_SECONDS * 1000;
@@ -23,33 +26,6 @@ export const UNLOCK_CLOCK_SKEW_MS = 60 * 1000;
 // Mirror Auth.js's cookie-prefix convention: __Secure- over HTTPS.
 export function unlockCookieName(secure: boolean): string {
   return secure ? "__Secure-pub_unlock" : "pub_unlock";
-}
-
-function base64url(bytes: Uint8Array): string {
-  let bin = "";
-  for (const b of bytes) bin += String.fromCharCode(b);
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-async function hmac(secret: string, msg: string): Promise<string> {
-  const enc = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(msg));
-  return base64url(new Uint8Array(sig));
-}
-
-// Length-checked constant-time string compare (avoids early-exit timing leak).
-function safeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let out = 0;
-  for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return out === 0;
 }
 
 // Cookie value = "<expMs>.<hmac(secret, expMs)>". Self-contained so the edge
