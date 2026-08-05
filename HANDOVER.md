@@ -121,17 +121,25 @@ password change not revoking sessions) was found and fixed the same day; another
 open and is backlog item [B12](#b12--get-the-rls-posture-into-version-control-then-verify-it-in-production).
 
 **Read the scope of that result carefully, because it is easy to over-claim.** The
-assessment was a **static source review only** — nothing was executed, no live database or
-deployed environment was inspected, and it included no penetration testing. It therefore
-**does not establish that the system is "secure" in any absolute sense**, and it should
-never be cited as if it did. What it establishes is narrower and still useful: the controls
-that exist are implemented correctly, the access model has no *known* holes, and the team's
-own register of accepted risks is accurate. It complements Semgrep, dependency scanning and
-human review — it does not replace them, and it is a point-in-time result against revision
-`ff4857f`. Three of its conclusions end in "verify this in production" and remain unverified
-(see §5, *Known unknowns*). This caveat lives here, in the technical record, deliberately —
-`LEADERSHIP_BRIEF.md` reports the outcome without the methodology hedging, so this document
-is the one that must carry the limits.
+assessment was a **static source review plus a targeted dynamic pass** — the latter executed
+only the code behind F2/F3/F5 on a local instance. No live database or deployed environment was
+inspected, and **no comprehensive penetration test or full dynamic application security test
+has been run**. It therefore **does not establish that the system is "secure" in any absolute
+sense**, and it should never be cited as if it did. What it establishes is narrower and still
+useful: the controls that exist are implemented correctly, the access model has no *known*
+holes, and the team's own register of accepted risks is accurate. It complements Semgrep,
+dependency scanning and human review — it does not replace them, and it is a point-in-time
+result against revision `ff4857f`. Three of its conclusions end in "verify this in production"
+and remain unverified (see §5, *Known unknowns*). This caveat lives here, in the technical
+record, deliberately — `LEADERSHIP_BRIEF.md` reports the outcome without the methodology
+hedging, so this document is the one that must carry the limits.
+
+**The natural next depth is a comprehensive dynamic test.** A tool such as **Strix** — a
+dynamic application security testing / autonomous penetration-testing tool — can be run against
+a **local instance (never production)** to crawl, fuzz, and probe the running app end-to-end,
+far beyond the three findings verified by hand here. This is tracked as backlog
+[B23](#b23--run-a-comprehensive-dynamic-security-test-with-strix), with the local-only guardrails
+stated there.
 
 **Maturity summary, honestly stated:** the domain logic, authorization model, and data
 integrity work are mature. The weaker areas are *operational observability* (there is no
@@ -1085,6 +1093,7 @@ Twenty-one tickets, organised by theme. Each states the need, an approach, the f
 | [B20](#b20--u6--add-the-target-database-guard-to-seed-e2ets) | U6 — add the target-database guard to `seed-e2e.ts` | Security | S | P3 |
 | [B21](#b21--ui-audit-accessibility-mobile-and-consistency) | UI audit — accessibility, mobile and consistency | UI/UX | M | P2 |
 | [B22](#b22--resolve-the-stranded-testing-libraryjest-dom-dependency) | Resolve the stranded `@testing-library/jest-dom` dependency | Technical debt | S | P3 |
+| [B23](#b23--run-a-comprehensive-dynamic-security-test-with-strix) | Run a comprehensive dynamic security test with Strix | Security | M | P2 |
 
 ---
 
@@ -1388,6 +1397,40 @@ What that does **not** settle: git history shows the default was live between `c
 *between* those commits. **Action item, still open: check production for a legacy
 `admin@example.com` account and remove it if present.** This handover has no database access
 and could not check.
+
+---
+
+#### B23 — Run a comprehensive dynamic security test with Strix
+
+**Problem.** The security work to date is a **static** review plus a **targeted** dynamic pass
+that exercised only the three findings F2/F3/F5 by hand (see `SECURITY_ASSESSMENT.md`). Neither
+is a full dynamic application security test: no tool has crawled the running app end-to-end,
+fuzzed its inputs, or systematically attempted auth/authz bypass, injection, and
+resource-exhaustion across every route. Breadth is the gap — a static review only finds what a
+reader thinks to look for, and the targeted pass only confirmed what was already suspected.
+
+**Approach.** Run **Strix** — a dynamic application security testing / autonomous
+penetration-testing tool — against a **local instance, never production**, for a far more
+comprehensive dynamic pass than this repo has had. It should exercise the running app across
+the classes this project cares about: the public surface behind the PIN gate, the per-receipt
+capability token, the rate limiters, the CSV/import endpoints, and the PDF/QR routes (F2/F3
+live there). Treat its output as candidate findings to triage the same way the static
+assessment's were — reachability, impact, then an adversarial "is this real" check — rather
+than filing raw tool output.
+
+**Guardrails, non-negotiable.**
+- **Local only.** Never point it at `www.dcsim.us`. Dynamic testing that includes brute-force
+  and fuzzing against a live system serving HIARNG is disruptive by design and is not
+  authorised without an explicit decision.
+- The dev server permits one instance at a time and the test DB truncates under concurrent
+  runs (see §3.2), so it cannot share the machine with active development.
+- Get authorization in writing before any run that touches a shared or deployed environment.
+
+**Files/scope.** No source change — this is an activity, not a code edit. Its findings become
+their own tickets. **Effort:** M (a run plus triage). **Priority:** P2 — the static and
+targeted-dynamic passes are done and clean, so this is the natural next depth, not an urgent
+gap. Pairs with **B19** (a driven browser) and complements, rather than replaces, Semgrep and
+dependency scanning.
 
 ---
 
