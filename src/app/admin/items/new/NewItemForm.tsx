@@ -46,14 +46,16 @@ export function NewItemForm({
     deviceCategory: categories,
   };
 
-  // Only reachable when the form was NOT opened from a search — that path
-  // redirects to /items instead of returning, so it never renders this.
   if (state && "itemId" in state && state.itemId) {
     return (
       <div className="card stack">
         <p className="alert-success">Item created successfully.</p>
         <div className="row">
+          <Link href={`/i/${state.itemId}`} className="btn btn-primary">Open this item</Link>
           <Link href="/admin/items/new" className="btn btn-secondary">Add another</Link>
+          {"searchHref" in state && state.searchHref && (
+            <Link href={state.searchHref} className="btn btn-ghost">Back to search</Link>
+          )}
           <Link href="/items" className="btn btn-ghost">Back to items</Link>
         </div>
       </div>

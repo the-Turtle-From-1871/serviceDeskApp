@@ -1,6 +1,5 @@
 "use server";
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/authz";
 import {
   createItem,
@@ -77,24 +76,26 @@ export async function createItemAction(_prev: unknown, formData: FormData) {
   revalidatePath("/admin/categories");
   revalidatePath("/admin/analytics");
 
-  // OUTSIDE the try/catch above — redirect() works by throwing NEXT_REDIRECT,
-  // and a catch would swallow it into the generic error message.
-  //
-  // The destination is DERIVED, never caller-supplied: the path is hardcoded
-  // and q is read back off the row Prisma just wrote, so there is no redirect
-  // target for anyone to craft. URLSearchParams does the encoding — building
-  // this by concatenation mangles a serial containing &, #, + or a space and
-  // lands the admin on an empty list for the item they just created.
+  // Was a redirect() to the filtered list, which meant the confirmation screen
+  // never rendered on this path — so "open this item" would have been missing
+  // exactly where items are created fastest. The destination is now a LINK, but
+  // every property of the old redirect is preserved:
+  //   * derived, never caller-supplied — the path is hardcoded and q is read off
+  //     the row Prisma just wrote, so there is no target for anyone to craft;
+  //   * URLSearchParams does the encoding, because concatenation mangles a
+  //     serial containing &, #, + or a space and lands the admin on an empty
+  //     list for the item they just created;
+  //   * uic rides along ONLY when the new item satisfies it, since listItems
+  //     filters deviceUIC by exact equality — returning with a filter the item
+  //     does not match would hide the very row the link exists to show.
+  let searchHref: string | undefined;
   if (fromSearch) {
     const params = new URLSearchParams({ q: item.serialNumber });
-    // Carry the unit filter back only when the new item actually satisfies it —
-    // listItems filters deviceUIC by exact equality, so returning with a filter the
-    // item does not match would hide the very row this redirect exists to show.
     if (returnUic && item.deviceUIC === returnUic) params.set("uic", returnUic);
-    redirect(`/items?${params}`);
+    searchHref = `/items?${params}`;
   }
 
-  return { itemId: item.id };
+  return { itemId: item.id, searchHref };
 }
 
 // Admin edit of an item's seven editable fields (see `editableItemFields` in
