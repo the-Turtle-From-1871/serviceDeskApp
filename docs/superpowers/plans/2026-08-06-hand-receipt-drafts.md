@@ -1939,7 +1939,18 @@ Expected: 0 errors (pre-existing warnings are acceptable; no NEW warnings from t
 - [ ] **Step 2: Types**
 
 Run: `npx tsc --noEmit`
-Expected: no errors
+
+Expected: **no NEW errors.** This branch inherited a baseline of **18 pre-existing
+errors** from `main` (measured at `26ffe5f`), all in three test files none of this
+work touches:
+
+- `src/modules/audit/audit.service.test.ts` (4)
+- `src/modules/service-queue/service-queue.service.test.ts` (13)
+- `src/modules/transfers/transfers.service.test.ts` (1)
+
+Do NOT fix those — they are out of scope and would bloat this branch's diff.
+Any error naming a `drafts.*` file, `receipts/new/*`, `account/*`, or the cron
+route IS yours and must be fixed.
 
 - [ ] **Step 3: Full test suite**
 
