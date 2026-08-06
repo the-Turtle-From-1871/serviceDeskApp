@@ -3,7 +3,7 @@
 A living inventory of every security control in this app — what it does, where
 it lives, and why. **Maintained over time**; see [Keeping this current](#keeping-this-current).
 
-**Last reviewed: 2026-08-05**
+**Last reviewed: 2026-08-06**
 
 Related: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`../CLAUDE.md`](../CLAUDE.md) · [`password-reset-hardening.md`](./password-reset-hardening.md)
 
@@ -13,7 +13,7 @@ Related: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`../CLAUDE.md`](../CLAUDE.md
 
 | Area | Posture |
 |---|---|
-| Authentication | Auth.js v5, Credentials + JWT, bcrypt cost 12, live session revocation, 10h absolute / 4h idle |
+| Authentication | Auth.js v5, Credentials + JWT, bcrypt cost 12, live session revocation, 30d absolute / 7d idle |
 | Authorization | Role-based (`ADMIN`/`USER`), enforced per-route, re-read from the DB every request |
 | Public surface | Enumerable **by design**, behind a shared 8-digit PIN gate; `/` itself is open and carries no data |
 | Secrets | All via env; sensitive modules marked `server-only` |
@@ -105,20 +105,40 @@ via the path above. `src/modules/users/users.service.ts`
 > users. Cost: one extra `SELECT` per authenticated request — the accepted price
 > of keeping JWT sessions while supporting revocation.
 
-**Sessions last one 10-hour workday, absolutely, and 4 hours idle.**
+**Sessions last 30 days, absolutely, and 7 days idle.**
 `src/lib/session-freshness.ts` + the `jwt` callback in `src/auth.ts`.
-`session.maxAge` is 10 hours (down from the Auth.js default of **30 days**), but
-that alone is only an idle bound: Auth.js JWT sessions ROLL — every `auth()` call
-re-signs the token with a fresh `exp` and re-sets the cookie, so a tab left open
-would never expire. The absolute bound is therefore an **`authAt`** claim stamped
-at sign-in and never moved; a separate **`lastActiveAt`** claim moves on every
-request and enforces the 4-hour idle cut-off. Either lapsing returns `null` from
-the `jwt` callback, so the session stops satisfying `!!req.auth` and the coarse
-gate in `src/proxy.ts` redirects to `/login` — i.e. it forces re-authentication.
+`session.maxAge` is 30 days, but that alone is only an idle bound: Auth.js JWT
+sessions ROLL — every `auth()` call re-signs the token with a fresh `exp` and
+re-sets the cookie, so a tab left open would never expire. The absolute bound is
+therefore an **`authAt`** claim stamped at sign-in and never moved; a separate
+**`lastActiveAt`** claim moves on every request and enforces the 7-day idle
+cut-off. Either lapsing returns `null` from the `jwt` callback, so the session
+stops satisfying `!!req.auth` and the coarse gate in `src/proxy.ts` redirects to
+`/login` — i.e. it forces re-authentication. `maxAge` reads the same constant as
+the absolute claim, so the cookie can never expire before the claim it carries.
+
+> **Widened from 10h absolute / 4h idle on 2026-08-06.** The workday framing did
+> not survive contact with how the app is used: it is installed to the iOS home
+> screen, and a home-screen web app keeps its own cookie jar, so technicians met
+> the login form on most mornings and again after lunch. Re-authenticating twice
+> a day on a personal device pushes people to store the password somewhere
+> convenient, which costs more than the window it buys.
+>
+> What makes a long window affordable here is that **it is not the only
+> revocation lever, and not the fastest one**: `requireUser`/`requireAdmin`
+> re-read `role` + `isActive` from the DB on every request, and this callback
+> re-checks `passwordChangedAt` on every call. Deactivating an account or
+> resetting a password kills a live session immediately, a 29-day-old one
+> included. What lengthened is convenience, not time-to-revoke.
+>
+> **Accepted cost:** a session cookie captured off an unlocked device stays
+> replayable for up to 7 days of idleness instead of 4 hours. Logged in *Known
+> gaps*. The lever for a suspected compromise is deactivate-or-reset, not
+> waiting the window out — that was always true, and it matters more now.
 
 > Why the callback and not the proxy: the callback runs on EVERY `auth()` call —
 > Server Actions, Route Handlers and RSC included — not only the routes the
-> proxy matcher covers. A proxy-only check would leave a 9-hour-idle session
+> proxy matcher covers. A proxy-only check would leave a long-idle session still
 > able to POST a Server Action.
 >
 > **But the WRITE rides the proxy, and that asymmetry is load-bearing.** Only
@@ -127,10 +147,14 @@ gate in `src/proxy.ts` redirects to `/login` — i.e. it forces re-authenticatio
 > `auth()` used by RSC and `requireUser` re-signs a token and discards it. So
 > `lastActiveAt` advances because `src/proxy.ts` ran for the same request, which
 > makes its **matcher** part of this control: excluding an authenticated route
-> would leave users working there bounced 4 hours after their last *matched*
-> request, with the whole unit suite still green. `tests/e2e/auth.spec.ts`
-> asserts the cookie is re-issued across a navigation, because nothing else
-> can see it.
+> would leave users working there bounced one idle window after their last
+> *matched* request, with the whole unit suite still green.
+> `tests/e2e/auth.spec.ts` asserts the cookie is re-issued across a navigation,
+> because nothing else can see it.
+>
+> The matcher's exclusions are all routes nobody *works on* — `favicon.ico`, and
+> since 2026-08-06 `manifest.webmanifest`, `icon` and `apple-icon` (§ below), so
+> none of them carries anyone's idle clock.
 >
 > Same grandfathering softening as `pwdChangedAt`: a token minted before these
 > claims existed is **backfilled, not revoked**, so the deploy that adds them
@@ -139,7 +163,7 @@ gate in `src/proxy.ts` redirects to `/login` — i.e. it forces re-authenticatio
 > Auth.js JWTs are stateless with no revocation list, so writing a new cookie
 > cannot invalidate the old string — dating from `now` would let a pre-deploy
 > cookie saved out of devtools be re-pasted over and over, minting another full
-> 10-hour session each time, until its own **30-day** expiry ran out. `iat` is
+> session each time, until its own `exp` ran out. `iat` is
 > re-stamped on every roll, so a live session backfills to moments ago (nobody
 > is signed out) while a stale snapshot backfills to when it was last used and
 > fails these bounds immediately. Each claim is backfilled independently, so a
@@ -1351,6 +1375,24 @@ challenge.
 ## Known gaps & accepted risks
 
 Tracked deliberately, so nobody re-discovers them as new findings.
+
+**0d. A stolen session cookie is replayable for up to 7 days of idleness, and up
+to 30 days in total.** ⚠️ *Accepted 2026-08-06; the faster lever is revocation,
+not expiry.* Widening the session window from 10h/4h
+([§2](#2-authentication)) bought back the twice-a-day logins that the iOS
+home-screen install was inflicting on technicians — a home-screen web app has
+its own cookie jar, so it never inherits a Safari login. The cost is that a
+cookie lifted off an unlocked or lost device stays usable far longer than
+before. It is accepted rather than mitigated because **session length was never
+the fast path to cutting someone off**: `requireUser`/`requireAdmin` re-read
+`role` + `isActive` from the DB on every request and the `jwt` callback
+re-checks `passwordChangedAt` on every call, so deactivating the account or
+resetting the password ends every live session of theirs immediately. What this
+change does is make that lever the *only* timely one, where previously waiting
+four hours was also an option. The operational consequence, which belongs in
+staff onboarding rather than in code: **report a lost device**, because it will
+not sign itself out today. Revisit if the app ever holds anything a 7-day replay
+would be materially worse for than the current property-book data.
 
 **0c. A Vercel API token and a deploy hook sit on a technician workstation, and
 together they can deploy production unattended.** ⚠️ *Accepted; two exits exist.*

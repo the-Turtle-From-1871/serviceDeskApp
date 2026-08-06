@@ -66,10 +66,13 @@ afterEach(() => {
 });
 
 describe("session configuration", () => {
-  it("caps the session at 10 hours instead of the Auth.js 30-day default", () => {
+  it("bounds the cookie by the same constant as the absolute claim", () => {
     expect(config().session?.strategy).toBe("jwt");
+    // Reading the shared constant is the point: `maxAge` shorter than the
+    // absolute bound would expire the cookie before the claim it carries, and
+    // the session would end early for a reason nothing logs.
     expect(config().session?.maxAge).toBe(SESSION_MAX_AGE_SECONDS);
-    expect(config().session?.maxAge).toBe(10 * 60 * 60);
+    expect(config().session?.maxAge).toBe(30 * 24 * 60 * 60);
   });
 });
 
@@ -88,22 +91,24 @@ describe("subsequent requests", () => {
     const token = await jwt({ token: { ...before, iat: Math.floor(NOW / 1000) } });
     expect(token).not.toBeNull();
     expect(token!.lastActiveAt).toBe(NOW);
-    // The absolute stamp must NOT move, or the 10-hour bound never arrives.
+    // The absolute stamp must NOT move, or the absolute bound never arrives.
     expect(token!.authAt).toBe(before.authAt);
   });
 
-  it("revokes a session that has run out its 10-hour workday, even if active", async () => {
+  it("revokes a session that has run out its absolute window, even if active", async () => {
     const token = await jwt({
       token: { id: "u1", authAt: secondsAgo(SESSION_MAX_AGE_SECONDS), lastActiveAt: secondsAgo(1) },
     });
     expect(token).toBeNull();
   });
 
-  it("revokes a session idle for more than 4 hours", async () => {
+  it("revokes a session idle past the idle bound", async () => {
     const token = await jwt({
       token: {
         id: "u1",
-        authAt: secondsAgo(5 * 60 * 60),
+        // Older than `lastActiveAt`, and well inside the absolute bound, so
+        // idleness is the only thing that can revoke this.
+        authAt: secondsAgo(8 * 24 * 60 * 60),
         lastActiveAt: secondsAgo(SESSION_IDLE_TIMEOUT_SECONDS),
       },
     });
@@ -119,8 +124,8 @@ describe("subsequent requests", () => {
 
   it("backfills a token minted before these claims existed, from its own iat", async () => {
     // Not from `now`: seeding to `now` would let a pre-deploy cookie saved from
-    // devtools be re-pasted indefinitely, minting a fresh 10-hour session each
-    // time, because writing a new cookie cannot invalidate the old string.
+    // devtools be re-pasted indefinitely, minting a fresh session each time,
+    // because writing a new cookie cannot invalidate the old string.
     const rolledSecondsAgo = 30;
     const token = await jwt({
       token: { id: "u1", pwdChangedAt: null, iat: Math.floor(NOW / 1000) - rolledSecondsAgo },
@@ -131,13 +136,13 @@ describe("subsequent requests", () => {
   });
 
   it("REVOKES a stale pre-deploy cookie rather than backfilling it", async () => {
-    // A 30-day-old snapshot: alive under the old 30-day default, dead under
-    // this policy the first time it is presented.
+    // A 40-day-old snapshot — past the absolute bound, so it is dead the first
+    // time it is presented rather than being handed a fresh window.
     const token = await jwt({
       token: {
         id: "u1",
         pwdChangedAt: null,
-        iat: Math.floor(NOW / 1000) - 30 * 24 * 60 * 60,
+        iat: Math.floor(NOW / 1000) - 40 * 24 * 60 * 60,
       },
     });
     expect(token).toBeNull();

@@ -455,6 +455,22 @@ export const config = {
   // segment-anchoring note below exists to prevent, just at the directory level
   // instead of the string-prefix level.
   //
+  // `manifest.webmanifest`, `icon` and `apple-icon` are excluded for the same
+  // family of reason as `favicon.ico`, which was already here: they are
+  // metadata routes the browser fetches on its own, with no session to present.
+  // The coarse login gate below redirects any matched path to `/login` when
+  // logged out, so an iPhone doing "Add to Home Screen" would have been handed
+  // login-page HTML where it expected a manifest and a PNG — the install then
+  // falls back to a screenshot icon and a Safari-chrome window, with nothing
+  // anywhere reporting an error. (`/` itself is public, so the page loads and
+  // only the install metadata breaks, which is what makes it silent.)
+  //
+  // Excluding them does NOT weaken the idle clock the way the note in
+  // `src/auth.ts` warns about. That warning is about excluding a route people
+  // WORK on: `lastActiveAt` only advances on matched requests, so a matched-out
+  // page would strand a user whose whole session happened there. Nobody
+  // navigates to an icon.
+  //
   // The exclusions are SEGMENT-anchored with `(?:/|$)`. Unanchored, they were
   // prefixes: `/api/cronjobs`, `/logins`, `/unlockables` or `/terms-of-service`
   // would all have matched an exclusion and skipped the proxy entirely — no
@@ -463,6 +479,6 @@ export const config = {
   // fix had been applied only in code. The last three keep their trailing-slash
   // prefix form on purpose: they are directories, not routes.
   matcher: [
-    "/((?!(?:api/cron|api/items/import|login|forgot-password|reset-password|privacy|terms|unlock|favicon\\.ico)(?:/|$)|_next/static|_next/image|wasm/).*)",
+    "/((?!(?:api/cron|api/items/import|login|forgot-password|reset-password|privacy|terms|unlock|favicon\\.ico|manifest\\.webmanifest|icon|apple-icon)(?:/|$)|_next/static|_next/image|wasm/).*)",
   ],
 };
