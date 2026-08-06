@@ -154,3 +154,14 @@ export async function deleteDraft(id: string, userId: string): Promise<void> {
   // deleteMany, so a foreign or bogus id is a no-op rather than a throw.
   await prisma.receiptDraft.deleteMany({ where: { id, userId } });
 }
+
+// Drafts are scratch work, and a device list goes stale much faster than a
+// filed record — hence 30 days here against the closed-receipt purge's 90.
+// Measured on `updatedAt`, so re-saving a draft resets its clock.
+export const DRAFT_RETENTION_DAYS = 30;
+
+export async function purgeStaleDrafts(now: Date): Promise<{ deletedCount: number }> {
+  const cutoff = new Date(now.getTime() - DRAFT_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  const { count } = await prisma.receiptDraft.deleteMany({ where: { updatedAt: { lt: cutoff } } });
+  return { deletedCount: count };
+}
