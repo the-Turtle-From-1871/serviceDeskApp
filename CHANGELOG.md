@@ -3,6 +3,32 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-08-06
+
+### Added
+
+- **Save a hand receipt as a draft.** The new receipt builder has a "Save draft"
+  button beside its title. It stores everything you have entered — items, both
+  parties, quantities, the return timer and any service flags — so an
+  interrupted handoff no longer has to be retyped. Saved drafts appear under
+  **Account → Draft hand receipts**, where you can resume or delete them.
+  Drafts are private to you.
+- Resuming a draft restores your typed work and warns you if any of its devices
+  have since been retired or removed from inventory, keeping the rest.
+
+### Security
+
+- A recipient signature is **never** saved in a draft. A signature attests to a
+  specific list of items, and a draft's list can change, so a resumed draft must
+  be signed again before it can be filed.
+
+### Notes
+
+- New table `ReceiptDraft` (migration `20260806120000_add_receipt_draft`) —
+  apply to Supabase **before** merging, per the migrate-before-push rule.
+- Drafts are deleted automatically 30 days after they were last saved, by the
+  existing nightly `/api/cron/purge` job. No new environment variables.
+
 ## 2026-08-05
 
 ### Security

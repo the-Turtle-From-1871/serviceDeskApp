@@ -139,6 +139,17 @@ export const WATCHED = [
   // these files. Directory-wide on purpose: any new file in this tool inherits the
   // same credential access.
   [/^scripts\/gmail-token-rotation\//, "workstation-held deploy credentials and unattended production writes (§6)"],
+  // Drafts are the one PRIVATE, owner-scoped surface in an otherwise
+  // org-shared app, and they hold party PII (names, ranks, units, phone
+  // numbers, emails) with no signature. The userId scoping IS the control —
+  // an unwatched change to either file could quietly turn a personal draft
+  // into a shared one, or drop the scope from a query.
+  [/^src\/modules\/receipts\/drafts\.service\.ts$/, "owner-scoped draft storage (§2)"],
+  [/^src\/app\/actions\/drafts\.ts$/, "draft save/delete actions (§2)"],
+  // The parser is what DROPS the recipient signature before anything is
+  // stored. A change here could start persisting ink without touching either
+  // file above.
+  [/^src\/modules\/receipts\/drafts\.form\.ts$/, "keeps signatures out of stored drafts (§2)"],
 ];
 
 function git(args) {
