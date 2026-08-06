@@ -35,6 +35,13 @@ test("spares a draft inside the window", async () => {
   expect(await prisma.receiptDraft.findUnique({ where: { id: fresh } })).not.toBeNull();
 });
 
+test("spares a draft sitting exactly on the cutoff (lt, not lte)", async () => {
+  const atBoundary = await draftUpdatedAt(daysAgo(DRAFT_RETENTION_DAYS));
+  const { deletedCount } = await purgeStaleDrafts(NOW);
+  expect(deletedCount).toBe(0);
+  expect(await prisma.receiptDraft.findUnique({ where: { id: atBoundary } })).not.toBeNull();
+});
+
 test("measures from updatedAt, so re-saving an old draft keeps it alive", async () => {
   const id = await draftUpdatedAt(daysAgo(DRAFT_RETENTION_DAYS + 5));
   await saveDraft(userId, receiptDraftSchema.parse({ receiver: { name: "touched" } }), id);
