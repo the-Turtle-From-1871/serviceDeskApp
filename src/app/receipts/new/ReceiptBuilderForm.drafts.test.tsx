@@ -14,6 +14,7 @@ vi.mock("@/components/SignaturePad", () => ({
 }));
 
 import { ReceiptBuilderForm } from "./ReceiptBuilderForm";
+import { receiptDraftSchema } from "@/modules/receipts/drafts.schema";
 
 const ITEMS = [{ itemId: "i1", make: "Dell", model: "5420", serialNumber: "SN1", holderName: null }];
 
@@ -46,5 +47,34 @@ describe("Save draft button", () => {
     const { container } = render(<ReceiptBuilderForm initialItems={ITEMS} signatures={[]} />);
     const hidden = container.querySelector('input[name="draftId"]') as HTMLInputElement;
     expect(hidden.value).toBe("");
+  });
+});
+
+describe("resuming a draft", () => {
+  const values = receiptDraftSchema.parse({
+    itemIds: ["i1"],
+    receiver: { name: "Doe, Jane", unit: "A Co" },
+    returnDays: "7",
+  });
+
+  it("tells the operator they must sign again", () => {
+    render(<ReceiptBuilderForm initialItems={ITEMS} signatures={[]} draftId="d1" draftValues={values} />);
+    expect(screen.getByText(/please sign again/i)).toBeTruthy();
+  });
+
+  it("restores the typed recipient and return timer", () => {
+    const { container } = render(<ReceiptBuilderForm initialItems={ITEMS} signatures={[]} draftId="d1" draftValues={values} />);
+    expect((container.querySelector('input[name="receiverName"]') as HTMLInputElement).value).toBe("Doe, Jane");
+    expect((container.querySelector('input[name="returnDays"]') as HTMLInputElement).value).toBe("7");
+  });
+
+  it("warns when items were dropped as no longer available", () => {
+    render(<ReceiptBuilderForm initialItems={ITEMS} signatures={[]} draftId="d1" draftValues={values} droppedItemCount={2} />);
+    expect(screen.getByText(/2 devices from this draft/i)).toBeTruthy();
+  });
+
+  it("shows no restore notice on a fresh builder", () => {
+    render(<ReceiptBuilderForm initialItems={ITEMS} signatures={[]} />);
+    expect(screen.queryByText(/please sign again/i)).toBeNull();
   });
 });

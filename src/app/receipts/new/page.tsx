@@ -6,15 +6,66 @@ import { groupItemsIntoLines, MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW } from "@/modu
 import { listSignatures } from "@/modules/signatures/signatures.service";
 import { SiteHeader } from "@/components/SiteHeader";
 import { ReceiptBuilderForm } from "./ReceiptBuilderForm";
+import { getDraft } from "@/modules/receipts/drafts.service";
+import { DraftError } from "@/modules/receipts/drafts.errors";
+import { splitDraftItems } from "@/modules/receipts/drafts.resume";
 
-export default async function NewReceiptPage({ searchParams }: { searchParams: Promise<{ items?: string }> }) {
+export default async function NewReceiptPage({ searchParams }: { searchParams: Promise<{ items?: string; draft?: string }> }) {
   const user = await requireUser();
-  const { items: itemsParam } = await searchParams;
-  const ids = (itemsParam ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const { items: itemsParam, draft: draftParam } = await searchParams;
+
+  // Resuming a saved draft. Scoped to the acting user inside getDraft, so
+  // another technician's id 404s rather than opening their work.
+  let draft: Awaited<ReturnType<typeof getDraft>> = null;
+  if (draftParam) {
+    try {
+      draft = await getDraft(draftParam, user.id);
+    } catch (e) {
+      if (e instanceof DraftError && e.code === "CORRUPT") {
+        return (
+          <>
+            <SiteHeader />
+            <main className="container container-mid stack">
+              <h1 className="page-title">New hand receipt</h1>
+              <div className="card empty">
+                This draft can no longer be read and should be deleted from your account.
+              </div>
+            </main>
+          </>
+        );
+      }
+      throw e;
+    }
+    if (!draft) notFound();
+  }
+
+  const ids = draft
+    ? draft.payload.itemIds
+    : (itemsParam ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   if (ids.length === 0) notFound();
 
   const loaded = (await Promise.all(ids.map((id) => getItem(id)))).filter((i) => i && i.status === "ACTIVE") as NonNullable<Awaited<ReturnType<typeof getItem>>>[];
+
+  // A draft whose devices have ALL since been retired or deleted must say so.
+  // Falling through to notFound() would read as "your draft vanished".
+  if (draft && loaded.length === 0) {
+    return (
+      <>
+        <SiteHeader />
+        <main className="container container-mid stack">
+          <h1 className="page-title">New hand receipt</h1>
+          <div className="card empty">
+            None of the {ids.length} device{ids.length === 1 ? "" : "s"} on this draft can be issued any
+            more — they have been retired or removed from inventory. Delete the draft from your account
+            and start again.
+          </div>
+        </main>
+      </>
+    );
+  }
   if (loaded.length === 0) notFound();
+
+  const { droppedIds } = splitDraftItems(ids, loaded);
 
   const lines = groupItemsIntoLines(loaded.map((i) => ({ itemId: i.id, make: i.make, model: i.model, serialNumber: i.serialNumber })));
   const tooMany = lines.length > MAX_RECEIPT_ROWS;
@@ -75,8 +126,11 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
               // the spec's persistent warning on precisely that path.
               holderName: lastReceivers[k]?.name ?? null,
             }))}
-            senderPrefill={senderPrefill}
+            senderPrefill={draft ? undefined : senderPrefill}
             signatures={signatures}
+            draftId={draft?.id}
+            draftValues={draft?.payload}
+            droppedItemCount={droppedIds.length}
           />
         )}
       </main>
