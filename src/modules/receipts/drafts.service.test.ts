@@ -84,6 +84,27 @@ test("saveDraft refuses past the per-user cap rather than pruning the oldest", a
   await expect(saveDraft(aliceId, payload({ receiver: { name: "edited" } }), mine[0].id)).resolves.toBeTruthy();
 });
 
+test("saveDraft serializes concurrent creates at the cap so exactly one wins", async () => {
+  // Fill to cap - 1, then fire two concurrent creates. Both observe the same
+  // pre-write count if the cap check is check-then-act; a correct
+  // implementation serializes them so exactly one succeeds and the user ends
+  // at the cap, never cap + 1.
+  for (let i = 0; i < MAX_DRAFTS_PER_USER - 1; i++) await saveDraft(aliceId, payload({ itemIds: [`i${i}`] }));
+  expect(await prisma.receiptDraft.count({ where: { userId: aliceId } })).toBe(MAX_DRAFTS_PER_USER - 1);
+
+  const results = await Promise.allSettled([
+    saveDraft(aliceId, payload({ itemIds: ["race-a"] })),
+    saveDraft(aliceId, payload({ itemIds: ["race-b"] })),
+  ]);
+
+  const fulfilled = results.filter((r) => r.status === "fulfilled");
+  const rejected = results.filter((r) => r.status === "rejected");
+  expect(fulfilled).toHaveLength(1);
+  expect(rejected).toHaveLength(1);
+  expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ code: "TOO_MANY" });
+  expect(await prisma.receiptDraft.count({ where: { userId: aliceId } })).toBe(MAX_DRAFTS_PER_USER);
+});
+
 test("getDraft reports a corrupt payload instead of throwing", async () => {
   const { id } = await saveDraft(aliceId, payload());
   await prisma.receiptDraft.update({ where: { id }, data: { payload: { itemIds: "not-an-array" } } });

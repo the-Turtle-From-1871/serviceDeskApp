@@ -1,4 +1,5 @@
 import "server-only";
+import { Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { receiptDraftSchema, formatDraftLabel, type ReceiptDraftPayload } from "./drafts.schema";
 import { DraftError } from "./drafts.errors";
@@ -37,11 +38,15 @@ export async function saveDraft(
       data: denormalized,
     });
     if (count === 1) {
-      const row = await prisma.receiptDraft.findUniqueOrThrow({
-        where: { id: draftId },
+      // findFirst, so `userId` stays in the WHERE for this follow-up read too —
+      // never findUniqueOrThrow by bare id. Also tolerates a raced delete
+      // between the updateMany above and this read: `row` comes back null and
+      // we fall through to the create path below instead of throwing P2025.
+      const row = await prisma.receiptDraft.findFirst({
+        where: { id: draftId, userId },
         select: { id: true, updatedAt: true },
       });
-      return row;
+      if (row) return row;
     }
   }
 
@@ -49,13 +54,66 @@ export async function saveDraft(
   // returned. Refusing (rather than pruning the oldest) is deliberate: silently
   // deleting the technician's own saved work is worse than a message they can
   // act on.
-  const existing = await prisma.receiptDraft.count({ where: { userId } });
-  if (existing >= MAX_DRAFTS_PER_USER) throw new DraftError("TOO_MANY");
+  return createDraftUnderCap(userId, denormalized);
+}
 
-  return prisma.receiptDraft.create({
-    data: { ...denormalized, userId },
-    select: { id: true, updatedAt: true },
-  });
+type Denormalized = {
+  payload: ReceiptDraftPayload;
+  recipientName: string | null;
+  itemCount: number;
+};
+
+// count() then create() is check-then-act: two concurrent saves can each
+// observe count() < cap and both create, letting a user end up over the cap.
+// Running both inside a single Serializable transaction makes Postgres
+// serialize the two attempts instead — the loser re-executes against the
+// true, post-winner count. Serializable transactions can abort with a
+// serialization failure purely from that concurrency, with no cap involved at
+// all, so that failure is retried here rather than being reported as
+// TOO_MANY (wrong: might not be at cap) or allowed to escape as a raw error
+// (wrong: a transient conflict isn't a real failure the caller should see).
+//
+// The @prisma/adapter-pg driver surfaces Postgres's serialization_failure as
+// a `DriverAdapterError` (from `@prisma/driver-adapter-utils`, a transitive
+// dependency we don't import directly) wrapping the raw `pg` error, rather
+// than as the engine-level `PrismaClientKnownRequestError` P2034 — so this
+// checks the underlying Postgres SQLSTATE instead of either package's own
+// error class. 40001 = serialization_failure, 40P01 = deadlock_detected
+// (Serializable can produce either under contention).
+function isSerializationConflict(e: unknown): boolean {
+  if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2034") return true;
+  const cause = (e as { cause?: unknown } | null)?.cause;
+  const originalCode = (cause as { originalCode?: unknown } | null | undefined)?.originalCode;
+  return originalCode === "40001" || originalCode === "40P01";
+}
+
+const MAX_SERIALIZATION_RETRIES = 5;
+
+async function createDraftUnderCap(
+  userId: string,
+  denormalized: Denormalized,
+): Promise<{ id: string; updatedAt: Date }> {
+  for (let attempt = 1; attempt <= MAX_SERIALIZATION_RETRIES; attempt++) {
+    try {
+      return await prisma.$transaction(
+        async (tx) => {
+          const existing = await tx.receiptDraft.count({ where: { userId } });
+          if (existing >= MAX_DRAFTS_PER_USER) throw new DraftError("TOO_MANY");
+          return tx.receiptDraft.create({
+            data: { ...denormalized, userId },
+            select: { id: true, updatedAt: true },
+          });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+    } catch (e) {
+      if (e instanceof DraftError) throw e;
+      if (isSerializationConflict(e) && attempt < MAX_SERIALIZATION_RETRIES) continue;
+      throw e;
+    }
+  }
+  // Unreachable — the loop above always returns or throws.
+  throw new DraftError("TOO_MANY");
 }
 
 /** Newest first. Reads only the denormalized columns — a payload is never
