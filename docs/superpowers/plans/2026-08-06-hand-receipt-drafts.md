@@ -238,9 +238,11 @@ const NUMERIC_MAX = 10; // "3650" and friends; these stay strings, see below
 /** Trimmed, capped, and defaulting to "" — a draft keeps blanks as blanks. */
 const text = (max: number) => z.string().trim().max(max).default("");
 
+// NOT `as const`: this is passed to Zod's `.default()`, which wants a mutable
+// object matching the schema's input type — a readonly literal fights it.
 export const EMPTY_DRAFT_PARTY = {
   isDcsim: false, name: "", rank: "", unit: "", contact: "", email: "",
-} as const;
+};
 
 const draftPartySchema = z.object({
   isDcsim: z.boolean().default(false),
