@@ -141,4 +141,30 @@ describe("resuming a draft — quantity tracking (frozen-qty regression)", () =>
     expect(await screen.findByText("SN2")).toBeDefined();
     expect(issued().value).toBe("5"); // unchanged — the override still wins
   });
+
+  it("decides per FIELD: an edited Authorized does not refreeze an untouched Issued", async () => {
+    // Authorized was edited away from the live default (1 -> 3); Issued was
+    // left at the live default (1). Requiring BOTH fields to match before
+    // treating the LINE as untouched would wrongly write a whole-line
+    // override here, refreezing Issued even though the operator never typed
+    // into it — the exact wrong-count-on-a-signed-receipt bug Finding 1 was
+    // about, one level finer.
+    const authInput = () => screen.getByLabelText("Quantity authorized, Dell 5420") as HTMLInputElement;
+    const values = receiptDraftSchema.parse({
+      itemIds: ["i1"],
+      lines: [{ make: "Dell", model: "5420", qtyAuth: "3", qtyIssued: "1" }],
+    });
+    lookupScannedItem.mockResolvedValue(HP2);
+    const user = userEvent.setup();
+    render(<ReceiptBuilderForm initialItems={ITEMS} signatures={[]} draftId="d1" draftValues={values} />);
+
+    expect(authInput().value).toBe("3");
+    expect(issued().value).toBe("1");
+    await user.click(screen.getByRole("button", { name: /Scan to add/i }));
+    await user.click(screen.getByRole("button", { name: "emit-i2" }));
+
+    expect(await screen.findByText("SN2")).toBeDefined();
+    expect(authInput().value).toBe("3"); // the operator's edit still wins
+    expect(issued().value).toBe("2"); // untouched field still tracks upward
+  });
 });

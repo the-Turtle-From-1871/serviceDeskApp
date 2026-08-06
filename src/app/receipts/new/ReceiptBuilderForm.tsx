@@ -434,14 +434,25 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, dr
   // this component already uses) is treated as "untouched" and left ABSENT,
   // and only a value that actually differs — the operator having typed
   // something else before saving — becomes an override.
+  //
+  // Decided PER FIELD, not per line: Authorized and Issued are independent on
+  // a DA 2062 (that's why they're two inputs), so an operator who edited only
+  // Authorized and left Issued tracking must resume with Issued STILL
+  // tracking. Requiring both fields to match the default before treating the
+  // line as untouched re-froze the field they never touched — same bug class
+  // as the line-level version of this, just one level finer. A line where
+  // NEITHER field differs must produce no entry at all (not an object with
+  // two `undefined` values), so `qtyEdits` never lies about what was edited.
   const [qtyEdits, setQtyEdits] = useState<Record<string, { auth?: string; issued?: string }>>(() => {
     const liveDefault = new Map(groupItemsIntoLines(initialItems).map((l) => [`${l.make} ${l.model}`, l.defaultQty]));
     const edits: Record<string, { auth?: string; issued?: string }> = {};
     for (const l of draftValues?.lines ?? []) {
       const key = `${l.make} ${l.model}`;
       const def = liveDefault.get(key);
-      if (def !== undefined && l.qtyAuth === String(def) && l.qtyIssued === String(def)) continue;
-      edits[key] = { auth: l.qtyAuth, issued: l.qtyIssued };
+      const entry: { auth?: string; issued?: string } = {};
+      if (def === undefined || l.qtyAuth !== String(def)) entry.auth = l.qtyAuth;
+      if (def === undefined || l.qtyIssued !== String(def)) entry.issued = l.qtyIssued;
+      if (Object.keys(entry).length > 0) edits[key] = entry;
     }
     return edits;
   });
