@@ -132,3 +132,45 @@ describe("LoginForm without Turnstile", () => {
     expect(submit().textContent).toMatch(/^sign in$/i);
   });
 });
+
+describe("LoginForm password-manager autofill", () => {
+  // These four attributes are the whole contract with iOS Password AutoFill,
+  // and the first one reads like a mistake, so it needs pinning rather than a
+  // comment alone: the field holds an EMAIL but must advertise `username`.
+  // `username` is the token password managers key on for a sign-in form;
+  // `email` is a contact field, so iOS offered contact-card addresses or
+  // nothing, never the saved login for this site. Reverting it to the
+  // "obviously correct" `email` silently removes autofill on a phone, and
+  // nothing else in the suite would notice.
+  const field = (id: string) => document.getElementById(id) as HTMLInputElement;
+
+  it("advertises the sign-in pair password managers look for", () => {
+    render(<LoginForm turnstileSiteKey={null} />);
+
+    expect(field("email").getAttribute("autocomplete")).toBe("username");
+    expect(field("password").getAttribute("autocomplete")).toBe("current-password");
+  });
+
+  it("keeps type=email for the keyboard, and stable id/name for the keychain", () => {
+    // `type` drives the phone keyboard and is independent of the autofill
+    // token. The stable `id`/`name` are a documented precondition for a browser
+    // storing anything to offer back later — a generated id defeats it.
+    render(<LoginForm turnstileSiteKey={null} />);
+
+    expect(field("email").type).toBe("email");
+    expect(field("email").name).toBe("email");
+    expect(field("password").type).toBe("password");
+    expect(field("password").name).toBe("password");
+  });
+
+  it("keeps the fields inside a form with a submit button", () => {
+    // The other half of that precondition: no <form>, or no submit button, and
+    // the browser has no "a login just happened" signal to save against.
+    render(<LoginForm turnstileSiteKey={null} />);
+
+    expect(field("email").form).not.toBeNull();
+    expect(field("email").form).toBe(field("password").form);
+    expect(submit().type).toBe("submit");
+    expect(submit().form).toBe(field("email").form);
+  });
+});

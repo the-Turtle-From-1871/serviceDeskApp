@@ -52,7 +52,15 @@ export function LoginForm({ turnstileSiteKey }: { turnstileSiteKey: string | nul
     <form action={action} className="stack">
       <div className="field">
         <label className="label" htmlFor="email">Email</label>
-        <input id="email" className="input" name="email" type="email" required autoComplete="email" />
+        {/* `autoComplete="username"`, NOT `"email"`, even though this field holds
+            an email and keeps `type="email"` for the keyboard. `username` is the
+            token password managers key on for a sign-in form; `email` is a
+            CONTACT field, so iOS offered contact-card addresses (or nothing) and
+            never the saved login for this site — which is what someone tapping
+            the field on a phone is actually reaching for. `id`/`name` stay
+            `email`: iOS also requires a stable id/name inside a <form> with a
+            submit button before it will store anything to offer back. */}
+        <input id="email" className="input" name="email" type="email" required autoComplete="username" />
       </div>
       <div className="field">
         <label className="label" htmlFor="password">Password</label>
