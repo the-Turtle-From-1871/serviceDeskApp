@@ -1,10 +1,28 @@
 // @vitest-environment jsdom
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 vi.mock("@/app/actions/receipts", () => ({ createReceiptAction: vi.fn() }));
 vi.mock("@/app/actions/drafts", () => ({ saveDraftAction: vi.fn() }));
-vi.mock("@/app/actions/scan", () => ({ lookupScannedItem: vi.fn() }));
+// Referenced by NAME (not an inline factory-local `vi.fn()`) so the resume-qty
+// tests below can configure what a scan resolves to — mirrors
+// ReceiptBuilderForm.test.tsx's own `lookupScannedItem` mock.
+const lookupScannedItem = vi.fn();
+vi.mock("@/app/actions/scan", () => ({
+  lookupScannedItem: (id: string) => lookupScannedItem(id),
+}));
+// A minimal stand-in for the camera sheet, same shape as
+// ReceiptBuilderForm.test.tsx's — one button that emits one decoded item URL.
+// jsdom has no camera; the real component would just report "unavailable".
+vi.mock("@/components/QrScanner", () => ({
+  QrScanner: ({ onDecode }: { onDecode: (t: string) => void }) => (
+    <div>
+      <button type="button" onClick={() => onDecode("https://x.example/i/i2")}>emit-i2</button>
+    </div>
+  ),
+}));
+vi.mock("@/lib/beep", () => ({ beep: vi.fn() }));
 // jsdom has no canvas backend, so the real SignaturePad's `getContext("2d")!`
 // returns null and its mount effect throws the instant it renders — none of
 // these tests exercise signing, so stub it out exactly like
@@ -76,5 +94,51 @@ describe("resuming a draft", () => {
   it("shows no restore notice on a fresh builder", () => {
     render(<ReceiptBuilderForm initialItems={ITEMS} signatures={[]} />);
     expect(screen.queryByText(/please sign again/i)).toBeNull();
+  });
+});
+
+describe("resuming a draft — quantity tracking (frozen-qty regression)", () => {
+  const issued = () => screen.getByLabelText("Quantity issued, Dell 5420") as HTMLInputElement;
+
+  const HP2 = { ok: true as const, item: { id: "i2", make: "Dell", model: "5420", serialNumber: "SN2" }, holderName: null };
+
+  it("keeps an untouched resumed line tracking when a matching item is added", async () => {
+    // Saved qty (1) equals the live default for a single-item line: this must
+    // be treated as "never touched", not as a frozen override.
+    const values = receiptDraftSchema.parse({
+      itemIds: ["i1"],
+      lines: [{ make: "Dell", model: "5420", qtyAuth: "1", qtyIssued: "1" }],
+    });
+    lookupScannedItem.mockResolvedValue(HP2);
+    const user = userEvent.setup();
+    render(<ReceiptBuilderForm initialItems={ITEMS} signatures={[]} draftId="d1" draftValues={values} />);
+
+    expect(issued().value).toBe("1");
+    await user.click(screen.getByRole("button", { name: /Scan to add/i }));
+    await user.click(screen.getByRole("button", { name: "emit-i2" }));
+
+    // Grew to 2 — proves the resumed line was left ABSENT from qtyEdits and is
+    // still deriving from the live item count, not frozen at the saved "1".
+    expect(await screen.findByText("SN2")).toBeDefined();
+    expect(issued().value).toBe("2");
+  });
+
+  it("preserves a deliberately edited resumed quantity and does not track", async () => {
+    // Saved qty (5) does NOT match the live default (1): this is the
+    // operator's explicit value and must survive, even once more items land.
+    const values = receiptDraftSchema.parse({
+      itemIds: ["i1"],
+      lines: [{ make: "Dell", model: "5420", qtyAuth: "5", qtyIssued: "5" }],
+    });
+    lookupScannedItem.mockResolvedValue(HP2);
+    const user = userEvent.setup();
+    render(<ReceiptBuilderForm initialItems={ITEMS} signatures={[]} draftId="d1" draftValues={values} />);
+
+    expect(issued().value).toBe("5");
+    await user.click(screen.getByRole("button", { name: /Scan to add/i }));
+    await user.click(screen.getByRole("button", { name: "emit-i2" }));
+
+    expect(await screen.findByText("SN2")).toBeDefined();
+    expect(issued().value).toBe("5"); // unchanged — the override still wins
   });
 });

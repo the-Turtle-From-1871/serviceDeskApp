@@ -422,9 +422,29 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, dr
   // ABSENT entry means "untouched" and renders the live item count; a present
   // one is the operator's explicit value and wins from then on. Storing only
   // overrides is what makes tracking-until-edited fall out for free.
-  const [qtyEdits, setQtyEdits] = useState<Record<string, { auth?: string; issued?: string }>>(() =>
-    Object.fromEntries((draftValues?.lines ?? []).map((l) => [`${l.make} ${l.model}`, { auth: l.qtyAuth, issued: l.qtyIssued }])),
-  );
+  //
+  // A resumed draft's `lines` array holds EVERY line that existed when it was
+  // saved, touched or not (draftPayloadFromForm doesn't distinguish), so
+  // seeding an override for all of them unconditionally would freeze every
+  // line's qty at its saved value — resuming a 2-item line and then scanning a
+  // third would leave Issued reading "2" against three printed serials. This
+  // is the exact frozen-qty bug QtyInput's own comment (above) already
+  // documents as having shipped once. So a saved value equal to the LIVE
+  // default (computed from `initialItems` via the same groupItemsIntoLines
+  // this component already uses) is treated as "untouched" and left ABSENT,
+  // and only a value that actually differs — the operator having typed
+  // something else before saving — becomes an override.
+  const [qtyEdits, setQtyEdits] = useState<Record<string, { auth?: string; issued?: string }>>(() => {
+    const liveDefault = new Map(groupItemsIntoLines(initialItems).map((l) => [`${l.make} ${l.model}`, l.defaultQty]));
+    const edits: Record<string, { auth?: string; issued?: string }> = {};
+    for (const l of draftValues?.lines ?? []) {
+      const key = `${l.make} ${l.model}`;
+      const def = liveDefault.get(key);
+      if (def !== undefined && l.qtyAuth === String(def) && l.qtyIssued === String(def)) continue;
+      edits[key] = { auth: l.qtyAuth, issued: l.qtyIssued };
+    }
+    return edits;
+  });
   const lineKey = (ln: { make: string; model: string }) => `${ln.make} ${ln.model}`;
   const qtyValue = (ln: { make: string; model: string; defaultQty: number }, field: "auth" | "issued") =>
     qtyEdits[lineKey(ln)]?.[field] ?? String(ln.defaultQty);

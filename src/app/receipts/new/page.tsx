@@ -39,9 +39,15 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
     if (!draft) notFound();
   }
 
-  const ids = draft
-    ? draft.payload.itemIds
-    : (itemsParam ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  // The URL wins over the draft payload when both are present. Resuming from
+  // /account carries no `?items=`, so the payload still seeds the first
+  // render — but once mounted, ReceiptBuilderForm's `replaceState` effect keeps
+  // the URL in step with the LIVE item list (including anything scanned after
+  // resuming), and that URL must win on a reload or a post-resume scan is
+  // silently discarded — the exact tab-eviction scenario that effect exists to
+  // survive.
+  const parsedItems = (itemsParam ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const ids = draft ? (parsedItems.length ? parsedItems : draft.payload.itemIds) : parsedItems;
   if (ids.length === 0) notFound();
 
   const loaded = (await Promise.all(ids.map((id) => getItem(id)))).filter((i) => i && i.status === "ACTIVE") as NonNullable<Awaited<ReturnType<typeof getItem>>>[];
@@ -65,6 +71,13 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
   }
   if (loaded.length === 0) notFound();
 
+  // Only meaningful when resuming a draft — with no draft, `ids` is just
+  // whatever the caller put in `?items=` and every one of them is either
+  // loaded or excluded already; there is no "dropped from the draft" story to
+  // tell. Without gating on `draft`, a plain `/receipts/new?items=<retired>,<active>`
+  // link (reachable from `/items` when a device is retired between page load
+  // and click) rendered a draft-worded "removed from this draft" alert with no
+  // draft in play.
   const { droppedIds } = splitDraftItems(ids, loaded);
 
   const lines = groupItemsIntoLines(loaded.map((i) => ({ itemId: i.id, make: i.make, model: i.model, serialNumber: i.serialNumber })));
@@ -130,7 +143,7 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
             signatures={signatures}
             draftId={draft?.id}
             draftValues={draft?.payload}
-            droppedItemCount={droppedIds.length}
+            droppedItemCount={draft ? droppedIds.length : 0}
           />
         )}
       </main>
