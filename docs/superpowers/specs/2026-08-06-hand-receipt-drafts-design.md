@@ -284,7 +284,10 @@ and its device list goes stale much faster than a filed record.
 |---|---|
 | `prisma/schema.prisma` | new `ReceiptDraft` model, `User` back-relation |
 | `prisma/migrations/<ts>_add_receipt_draft/` | new migration |
-| `src/modules/receipts/drafts.schema.ts` | **new** — lenient Zod, pure |
+| `src/modules/receipts/drafts.schema.ts` | **new** — lenient Zod + label formatter, pure |
+| `src/modules/receipts/drafts.errors.ts` | **new** — `DraftError` (`TOO_MANY` \| `CORRUPT`) |
+| `src/modules/receipts/drafts.form.ts` | **new** — pure `FormData` → payload; drops the signature. Separate from the action because a file-level `"use server"` makes every export an async Server Function |
+| `src/modules/receipts/drafts.resume.ts` | **new** — pure `splitDraftItems`, decides what survived |
 | `src/modules/receipts/drafts.service.ts` | **new** — `server-only`; save/list/get/delete/purge |
 | `src/app/actions/drafts.ts` | **new** — `saveDraftAction`, `deleteDraftAction` |
 | `src/app/receipts/new/ReceiptBuilderForm.tsx` | header row + button; `draftId`; seed from `draftValues`; notices; `replaceState` fix |
