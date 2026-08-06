@@ -14,6 +14,8 @@ import { parseItemScan } from "@/modules/items/scan-url";
 import { lookupScannedItem } from "@/app/actions/scan";
 import { QrScanner } from "@/components/QrScanner";
 import { beep } from "@/lib/beep";
+import { saveDraftAction } from "@/app/actions/drafts";
+import type { ReceiptDraftPayload } from "@/modules/receipts/drafts.schema";
 
 // `holderName` is the item's current holder, used to warn when a scan brings in
 // equipment held by someone other than the sender on the form. It rides along
@@ -247,12 +249,33 @@ function ServiceControls({ itemId }: { itemId: string }) {
   );
 }
 
-export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures }: {
+export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, draftId: initialDraftId, draftValues }: {
   initialItems: BuilderItem[];
   senderPrefill?: Prefill;
   signatures: PickableSignature[];
+  draftId?: string;
+  draftValues?: ReceiptDraftPayload;
 }) {
   const [state, action, pending] = useActionState(createReceiptAction, undefined);
+
+  // A separate useActionState from the Create one above: a failed draft save
+  // must never render as a failed receipt, and vice versa.
+  const [draftState, saveDraft, savingDraft] = useActionState(saveDraftAction, undefined);
+
+  // Blank until this form has been saved once. Held in state (not just seeded
+  // from the prop) so the id returned by the FIRST save is posted by the
+  // second — otherwise every save creates another draft.
+  const [draftId, setDraftId] = useState(initialDraftId ?? "");
+
+  // Guarded render-time write, compared on the action state's IDENTITY — the
+  // "storing information from previous renders" pattern used by
+  // SignatureManager.tsx:28-35 and ItemDetailsCard.tsx:43-47. NOT a useEffect:
+  // the repo lints react-hooks/set-state-in-effect as an error.
+  const [prevDraftState, setPrevDraftState] = useState(draftState);
+  if (draftState !== prevDraftState) {
+    setPrevDraftState(draftState);
+    if (draftState && "draftId" in draftState && draftState.draftId) setDraftId(draftState.draftId);
+  }
   // The item list is now the form's own state, seeded from the URL. It must NOT
   // go back to being a prop: re-deriving it from `?items=` on each change would
   // remount this component and discard the drawn signature and every typed
@@ -472,6 +495,35 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures }: 
 
   return (
     <form action={action} className="stack">
+      {/* The title lives INSIDE the form because the Save-draft button must:
+          `formAction` only applies to a submit button within the form it posts.
+          `.row` + `.spacer` is the shared title-left/action-right idiom from
+          items/page.tsx:67-77, and `.row` wraps, so on a phone the button drops
+          below the heading instead of crushing it. */}
+      <div className="row">
+        <h1 className="page-title">New hand receipt</h1>
+        <button
+          type="submit"
+          formAction={saveDraft}
+          /* Without this the browser refuses to submit while a `required`
+             field is blank — which is exactly the state a draft captures. */
+          formNoValidate
+          className="btn btn-secondary spacer"
+          style={{ minHeight: "var(--tap)" }}
+          disabled={savingDraft}
+        >
+          {savingDraft ? "Saving…" : "Save draft"}
+        </button>
+      </div>
+      {draftState && "error" in draftState && draftState.error && (
+        <p role="alert" className="alert-error">{draftState.error}</p>
+      )}
+      {draftState && "draftId" in draftState && (
+        <p role="status" aria-live="polite" className="alert-success">
+          Draft saved. Find it under Account → Draft hand receipts.
+        </p>
+      )}
+      <input type="hidden" name="draftId" value={draftId} />
       {items.map((it) => <input key={it.itemId} type="hidden" name="itemId" value={it.itemId} />)}
       <fieldset className="card stack-sm">
         <legend className="card__title">Items ({lines.length} {lines.length === 1 ? "row" : "rows"})</legend>

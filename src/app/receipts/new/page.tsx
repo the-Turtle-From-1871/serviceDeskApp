@@ -46,11 +46,16 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
           desktop instead of wrapping into a ~143px-tall stack. Matches the Items
           list and the site header, which are already wide. */}
       <main className="container container-wide stack">
-        <h1 className="page-title">New hand receipt</h1>
         {tooMany ? (
-          <div className="card empty">This selection has {lines.length} item types — the form holds {MAX_RECEIPT_ROWS}. Split it into two receipts.</div>
+          <>
+            <h1 className="page-title">New hand receipt</h1>
+            <div className="card empty">This selection has {lines.length} item types — the form holds {MAX_RECEIPT_ROWS}. Split it into two receipts.</div>
+          </>
         ) : tooManyPerRow ? (
-          <div className="card empty">One item type has more than {MAX_ITEMS_PER_ROW} items on a single row. Split that item across two receipts.</div>
+          <>
+            <h1 className="page-title">New hand receipt</h1>
+            <div className="card empty">One item type has more than {MAX_ITEMS_PER_ROW} items on a single row. Split that item across two receipts.</div>
+          </>
         ) : (
           <ReceiptBuilderForm
             initialItems={loaded.map((i, k) => ({
