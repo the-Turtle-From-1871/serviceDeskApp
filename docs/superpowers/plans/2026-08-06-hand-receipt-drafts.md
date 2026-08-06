@@ -1428,7 +1428,13 @@ Replace the effect at lines 274-277 with:
 
 - [ ] **Step 11: Add the resume cases to the component test**
 
-Append to `ReceiptBuilderForm.drafts.test.tsx`:
+Append to `ReceiptBuilderForm.drafts.test.tsx`. **Task 6 already added two pieces
+of test infrastructure to the top of that file that you must not remove:** a
+`SignaturePad` mock (jsdom has no canvas, so the real component throws on mount
+when it calls `getContext("2d")` — the sibling `ReceiptBuilderForm.test.tsx`
+mocks it for the same reason) and an `afterEach(cleanup)` (without it renders
+bleed across tests and `getByRole` stops being unique). Reuse them; do not
+re-declare them.
 
 ```tsx
 import { receiptDraftSchema } from "@/modules/receipts/drafts.schema";
