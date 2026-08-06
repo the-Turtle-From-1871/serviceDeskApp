@@ -3,6 +3,18 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-08-06
+
+### Added
+- **The app now installs properly to a phone's home screen.** Adding it from Safari or Chrome gives you a real app icon and name, and it opens in its own window without the browser address bar. Previously iOS had nothing to work from, so it used a screenshot of whatever page you happened to be on as the icon and opened the site in an ordinary browser tab. This is presentation only — it does not add offline use. Every page still reads live custody data, and showing you a cached property book would mean showing you yesterday's holder for a device, which is worse than showing you an error.
+
+### Changed
+- **You now stay signed in for far longer: 7 days without using the app, and 30 days in total before you are asked to sign in again.** It was 4 hours idle and 10 hours total, which was written for a shift at a desk and did not match how the app is actually used. Anyone who had added it to their phone's home screen was meeting the login form nearly every time they opened it — a home-screen app keeps its own separate sign-in from Safari, so it never inherited a login done in the browser, and the 4-hour window had usually lapsed since the last time it was opened. Signing in twice a day on a personal phone mostly teaches people to keep the password somewhere handy, which is the opposite of the point.
+- Two things worth knowing, both unchanged by this. **Deactivating an account or changing a password still ends that person's sessions immediately**, on every device — that remains the way to cut off access, and it does not wait out the 30 days. And **a longer session means more time in which a phone left unlocked is a signed-in phone**: lock your device, and tell an admin if you lose it, rather than counting on it signing itself out.
+
+### Notes
+- No migration, config, or env change. The session length is a code constant (`src/lib/session-freshness.ts`); existing sessions pick up the new window on their next request rather than needing anyone to sign in again.
+
 ## 2026-08-05
 
 ### Security
