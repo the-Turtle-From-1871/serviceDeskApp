@@ -13,6 +13,7 @@ import { parseServiceMap } from "@/modules/service-queue/service-form";
 import { parseReceiptForm } from "./receipts.parse";
 import { getOwnedSignature } from "@/modules/signatures/signatures.service";
 import { computeDueAt } from "@/modules/timers/due";
+import { deleteDraft } from "@/modules/receipts/drafts.service";
 
 export async function createReceiptAction(_prev: unknown, formData: FormData) {
   const user = await requireUser();
@@ -81,6 +82,20 @@ export async function createReceiptAction(_prev: unknown, formData: FormData) {
     const dueAt = parsed.data.returnDays ? computeDueAt(new Date(), parsed.data.returnDays) : null;
     const t = await createTransfer({ ...parsed.data, createdByUserId: user.id, dueAt });
     receiptNumber = t.receiptNumber;
+
+    // The receipt is filed, so its draft has served its purpose. Best-effort
+    // in the same style as the email block below: the receipt already exists
+    // and is authoritative, so a failed cleanup is logged, never surfaced as a
+    // failed receipt. A stale draft is harmless; a receipt that reports failure
+    // after being filed is not.
+    const draftId = String(formData.get("draftId") ?? "").trim();
+    if (draftId) {
+      try {
+        await deleteDraft(draftId, user.id);
+      } catch (err) {
+        console.error(`[createReceiptAction] draft cleanup failed for ${draftId}:`, err);
+      }
+    }
 
     // [Service Queue] For each item flagged "Needs service?" on the form, create
     // an item-level service request tied to this receipt. Best-effort ONLY for
