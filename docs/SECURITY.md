@@ -193,6 +193,31 @@ acting account id, so accountability depends on nobody sharing a login.
 **Password policy** — minimum 8 characters, enforced by Zod on both admin
 creation and self-service reset. `passwordField` in `src/modules/users/users.schema.ts`
 
+**The sign-in form deliberately cooperates with password managers.**
+`src/app/login/LoginForm.tsx` advertises `autocomplete="username"` on the email
+field and `current-password` on the password field. **Do not "harden" this to
+`autocomplete="off"`** — that is a long-discredited move: it does not stop modern
+managers, and to the extent it inconveniences anyone it pushes them toward short,
+memorised, reused passwords, which is a materially worse outcome than a
+credential sitting in the platform keychain. An 8-character minimum with no
+complexity or rotation rule (above) only makes sense alongside this.
+
+> Why `username` on a field that holds an email: `username` is the token managers
+> key on for a sign-in form, while `email` is a **contact** token that asks the
+> device for an address from the user's contact card. With `email` there, iOS
+> offered contact addresses or nothing and never the login saved for this site,
+> so on a phone the field looked broken. `type`/`id`/`name` stay `email`.
+> `LoginForm.test.tsx` pins all four attributes, plus the stable `id`/`name`
+> inside a `<form>` with a submit button that a browser requires before it will
+> store a credential at all — the assertion exists because `username` on a field
+> labelled Email reads like a mistake and inviting the "fix" costs autofill
+> silently.
+>
+> Note this is the *entry* surface only, and it grants nothing: `loginAction`
+> still runs the same Turnstile check, per-account bucket and velocity counter
+> ([§12](#12-rate-limiting), [§13](#13-captcha--cloudflare-turnstile)), and an
+> autofilled password is verified exactly like a typed one.
+
 ---
 
 ## 2. Authorization
