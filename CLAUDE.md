@@ -10,7 +10,15 @@
 - Validation & Utils: Zod, `pdf-lib`, `qrcode`
 - Styling: **two systems, on purpose** — see the styling rule below
 - Charts: `recharts`; icons: `lucide-react`; PNG export: `html-to-image`
-- Testing & Linting: Vitest (Integration), Playwright, ESLint 9
+- Testing & Linting: Vitest (unit + integration + jsdom component tests), Playwright, ESLint 9
+
+## Repo Map
+- `src/app/**` — routes and pages, plus the **Server Actions** in `src/app/actions/*` and `src/app/admin/actions/*`. Actions are the primary write path, and every one starts with `requireUser()`/`requireAdmin()` (see §1).
+- `src/modules/<domain>/` — 11 domain modules: `items`, `transfers`, `receipts`, `returns`, `service-queue`, `users`, `audit`, `auth`, `contacts`, `signatures`, `timers`. Convention: **`X.service.ts` reaches the DB** (all 14 import Prisma), **`X.schema.ts` is Zod**, and **pure logic is split into its own leaf file** — `readiness.ts`, `recipient-search.ts`, `audit.status.ts` — so it can be unit-tested directly and imported somewhere a DB client must not go.
+- `src/lib/**` — 49 cross-cutting utilities. Three are **proxy-safe and must stay that way**: `rate-limit.ts`, `public-access-cookie.ts` and `session-freshness.ts` must never import Prisma, bcrypt or `server-only`, because `src/proxy.ts` imports them and its bundle must carry no DB client. Each says so in its own header comment.
+- `src/components/**` — shared components. `src/components/ui/*` is the Tailwind/shadcn zone; everything else is the legacy `globals.css` world (see Styling, next).
+- `src/proxy.ts` — **Next 16 renamed middleware to proxy.** Grepping for `middleware.ts` finds nothing. It holds the coarse login gate, the PIN gate and the route rate limits — but never authz, which stays per-route.
+- Tests sit **beside** their subject (`x.ts` → `x.test.ts`). `*.test.tsx` are jsdom component tests run by `npm run test:ui`, with jsdom opted in per file (see Core Commands).
 
 ## Styling — Two Systems Coexist (read before touching CSS)
 - **`globals.css` is the original design system** (the "property book" ledger look) and backs every pre-existing page via classes like `.card` / `.stack` / `.btn` / `.table`. It is NOT being migrated wholesale.
@@ -30,9 +38,11 @@
 - Dev Server: `npm run dev`
 - Build App: `npm run build`
 - Database Client: `npx prisma generate`
-- Database Migration: `npx prisma migrate dev`
+- Database Migration: `npm run db:migrate`
 - Run Linters: `npm run lint`
-- Run Integration Tests: `npx vitest run integration`
+- **Run the tests: `npm test`** — the whole Vitest suite (~118 files; `include` also covers `tests/**` and `scripts/**/*.test.mjs`). `npx vitest run <pattern>` runs a subset, but note the pattern is a **filename** filter: `npx vitest run integration` matches exactly ONE file (`seal.integration.test.ts`), so it is not "the integration tests" and a green result from it is close to no evidence at all.
+- Component tests: `npm run test:ui` (`*.test.tsx`). jsdom is opt-in **per file** via a `// @vitest-environment jsdom` docblock on line 1 (Vitest 4 removed `environmentMatchGlobs`). Still no layout engine — see the styling rules above.
+- Security-docs guard: `npm run check:security-docs`
 - Run E2E Tests: `npx playwright test`
 
 ## CI/CD & Branch Protection (`main` is protected)
