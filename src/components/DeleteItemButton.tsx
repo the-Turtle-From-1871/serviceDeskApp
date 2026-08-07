@@ -13,7 +13,7 @@ import { deleteItemAction } from "@/app/admin/actions/items";
  * gives us Escape-to-close for free.
  */
 export function DeleteItemButton({
-  id, make, model, serialNumber, holderName,
+  id, make, model, serialNumber, holderName, onOpen,
 }: {
   id: string;
   make: string;
@@ -26,6 +26,10 @@ export function DeleteItemButton({
    *  CLAUDE.md's data-fetching rule forbids. Null/undefined renders no
    *  warning — the item isn't currently signed out. */
   holderName?: string | null;
+  /** Fired just before the dialog opens. /items uses it to retract the mobile
+   *  swipe drawer this button was tapped in, so no ancestor is mid-transform
+   *  while a modal is in the top layer. */
+  onOpen?: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +37,7 @@ export function DeleteItemButton({
 
   return (
     <>
-      <button type="button" className="btn btn-danger btn-sm" onClick={() => ref.current?.showModal()}>
+      <button type="button" className="btn btn-danger btn-sm" onClick={() => { onOpen?.(); ref.current?.showModal(); }}>
         Delete
       </button>
       {/* No className on the <dialog> itself. The UA stylesheet hides a closed
