@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
   axisFor,
   clampOffset,
@@ -71,16 +71,42 @@ export type RowGestures = {
 };
 
 export function useRowGestures({
+  rowIds,
   swipeEnabled,
   longPressEnabled,
   onLongPress,
 }: {
+  /** The rows currently rendered, in order. Only used to notice that the set
+   *  changed — see the reset below. */
+  rowIds: string[];
   /** Admin-only, and off during selection mode — see ItemSelectTable. */
   swipeEnabled: boolean;
   longPressEnabled: boolean;
   onLongPress: (rowId: string) => void;
 }): RowGestures {
   const [openId, setOpenId] = useState<string | null>(null);
+
+  // An open drawer belongs to the list the user swiped, not to the component —
+  // and both tables stay MOUNTED while their rows change underneath them
+  // (/items pages and sorts by `router.push` within the same route; the queue
+  // filters and sorts client-side). Without this, swiping row A open, paging
+  // forward and paging back re-mounts A already slid aside with its actions
+  // exposed, from a gesture the user did not make on this visit. Filtering the
+  // queue does the same.
+  //
+  // Compared by CONTENT rather than array identity: `rowIds` is a fresh array
+  // on every render, so an identity check would clear the drawer on the very
+  // re-render that opening it causes. This is React's documented "adjust state
+  // when a prop changes" pattern — a guarded render-time write, not a
+  // useEffect, so the drawer never paints open for a frame first (the repo uses
+  // the same pattern in SignatureManager).
+  const rowsKey = rowIds.join(",");
+  const [prevRowsKey, setPrevRowsKey] = useState(rowsKey);
+  if (rowsKey !== prevRowsKey) {
+    setPrevRowsKey(rowsKey);
+    setOpenId(null);
+  }
+
   const gesture = useRef<Gesture | null>(null);
   /** The row whose next card click a gesture has already spent, or null.
    *
@@ -106,6 +132,44 @@ export function useRowGestures({
   }, []);
 
   const closeDrawer = useCallback(() => setOpenId(null), []);
+
+  /** Settle a row back to its pre-gesture position. The drag is written
+   *  straight to the node, so React will not undo it for us. */
+  const settle = (g: Gesture) => {
+    g.el?.style.setProperty("--swipe", g.startedOpen ? `${-DRAWER_WIDTH}px` : "0px");
+    g.el?.style.removeProperty("transition");
+  };
+
+  // Safety net for the single-slot guard in onPointerDown. That guard makes
+  // later fingers inert while a gesture is live, which is right — but it means
+  // an occupied slot that is never emptied refuses EVERY subsequent swipe and
+  // long-press on the page, permanently, with no way back short of a remount.
+  //
+  // The row's own handlers cannot always empty it: each one first requires
+  // `g.rowId === rowId && g.pointerId === e.pointerId`, so a pointerup that
+  // lands anywhere other than the row that started the gesture never reaches
+  // them. That happens for real — the row unmounts mid-drag on a revalidation,
+  // pointer capture is lost, or a fling lifts off over a different card.
+  //
+  // Listening on the document closes the gap: these fire after React's own
+  // handlers (which run at the root container), so for an ordinary gesture the
+  // slot is already null and this does nothing. It only ever acts on the
+  // gestures the row missed, and treats them as cancelled rather than guessing
+  // at an open/close the user may not have completed.
+  useEffect(() => {
+    const rescue = (e: PointerEvent) => {
+      const g = gesture.current;
+      if (!g || g.pointerId !== e.pointerId) return;
+      settle(g);
+      endGesture();
+    };
+    document.addEventListener("pointerup", rescue);
+    document.addEventListener("pointercancel", rescue);
+    return () => {
+      document.removeEventListener("pointerup", rescue);
+      document.removeEventListener("pointercancel", rescue);
+    };
+  }, [endGesture]);
 
   const consumeSuppressedClick = useCallback((rowId: string) => {
     if (suppressClick.current !== rowId) return false;
@@ -314,8 +378,7 @@ export function useRowGestures({
       // The system took the pointer away (a scroll took over, a call came in).
       // Settle back to whatever the drawer was before the gesture started —
       // the drag wrote straight to the DOM, so React will not do it for us.
-      g.el?.style.setProperty("--swipe", g.startedOpen ? `${-DRAWER_WIDTH}px` : "0px");
-      g.el?.style.removeProperty("transition");
+      settle(g);
       endGesture();
     },
     [endGesture],

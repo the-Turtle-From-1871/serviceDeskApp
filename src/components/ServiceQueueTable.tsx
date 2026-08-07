@@ -47,6 +47,10 @@ export function ServiceQueueTable({ rows }: { rows: QueueRowVM[] }) {
   }, [rows, search, typeFilter, sort]);
 
   const gestures = useRowGestures({
+    // Search, the type filter and sorting all rebuild `shown` client-side with
+    // this component mounted, so without this an open drawer would survive a
+    // filter change and reappear on whichever row happened to take its place.
+    rowIds: shown.map((r) => r.id),
     // The whole page is behind requireAdmin (see admin/queue/page.tsx) and
     // every row's drawer holds the same one action, so there is never an empty
     // drawer to pull open.

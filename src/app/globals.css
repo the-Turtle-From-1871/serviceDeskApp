@@ -1273,6 +1273,20 @@ input[type="file"].input {
        (WCAG 1.4.4). Naming both keeps the gesture arbitration above while
        leaving zoom to the browser. */
     touch-action: pan-y pinch-zoom;
+    /* The card is a stretched <a> and the long press fires at 500ms — which is
+       exactly when the OS claims the same gesture on the same element. On iOS
+       a pressed link raises the callout/preview sheet ("Open / Copy / Share"),
+       so selection mode would turn on and vibrate UNDER a system sheet; on
+       Android the press starts a text-selection drag whose handles then eat the
+       swipe. Both properties inherit, so setting them on the row covers the
+       link and the card text inside it.
+       Scoped to the card layout only, so the desktop table stays selectable.
+       The tradeoff is deliberate: long-press on a card is the app's selection
+       gesture, so the text under it cannot also be the browser's. Neither of
+       these is reproducible in desktop Chromium — verify on a device. */
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
   /* `:hover` sticks after a tap on touch devices, which would leave whichever
      card you last touched permanently tinted. */
