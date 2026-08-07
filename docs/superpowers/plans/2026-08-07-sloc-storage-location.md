@@ -762,6 +762,18 @@ In `CLAUDE.md`, in the Categories bullet's `**CSV header:**` sub-bullet (which a
   * **Storage location** (`Item.storageLocation`) fills from **`SLoc`** (also `storageLocation` / `storageLoc`). A bare **`location`** is deliberately NOT aliased, for the same reason as a bare `type`: fleet exports carry a generic "Location" column meaning a geographic site, and aliasing it would overwrite every matched item's storage location and log the churn to `ItemEdit`. It is plain free text with no managed vocabulary and no index — unlike `deviceCategory`/`homeUnit`, nothing groups the fleet by it. Adding an importable column also means adding it to **`UPDATABLE_ITEM_COLUMNS`** in `items.service.ts` (the allowlist guarding the batched UPDATE's identifier splice) and to `loadExistingBySerial`'s `select`, or every import carrying it throws.
 ```
 
+- [ ] **Step 4b: Fix every stale "seven fields" claim — the editable set is now EIGHT**
+
+`editableItemFields` grew from seven fields to eight. Five places still say seven, and this project treats a doc that describes code which no longer exists as a defect, not a nitpick. Update all five:
+
+1. **`CLAUDE.md` line ~72** — the §1 bullet "The two item-edit surfaces share ONE field definition" says "**exactly seven fields**" and then enumerates them. Change to **eight** and add `storageLocation` to the list. This is the most important of the five: it is the guide a future reader trusts, and it currently understates the editable set.
+2. `src/modules/items/items.schema.ts:112` — "seven-field editable set" in the `itemIdentitySchema` doc comment.
+3. `src/modules/items/items.schema.ts:168` — "the seven fields both edit surfaces expose" in the `editableItemFields` doc comment.
+4. `src/modules/items/items.schema.test.ts:40` — test title `"round-trips all seven editable fields"`.
+5. `src/modules/items/items.schema.test.ts:147` — test title `"strips the seven editable fields — this form corrects identity ONLY"`.
+
+Do NOT change any assertion — both tests derive from the `EDITABLE_FIELDS` constant, which was already grown correctly. These are names and prose only.
+
 - [ ] **Step 5: Confirm the security-docs guard is not triggered**
 
 Run: `npm run check:security-docs`
