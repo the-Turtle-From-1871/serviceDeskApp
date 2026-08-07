@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 //
-// The mobile nav is a fixed bottom rail, not a hamburger dropdown. Both navs
-// are rendered at every width and CSS alone decides which is visible (see the
-// .nav-rail block in globals.css), so these tests pin the MARKUP contract the
-// stylesheet depends on — jsdom has no layout engine and can prove nothing
-// about the rail's position, height or safe-area padding. That has to be
-// measured in a real browser.
+// The mobile nav is a fixed bottom rail, not a hamburger, and Account is the
+// header's profile icon rather than a tab. Both navs are rendered at every
+// width and CSS alone decides which is visible (see the .nav-rail block in
+// globals.css), so these tests pin the MARKUP contract the stylesheet depends
+// on — jsdom has no layout engine and can prove nothing about the rail's
+// position, height or safe-area padding. That has to be measured in a browser.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 
@@ -26,47 +26,34 @@ import { navItemsFor } from "./nav";
 afterEach(cleanup);
 
 const rail = () => screen.getByRole("navigation", { name: "Main" });
+const railTabs = () => within(rail()).getAllByRole("link");
+const profile = () => screen.queryByRole("link", { name: "Account" });
+const currentRailTabs = () =>
+  railTabs()
+    .filter((t) => t.getAttribute("aria-current") === "page")
+    .map((t) => t.textContent);
 
 describe("AppHeader bottom rail", () => {
   it("renders one tab per nav item, for each role", () => {
     for (const [flags, expected] of [
       [{ loggedIn: false, isAdmin: false }, ["Search", "Staff sign in"]],
-      [{ loggedIn: true, isAdmin: false }, ["Search", "Items", "Account"]],
-      [{ loggedIn: true, isAdmin: true }, ["Search", "Items", "Dashboard", "Account"]],
+      [{ loggedIn: true, isAdmin: false }, ["Search", "Items"]],
+      [
+        { loggedIn: true, isAdmin: true },
+        ["Search", "Items", "Queue", "Users", "Dashboard"],
+      ],
     ] as const) {
       render(<AppHeader items={navItemsFor(flags)} loggedIn={flags.loggedIn} />);
-      const tabs = within(rail()).getAllByRole("link");
-      expect(tabs.map((t) => t.textContent)).toEqual([...expected]);
+      expect(railTabs().map((t) => t.textContent)).toEqual([...expected]);
       cleanup();
     }
   });
 
   it("gives every tab an icon, so a tab is never a bare label", () => {
     render(<AppHeader items={navItemsFor({ loggedIn: true, isAdmin: true })} loggedIn />);
-    for (const tab of within(rail()).getAllByRole("link")) {
+    for (const tab of railTabs()) {
       expect(tab.querySelector("svg")).not.toBeNull();
     }
-  });
-
-  it("marks only the active tab, matching the header nav's own active link", () => {
-    pathname.mockReturnValue("/items");
-    render(<AppHeader items={navItemsFor({ loggedIn: true, isAdmin: true })} loggedIn />);
-
-    const current = within(rail())
-      .getAllByRole("link")
-      .filter((t) => t.getAttribute("aria-current") === "page");
-    expect(current.map((t) => t.textContent)).toEqual(["Items"]);
-    // Both navs are in the DOM at once; they must agree about where we are.
-    expect(screen.getAllByRole("link", { current: "page" })).toHaveLength(2);
-  });
-
-  it("keeps Dashboard active across the admin subtree", () => {
-    pathname.mockReturnValue("/admin/queue");
-    render(<AppHeader items={navItemsFor({ loggedIn: true, isAdmin: true })} loggedIn />);
-    const current = within(rail())
-      .getAllByRole("link")
-      .filter((t) => t.getAttribute("aria-current") === "page");
-    expect(current.map((t) => t.textContent)).toEqual(["Dashboard"]);
   });
 
   it("has no hamburger toggle left to open a menu that no longer exists", () => {
@@ -79,5 +66,66 @@ describe("AppHeader bottom rail", () => {
     pathname.mockReturnValue("/account");
     render(<AppHeader items={navItemsFor({ loggedIn: true, isAdmin: false })} loggedIn />);
     expect(within(rail()).queryByText(/sign out/i)).toBeNull();
+  });
+});
+
+describe("AppHeader active tab", () => {
+  it("marks exactly one tab, and the header nav agrees with the rail", () => {
+    pathname.mockReturnValue("/items");
+    render(<AppHeader items={navItemsFor({ loggedIn: true, isAdmin: true })} loggedIn />);
+    expect(currentRailTabs()).toEqual(["Items"]);
+    // Both navs are in the DOM at once; they must agree about where we are.
+    expect(screen.getAllByRole("link", { current: "page" })).toHaveLength(2);
+  });
+
+  // The regression this guards: Queue and Users sit inside /admin's subtree, so
+  // a naive isActive() per item lights up TWO tabs and puts aria-current on two
+  // links at once.
+  it("marks Queue — not Dashboard — on the queue page", () => {
+    pathname.mockReturnValue("/admin/queue");
+    render(<AppHeader items={navItemsFor({ loggedIn: true, isAdmin: true })} loggedIn />);
+    expect(currentRailTabs()).toEqual(["Queue"]);
+  });
+
+  it("marks Users — not Dashboard — on the users page", () => {
+    pathname.mockReturnValue("/admin/users");
+    render(<AppHeader items={navItemsFor({ loggedIn: true, isAdmin: true })} loggedIn />);
+    expect(currentRailTabs()).toEqual(["Users"]);
+  });
+
+  it("falls back to Dashboard on an admin page with no tab of its own", () => {
+    pathname.mockReturnValue("/admin/audit");
+    render(<AppHeader items={navItemsFor({ loggedIn: true, isAdmin: true })} loggedIn />);
+    expect(currentRailTabs()).toEqual(["Dashboard"]);
+  });
+});
+
+describe("AppHeader profile icon", () => {
+  it("is a link to /account, with an accessible name and an icon", () => {
+    pathname.mockReturnValue("/items");
+    render(<AppHeader items={navItemsFor({ loggedIn: true, isAdmin: true })} loggedIn />);
+    const p = profile();
+    expect(p).not.toBeNull();
+    expect(p!.getAttribute("href")).toBe("/account");
+    expect(p!.querySelector("svg")).not.toBeNull();
+  });
+
+  it("is absent when logged out — there is no account to reach", () => {
+    pathname.mockReturnValue("/");
+    render(<AppHeader items={navItemsFor({ loggedIn: false, isAdmin: false })} loggedIn={false} />);
+    expect(profile()).toBeNull();
+  });
+
+  it("carries the current marker on /account, where no tab does", () => {
+    pathname.mockReturnValue("/account");
+    render(<AppHeader items={navItemsFor({ loggedIn: true, isAdmin: true })} loggedIn />);
+    expect(currentRailTabs()).toEqual([]);
+    expect(profile()!.getAttribute("aria-current")).toBe("page");
+  });
+
+  it("is not marked current anywhere else", () => {
+    pathname.mockReturnValue("/items");
+    render(<AppHeader items={navItemsFor({ loggedIn: true, isAdmin: true })} loggedIn />);
+    expect(profile()!.getAttribute("aria-current")).toBeNull();
   });
 });
