@@ -165,12 +165,11 @@ export function ItemSelectTable({
       key={it.id}
       {...gestures.pointerHandlers(it.id)}
       style={{
-        // Read by the mobile card rules in globals.css; ignored above 720px,
-        // where nothing declares a transform.
+        // Read by the mobile card rules in globals.css. This is the RESTING
+        // position only — a live drag is written straight to the node by
+        // useRowGestures and settles on this same value, so a swipe costs no
+        // renders. Ignored above 720px, where nothing declares a transform.
         ["--swipe" as string]: `${offset}px`,
-        // A row under the finger must track it exactly. Anywhere else the CSS
-        // transition animates the snap open or shut.
-        transition: gestures.draggingId === it.id ? "none" : undefined,
       }}
       onClickCapture={(e) => {
         // Only the card's own stretched link is ever intercepted. Buttons, the
@@ -263,12 +262,15 @@ export function ItemSelectTable({
               model={it.model}
               serialNumber={it.serialNumber}
               holderName={it.holderName}
-              // Retract the drawer before the modal opens. A modal <dialog>
-              // lives in the top layer and should be immune to an ancestor's
-              // transform, but the open row IS transformed and this app has
-              // already shipped one dialog bug that only a real browser caught
-              // (see CLAUDE.md). Closing first means there is no live transform
-              // to be wrong about, and it is the better interaction anyway.
+              // Retract the drawer when the modal opens. This is an
+              // INTERACTION choice, not a safety mechanism: `closeDrawer` is a
+              // setState and `showModal()` runs in the same handler, so the row
+              // is still transformed at the moment the dialog enters the top
+              // layer — the ordering an earlier version of this comment claimed
+              // does not exist. It does not need to: a top-layer element's
+              // containing block is the viewport regardless of an ancestor's
+              // transform, measured here at a 390px viewport (dialog at left 0,
+              // full width, with the row sitting at -180px).
               onOpen={closeDrawer}
             />
           )}
@@ -481,13 +483,28 @@ export function ItemSelectTable({
       {selected.size > 0 && (
         // zIndex keeps this bar above the table rows it floats over.
         <div className="card stack-sm" style={{ position: "sticky", bottom: 0, zIndex: 2 }}>
-          <div className="row" style={{ justifyContent: "space-between" }}>
+          <div className="row" style={{ justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
             <span>{selected.size} selected · {groupCount} row{groupCount === 1 ? "" : "s"}</span>
-            {tooMany
-              ? <span role="alert" className="alert-error">Too many item types ({groupCount}). Max {MAX_RECEIPT_ROWS} per receipt — split into two.</span>
-              : tooManyPerRow
-              ? <span role="alert" className="alert-error">Too many of one item ({maxGroupSize}). Max {MAX_ITEMS_PER_ROW} per row — split into two.</span>
-              : <button className="btn btn-primary" onClick={create}>Create receipt from {selected.size} selected</button>}
+            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+              {tooMany
+                ? <span role="alert" className="alert-error">Too many item types ({groupCount}). Max {MAX_RECEIPT_ROWS} per receipt — split into two.</span>
+                : tooManyPerRow
+                ? <span role="alert" className="alert-error">Too many of one item ({maxGroupSize}). Max {MAX_ITEMS_PER_ROW} per row — split into two.</span>
+                : <button className="btn btn-primary" onClick={create}>Create receipt from {selected.size} selected</button>}
+              {/* The only way out of selection mode on a phone. `selecting` is
+                  derived from selected.size, and on the card layout every tap
+                  on an ACTIVE card toggles instead of opening — so with the
+                  <thead> checkbox hidden below 720px and selections surviving
+                  paging, a selection made on page 1 left no reachable control
+                  to undo it once you paged away. Reload was the only exit. */}
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setSelected(new Map())}
+              >
+                Clear selection
+              </button>
+            </div>
           </div>
           {/* The bulk "Set accountability" select is gone for good —
               accountability comes from audit evidence (record an audit

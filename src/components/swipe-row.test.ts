@@ -3,10 +3,12 @@ import {
   axisFor,
   clampOffset,
   shouldOpen,
-  isLongPress,
+  releaseVelocity,
+  withinLongPressSlop,
   DRAWER_WIDTH,
   AXIS_LOCK_PX,
-  LONG_PRESS_MS,
+  LONG_PRESS_SLOP_PX,
+  STALE_VELOCITY_MS,
 } from "./swipe-row";
 
 describe("axisFor", () => {
@@ -70,18 +72,37 @@ describe("shouldOpen", () => {
   });
 });
 
-describe("isLongPress", () => {
-  it("needs the full duration", () => {
-    expect(isLongPress(LONG_PRESS_MS - 1, 0, 0)).toBe(false);
-    expect(isLongPress(LONG_PRESS_MS, 0, 0)).toBe(true);
+describe("withinLongPressSlop", () => {
+  it("tolerates the small drift of a finger trying to hold still", () => {
+    expect(withinLongPressSlop(0, 0)).toBe(true);
+    expect(withinLongPressSlop(LONG_PRESS_SLOP_PX, -LONG_PRESS_SLOP_PX)).toBe(true);
   });
 
-  it("is disqualified by a finger that drifted into a gesture", () => {
-    expect(isLongPress(LONG_PRESS_MS + 200, -20, 0)).toBe(false);
-    expect(isLongPress(LONG_PRESS_MS + 200, 0, -20)).toBe(false);
+  // Deliberately tighter than AXIS_LOCK_PX, so a finger that is turning into
+  // either a swipe or a scroll is disqualified before the timer can fire.
+  it("rejects a finger that has started travelling", () => {
+    expect(withinLongPressSlop(LONG_PRESS_SLOP_PX + 1, 0)).toBe(false);
+    expect(withinLongPressSlop(0, LONG_PRESS_SLOP_PX + 1)).toBe(false);
+    expect(LONG_PRESS_SLOP_PX).toBeLessThan(AXIS_LOCK_PX);
+  });
+});
+
+describe("releaseVelocity", () => {
+  it("keeps a velocity sampled just before the lift", () => {
+    expect(releaseVelocity(-1.2, 0)).toBe(-1.2);
+    expect(releaseVelocity(-1.2, STALE_VELOCITY_MS)).toBe(-1.2);
   });
 
-  it("tolerates the small drift of a stationary finger", () => {
-    expect(isLongPress(LONG_PRESS_MS + 50, 3, -3)).toBe(true);
+  it("discards a velocity the finger has already stopped earning", () => {
+    // Flick left fast, pause to reconsider, lift: without this the drawer
+    // opens on a gesture the user visibly abandoned.
+    expect(releaseVelocity(-1.2, STALE_VELOCITY_MS + 1)).toBe(0);
+    expect(releaseVelocity(-1.2, 1000)).toBe(0);
+  });
+
+  it("leaves a stale release to be decided by distance alone", () => {
+    // Zeroed velocity falls through to the distance rule in shouldOpen.
+    expect(shouldOpen(-DRAWER_WIDTH * 0.9, releaseVelocity(-1.2, 500))).toBe(true);
+    expect(shouldOpen(-DRAWER_WIDTH * 0.1, releaseVelocity(-1.2, 500))).toBe(false);
   });
 });

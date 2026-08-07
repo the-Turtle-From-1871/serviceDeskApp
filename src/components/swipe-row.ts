@@ -113,8 +113,31 @@ export const LONG_PRESS_MS = 500;
  *  swipe or a scroll has already been disqualified by the time it fires. */
 export const LONG_PRESS_SLOP_PX = 8;
 
-/** Whether a press held for `heldMs` at displacement (dx, dy) is a long press. */
-export function isLongPress(heldMs: number, dx: number, dy: number): boolean {
-  if (heldMs < LONG_PRESS_MS) return false;
+/** Whether a finger that has moved (dx, dy) is still holding still enough to
+ *  count as a press.
+ *
+ *  Only the slop half of "long press" lives here — the duration half belongs to
+ *  the timer in useRowGestures, which already measures elapsed time better than
+ *  a function can. The hook calls THIS rather than re-deriving the rule inline,
+ *  so the tested code and the shipped code cannot drift apart. */
+export function withinLongPressSlop(dx: number, dy: number): boolean {
   return Math.abs(dx) <= LONG_PRESS_SLOP_PX && Math.abs(dy) <= LONG_PRESS_SLOP_PX;
+}
+
+/** How long after the last movement sample a release still counts as "moving".
+ *
+ *  Velocity is only sampled on pointermove, so a finger that flicks and then
+ *  rests before lifting sends no further samples and the last one survives to
+ *  the release. Without this the card opens on a gesture the user visibly
+ *  abandoned — flick, pause, think better of it, lift. One frame at 60Hz is
+ *  ~17ms, so 100ms is several frames of genuine stillness, not jitter. */
+export const STALE_VELOCITY_MS = 100;
+
+/** The velocity a release should actually be judged on.
+ *
+ *  `msSinceLastSample` is the gap between the last pointermove and the lift.
+ *  A stale sample is discarded rather than decayed: the question at release is
+ *  only "was the finger still moving", and a paused finger was not. */
+export function releaseVelocity(velocity: number, msSinceLastSample: number): number {
+  return msSinceLastSample > STALE_VELOCITY_MS ? 0 : velocity;
 }

@@ -3,10 +3,12 @@ import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent }
 import {
   axisFor,
   clampOffset,
+  isCardLayout,
+  releaseVelocity,
   shouldOpen,
   DRAWER_WIDTH,
   LONG_PRESS_MS,
-  LONG_PRESS_SLOP_PX,
+  withinLongPressSlop,
   type GestureAxis,
 } from "./swipe-row";
 
@@ -42,19 +44,19 @@ type Gesture = {
   velocity: number;
   longPressTimer: ReturnType<typeof setTimeout> | null;
   fired: boolean;
+  /** The row's own element, once the gesture is committed to a swipe. The drag
+   *  is written straight to it instead of through React state — see
+   *  onPointerMove. */
+  el: HTMLElement | null;
 };
 
 export type RowGestures = {
   /** The row whose action drawer is currently open, if any. */
   openId: string | null;
-  /** Where the row should sit, in px (negative = leftward): the live drag if
-   *  this row is under a finger, otherwise its resting place. One function so
-   *  no caller has to remember that a row dragged back to exactly 0 is still
-   *  the open row and must NOT snap to the drawer. */
+  /** Where the row RESTS, in px (negative = leftward). The live drag is not
+   *  here: it is written straight to the dragged node, so a swipe costs no
+   *  renders at all. Both paths settle on the same value. */
   offsetFor: (rowId: string) => number;
-  /** The row under an active drag, if any. That row must not animate, or it
-   *  lags behind the finger. */
-  draggingId: string | null;
   closeDrawer: () => void;
   /** Whether this row's next card click was produced by a gesture rather than
    *  a tap, and so must not navigate. Reads AND clears. Call once, from a
@@ -79,7 +81,6 @@ export function useRowGestures({
   onLongPress: (rowId: string) => void;
 }): RowGestures {
   const [openId, setOpenId] = useState<string | null>(null);
-  const [drag, setDrag] = useState<{ rowId: string; offset: number } | null>(null);
   const gesture = useRef<Gesture | null>(null);
   /** The row whose next card click a gesture has already spent, or null.
    *
@@ -102,7 +103,6 @@ export function useRowGestures({
   const endGesture = useCallback(() => {
     clearTimer();
     gesture.current = null;
-    setDrag(null);
   }, []);
 
   const closeDrawer = useCallback(() => setOpenId(null), []);
@@ -115,15 +115,43 @@ export function useRowGestures({
 
   const onPointerDown = useCallback(
     (rowId: string) => (e: ReactPointerEvent<HTMLElement>) => {
-      // Right-click and the middle button are not gestures, and a press that
-      // starts on a button inside the drawer must reach that button untouched.
+      // Right-click and the middle button are not gestures.
       if (e.button !== 0) return;
-      // Touch and pen only. A mouse has no business here: the card layout and
-      // its drawer exist only under the 720px breakpoint, so a mouse-drag on a
+      // Touch and pen only. A mouse has no business here: a mouse-drag on the
       // desktop table would translate a row with nothing behind it, and a
-      // held-down mouse button would silently enter selection mode. This is
-      // also why neither gesture needs a viewport check.
+      // held-down mouse button would silently enter selection mode.
       if (e.pointerType === "mouse") return;
+      // A touch device WIDER than the breakpoint (iPad landscape at 1024px, an
+      // iPad Mini at 744px, a Surface) still sends pointerType "touch" — but
+      // every transform that makes a gesture visible lives inside the 720px
+      // media block. Without this the row goes invisibly "open": nothing moves,
+      // and the next tap is spent closing a drawer the user never saw. Checked
+      // at event time, which is the only time it is safe to look at the
+      // viewport (see CARD_LAYOUT_QUERY).
+      if (!isCardLayout()) return;
+      // A press that starts on a control belongs to that control. `e.button`
+      // above is the MOUSE button, not an HTML <button>, so it never covered
+      // this: holding Edit for 500ms used to fire the long press, toggle the
+      // row into the selection, and retract the drawer out from under the
+      // finger — while the click still went through to Edit.
+      //
+      // `a` is deliberately NOT in this list, and must never be added. The
+      // card's tap target is a STRETCHED link whose ::after covers the entire
+      // row, so every touch anywhere on a card reports an <a> as its target —
+      // matching on it refuses every gesture the feature exists for, and the
+      // swipe silently stops working on both tables. (It shipped that way for
+      // one round and only a real-browser swipe caught it; jsdom has no
+      // hit-testing, so the target there is whatever element the test names.)
+      // The drawer's own links are inside `td.row-actions`, which is matched.
+      if ((e.target as HTMLElement | null)?.closest?.("td.row-actions, button, input, label")) {
+        return;
+      }
+      // One gesture at a time. `gesture.current` is a single slot, so a second
+      // finger landing on another row used to overwrite it — leaving the first
+      // row translated mid-swipe with `transition: none` until that second
+      // gesture happened to end. Two-finger scrolls and pinch-zooms do this
+      // routinely. The first finger keeps the gesture; later ones are inert.
+      if (gesture.current) return;
 
       // A gesture that ended somewhere other than on the card (a fling that
       // lifted over the drawer) leaves the flag set with no click to spend it
@@ -152,6 +180,7 @@ export function useRowGestures({
         velocity: 0,
         longPressTimer: null,
         fired: false,
+        el: null,
       };
       gesture.current = g;
 
@@ -181,7 +210,7 @@ export function useRowGestures({
       const dx = e.clientX - g.startX;
       const dy = e.clientY - g.startY;
 
-      if (Math.abs(dx) > LONG_PRESS_SLOP_PX || Math.abs(dy) > LONG_PRESS_SLOP_PX) clearTimer();
+      if (!withinLongPressSlop(dx, dy)) clearTimer();
       if (g.fired) return;
 
       if (g.axis === "undecided") {
@@ -195,12 +224,24 @@ export function useRowGestures({
         }
         if (g.axis === "horizontal") {
           if (!swipeEnabled) {
+            // Spend the click even though nothing will move. `touch-action`
+            // hands horizontal gestures to us, so the browser still synthesises
+            // a click at touchend — and it lands on the stretched card link.
+            // Without this a standard user (whose drawer is empty, and who has
+            // no grip to suggest otherwise) drags a card sideways and is taken
+            // to the item page instead of nothing happening.
+            suppressClick.current = rowId;
             endGesture();
             return;
           }
           // Claim the pointer only now: capturing on pointerdown would swallow
           // taps meant for the buttons inside the drawer.
           e.currentTarget.setPointerCapture?.(e.pointerId);
+          // The row's own element, so the drag can be written straight to it —
+          // see below. A row under a finger must track it exactly, so the CSS
+          // snap transition is suppressed for the duration of the drag.
+          g.el = e.currentTarget;
+          g.el.style.transition = "none";
         }
       }
 
@@ -212,7 +253,15 @@ export function useRowGestures({
       g.lastX = e.clientX;
       g.lastT = now;
 
-      setDrag({ rowId, offset: clampOffset(dx, g.startedOpen) });
+      // Written DIRECTLY to the dragged row's style, deliberately bypassing
+      // React. This used to be `setDrag(...)`, i.e. component state, which
+      // re-rendered the whole page — 50 rows, each carrying the card cells and
+      // a full drawer including DeleteItemButton — on every pointermove, at up
+      // to 120Hz, on exactly the phones this feature is for. Only one custom
+      // property on one node actually changes, and pointerup below settles the
+      // DOM to the same value React will render from `openId`, so the two never
+      // disagree.
+      g.el?.style.setProperty("--swipe", `${clampOffset(dx, g.startedOpen)}px`);
     },
     [swipeEnabled, endGesture],
   );
@@ -232,7 +281,19 @@ export function useRowGestures({
 
       if (g.axis === "horizontal") {
         const offset = clampOffset(e.clientX - g.startX, g.startedOpen);
-        setOpenId(shouldOpen(offset, g.velocity) ? rowId : null);
+        // Judge the release on a FRESH sample only — see releaseVelocity.
+        const v = releaseVelocity(g.velocity, Date.now() - g.lastT);
+        const open = shouldOpen(offset, v);
+        // Settle the node to EXACTLY what React is about to render from
+        // `openId`. Writing the resting value (rather than clearing the
+        // property) is what keeps the direct-DOM drag above consistent with
+        // React's model: when a row is re-opened from an already-open state
+        // the rendered value does not change, so React skips the style and the
+        // DOM must already be right. The transition override is dropped here
+        // so the snap animates.
+        g.el?.style.setProperty("--swipe", open ? `${-DRAWER_WIDTH}px` : "0px");
+        g.el?.style.removeProperty("transition");
+        setOpenId(open ? rowId : null);
         suppressClick.current = rowId;
       } else if (g.startedOpen) {
         // A plain tap on an open card closes it rather than navigating —
@@ -251,18 +312,18 @@ export function useRowGestures({
       const g = gesture.current;
       if (!g || g.rowId !== rowId || g.pointerId !== e.pointerId) return;
       // The system took the pointer away (a scroll took over, a call came in).
-      // Settle back to whatever the drawer was before the gesture started.
+      // Settle back to whatever the drawer was before the gesture started —
+      // the drag wrote straight to the DOM, so React will not do it for us.
+      g.el?.style.setProperty("--swipe", g.startedOpen ? `${-DRAWER_WIDTH}px` : "0px");
+      g.el?.style.removeProperty("transition");
       endGesture();
     },
     [endGesture],
   );
 
   const offsetFor = useCallback(
-    (rowId: string) => {
-      if (drag && drag.rowId === rowId) return drag.offset;
-      return openId === rowId ? -DRAWER_WIDTH : 0;
-    },
-    [drag, openId],
+    (rowId: string) => (openId === rowId ? -DRAWER_WIDTH : 0),
+    [openId],
   );
 
   const pointerHandlers = useCallback(
@@ -278,7 +339,6 @@ export function useRowGestures({
   return {
     openId,
     offsetFor,
-    draggingId: drag?.rowId ?? null,
     closeDrawer,
     consumeSuppressedClick,
     pointerHandlers,

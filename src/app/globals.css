@@ -1230,8 +1230,13 @@ input[type="file"].input {
     transition: transform 180ms ease-out;
     /* The browser keeps vertical scrolling outright; the pointer handlers only
        ever see the horizontal gestures they are allowed to claim. Without
-       this the two fight and the list feels stuck. */
-    touch-action: pan-y;
+       this the two fight and the list feels stuck.
+       `pinch-zoom` is listed explicitly: `pan-y` alone permits ONLY vertical
+       panning, which silently disables pinch-to-zoom over the whole list —
+       and magnifying a serial number is exactly what someone does on a phone
+       (WCAG 1.4.4). Naming both keeps the gesture arbitration above while
+       leaving zoom to the browser. */
+    touch-action: pan-y pinch-zoom;
   }
   /* `:hover` sticks after a tap on touch devices, which would leave whichever
      card you last touched permanently tinted. */
@@ -1318,22 +1323,46 @@ input[type="file"].input {
   /* ---- Selection mode: checkboxes appear in the header band ----
      Absolutely positioned so entering the mode costs the card no height —
      the list must not reflow under the finger that just long-pressed it. */
-  .table--cards td.cell-select { display: none; }
+  /* VISUALLY hidden, not `display: none`. A checkbox that is `display: none`
+     leaves the accessibility tree too, and long-press — a 500ms touch gesture —
+     would then be the ONLY way into selection mode: no screen-reader, switch-
+     access or keyboard user could select anything on a phone, which takes
+     "Create receipt from N selected" and "Print QR codes" away from them
+     entirely. Clipped like `.sr-only`, the checkbox stays focusable and
+     announced, and the two rules below give it a real box the moment it is
+     either focused or in use. */
+  .table--cards td.cell-select {
+    display: block;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
   /* No stacked-cell label here. `.table td::before { content: attr(data-label) }`
      gives every restacked cell its column name, which is right for a full-width
      row and wrong for a 44px box pinned in a corner: "Select" wrapped one
      letter per line and spilled down over the card. */
   .table--cards td.cell-select::before { content: none; }
-  .table--cards.is-selecting td.cell-select {
+  /* `:has(input)` is what keeps a RETIRED card clean: its select cell renders
+     with no checkbox inside (retired rows are excluded from every bulk action),
+     and giving that empty cell a 44px box over the stretched link would put a
+     dead zone in the corner of the card that swallows taps meant to open it. */
+  .table--cards.is-selecting td.cell-select:has(input),
+  .table--cards td.cell-select:focus-within {
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    position: absolute;
     top: 0;
     right: 8px;
     width: var(--tap);
     height: var(--tap);
-    padding: 0;
+    margin: 0;
+    overflow: visible;
+    clip-path: none;
     /* Over the stretched link, or the checkbox cannot be tapped. */
     z-index: 2;
   }
