@@ -445,7 +445,16 @@ export function ItemSelectTable({
             onClick={printQr}
             title={selected.size === 0 ? "Select items to print QR labels" : undefined}
           >
-            Print QR codes{selected.size ? ` (${selected.size})` : ""}
+            {/* The label is CONSTANT on purpose. It used to append ` (N)`, and
+                on a phone this button and Columns share one fixed-width row —
+                so the suffix appearing widened this button by 8.9px and shrank
+                Columns by exactly that much, then jittered again at (10) and
+                (100). The count is not lost: the selection bar below reads
+                "N selected · N rows", and it is on screen under precisely the
+                same condition (selected.size > 0), so this was showing the same
+                number twice at the cost of the toolbar resizing. Measured at
+                390px. */}
+            Print QR codes
           </button>
         )}
         <details className="col-menu spacer">
