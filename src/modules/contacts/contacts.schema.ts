@@ -12,10 +12,17 @@ const optionalText = z
   .transform((v) => v || undefined)
   .optional();
 
+// Exported so `upsertContactFromParty` can DROP an over-long rank before it
+// reaches this schema rather than losing the whole contact to a parse failure.
+// It must be the one definition: a local copy that drifted below this cap would
+// let an over-long value past the caller's check and straight into a refusal
+// here — exactly the outcome the drop exists to prevent.
+export const RANK_MAX_LENGTH = 20;
+
 const rank = z
   .string()
   .trim()
-  .max(20)
+  .max(RANK_MAX_LENGTH)
   .transform((v) => v || undefined)
   .optional();
 

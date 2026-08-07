@@ -42,6 +42,11 @@ describe("check-security-docs WATCHED list", () => {
     // the app, holding party PII.
     "src/modules/receipts/drafts.service.ts",
     "src/app/actions/drafts.ts",
+    // The contact book's ONE non-admin write path: createReceiptAction saves
+    // outside parties under a bare requireUser. The DCSIM skip, the
+    // email-is-the-match-key rule and the create-only name/createdById all live
+    // in this file and nowhere else.
+    "src/modules/contacts/contacts.service.ts",
     "src/modules/receipts/drafts.form.ts",
   ];
 
