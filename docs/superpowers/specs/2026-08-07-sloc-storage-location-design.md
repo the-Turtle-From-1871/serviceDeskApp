@@ -31,7 +31,7 @@ would change the importer for every column rather than this one.
 | File format | A CSV column, exported from Excel. No `.xlsx` parsing. |
 | Value model | Free text with suggestions, like `deviceUIC`. No managed vocabulary. |
 | Who can edit | Admins only. |
-| Item page visibility | Visible to **everyone**, including logged-out PIN visitors. |
+| Item page visibility | Signed-in staff only — a row in the existing details card. |
 | `/items` list | Searchable via `?q=`. **No** column, **no** sort key. |
 
 ### Why free text and not a managed list
@@ -140,14 +140,26 @@ offers locations already in use. It stays one query.
 
 ## Display
 
-**Item page (`/i/<id>`)** — one more row in the details list, rendered for
-everyone, including logged-out visitors who unlocked with the shared PIN.
+**Item page (`/i/<id>`)** — one more row in `ItemDetailsCard`'s `<dl>`,
+alongside Device UIC and Category, plus an admin-only input in that card's edit
+form.
 
-This is a deliberate widening of the public surface and is recorded as such:
-serials, home unit and current holder are already public by the accepted
-requirement in CLAUDE.md §1, but a storage location is different in kind — it
-tells a reader where to physically go and find the device. The team accepted
-this tradeoff explicitly when the field was scoped.
+**The public surface does not change.** `ItemDetailsCard` already renders
+inside `{loggedIn && …}` (`page.tsx:107`), so the whole details list is
+staff-only today; a logged-out visitor sees only the make/model heading,
+`Serial … · home unit`, the status badge, the overdue-audit banner and receipt
+history. Storage location joins the gated list, so no unauthenticated visitor
+ever receives it — not in the rendered page and not in the RSC Flight payload,
+since the component is not rendered at all without a session.
+
+This was originally scoped as "visible to everyone" on the assumption that the
+details list was public. It is not, and un-gating it to honour that reading
+would have published storage locations on a surface that currently carries only
+make, model, serial, home unit and status. Staff-only was chosen once the code
+was checked.
+
+Unlike `notes`, the value needs **no `isAdmin` gate on the prop**: it is
+readable by any signed-in user and only its *editing* is admin-restricted.
 
 **`/items` list** — no column and no sort key. `sort-keys.ts`,
 `items-view.ts` and the mobile card layout are untouched.
@@ -193,11 +205,13 @@ the first test for that file is part of this work.
   new column and its accepted aliases.
 - **`CLAUDE.md`** — the header-alias note, including why a bare `location` is
   excluded, alongside the existing `type` exclusion.
-- **`docs/SECURITY.md`** — the item page now publishes physical storage
-  locations to unauthenticated PIN visitors. That is a change to the public
-  surface, which §1 requires be recorded with a *Last reviewed* bump. Also
-  check whether any touched file needs adding to the
-  `scripts/check-security-docs.mjs` watch list.
+- **`docs/SECURITY.md`** — **not required.** Nothing in this change touches
+  authn/authz, crypto, retention, or the public unauthenticated surface: the
+  field is visible only to signed-in users, editable only by admins through the
+  existing role-picked schema split, and searchable only from the login-gated
+  `/items` page. No file on the `scripts/check-security-docs.mjs` watch list is
+  modified, so the `Security docs current` CI job will not fire. Run
+  `npm run check:security-docs` to confirm rather than assuming.
 
 ## Risks
 
@@ -205,6 +219,9 @@ the first test for that file is part of this work.
    extended as part of this work rather than after it.
 2. **A future export carries a generic "Location" column.** Mitigated by
    refusing that alias and writing down why.
-3. **Public disclosure of physical locations.** Accepted deliberately; recorded
-   in `docs/SECURITY.md` so a later audit reads it as a decision rather than a
-   bug to auto-remediate.
+3. **The importer's SQL allowlist is missed.** `UPDATABLE_ITEM_COLUMNS` in
+   `items.service.ts` guards the batched UPDATE's identifier interpolation. A
+   new importable column absent from it makes `planImport` emit a field the
+   writer then refuses, so every import carrying an SLoc fails with "Refusing
+   to update unknown column(s)". Covered by the import test that asserts a
+   matched row's location is overwritten.
