@@ -417,9 +417,11 @@ git commit -m "feat(import): plan storage-location creates and updates"
 
 **This task is where a miss fails loudly.** `UPDATABLE_ITEM_COLUMNS` is an allowlist guarding a SQL-identifier interpolation in the batched UPDATE. `planImport` now emits `storageLocation`, so if the allowlist does not contain it, every import carrying an SLoc throws `Refusing to update unknown column(s): storageLocation`.
 
-- [ ] **Step 1: Add the column to the read**
+- [x] **Step 1: Add the column to the read** — **ALREADY DONE in Task 3 (commit `d805774`).**
 
-In `loadExistingBySerial`'s `select`, add `storageLocation: true,` to the field list. Without it, `ExistingItem.storageLocation` is always `undefined` and `diffItemFields` compares against nothing — every import would report a change and rewrite the same value.
+`loadExistingBySerial`'s `select` already carries `storageLocation: true`. Task 3 was forced to add it: making `ExistingItem.storageLocation` a required field broke that select immediately, so the one-line read change came forward with it. Verify it is present, then move to Step 2 — do not re-add it.
+
+For the record of why it matters: without it, `ExistingItem.storageLocation` is always `undefined` and `diffItemFields` compares against nothing, so every import reports a change and rewrites the same value, logging a bogus history row each time.
 
 - [ ] **Step 2: Add the column to the write allowlist**
 
