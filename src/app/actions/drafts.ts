@@ -35,6 +35,14 @@ export async function deleteDraftAction(formData: FormData): Promise<void> {
   const user = await requireUser();
   const id = String(formData.get("id") ?? "").trim();
   if (!id) return;
-  await deleteDraft(id, user.id);
+  try {
+    await deleteDraft(id, user.id);
+  } catch (e) {
+    // A DB blip must not throw unhandled out of a plain form action — that
+    // takes out /account via the error boundary for what is, worst case, a
+    // draft that stays around to be deleted again. Same best-effort shape as
+    // deleteSignatureAction (signatures.ts).
+    console.error("[deleteDraftAction] unexpected error:", e);
+  }
   revalidatePath("/account");
 }

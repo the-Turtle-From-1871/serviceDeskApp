@@ -41,4 +41,17 @@ describe("DraftList", () => {
     render(<DraftList drafts={DRAFTS} />);
     expect(screen.getByRole("button", { name: /delete draft doe, jane/i })).toBeTruthy();
   });
+
+  // Every other date surface in the app goes through formatDateTimeHST
+  // (Pacific/Honolulu, no DST) so a saved time reads the same regardless of
+  // the server's own locale/timezone. A bare `toLocaleString()` here rendered
+  // Vercel's UTC unlabelled — this pins the shared, labelled format instead.
+  it("shows the save time in HST via the shared formatter, not the server's raw locale string", () => {
+    render(<DraftList drafts={DRAFTS} />);
+    expect(screen.getAllByText(/Saved .*HST/).length).toBe(DRAFTS.length);
+    // The un-fixed bug: Date.prototype.toLocaleString() with no arguments has
+    // no "HST" suffix at all — its presence is what proves the shared helper
+    // is doing the formatting, not an ad hoc call re-introduced later.
+    expect(screen.queryByText(DRAFTS[0].updatedAt.toLocaleString())).toBeNull();
+  });
 });

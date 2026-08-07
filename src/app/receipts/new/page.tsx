@@ -9,6 +9,23 @@ import { ReceiptBuilderForm } from "./ReceiptBuilderForm";
 import { getDraft } from "@/modules/receipts/drafts.service";
 import { DraftError } from "@/modules/receipts/drafts.errors";
 import { splitDraftItems, formatDroppedItemsNotice, type DroppedDraftItem } from "@/modules/receipts/drafts.resume";
+import { deleteDraftAction } from "@/app/actions/drafts";
+
+// Shared by every terminal ("can't be resumed") card below, so a technician
+// stuck on one of them always has the same way out: delete the draft, same as
+// the /account list's own Delete button (DraftList.tsx), posting to the same
+// action. Per design spec §4.4 — a terminal card must never leave the operator
+// with nothing to do but navigate away by hand.
+function DeleteDraftForm({ draftId }: { draftId: string }) {
+  return (
+    <form action={deleteDraftAction}>
+      <input type="hidden" name="id" value={draftId} />
+      <button type="submit" className="btn btn-secondary" style={{ minHeight: "var(--tap)" }}>
+        Delete this draft
+      </button>
+    </form>
+  );
+}
 
 export default async function NewReceiptPage({ searchParams }: { searchParams: Promise<{ items?: string; draft?: string }> }) {
   const user = await requireUser();
@@ -27,8 +44,12 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
             <SiteHeader />
             <main className="container container-mid stack">
               <h1 className="page-title">New hand receipt</h1>
-              <div className="card empty">
-                This draft can no longer be read and should be deleted from your account.
+              <div className="card empty stack-sm">
+                <p>This draft can no longer be read and should be deleted.</p>
+                {/* `draft` is never assigned on this path (the throw happens
+                    before the assignment completes), but `draftParam` — the id
+                    from the URL — is exactly what a delete needs. */}
+                <DeleteDraftForm draftId={draftParam} />
               </div>
             </main>
           </>
@@ -48,6 +69,26 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
   // survive.
   const parsedItems = (itemsParam ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   const ids = draft ? (parsedItems.length ? parsedItems : draft.payload.itemIds) : parsedItems;
+
+  // A draft can be SAVED with zero items — `removeItem` can empty the builder's
+  // list before "Save draft" is clicked, and `receiptDraftSchema` permits
+  // `itemIds: []`. Resuming one must never fall through to the bare
+  // `notFound()` below: per spec §4.4, never an empty builder and never a bare
+  // 404 for a draft — always an explanatory card with a way out.
+  if (draft && ids.length === 0) {
+    return (
+      <>
+        <SiteHeader />
+        <main className="container container-mid stack">
+          <h1 className="page-title">New hand receipt</h1>
+          <div className="card empty stack-sm">
+            <p>This draft has no items saved and can&apos;t be resumed. Delete it and start a new hand receipt.</p>
+            <DeleteDraftForm draftId={draft.id} />
+          </div>
+        </main>
+      </>
+    );
+  }
   if (ids.length === 0) notFound();
 
   // Kept alongside `loaded` (not discarded) so a dropped item can be NAMED:
@@ -65,10 +106,12 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
         <SiteHeader />
         <main className="container container-mid stack">
           <h1 className="page-title">New hand receipt</h1>
-          <div className="card empty">
-            None of the {ids.length} device{ids.length === 1 ? "" : "s"} on this draft can be issued any
-            more — they have been retired or removed from inventory. Delete the draft from your account
-            and start again.
+          <div className="card empty stack-sm">
+            <p>
+              None of the {ids.length} device{ids.length === 1 ? "" : "s"} on this draft can be issued any
+              more — they have been retired or removed from inventory. Delete the draft and start again.
+            </p>
+            <DeleteDraftForm draftId={draft.id} />
           </div>
         </main>
       </>

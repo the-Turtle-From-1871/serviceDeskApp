@@ -191,6 +191,23 @@ function ServiceControls({ itemId, initial }: {
   // in the rare case the serial is already in the queue, blank leaves that
   // existing deadline alone rather than wiping it (see upsertServiceRequest).
   const [days, setDays] = useState(initial?.days ?? "");
+  // Same defect class as PartyFields' `dcsimRef` above (lines ~70-85): React
+  // resets the form after ANY settled action, restoring every control to the
+  // `defaultChecked` captured at mount — and a controlled checkbox does not
+  // get `defaultChecked` kept in step for free. Before this branch the only
+  // settle was a FAILED create; `formAction={saveDraft}` makes a SUCCESSFUL
+  // save settle the form too. So: DCSIM recipient, tick "Needs service?" on a
+  // few devices, Save draft — the boxes silently uncheck. `needs` (React
+  // state) is untouched, so the type/days inputs stay visible and it READS
+  // like a rendering glitch, not data loss — but `service[itemId][needs]`
+  // then posts nothing on Create, `parseServiceMap` drops the flag, and the
+  // device never reaches the service queue. A later Save draft persists
+  // `service: []`, making the loss durable. Verified by
+  // ReceiptBuilderForm.drafts.test.tsx's Save-draft-checkbox test.
+  const needsRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (needsRef.current) needsRef.current.defaultChecked = needs;
+  }, [needs]);
   // One horizontal row, not a stack-sm column: the checkbox, the type, and the
   // note sit inline so an item occupies a single table row on a desktop. `.row`
   // still wraps, so a narrow screen stacks them as before.
@@ -198,6 +215,7 @@ function ServiceControls({ itemId, initial }: {
     <div className="row" style={{ gap: 8 }}>
       <label className="row" style={{ gap: 6, whiteSpace: "nowrap" }}>
         <input
+          ref={needsRef}
           type="checkbox"
           name={`service[${itemId}][needs]`}
           checked={needs}

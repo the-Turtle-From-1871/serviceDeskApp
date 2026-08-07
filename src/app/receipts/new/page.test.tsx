@@ -18,6 +18,11 @@ vi.mock("@/modules/signatures/signatures.service", () => ({ listSignatures: vi.f
 const getDraft = vi.fn();
 vi.mock("@/modules/receipts/drafts.service", () => ({ getDraft: (id: string, userId: string) => getDraft(id, userId) }));
 vi.mock("@/components/SiteHeader", () => ({ SiteHeader: () => <div data-testid="site-header" /> }));
+// page.tsx only ever passes this as a `<form action={...}>` reference in these
+// tests — nothing here submits the form — so a bare stub is enough, and it
+// keeps the real "use server" file (which imports server-only modules) out of
+// this jsdom module graph entirely.
+vi.mock("@/app/actions/drafts", () => ({ deleteDraftAction: vi.fn() }));
 // Echoes exactly the props under test back into the DOM as data-attributes, so
 // assertions read the same wiring NewReceiptPage actually computed — not a
 // re-derivation of it.
@@ -33,6 +38,7 @@ vi.mock("./ReceiptBuilderForm", () => ({
 }));
 
 import NewReceiptPage from "./page";
+import { DraftError } from "@/modules/receipts/drafts.errors";
 
 const item = (id: string, status: "ACTIVE" | "RETIRED" = "ACTIVE") => ({
   id, status, make: "Dell", model: "5420", serialNumber: `SN-${id}`,
@@ -144,5 +150,52 @@ describe("NewReceiptPage — the URL wins over the draft payload when both are p
     const builder = screen.getByTestId("builder");
     expect(builder.dataset.items).toBe("i1");
     expect(builder.dataset.droppedNotice).toBe(""); // not stale-reported
+  });
+});
+
+// Finding 3: the spec (§4.4) requires an explanatory card — never a bare
+// notFound(), never an empty builder — and a Delete button on every terminal
+// card, matching /account's own Delete button.
+describe("NewReceiptPage — terminal draft cards never dead-end without a way out", () => {
+  it("renders an explanatory card with a Delete button for a draft that can no longer be read, instead of throwing", async () => {
+    getDraft.mockRejectedValue(new DraftError("CORRUPT"));
+
+    const el = await NewReceiptPage({ searchParams: Promise.resolve({ draft: "d1" }) });
+    render(el);
+
+    expect(screen.getByText(/can no longer be read/i)).toBeTruthy();
+    const del = screen.getByRole("button", { name: /delete this draft/i });
+    const form = del.closest("form") as HTMLFormElement;
+    expect((form.querySelector('input[name="id"]') as HTMLInputElement).value).toBe("d1");
+  });
+
+  it("renders an explanatory card with a Delete button when every device on the draft is gone, instead of a bare 404", async () => {
+    getDraft.mockResolvedValue({ id: "d1", payload: { itemIds: ["i1", "i2"], lines: [], sender: {}, receiver: {}, returnDays: "", service: [] }, updatedAt: new Date() });
+    getItem.mockImplementation(async (id: string) => item(id, "RETIRED"));
+
+    const el = await NewReceiptPage({ searchParams: Promise.resolve({ draft: "d1" }) });
+    render(el);
+
+    expect(screen.getByText(/None of the 2 devices/i)).toBeTruthy();
+    const del = screen.getByRole("button", { name: /delete this draft/i });
+    const form = del.closest("form") as HTMLFormElement;
+    expect((form.querySelector('input[name="id"]') as HTMLInputElement).value).toBe("d1");
+  });
+
+  // A draft can be SAVED with zero items (removeItem can empty the builder's
+  // list before "Save draft"), and the schema permits `itemIds: []`. Resuming
+  // one used to fall through to a bare notFound() — the exact "empty builder /
+  // bare 404" pairing the spec forbids.
+  it("renders an explanatory card with a Delete button for a draft saved with zero items, instead of 404ing", async () => {
+    getDraft.mockResolvedValue({ id: "d1", payload: { itemIds: [], lines: [], sender: {}, receiver: {}, returnDays: "", service: [] }, updatedAt: new Date() });
+
+    const el = await NewReceiptPage({ searchParams: Promise.resolve({ draft: "d1" }) });
+    render(el);
+
+    expect(screen.getByText(/no items saved/i)).toBeTruthy();
+    expect(getItem).not.toHaveBeenCalled(); // nothing to even try loading
+    const del = screen.getByRole("button", { name: /delete this draft/i });
+    const form = del.closest("form") as HTMLFormElement;
+    expect((form.querySelector('input[name="id"]') as HTMLInputElement).value).toBe("d1");
   });
 });

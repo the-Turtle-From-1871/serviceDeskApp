@@ -1,4 +1,5 @@
 import { deleteDraftAction } from "@/app/actions/drafts";
+import { formatDateTimeHST } from "@/lib/datetime";
 
 // A server component: there is no client state here. Delete is a plain form
 // posting to a Server Action, deliberately NOT a confirmation `<dialog>` — a
@@ -21,8 +22,13 @@ export function DraftList({ drafts }: {
         <li key={d.id} className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <div>
             <strong>{d.label}</strong>
+            {/* Every other date surface in the app goes through this HST helper
+                (Pacific/Honolulu, no DST) — `toLocaleString()` here rendered
+                the SERVER's (Vercel's UTC) locale, unlabelled: "Saved
+                8/7/2026, 3:04 AM" for work actually done at 5pm the day
+                before. */}
             <div className="subtle" style={{ fontSize: 12 }}>
-              Saved {d.updatedAt.toLocaleString()}
+              Saved {formatDateTimeHST(d.updatedAt)}
             </div>
           </div>
           <span className="spacer" />

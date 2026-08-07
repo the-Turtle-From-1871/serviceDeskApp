@@ -116,4 +116,15 @@ describe("deleteDraftAction", () => {
     await deleteDraftAction(form([]));
     expect(deleteDraft).not.toHaveBeenCalled();
   });
+
+  // A DB blip must not throw unhandled out of a plain form action — that
+  // takes out /account via the error boundary. Matches deleteSignatureAction's
+  // best-effort shape.
+  it("does not throw when the delete fails, and logs it instead", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    deleteDraft.mockRejectedValueOnce(new Error("boom"));
+    await expect(deleteDraftAction(form([["id", "d1"]]))).resolves.toBeUndefined();
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
 });
