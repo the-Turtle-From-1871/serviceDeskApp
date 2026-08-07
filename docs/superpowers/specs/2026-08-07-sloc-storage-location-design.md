@@ -232,5 +232,15 @@ the file, and 10 tests were deleted before review caught it.)
    `items.service.ts` guards the batched UPDATE's identifier interpolation. A
    new importable column absent from it makes `planImport` emit a field the
    writer then refuses, so every import carrying an SLoc fails with "Refusing
-   to update unknown column(s)". Covered by the import test that asserts a
-   matched row's location is overwritten.
+   to update unknown column(s)".
+
+   **Mitigated by a test in `items.service.import.test.ts`, NOT `import.test.ts`.**
+   This distinction is the whole point: `import.test.ts` exercises `planImport`,
+   which is pure and never reaches the allowlist, so a storage-location test
+   there passes whether or not the allowlist entry exists. Only
+   `items.service.import.test.ts` calls `commitImport` against a real database
+   and therefore runs the batched UPDATE. An earlier draft of this document
+   claimed the risk was "covered by the import test that asserts a matched row's
+   location is overwritten" — that was wrong, and it named the test that cannot
+   catch it. The same trap applies to `homeUnit`, whose real coverage also lives
+   in the service-level file.

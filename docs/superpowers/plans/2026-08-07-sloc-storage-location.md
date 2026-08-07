@@ -433,11 +433,19 @@ In `UPDATABLE_ITEM_COLUMNS`, after `"deviceCategory",` add:
 
 No `FIELD_TO_COLUMN` entry is needed — the field is not `@map`'d, so the field name *is* the physical column name. No `COLUMN_CAST` entry is needed either — it is text, and `castFor` defaults to `text`.
 
-- [ ] **Step 3: Verify the whole import suite still passes**
+- [ ] **Step 3: Verify the import suite still passes — including the real-DB file**
 
-Run: `npx vitest run src/modules/items/import.test.ts src/modules/items/items.service.test.ts`
+Run: `npx vitest run src/modules/items/import.test.ts src/modules/items/items.service.import.test.ts`
 
 Expected: PASS.
+
+**`items.service.import.test.ts` is the file that matters here and it is easy to miss.** It is the only one that calls `commitImport` against a real database, so it is the only one that runs the batched UPDATE and therefore the only one that touches the allowlist. `import.test.ts` exercises `planImport`, which is pure — a storage-location test there passes whether or not Step 2 was done. An earlier draft of this plan named `items.service.test.ts` here instead, which is why the missing coverage went unnoticed until review.
+
+- [ ] **Step 3b: Add the test that would catch a missing allowlist entry**
+
+Append to `src/modules/items/items.service.import.test.ts` (9 existing tests — append, do not replace), mirroring the existing `"commitImport overwrites an existing item's homeUnit from the CSV and logs the change"` test: create an item with a `storageLocation`, `commitImport` a CSV using the `SLoc` header carrying a different value, then assert **the persisted row** holds the new value and that an `ItemEdit` records the change.
+
+Prove it bites: temporarily remove `"storageLocation",` from `UPDATABLE_ITEM_COLUMNS`, confirm the test FAILS with "Refusing to update unknown column(s)", then restore it.
 
 - [ ] **Step 4: Typecheck**
 
