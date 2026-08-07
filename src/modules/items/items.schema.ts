@@ -95,6 +95,7 @@ export const newItemSchema = z.object({
   homeUnit: optional,
   deviceUIC: optional,
   deviceCategory: categoryNew,
+  storageLocation: optional,
   notes: optional,
 });
 
@@ -108,7 +109,7 @@ export type NewItemInput = z.infer<typeof newItemSchema>;
  * from editing who holds a device: the serial is the identity existing signed
  * hand receipts refer to, so changing one rewrites what those receipts appear
  * to describe. Keeping it a separate schema + separate Server Action keeps the
- * seven-field editable set exactly as narrow as it is, and keeps the two
+ * eight-field editable set exactly as narrow as it is, and keeps the two
  * shared edit surfaces (item card + admin page) free of these fields — only the
  * admin edit page renders this one.
  *
@@ -131,6 +132,7 @@ export const importRowSchema = z.object({
   homeUnit: optional,
   deviceUIC: optional,
   deviceCategory: categoryOptional,
+  storageLocation: optional,
   notes: optional,
   assignedUser: optional,
   lastLogonUserPrincipalName: optional,
@@ -163,7 +165,7 @@ const categoryClearable = clearable
   );
 
 /**
- * THE editable field set for an item — the seven fields both edit surfaces
+ * THE editable field set for an item — the eight fields both edit surfaces
  * expose, and the single definition they share so the two can never drift.
  *
  * Consumers: `adminItemEditSchema` (the /admin/items/[id]/edit page) and
@@ -194,6 +196,7 @@ const editableItemFields = {
   currentPosition: clearable,
   notes: clearable,
   deviceCategory: categoryClearable,
+  storageLocation: clearable,
 } as const;
 
 /** The admin item-edit page's field set (`/admin/items/[itemId]/edit`). */

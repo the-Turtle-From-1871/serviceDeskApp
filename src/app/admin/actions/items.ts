@@ -99,7 +99,7 @@ export async function createItemAction(_prev: unknown, formData: FormData) {
   return { itemId: item.id, searchHref };
 }
 
-// Admin edit of an item's seven editable fields (see `editableItemFields` in
+// Admin edit of an item's eight editable fields (see `editableItemFields` in
 // items.schema.ts). make/model/serialNumber are NOT among them — identity is
 // corrected through its own form and its own action below
 // (updateItemIdentityAction). Routes through the SAME updateItemFields as the
@@ -145,7 +145,7 @@ export async function updateItemAction(_prev: unknown, formData: FormData) {
 // Correct an item's IDENTITY — make / model / serialNumber.
 //
 // Its own action, its own schema and its own form on /admin/items/[id]/edit,
-// deliberately NOT folded into adminItemEditSchema's seven editable fields.
+// deliberately NOT folded into adminItemEditSchema's eight editable fields.
 // A mistyped serial has to be correctable without a CSV round-trip, but the
 // serial is the identity existing signed hand receipts refer to, so correcting
 // one changes what those receipts appear to describe — that belongs behind a

@@ -21,6 +21,7 @@
 - **Never run `npm test` while another agent may be running it** — parallel runs truncate the shared test database and produce fake failures in unrelated files. Run the targeted file, as each task specifies.
 - **Prisma migrations:** `prisma migrate dev` cannot run non-interactively in this shell. Use `migrate diff --from-config-datasource --to-schema --script`, then `migrate deploy`.
 - **Do not stage other files.** The working tree may carry another session's in-flight edits. Every commit step stages explicit paths only — never `git add -A` or `git add .`.
+- **`npx tsc --noEmit` does NOT exit clean on this branch, and never did.** It reports **18 pre-existing errors** across exactly three files — `src/modules/audit/audit.service.test.ts`, `src/modules/service-queue/service-queue.service.test.ts`, `src/modules/transfers/transfers.service.test.ts` — all Prisma mock-typing noise in test files. CI does not run `tsc` at all (the three required checks are Semgrep SAST, `next build`, and the security-docs guard), which is how the debt accumulated. The baseline is saved at `.superpowers/sdd/2026-08-07-sloc-storage-location/tsc-baseline.txt`. **Wherever a task says to run `tsc --noEmit`, the pass condition is "no NEW error"** — no error naming `storageLocation`, and none in a file you touched. Compare against the baseline; do not try to reach zero, and do not "fix" those three files as a drive-by.
 
 ## File Structure
 
@@ -30,7 +31,7 @@
 | `prisma/migrations/<ts>_item_storage_location/migration.sql` | Create | The DDL. |
 | `src/modules/items/item-diff.ts` | Modify | Add to `ItemLoggedFields` so changes are recorded in history. |
 | `src/modules/items/csv.ts` | Modify | Add to `RawRow`, `HEADER_MAP`, row mapping. |
-| `src/modules/items/csv.test.ts` | Create | First test for this file — header aliasing. |
+| `src/modules/items/csv.test.ts` | **Modify (append)** | Header-aliasing tests. The file already exists with 15 tests — APPEND, never replace. |
 | `src/modules/items/items.schema.ts` | Modify | Add to `importRowSchema`, `editableItemFields`, `newItemSchema`. |
 | `src/modules/items/import.ts` | Modify | Add to `ExistingItem`, `NewItemImport`, both `planImport` branches. |
 | `src/modules/items/items.service.ts` | Modify | `loadExistingBySerial` select, `UPDATABLE_ITEM_COLUMNS`, `ItemFieldSuggestions` + its query, both search filter paths. |
@@ -130,17 +131,19 @@ git commit -m "feat(items): add Item.storageLocation column"
 
 **Files:**
 - Modify: `src/modules/items/csv.ts`
-- Create: `src/modules/items/csv.test.ts`
+- Modify (append only): `src/modules/items/csv.test.ts`
 
 **Interfaces:**
 - Consumes: nothing from Task 1 (this file is pure, no Prisma).
 - Produces: `RawRow.storageLocation: string` (empty string when the column is absent). `planImport` in Task 3 reads it.
 
-**Why a new test file:** `csv.ts` has no test coverage at all today, and its failure mode is silent — an unrecognised header is ignored, so a broken alias map reports a *successful* import with the column quietly dropped.
+**Why these tests matter:** this module's failure mode is silent — an unrecognised header is ignored, so a broken alias map reports a *successful* import with the column quietly dropped. That is exactly how the `DeviceOwnershipUIC` bug reached production and left ~1,000 items with an empty UIC.
+
+**⚠️ `csv.test.ts` ALREADY EXISTS — 121 lines, 15 tests, six commits of history. APPEND to it; never replace it.** Its existing tests guard the UIC alias set (including that production regression), the category aliases, the deliberate bare-`type` exclusion, quoted fields with embedded commas, blank-line skipping, and five error paths. Deleting any of them is a Critical defect: nothing fails, the suite simply covers less. An earlier draft of this plan wrongly said "Create" and claimed the file had no coverage — that was a plan error, and it cost a fix round.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `src/modules/items/csv.test.ts`:
+APPEND this block to the end of `src/modules/items/csv.test.ts`, leaving every existing test untouched:
 
 ```typescript
 import { describe, it, expect } from "vitest";
@@ -216,7 +219,7 @@ In `parseItemsCsv`'s `records.map(...)`, after `deviceCategory: r.deviceCategory
 
 Run: `npx vitest run src/modules/items/csv.test.ts`
 
-Expected: PASS, 3 tests.
+Expected: PASS, **18 tests** — the 15 that already existed plus your 3. A run reporting only 3 means the pre-existing tests were replaced instead of appended; restore them from git before committing.
 
 - [ ] **Step 7: Commit**
 
@@ -414,9 +417,11 @@ git commit -m "feat(import): plan storage-location creates and updates"
 
 **This task is where a miss fails loudly.** `UPDATABLE_ITEM_COLUMNS` is an allowlist guarding a SQL-identifier interpolation in the batched UPDATE. `planImport` now emits `storageLocation`, so if the allowlist does not contain it, every import carrying an SLoc throws `Refusing to update unknown column(s): storageLocation`.
 
-- [ ] **Step 1: Add the column to the read**
+- [x] **Step 1: Add the column to the read** — **ALREADY DONE in Task 3 (commit `d805774`).**
 
-In `loadExistingBySerial`'s `select`, add `storageLocation: true,` to the field list. Without it, `ExistingItem.storageLocation` is always `undefined` and `diffItemFields` compares against nothing — every import would report a change and rewrite the same value.
+`loadExistingBySerial`'s `select` already carries `storageLocation: true`. Task 3 was forced to add it: making `ExistingItem.storageLocation` a required field broke that select immediately, so the one-line read change came forward with it. Verify it is present, then move to Step 2 — do not re-add it.
+
+For the record of why it matters: without it, `ExistingItem.storageLocation` is always `undefined` and `diffItemFields` compares against nothing, so every import reports a change and rewrites the same value, logging a bogus history row each time.
 
 - [ ] **Step 2: Add the column to the write allowlist**
 
@@ -428,17 +433,25 @@ In `UPDATABLE_ITEM_COLUMNS`, after `"deviceCategory",` add:
 
 No `FIELD_TO_COLUMN` entry is needed — the field is not `@map`'d, so the field name *is* the physical column name. No `COLUMN_CAST` entry is needed either — it is text, and `castFor` defaults to `text`.
 
-- [ ] **Step 3: Verify the whole import suite still passes**
+- [ ] **Step 3: Verify the import suite still passes — including the real-DB file**
 
-Run: `npx vitest run src/modules/items/import.test.ts src/modules/items/items.service.test.ts`
+Run: `npx vitest run src/modules/items/import.test.ts src/modules/items/items.service.import.test.ts`
 
 Expected: PASS.
+
+**`items.service.import.test.ts` is the file that matters here and it is easy to miss.** It is the only one that calls `commitImport` against a real database, so it is the only one that runs the batched UPDATE and therefore the only one that touches the allowlist. `import.test.ts` exercises `planImport`, which is pure — a storage-location test there passes whether or not Step 2 was done. An earlier draft of this plan named `items.service.test.ts` here instead, which is why the missing coverage went unnoticed until review.
+
+- [ ] **Step 3b: Add the test that would catch a missing allowlist entry**
+
+Append to `src/modules/items/items.service.import.test.ts` (9 existing tests — append, do not replace), mirroring the existing `"commitImport overwrites an existing item's homeUnit from the CSV and logs the change"` test: create an item with a `storageLocation`, `commitImport` a CSV using the `SLoc` header carrying a different value, then assert **the persisted row** holds the new value and that an `ItemEdit` records the change.
+
+Prove it bites: temporarily remove `"storageLocation",` from `UPDATABLE_ITEM_COLUMNS`, confirm the test FAILS with "Refusing to update unknown column(s)", then restore it.
 
 - [ ] **Step 4: Typecheck**
 
 Run: `npx tsc --noEmit`
 
-Expected: PASS.
+Expected: the 18 pre-existing baseline errors and **no new one** — nothing naming `storageLocation`, nothing in `items.service.ts`. See Global Constraints.
 
 - [ ] **Step 5: Commit**
 
@@ -473,15 +486,11 @@ In `src/modules/items/items.schema.ts`, in `editableItemFields`, after `deviceCa
 
 This one edit gives both admin surfaces the field at once — `adminItemEditSchema` and `itemDetailsSchema` are both built from this object. **Do not add it to `userItemDetailsSchema`**; a standard USER still edits exactly two fields.
 
-- [ ] **Step 2: Add it to the create schema**
+- [x] **Step 2: Add it to the create schema** — **ALREADY DONE in Task 4's fix round (commit `68d25b9`).**
 
-In the same file, in `newItemSchema`, after `deviceCategory: categoryNew,` add:
+`newItemSchema` already carries `storageLocation: optional,` after `deviceCategory: categoryNew,`. Task 4's real-DB test had to create an item holding a storage location, and `createItem` re-parses its input through `newItemSchema`, so the line came forward with it. Verify it is present and move on — do not re-add it.
 
-```typescript
-  storageLocation: optional,
-```
-
-`optional` here, not `clearable`: a row that does not exist yet has no value to clear, and writing `""` puts an empty string where every filter would treat it as a value.
+For the record of why that helper: `optional`, not `clearable` — a row that does not exist yet has no value to clear, and writing `""` puts an empty string where every filter would treat it as a value.
 
 - [ ] **Step 3: Extend the suggestion vocabulary**
 
@@ -510,7 +519,7 @@ Run:
 npx tsc --noEmit
 ```
 
-Expected: FAIL, with errors at each site that builds an `ItemFieldSuggestions` literal. At minimum `src/app/i/[itemId]/page.tsx:72` has `{ make: [], model: [], deviceUIC: [] }` — add `storageLocation: []`. Fix each reported site the same way, then re-run until it passes.
+Expected: NEW errors — beyond the 18 baseline ones — at each site that builds an `ItemFieldSuggestions` literal. At minimum `src/app/i/[itemId]/page.tsx:72` has `{ make: [], model: [], deviceUIC: [] }` — add `storageLocation: []`. Fix each reported site the same way, then re-run until only the 18 baseline errors remain. Do not touch the three baseline files.
 
 - [ ] **Step 5: Add the display row and edit input to the item card**
 
@@ -606,10 +615,10 @@ Expected: PASS. If the first case returns `undefined` instead of `""`, Step 1 us
 Run:
 
 ```bash
-npx tsc --noEmit && npm run test:ui
+npx tsc --noEmit; npm run test:ui
 ```
 
-Expected: both PASS.
+Expected: `tsc` reports only the 18 baseline errors (see Global Constraints — it does not exit 0, which is why these are two statements and not `&&`); `test:ui` PASSES.
 
 - [ ] **Step 10: Commit**
 
@@ -739,13 +748,11 @@ And extend the paragraph about the ignored `type` column with a second sentence:
               fleet exports use it for a geographic site, not a storage location.
 ```
 
-- [ ] **Step 3: Add the changelog entry**
+- [x] **Step 3: Add the changelog entry** — **ALREADY DONE in Task 5 (commit `d93b5ff`).**
 
-In `CHANGELOG.md`, under `## 2026-08-07` (create the section at the top of the file if today's does not exist yet), under `### Added`:
+`CHANGELOG.md` already carries an entry under `## 2026-08-07` → `### Added`. **Do not add a second one.**
 
-```markdown
-- **Storage location on items.** Items now carry a storage location — where the device physically sits when nobody is holding it. It imports from the fleet export's **SLoc** column (also accepted: `storageLocation`, `storageLoc`), shows on the item page for signed-in staff, is editable by admins from the item card and the admin edit page, and is matched by the `/items` search box. A blank cell in a CSV leaves the stored value untouched, as with every other imported column; clearing one is done from the item's edit form.
-```
+Instead, **review the existing entry and extend it** so it covers what Tasks 6 and 7 added, which it was written before: that the `/items` search box now matches a storage location, and that a blank cell in a CSV leaves the stored value untouched (clearing one is done from the item's edit form). Keep it one entry, describing the behavior for a reader rather than the diff.
 
 - [ ] **Step 4: Document the header-alias rule**
 
@@ -754,6 +761,18 @@ In `CLAUDE.md`, in the Categories bullet's `**CSV header:**` sub-bullet (which a
 ```markdown
   * **Storage location** (`Item.storageLocation`) fills from **`SLoc`** (also `storageLocation` / `storageLoc`). A bare **`location`** is deliberately NOT aliased, for the same reason as a bare `type`: fleet exports carry a generic "Location" column meaning a geographic site, and aliasing it would overwrite every matched item's storage location and log the churn to `ItemEdit`. It is plain free text with no managed vocabulary and no index — unlike `deviceCategory`/`homeUnit`, nothing groups the fleet by it. Adding an importable column also means adding it to **`UPDATABLE_ITEM_COLUMNS`** in `items.service.ts` (the allowlist guarding the batched UPDATE's identifier splice) and to `loadExistingBySerial`'s `select`, or every import carrying it throws.
 ```
+
+- [ ] **Step 4b: Fix every stale "seven fields" claim — the editable set is now EIGHT**
+
+`editableItemFields` grew from seven fields to eight. Five places still say seven, and this project treats a doc that describes code which no longer exists as a defect, not a nitpick. Update all five:
+
+1. **`CLAUDE.md` line ~72** — the §1 bullet "The two item-edit surfaces share ONE field definition" says "**exactly seven fields**" and then enumerates them. Change to **eight** and add `storageLocation` to the list. This is the most important of the five: it is the guide a future reader trusts, and it currently understates the editable set.
+2. `src/modules/items/items.schema.ts:112` — "seven-field editable set" in the `itemIdentitySchema` doc comment.
+3. `src/modules/items/items.schema.ts:168` — "the seven fields both edit surfaces expose" in the `editableItemFields` doc comment.
+4. `src/modules/items/items.schema.test.ts:40` — test title `"round-trips all seven editable fields"`.
+5. `src/modules/items/items.schema.test.ts:147` — test title `"strips the seven editable fields — this form corrects identity ONLY"`.
+
+Do NOT change any assertion — both tests derive from the `EDITABLE_FIELDS` constant, which was already grown correctly. These are names and prose only.
 
 - [ ] **Step 5: Confirm the security-docs guard is not triggered**
 
@@ -774,9 +793,9 @@ git commit -m "docs(items): document the SLoc storage-location column"
 
 - [ ] **Step 1: Typecheck and lint**
 
-Run: `npx tsc --noEmit && npm run lint`
+Run: `npx tsc --noEmit; npm run lint`
 
-Expected: both PASS.
+Expected: `tsc` reports only the 18 baseline errors and no new one (see Global Constraints); `lint` PASSES. Note `next build` — Step 3 — is the check CI actually gates on.
 
 - [ ] **Step 2: Run the full test suite**
 

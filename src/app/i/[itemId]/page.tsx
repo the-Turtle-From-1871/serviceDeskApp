@@ -69,7 +69,7 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
     // The picker offers the MANAGED vocabulary, not whatever strings happen to
     // be on items — same source as the admin edit page.
     isAdmin ? listCategoryNames() : [],
-    isAdmin ? listItemFieldSuggestions() : { make: [], model: [], deviceUIC: [] },
+    isAdmin ? listItemFieldSuggestions() : { make: [], model: [], deviceUIC: [], storageLocation: [] },
   ]);
   const now = new Date();
   const auditLightState = item.status === "RETIRED" ? null : auditState(audits[0]?.createdAt ?? null, now);
@@ -112,6 +112,7 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
               homeUnit: item.homeUnit,
               deviceUIC: item.deviceUIC,
               deviceCategory: item.deviceCategory,
+              storageLocation: item.storageLocation,
               currentUserEmail: item.currentUserEmail,
               currentPosition: item.currentPosition,
               // ItemDetailsCard is a client component, so its props are

@@ -104,7 +104,7 @@ export function listUnits(): Promise<{ abbreviation: string; fullName: string }[
         book's spreadsheet happened to contain.
      3. Item creation (newItemSchema.homeUnit, items.schema.ts) — free text
         typed at creation time, casing uncontrolled.
-     4. Hand edit — homeUnit is one of the seven admin-editable fields
+     4. Hand edit — homeUnit is one of the eight admin-editable fields
         (editableItemFields, items.schema.ts), settable free-text from both
         `/admin/items/<id>/edit` and the item detail card.
    CASE is the thing that actually drifts across paths 2-4: none of them

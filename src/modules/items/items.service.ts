@@ -236,6 +236,7 @@ function itemFilterSql(search: string | null, uic: string | null): Prisma.Sql {
       OR i."make" ILIKE ${pattern}::text
       OR i."model" ILIKE ${pattern}::text
       OR i."serialNumber"::text ILIKE ${pattern}::text
+      OR i."storageLocation" ILIKE ${pattern}::text
       OR ${recipientMatchSql(search ? recipientTokens(search) : [])})
     AND (${uic}::text IS NULL OR i."deviceUIC" = ${uic}::text)`;
 }
@@ -329,6 +330,7 @@ export async function listItems(opts: {
         { make: { contains: search, mode: "insensitive" } },
         { model: { contains: search, mode: "insensitive" } },
         { serialNumber: { contains: search, mode: "insensitive" } },
+        { storageLocation: { contains: search, mode: "insensitive" } },
         // The recipient named on the item's CURRENT custody — an open receipt
         // with this row unreturned. Same rule as READINESS_CASE's DEPLOYED
         // branch, deliberately NOT getHoldingTransfer's stricter
@@ -433,7 +435,7 @@ export async function listItemUics(
   return rows.map((r) => r.deviceUIC).filter((u): u is string => u !== null);
 }
 
-export type ItemFieldSuggestions = { make: string[]; model: string[]; deviceUIC: string[] };
+export type ItemFieldSuggestions = { make: string[]; model: string[]; deviceUIC: string[]; storageLocation: string[] };
 
 /**
  * The free-text catalogue vocabularies, for the suggestion comboboxes.
@@ -468,6 +470,10 @@ export async function listItemFieldSuggestions(): Promise<ItemFieldSuggestions> 
     (SELECT 'deviceUIC' AS field, "deviceUIC" AS value, COUNT(*)::int AS n
        FROM "Item" WHERE btrim(COALESCE("deviceUIC", '')) <> ''
        GROUP BY "deviceUIC" ORDER BY n DESC, value ASC LIMIT ${SUGGESTION_CAP})
+    UNION ALL
+    (SELECT 'storageLocation' AS field, "storageLocation" AS value, COUNT(*)::int AS n
+       FROM "Item" WHERE btrim(COALESCE("storageLocation", '')) <> ''
+       GROUP BY "storageLocation" ORDER BY n DESC, value ASC LIMIT ${SUGGESTION_CAP})
   `);
 
   // Sorted in JS rather than trusting the UNION ALL to preserve each arm's
@@ -479,7 +485,7 @@ export async function listItemFieldSuggestions(): Promise<ItemFieldSuggestions> 
       .sort((a, b) => b.n - a.n || a.value.localeCompare(b.value))
       .map((r) => r.value);
 
-  return { make: bucket("make"), model: bucket("model"), deviceUIC: bucket("deviceUIC") };
+  return { make: bucket("make"), model: bucket("model"), deviceUIC: bucket("deviceUIC"), storageLocation: bucket("storageLocation") };
 }
 
 export type ItemEditor = { id: string; name: string };
@@ -498,6 +504,7 @@ const UPDATABLE_ITEM_COLUMNS = new Set<string>([
   "homeUnit",
   "deviceUIC",
   "deviceCategory",
+  "storageLocation",
   "notes",
   "currentUserEmail",
   "currentPosition",
@@ -800,7 +807,7 @@ async function loadExistingBySerial(serials: string[]): Promise<Map<string, Exis
     where: { serialNumber: { in: wanted } },
     select: {
       id: true, status: true, serialNumber: true, make: true, model: true, deviceName: true, homeUnit: true,
-      deviceUIC: true, deviceCategory: true, currentUserEmail: true, lastLogonUserPrincipalName: true, lastLogonDate: true,
+      deviceUIC: true, deviceCategory: true, storageLocation: true, currentUserEmail: true, lastLogonUserPrincipalName: true, lastLogonDate: true,
       enrollmentDate: true, compliance: true,
     },
   });

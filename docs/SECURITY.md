@@ -3,7 +3,7 @@
 A living inventory of every security control in this app — what it does, where
 it lives, and why. **Maintained over time**; see [Keeping this current](#keeping-this-current).
 
-**Last reviewed: 2026-08-06**
+**Last reviewed: 2026-08-07**
 
 Related: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`../CLAUDE.md`](../CLAUDE.md) · [`password-reset-hardening.md`](./password-reset-hardening.md)
 
@@ -238,12 +238,17 @@ deactivation take effect on the *next request* instead of at token expiry.
 
 **Field-level restriction is enforced server-side, not hidden in the UI.** A
 `USER` may edit only an item's current-holder email and current position;
-`deviceName` / `homeUnit` / `deviceUIC` / `notes` / `deviceCategory` are
-admin-only. `updateItemDetailsAction` **picks the Zod schema by role**, so a
-crafted POST can't widen the field set. Both edit surfaces (the item card and
-`/admin/items/<id>/edit`) now share ONE field definition — `editableItemFields`
-in `src/modules/items/items.schema.ts` — so the admin set cannot drift between
-them; `userItemDetailsSchema` stays separately and deliberately narrow.
+`deviceName` / `homeUnit` / `deviceUIC` / `notes` / `deviceCategory` /
+`storageLocation` are admin-only. `updateItemDetailsAction` **picks the Zod
+schema by role**, so a crafted POST can't widen the field set. Both edit
+surfaces (the item card and `/admin/items/<id>/edit`) now share ONE field
+definition — `editableItemFields` in `src/modules/items/items.schema.ts` — so
+the admin set cannot drift between them; `userItemDetailsSchema` stays
+separately and deliberately narrow. `storageLocation` follows the same
+read/write split as the rest of this admin set: any signed-in user can see it
+on the item detail card, but only an admin can change it, and it is not part
+of the public unauthenticated surface — the item card that renders it sits
+entirely behind the login gate.
 
 **Item identity (`make` / `model` / `serialNumber`) is a separate admin-only
 action.** `itemIdentitySchema` → `updateItemIdentityAction`, reachable only from

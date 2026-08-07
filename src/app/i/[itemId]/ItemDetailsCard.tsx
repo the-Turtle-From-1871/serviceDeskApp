@@ -10,6 +10,7 @@ export type ItemDetailsValues = {
   homeUnit: string | null;
   deviceUIC: string | null;
   deviceCategory: string | null;
+  storageLocation: string | null;
   currentUserEmail: string | null;
   currentPosition: string | null;
   notes: string | null;
@@ -119,6 +120,16 @@ export function ItemDetailsCard({ item, isAdmin, units, categories, suggestions,
                     defaultValue={item.deviceCategory ?? ""}
                   />
                 </div>
+                <div className="field">
+                  <label className="label" htmlFor="ed-storageLocation">Storage location (SLoc)</label>
+                  <SuggestCombobox
+                    id="ed-storageLocation"
+                    name="storageLocation"
+                    options={suggestions.storageLocation}
+                    placeholder="e.g. Bldg 400 Cage 3"
+                    defaultValue={item.storageLocation ?? ""}
+                  />
+                </div>
               </>
             )}
             <div className="field">
@@ -161,6 +172,8 @@ export function ItemDetailsCard({ item, isAdmin, units, categories, suggestions,
           <dd>{item.deviceUIC || dash}</dd>
           <dt>Category</dt>
           <dd>{item.deviceCategory || dash}</dd>
+          <dt>Storage location</dt>
+          <dd>{item.storageLocation || dash}</dd>
           <dt>Current user email</dt>
           <dd>{item.currentUserEmail || dash}</dd>
           <dt>Current position</dt>

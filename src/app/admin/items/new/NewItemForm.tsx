@@ -13,6 +13,7 @@ const fields = [
   ["homeUnit", "Home unit", false],
   ["deviceUIC", "Unit (UIC)", false],
   ["deviceCategory", "Category", false],
+  ["storageLocation", "Storage location (SLoc)", false],
 ] as const;
 
 export function NewItemForm({
@@ -44,6 +45,7 @@ export function NewItemForm({
     deviceUIC: suggestions.deviceUIC,
     homeUnit: units,
     deviceCategory: categories,
+    storageLocation: suggestions.storageLocation,
   };
 
   if (state && "itemId" in state && state.itemId) {

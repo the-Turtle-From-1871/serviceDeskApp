@@ -187,16 +187,25 @@ public search (`liveSearchAction`), which stays serial- and receipt-only.
 
 | File | What it pins |
 |---|---|
-| `csv.test.ts` *(new)* | `sloc` / `S_Loc` / `Storage Location` all map to `storageLocation`; a bare `location` header does **not**. |
+| `csv.test.ts` *(append)* | `sloc` / `S_Loc` / `Storage Location` all map to `storageLocation`; a bare `location` header does **not**. |
 | `item-diff.test.ts` | A changed storage location produces a `FieldChange`; an unchanged one produces none. |
 | `items.schema.test.ts` | Import blank → `undefined` (leave alone); form blank → clear recorded. |
 | `import.test.ts` | Create sets it; a matched row overwrites it; blank leaves it untouched; a `RETIRED` match writes no history row. |
 | `items.readiness-sort.parity.test.ts` | A search matching only on storage location returns identical ids from both the Prisma and raw paths. |
 
-`csv.ts` has **no test coverage at all** today. The alias map is precisely the
-kind of table that breaks silently — an unrecognised header is ignored, so a
-regression reports a successful import with the column quietly dropped. Adding
-the first test for that file is part of this work.
+The alias map is precisely the kind of table that breaks silently — an
+unrecognised header is ignored, so a regression reports a *successful* import
+with the column quietly dropped. That is how the `DeviceOwnershipUIC` bug
+reached production and left ~1,000 items with an empty UIC.
+
+**`csv.test.ts` already exists** — 121 lines, 15 tests, dating to the original
+import feature — and its existing cases guard that exact regression plus the
+category aliases, the bare-`type` exclusion, quoting, and five error paths. The
+new cases are **appended**. (An earlier draft of this document claimed the file
+had no coverage. That was wrong: it came from reading a code-intelligence
+"no covering tests" result for a single *symbol* as a statement about the
+*file*. The claim reached the plan, the plan told an implementer to "create"
+the file, and 10 tests were deleted before review caught it.)
 
 ## Documentation (same commit)
 
@@ -223,5 +232,15 @@ the first test for that file is part of this work.
    `items.service.ts` guards the batched UPDATE's identifier interpolation. A
    new importable column absent from it makes `planImport` emit a field the
    writer then refuses, so every import carrying an SLoc fails with "Refusing
-   to update unknown column(s)". Covered by the import test that asserts a
-   matched row's location is overwritten.
+   to update unknown column(s)".
+
+   **Mitigated by a test in `items.service.import.test.ts`, NOT `import.test.ts`.**
+   This distinction is the whole point: `import.test.ts` exercises `planImport`,
+   which is pure and never reaches the allowlist, so a storage-location test
+   there passes whether or not the allowlist entry exists. Only
+   `items.service.import.test.ts` calls `commitImport` against a real database
+   and therefore runs the batched UPDATE. An earlier draft of this document
+   claimed the risk was "covered by the import test that asserts a matched row's
+   location is overwritten" — that was wrong, and it named the test that cannot
+   catch it. The same trap applies to `homeUnit`, whose real coverage also lives
+   in the service-level file.
