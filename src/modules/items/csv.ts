@@ -11,6 +11,7 @@ export type RawRow = {
   homeUnit: string;
   deviceUIC: string;
   deviceCategory: string;
+  storageLocation: string;
   notes: string;
   assignedUser: string;
   lastLogonUserPrincipalName: string;
@@ -46,6 +47,18 @@ const HEADER_MAP: Record<string, keyof Omit<RawRow, "row">> = {
   devicecategory: "deviceCategory",
   devicetype: "deviceCategory",
   category: "deviceCategory",
+  // Storage location — the fleet export's "SLoc". normalizeHeader strips case
+  // and non-alphanumerics, so "SLoc", "S_Loc", "S Loc" and "Storage Location"
+  // all arrive here as one of these three keys.
+  //
+  // NOTE the deliberate absence of a bare `location` alias, for the same reason
+  // a bare `type` is absent above: an MDM or fleet export can carry a generic
+  // "Location" column holding a geographic site or building, and aliasing it
+  // would overwrite every matched device's storage location in a single import
+  // and log that churn to ItemEdit history. Keep the alias list explicit.
+  sloc: "storageLocation",
+  storagelocation: "storageLocation",
+  storageloc: "storageLocation",
   notes: "notes",
   assigneduser: "assignedUser",
   lastlogonuserprincipalname: "lastLogonUserPrincipalName",
@@ -93,6 +106,7 @@ export function parseItemsCsv(text: string): { rows: RawRow[]; error?: string } 
     homeUnit: r.homeUnit ?? "",
     deviceUIC: r.deviceUIC ?? "",
     deviceCategory: r.deviceCategory ?? "",
+    storageLocation: r.storageLocation ?? "",
     notes: r.notes ?? "",
     assignedUser: r.assignedUser ?? "",
     lastLogonUserPrincipalName: r.lastLogonUserPrincipalName ?? "",
