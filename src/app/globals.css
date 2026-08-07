@@ -845,6 +845,16 @@ input[type="file"].input {
 .card-link {
   color: inherit;
   text-decoration: none;
+  /* iOS treats a held LINK as the start of a link-drag, and when that system
+     gesture claims the touch WebKit fires `pointercancel` — which kills the
+     500ms long-press timer, so lifting the finger is just a tap and the item
+     opens instead of entering selection mode. `-webkit-touch-callout` on the
+     row suppresses the preview sheet but NOT the drag, so this is the third
+     property of the set and the one that keeps the pointer stream ours.
+     It does not inherit, so it has to sit on the anchor itself.
+     See the matching `draggable={false}`, which is the same instruction to
+     engines that ignore this property. */
+  -webkit-user-drag: none;
 }
 
 /* The serial number is the primary key a human matches against a sticker on

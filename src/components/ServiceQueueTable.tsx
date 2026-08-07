@@ -173,6 +173,10 @@ export function ServiceQueueTable({ rows }: { rows: QueueRowVM[] }) {
                     <Link
                       href={`/i/${r.itemId}`}
                       className="card-link"
+                      // Same reason as /items: a held link starts an iOS
+                      // link-drag, which cancels the pointer stream a swipe
+                      // depends on. See `-webkit-user-drag` on .card-link.
+                      draggable={false}
                       aria-label={`View ${r.deviceName ?? "device"}, serial ${r.serialNumber}`}
                     >
                       {r.serialNumber}
