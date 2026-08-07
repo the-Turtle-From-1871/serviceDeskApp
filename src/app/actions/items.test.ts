@@ -77,6 +77,7 @@ const ADMIN_FIELDS = {
   currentPosition: "Supply",
   notes: "Screen scratched",
   deviceCategory: "Laptop",
+  storageLocation: "Bldg 400 Cage 3",
 };
 
 beforeEach(() => {
@@ -101,13 +102,14 @@ describe("updateItemDetailsAction — role-gated fields", () => {
         deviceUIC: "HACKED UIC",
         notes: "HACKED NOTE",
         deviceCategory: "HACKED CATEGORY",
+        storageLocation: "HACKED SLOC",
       }),
     );
     expect(res).toEqual({ ok: true });
     const [id, data] = updateItemFields.mock.calls[0];
     expect(id).toBe("item-1");
     expect(data).toEqual({ currentUserEmail: "jane@u.mil", currentPosition: "Supply" });
-    for (const f of ["deviceName", "homeUnit", "deviceUIC", "notes", "deviceCategory"]) {
+    for (const f of ["deviceName", "homeUnit", "deviceUIC", "notes", "deviceCategory", "storageLocation"]) {
       expect(data).not.toHaveProperty(f);
     }
     // A USER's category never reaches the managed vocabulary either.
@@ -136,7 +138,7 @@ describe("updateItemDetailsAction — role-gated fields", () => {
     requireUser.mockResolvedValue(ADMIN);
     await updateItemDetailsAction(
       undefined,
-      fd({ id: "item-1", ...ADMIN_FIELDS, homeUnit: "", deviceUIC: "  ", notes: "", deviceCategory: "  ", currentUserEmail: "", currentPosition: "" }),
+      fd({ id: "item-1", ...ADMIN_FIELDS, homeUnit: "", deviceUIC: "  ", notes: "", deviceCategory: "  ", currentUserEmail: "", currentPosition: "", storageLocation: "  " }),
     );
     const [, data] = updateItemFields.mock.calls[0];
     expect(data).toEqual({
@@ -147,6 +149,7 @@ describe("updateItemDetailsAction — role-gated fields", () => {
       currentPosition: "",
       notes: "",
       deviceCategory: "",
+      storageLocation: "",
     });
     expect(learnCategories).not.toHaveBeenCalled();
   });
