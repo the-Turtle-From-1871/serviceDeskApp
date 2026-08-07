@@ -118,6 +118,18 @@ export function useRowGestures({
    *  clears even that. */
   const suppressClick = useRef<string | null>(null);
 
+  /** When and where the most recent press began, kept OUTSIDE the gesture slot
+   *  so it survives `endGesture()`.
+   *
+   *  This is the fail-safe for a press whose pointer stream is taken away
+   *  mid-hold: iOS can hand the touch to a system gesture (a link-drag) and
+   *  fire `pointercancel`, which clears the long-press timer — and then the
+   *  lift still produces a click, so a deliberate hold navigated to the item
+   *  instead of selecting. The CSS/`draggable` guards are what stop the
+   *  takeover; this makes the failure mode harmless if one ever gets through:
+   *  a press held past the threshold NEVER navigates. */
+  const lastPress = useRef<{ rowId: string; at: number } | null>(null);
+
   const clearTimer = () => {
     const g = gesture.current;
     if (g?.longPressTimer) {
@@ -171,11 +183,26 @@ export function useRowGestures({
     };
   }, [endGesture]);
 
-  const consumeSuppressedClick = useCallback((rowId: string) => {
-    if (suppressClick.current !== rowId) return false;
-    suppressClick.current = null;
-    return true;
-  }, []);
+  const consumeSuppressedClick = useCallback(
+    (rowId: string) => {
+      if (suppressClick.current === rowId) {
+        suppressClick.current = null;
+        lastPress.current = null;
+        return true;
+      }
+      // Fail-safe: this click ends a press that lasted at least as long as a
+      // long press, so it was a hold, not a tap — whatever became of the timer.
+      // Only where a long press MEANS something: on the queue it is disabled,
+      // and a slow tap there must still open the item.
+      const lp = lastPress.current;
+      if (longPressEnabled && lp?.rowId === rowId && Date.now() - lp.at >= LONG_PRESS_MS) {
+        lastPress.current = null;
+        return true;
+      }
+      return false;
+    },
+    [longPressEnabled],
+  );
 
   const onPointerDown = useCallback(
     (rowId: string) => (e: ReactPointerEvent<HTMLElement>) => {
@@ -232,6 +259,8 @@ export function useRowGestures({
       }
 
       const now = Date.now();
+      // Recorded before the gesture, and deliberately not cleared with it.
+      lastPress.current = { rowId, at: now };
       const g: Gesture = {
         rowId,
         pointerId: e.pointerId,

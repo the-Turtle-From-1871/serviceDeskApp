@@ -5,6 +5,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-08-07
 
+### Fixed
+- **Press and hold on an iPhone now starts selecting items instead of opening the item.** Holding a card was opening the item page every time, which made selecting several items for a hand receipt or a QR sheet impossible by touch. The cause was iOS treating a held card as the start of *dragging a link* — the system took over the press, and by the time you lifted your finger the app only ever saw an ordinary tap. Cards no longer offer themselves to be dragged, so the hold reaches the app. There is also a backstop: a press held for half a second or more will never open the item, even if something else interrupts it. A quick tap still opens the item exactly as before, and on the service queue — where holding does nothing — a slow tap still opens the item too.
+
 ### Added
 - **The admin dashboard now shows the ten most recent hand receipts.** Until now there was no way to see what had just been issued without already knowing a receipt number to search for: the dashboard listed what was overdue or due soon, which answers "what is late", not "what did we just hand out". The new card sits under the hand-receipt timers and gives each receipt's number, its items, who received it, the date it was created, and whether it is still open or has been closed — and each entry links straight through to the receipt itself. Two limits worth knowing. It is on the **admin** dashboard, so a standard user account does not see it. And closed receipts are permanently deleted 90 days after they close, so once a receipt has been closed for that long it drops off this list along with everything else.
 

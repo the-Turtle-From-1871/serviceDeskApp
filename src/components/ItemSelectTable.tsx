@@ -229,6 +229,12 @@ export function ItemSelectTable({
         <Link
           href={`/i/${it.id}`}
           className="card-link"
+          // A held link is a DRAGGABLE link on iOS, and the system drag that
+          // starts cancels our pointer stream mid-press — see the
+          // `-webkit-user-drag` note on .card-link. This is the same
+          // instruction at the HTML level, for engines that ignore that
+          // property. Dragging a row was never a feature here.
+          draggable={false}
           aria-label={`View ${it.make} ${it.model}, serial ${it.serialNumber}`}
         >
           {it.serialNumber}
