@@ -2,7 +2,7 @@
 // unit-testable without a database.
 
 // Every field whose changes are recorded in ItemEdit. Callers pass any subset:
-// the user-facing card edits four of them, the admin form edits six.
+// the user-facing card edits two of them, the admin form edits eight.
 // NOTE: deviceName, make, model, and serialNumber back NOT NULL columns on
 // Item. They're typed `string | null` here (and norm() below maps ""/blank
 // to null) only because this module doesn't enforce non-blank itself — every

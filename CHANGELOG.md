@@ -14,7 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Sign out has moved to the Account page on a phone**, at the bottom, under Change password. It used to live inside the ☰ menu, which no longer exists — the Account tab takes you straight to it. It is also on the Account page on a computer now, in addition to staying in the header, so it is somewhere findable rather than only in a corner you may have scrolled past.
 
 ### Notes
-- No migration, config, or env change. The list is one bounded query ordered by an index that already existed on the receipt table.
+- The recent-receipts card itself needs no migration, config, or env change: the list is one bounded query ordered by an index that already existed on the receipt table.
+- Storage location DOES add a migration: new column `Item.storageLocation` (`20260807000000_item_storage_location`) — apply to Supabase **before** merging, per the migrate-before-push rule. No new environment variables.
 - The bottom bar is padded for the home indicator on notched iPhones (`env(safe-area-inset-bottom)`), which matters because this app installs to the home screen and so has no browser chrome below it. It is hidden when printing, and sits below the QR scanner overlay rather than on top of it.
 
 ## 2026-08-06

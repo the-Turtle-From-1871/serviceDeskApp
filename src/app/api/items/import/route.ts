@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
 // `getImportActor()` (one DB round trip), `file.text()`, and inside
 // commitImport, `Promise.all([loadExistingBySerial, loadUnitMap])` — two
 // parallel queries, the first of which can return up to MAX_IMPORT_ROWS
-// (2000) rows × 14 columns. On a cold start, add Prisma engine
+// (2000) rows × 15 columns. On a cold start, add Prisma engine
 // initialization and the first pool connect on top of that. If the platform
 // kills the function before this pre-transaction work finishes, it never
 // reaches the transaction at all — same bad outcome (no clean 500 into the
