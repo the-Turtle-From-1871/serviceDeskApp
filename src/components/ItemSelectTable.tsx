@@ -137,6 +137,11 @@ export function ItemSelectTable({
   const selecting = selected.size > 0;
 
   const gestures = useRowGestures({
+    // Paging and sorting are `router.push` navigations within this route, so
+    // this component stays mounted while `items` changes under it. Handing the
+    // ids over lets the hook drop an open drawer that belongs to the previous
+    // page rather than re-showing it here.
+    rowIds: items.map((it) => it.id),
     // Swipe reveals Edit/Retire/Delete, all admin-only — a standard user's
     // drawer would be empty, so there is nothing to pull open. It is also off
     // while selecting, so the two gestures never compete for the same finger.
