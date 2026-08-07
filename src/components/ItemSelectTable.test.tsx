@@ -192,6 +192,28 @@ describe("ItemSelectTable — mobile card structure", () => {
     expect(container.querySelector("table.table.table--cards")).not.toBeNull();
   });
 
+  // Reported: selecting an item resized the "Print QR codes" AND "Columns"
+  // buttons. On a phone the two share one fixed-width row, so the ` (N)` this
+  // label used to append widened this button by 8.9px and shrank Columns by
+  // exactly that much — then jittered again at (10) and (100). jsdom has no
+  // layout engine, so what is pinned here is the CAUSE: the label is constant.
+  // The count is not lost — the selection bar below reads "N selected · N rows".
+  it("keeps the Print QR label constant when items are selected, so the toolbar cannot resize", () => {
+    const { container } = renderRows();
+    const btn = [...container.querySelectorAll("button")].find((b) =>
+      b.textContent!.trim().startsWith("Print QR"),
+    )!;
+    expect(btn.textContent!.trim()).toBe("Print QR codes");
+
+    const box = container.querySelector('tbody input[type="checkbox"]') as HTMLInputElement;
+    act(() => { fireEvent.click(box); });
+
+    // The selection really happened...
+    expect(screen.getByText(/1 selected · /)).toBeTruthy();
+    // ...and the label did not move.
+    expect(btn.textContent!.trim()).toBe("Print QR codes");
+  });
+
   it("makes the card a real link to the item, not a click handler", () => {
     const { container } = renderRows();
     const link = container.querySelector("td.cell-serial a.card-link");
