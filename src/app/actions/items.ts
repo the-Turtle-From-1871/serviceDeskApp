@@ -8,11 +8,11 @@ import { ItemError } from "@/modules/items/items.errors";
 import type { ItemLoggedFields } from "@/modules/items/item-diff";
 
 // Inventory is shared org-wide, so there is deliberately no per-user ownership
-// filter — access is gated on ROLE. An ADMIN may edit all seven editable item
+// filter — access is gated on ROLE. An ADMIN may edit all eight editable item
 // fields; a standard USER may change only the current holder email and current
 // position. The role picks the schema, and z.object() strips the rest, so a
 // USER's crafted POST cannot alter deviceName/homeUnit/deviceUIC/notes/
-// deviceCategory even though the form hides those inputs.
+// deviceCategory/storageLocation even though the form hides those inputs.
 // Every change is recorded as an ItemEdit by updateItemFields.
 export async function updateItemDetailsAction(_prev: unknown, formData: FormData) {
   const user = await requireUser();

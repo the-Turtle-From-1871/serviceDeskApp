@@ -114,7 +114,7 @@ describe("updateItemDetailsAction — role-gated fields", () => {
     expect(learnCategories).not.toHaveBeenCalled();
   });
 
-  it("ADMIN may change all seven editable fields", async () => {
+  it("ADMIN may change all eight editable fields", async () => {
     requireUser.mockResolvedValue(ADMIN);
     const res = await updateItemDetailsAction(undefined, fd({ id: "item-1", ...ADMIN_FIELDS }));
     expect(res).toEqual({ ok: true });
@@ -215,7 +215,7 @@ describe("updateItemIdentityAction", () => {
     expect(editor).toEqual({ id: "a1", name: "Admin" });
   });
 
-  it("edits ONLY identity — the seven editable fields are stripped from this submission", async () => {
+  it("edits ONLY identity — the eight editable fields are stripped from this submission", async () => {
     await updateItemIdentityAction(
       undefined,
       fd({ id: "item-1", ...IDENTITY, ...ADMIN_FIELDS }),

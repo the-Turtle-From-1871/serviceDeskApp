@@ -31,7 +31,7 @@ export default async function EditItemPage({ params }: { params: Promise<{ itemI
           <h1 className="page-title">Edit item</h1>
           {/* Identification line. Make/model/serial are correctable, but only
               through the separate identity form below — never from the item
-              detail card, and never as part of the seven-field form. */}
+              detail card, and never as part of the eight-field form. */}
           <p className="subtle">{item.make} {item.model} · SN {item.serialNumber}</p>
         </div>
         <span className="spacer" />

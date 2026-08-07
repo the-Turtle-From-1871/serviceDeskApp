@@ -7,7 +7,7 @@ import type { ItemFieldSuggestions } from "@/modules/items/items.service";
 // The identity-correction form: make / model / serialNumber, exactly the fields
 // `itemIdentitySchema` declares.
 //
-// A SEPARATE card and a SEPARATE submit from the main seven-field form on
+// A SEPARATE card and a SEPARATE submit from the main eight-field form on
 // purpose. These three are what a device IS — the serial in particular is the
 // identity signed hand receipts name — so correcting one should read as a
 // deliberate act, not something tabbed through on the way to editing a phone
