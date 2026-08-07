@@ -3,6 +3,15 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-08-07
+
+### Changed
+- **On a phone, the menu has moved to a fixed bar along the bottom of the screen.** Search, Items, Dashboard and Account are now always visible as tabs with icons, instead of being hidden behind the ☰ button in the top corner that you had to open before you could go anywhere. The tab you are on is marked, so the app also tells you where you are, which the old menu only did once you opened it. Getting between sections is now one tap rather than two, and the tabs sit at the bottom where your thumb already is — this app is meant to be used one-handed while you are holding a device you are checking in or out. Nothing changed on a computer: the menu is still along the top of the page as it always has been.
+- **Sign out has moved to the Account page on a phone**, at the bottom, under Change password. It used to live inside the ☰ menu, which no longer exists — the Account tab takes you straight to it. It is also on the Account page on a computer now, in addition to staying in the header, so it is somewhere findable rather than only in a corner you may have scrolled past.
+
+### Notes
+- No migration, config, or env change. The bottom bar is padded for the home indicator on notched iPhones (`env(safe-area-inset-bottom)`), which matters because this app installs to the home screen and so has no browser chrome below it. It is hidden when printing, and sits below the QR scanner overlay rather than on top of it.
+
 ## 2026-08-06
 
 ### Added

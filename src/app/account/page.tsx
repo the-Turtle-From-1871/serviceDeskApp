@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { requireUser, AuthError } from "@/lib/authz";
 import prisma from "@/lib/prisma";
 import { SiteHeader } from "@/components/SiteHeader";
+import { SignOutButton } from "@/components/SignOutButton";
 import { ChangePasswordForm } from "./ChangePasswordForm";
 import { SignatureSettings } from "./SignatureSettings";
 import { listSignatureNames } from "@/modules/signatures/signatures.service";
@@ -62,6 +63,16 @@ export default async function AccountPage() {
         <div className="card stack">
           <div className="card__title">Change password</div>
           <ChangePasswordForm />
+        </div>
+        {/* On mobile this is the ONLY sign-out: the bottom nav rail replaced
+            the header dropdown that used to hold it, and the rail's Account tab
+            lands here. Desktop keeps the header button as well. */}
+        <div className="card stack">
+          <div className="card__title">Sign out</div>
+          <p className="subtle">Sign out of this device.</p>
+          <div className="row">
+            <SignOutButton />
+          </div>
         </div>
       </main>
     </>
