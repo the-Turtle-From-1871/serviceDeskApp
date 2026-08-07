@@ -22,7 +22,7 @@ vi.mock("@/components/SiteHeader", () => ({ SiteHeader: () => <div data-testid="
 // tests — nothing here submits the form — so a bare stub is enough, and it
 // keeps the real "use server" file (which imports server-only modules) out of
 // this jsdom module graph entirely.
-vi.mock("@/app/actions/drafts", () => ({ deleteDraftAction: vi.fn() }));
+vi.mock("@/app/actions/drafts", () => ({ deleteDraftAndReturnToAccountAction: vi.fn() }));
 // Echoes exactly the props under test back into the DOM as data-attributes, so
 // assertions read the same wiring NewReceiptPage actually computed — not a
 // re-derivation of it.

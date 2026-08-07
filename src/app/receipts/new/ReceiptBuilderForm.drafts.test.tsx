@@ -234,6 +234,109 @@ describe("Save draft — a settled action must not silently clear a service flag
     // sibling DCSIM checkbox.
     expect(needsBox.checked).toBe(true);
   });
+
+  // INVESTIGATION (not yet a confirmed bug when written): a source-level
+  // reading of React 19.2.4 suggested a CONTROLLED <select> is passed
+  // `setDefaultSelected = false` on both mount and update, so no <option>
+  // ever carries `defaultSelected` — meaning `form.reset()` after a settled
+  // action could snap the select to its first non-disabled option while React
+  // state (and the visible label) keeps the old value, the same defect family
+  // as the checkbox above. This test exists to PROVE or DISPROVE that before
+  // any fix is written.
+  it("does not reset the 'Service type' select away from a non-default choice after Save draft succeeds", async () => {
+    saveDraftAction.mockResolvedValue({ draftId: "d1", savedAt: Date.now() });
+    const user = userEvent.setup();
+    render(<ReceiptBuilderForm initialItems={ITEMS} signatures={[]} />);
+
+    await user.click(dcsimBox("Sender"));
+    await user.type(party("Sender").getByLabelText("DCSIM technician name"), "SGT Tech");
+    await user.click(dcsimBox("Recipient"));
+    await user.type(party("Recipient").getByLabelText("DCSIM technician name"), "SGT Other");
+
+    await user.click(screen.getByRole("checkbox", { name: /needs service/i }));
+    const typeSelect = screen.getByLabelText("Service type") as HTMLSelectElement;
+    expect(typeSelect.value).toBe("REIMAGE"); // the default
+    // REPAIR, not OTHER: OTHER reveals a required "describe the service"
+    // note input, which would block a click-triggered jsdom submission for
+    // the same reason established in the checkbox test above (a required,
+    // unfilled field) — a confound this test does not want.
+    await user.selectOptions(typeSelect, "REPAIR");
+    expect(typeSelect.value).toBe("REPAIR");
+
+    await user.click(screen.getByRole("button", { name: /save draft/i }));
+    await waitFor(() => expect(saveDraftAction).toHaveBeenCalled());
+    await screen.findByText(/draft saved/i);
+
+    expect(typeSelect.value).toBe("REPAIR");
+  });
+
+  // Second suspected site: TechnicianSignatureField's saved-signature <select>
+  // (TechnicianSignatureField.tsx:58). Its hidden `signatureId` input is
+  // derived from REACT STATE (`picked.id`, itself from `selectedId`), NOT from
+  // the <select> DOM node's live value — so even if the visible dropdown
+  // resets, what actually POSTS is governed by state alone. This test checks
+  // BOTH the hidden input (truth) and the select's own DOM value (display)
+  // rather than assuming either.
+  it("keeps posting the picked signature via the hidden input regardless of what the select displays after Save draft settles", async () => {
+    const SIGS = [
+      { id: "s1", name: "SGT Alpha", image: "data:image/png;base64,A" },
+      { id: "s2", name: "SGT Beta", image: "data:image/png;base64,B" },
+    ];
+    saveDraftAction.mockResolvedValue({ draftId: "d1", savedAt: Date.now() });
+    const user = userEvent.setup();
+    const { container } = render(<ReceiptBuilderForm initialItems={ITEMS} signatures={SIGS} />);
+
+    await user.click(dcsimBox("Sender"));
+    await user.type(party("Sender").getByLabelText("DCSIM technician name"), "SGT Tech");
+    await user.click(dcsimBox("Recipient"));
+
+    // Picking (not the first option) hides the recipient's own name field
+    // (hideReceiverName), so no further required field is introduced.
+    const picker = screen.getByLabelText("Who received it?") as HTMLSelectElement;
+    await user.selectOptions(picker, "s2");
+    expect(picker.value).toBe("s2");
+
+    await user.click(screen.getByRole("button", { name: /save draft/i }));
+    await waitFor(() => expect(saveDraftAction).toHaveBeenCalled());
+    await screen.findByText(/draft saved/i);
+
+    const hidden = container.querySelector('input[name="signatureId"]') as HTMLInputElement;
+    // The TRUTH — what a Create submission would actually post — is
+    // unaffected by any native reset of the visible <select>, because it is
+    // derived from React state on every render, never from the select's own
+    // DOM value.
+    expect(hidden.value).toBe("s2");
+  });
+
+  // The display half of the same defect: confirmed by direct observation that
+  // the <select>'s own DOM value snaps to the first non-disabled option
+  // ("s1") after the settle above, even though `hidden.value` (and thus what
+  // gets posted) stays correct at "s2". This is a DISPLAY/TRUTH mismatch, not
+  // a wrong-signature submission — but a technician looking at the dropdown
+  // after saving a draft would see the wrong name and could reasonably
+  // distrust or "fix" a selection that was never actually wrong.
+  it("resets the select's own displayed value even though the posted value stays correct", async () => {
+    const SIGS = [
+      { id: "s1", name: "SGT Alpha", image: "data:image/png;base64,A" },
+      { id: "s2", name: "SGT Beta", image: "data:image/png;base64,B" },
+    ];
+    saveDraftAction.mockResolvedValue({ draftId: "d1", savedAt: Date.now() });
+    const user = userEvent.setup();
+    render(<ReceiptBuilderForm initialItems={ITEMS} signatures={SIGS} />);
+
+    await user.click(dcsimBox("Sender"));
+    await user.type(party("Sender").getByLabelText("DCSIM technician name"), "SGT Tech");
+    await user.click(dcsimBox("Recipient"));
+
+    const picker = screen.getByLabelText("Who received it?") as HTMLSelectElement;
+    await user.selectOptions(picker, "s2");
+
+    await user.click(screen.getByRole("button", { name: /save draft/i }));
+    await waitFor(() => expect(saveDraftAction).toHaveBeenCalled());
+    await screen.findByText(/draft saved/i);
+
+    expect(picker.value).toBe("s2");
+  });
 });
 
 // Finding 4: the service round-trip through resume — drafts.form.ts ->

@@ -14,8 +14,14 @@ vi.mock("@/modules/receipts/drafts.service", () => ({
   MAX_DRAFTS_PER_USER: 25,
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+// Matches the established pattern in unlock.test.ts: `redirect()` in real
+// Next.js throws a digest-tagged control-flow error rather than returning, so
+// the mock reproduces that shape instead of silently no-op'ing (which would
+// let a test pass even if the action forgot to redirect at all).
+const redirectMock = vi.fn((url: string) => { throw new Error(`REDIRECT:${url}`); });
+vi.mock("next/navigation", () => ({ redirect: (u: string) => redirectMock(u) }));
 
-import { saveDraftAction, deleteDraftAction } from "./drafts";
+import { saveDraftAction, deleteDraftAction, deleteDraftAndReturnToAccountAction } from "./drafts";
 import { draftPayloadFromForm } from "@/modules/receipts/drafts.form";
 import { DraftError } from "@/modules/receipts/drafts.errors";
 
@@ -124,6 +130,38 @@ describe("deleteDraftAction", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     deleteDraft.mockRejectedValueOnce(new Error("boom"));
     await expect(deleteDraftAction(form([["id", "d1"]]))).resolves.toBeUndefined();
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  // deleteDraftAction itself must NEVER redirect — it is shared with
+  // DraftList.tsx's own Delete button on /account, whose flow (and the tests
+  // above) assume a plain resolving Promise.
+  it("never redirects", async () => {
+    await deleteDraftAction(form([["id", "d1"]]));
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+});
+
+// Item B: the /receipts/new terminal cards (corrupt / all-items-gone /
+// zero-items) used the shared deleteDraftAction, so a successful delete just
+// re-rendered the page straight into notFound() (or, for the corrupt card,
+// the same card again) — the operator acted and landed on a 404. This
+// dedicated action deletes exactly like deleteDraftAction, then redirects to
+// /account, WITHOUT changing deleteDraftAction's own contract (see the "never
+// redirects" test above).
+describe("deleteDraftAndReturnToAccountAction", () => {
+  it("deletes scoped to the acting user, then redirects to /account", async () => {
+    await expect(deleteDraftAndReturnToAccountAction(form([["id", "d1"]])))
+      .rejects.toThrow("REDIRECT:/account");
+    expect(deleteDraft).toHaveBeenCalledWith("d1", "u1");
+  });
+
+  it("still redirects even when the delete fails, matching deleteDraftAction's own best-effort swallow", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    deleteDraft.mockRejectedValueOnce(new Error("boom"));
+    await expect(deleteDraftAndReturnToAccountAction(form([["id", "d1"]])))
+      .rejects.toThrow("REDIRECT:/account");
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
   });

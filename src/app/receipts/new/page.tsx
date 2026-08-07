@@ -9,16 +9,20 @@ import { ReceiptBuilderForm } from "./ReceiptBuilderForm";
 import { getDraft } from "@/modules/receipts/drafts.service";
 import { DraftError } from "@/modules/receipts/drafts.errors";
 import { splitDraftItems, formatDroppedItemsNotice, type DroppedDraftItem } from "@/modules/receipts/drafts.resume";
-import { deleteDraftAction } from "@/app/actions/drafts";
+import { deleteDraftAndReturnToAccountAction } from "@/app/actions/drafts";
 
 // Shared by every terminal ("can't be resumed") card below, so a technician
 // stuck on one of them always has the same way out: delete the draft, same as
-// the /account list's own Delete button (DraftList.tsx), posting to the same
-// action. Per design spec §4.4 — a terminal card must never leave the operator
-// with nothing to do but navigate away by hand.
+// the /account list's own Delete button (DraftList.tsx). Posts to the
+// TERMINAL-CARD-specific action (not DraftList's plain `deleteDraftAction`):
+// this page would otherwise re-render straight into `notFound()` (or, for the
+// corrupt card, the very same card) immediately after a successful delete, so
+// this variant redirects to /account afterward. Per design spec §4.4 — a
+// terminal card must never leave the operator with nothing to do but navigate
+// away by hand.
 function DeleteDraftForm({ draftId }: { draftId: string }) {
   return (
-    <form action={deleteDraftAction}>
+    <form action={deleteDraftAndReturnToAccountAction}>
       <input type="hidden" name="id" value={draftId} />
       <button type="submit" className="btn btn-secondary" style={{ minHeight: "var(--tap)" }}>
         Delete this draft

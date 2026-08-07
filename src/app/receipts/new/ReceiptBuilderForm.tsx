@@ -208,6 +208,26 @@ function ServiceControls({ itemId, initial }: {
   useEffect(() => {
     if (needsRef.current) needsRef.current.defaultChecked = needs;
   }, [needs]);
+  // Same defect family, confirmed by a dedicated test rather than assumed: a
+  // CONTROLLED <select> is given no `defaultSelected` on any of its options
+  // (React tracks the current selection purely via the `value` prop, not via
+  // the option's default), so the native `form.reset()` triggered by ANY
+  // settled action — Save draft succeeding included — falls back to the HTML
+  // spec's rule "select the first option that is not disabled". A device
+  // marked REPAIR or OTHER silently reverts to REIMAGE in the DOM while
+  // `type` (React state) stays unchanged, so the visible dropdown disagrees
+  // with state and, on the next Create, the WRONG type is what gets posted
+  // (unlike TechnicianSignatureField's picker below, this select's value IS
+  // read directly by the browser at submit time — there is no hidden input
+  // standing in for it). Fixed by imperatively keeping each <option>'s
+  // `defaultSelected` in step with `type`, so the native reset has a real
+  // default to fall back to instead of "first non-disabled".
+  const typeRef = useRef<HTMLSelectElement>(null);
+  useEffect(() => {
+    const sel = typeRef.current;
+    if (!sel) return;
+    for (const opt of Array.from(sel.options)) opt.defaultSelected = opt.value === type;
+  }, [type]);
   // One horizontal row, not a stack-sm column: the checkbox, the type, and the
   // note sit inline so an item occupies a single table row on a desktop. `.row`
   // still wraps, so a narrow screen stacks them as before.
@@ -226,6 +246,7 @@ function ServiceControls({ itemId, initial }: {
       {needs && (
         <div className="row" style={{ gap: 6, flexWrap: "wrap", flex: "1 1 auto", minWidth: 0 }}>
           <select
+            ref={typeRef}
             className="select"
             style={{ width: "auto", minWidth: 130 }}
             name={`service[${itemId}][type]`}

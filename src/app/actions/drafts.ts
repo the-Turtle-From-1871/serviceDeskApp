@@ -1,5 +1,6 @@
 "use server";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/authz";
 import { saveDraft, deleteDraft, MAX_DRAFTS_PER_USER } from "@/modules/receipts/drafts.service";
 import { DraftError } from "@/modules/receipts/drafts.errors";
@@ -45,4 +46,25 @@ export async function deleteDraftAction(formData: FormData): Promise<void> {
     console.error("[deleteDraftAction] unexpected error:", e);
   }
   revalidatePath("/account");
+}
+
+// Same delete, but for the /receipts/new TERMINAL cards (corrupt, all-items-
+// gone, zero-items) rather than the /account list. Those cards render on a
+// draft that can no longer be resumed, so after a successful delete the page
+// would just re-run and hit `notFound()` (or, for the corrupt card, re-render
+// the same "delete this" card) — the operator acted and landed on a 404,
+// which reads as "the button did nothing". Redirecting to /account gives them
+// a real place to land.
+//
+// Deliberately a SEPARATE action from `deleteDraftAction` rather than adding
+// an unconditional redirect there: that action is shared with DraftList.tsx's
+// own Delete button on /account itself, and its existing tests (and the
+// account page's delete flow) assume a plain resolving Promise, not a thrown
+// NEXT_REDIRECT. A redirect to /account FROM /account would be harmless, but
+// it is an unrelated behavior change to a working, tested shared action for a
+// bug that only exists on the terminal-card path — so it is scoped here
+// instead.
+export async function deleteDraftAndReturnToAccountAction(formData: FormData): Promise<never> {
+  await deleteDraftAction(formData);
+  redirect("/account");
 }
