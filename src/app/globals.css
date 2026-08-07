@@ -250,6 +250,42 @@ h3 {
   border-radius: 0;
 }
 
+/* ---------- Account: the profile icon, top-right ----------
+   Account is deliberately NOT a nav item (see navItemsFor): it sits here at
+   every width, so it is in one predictable place and never spends a rail tab.
+   Sized to the tap floor on purpose — it is the smallest control in the header
+   and the only one on a phone. */
+.profile-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: var(--tap);
+  height: var(--tap);
+  border-radius: 999px;
+  color: var(--text-muted);
+}
+.profile-link:hover {
+  color: var(--primary);
+  background: var(--primary-soft);
+  text-decoration: none;
+}
+.profile-link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring);
+}
+.profile-link.is-active {
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+.profile-link__icon {
+  /* Preflight is not imported, so an svg is inline by default and would sit on
+     the text baseline. See the styling notes in CLAUDE.md. */
+  display: block;
+  width: 26px;
+  height: 26px;
+}
+
 /* ---------- Mobile: fixed bottom nav rail ----------
    Replaces the hamburger dropdown the header used to open below 720px. Both
    navs are always in the DOM (AppHeader renders each); these two rules are the
