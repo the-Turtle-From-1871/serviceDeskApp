@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -20,6 +20,8 @@ import {
   type ItemRow,
 } from "@/components/items-view";
 import { makeStore, usePersistedPref } from "@/components/persisted-pref";
+import { useRowGestures } from "@/components/useRowGestures";
+import { isCardLayout } from "@/components/swipe-row";
 import type { SortKey } from "@/modules/items/items.service";
 
 export type { ItemRow };
@@ -128,27 +130,123 @@ export function ItemSelectTable({
   }, [selected]);
   const tooManyPerRow = maxGroupSize > MAX_ITEMS_PER_ROW;
 
-  const renderRow = (it: ItemRow) => (
-    <tr key={it.id}>
-      <td data-label="Select">{it.status === "ACTIVE" && <input type="checkbox" checked={selected.has(it.id)} onChange={() => toggle(it)} aria-label={`Select ${it.deviceName ?? ""} ${it.make} ${it.model} ${it.serialNumber}`} />}</td>
-      {!isHidden("deviceName") && <td data-label="Device Name">{it.deviceName ? it.deviceName : <span className="subtle">—</span>}</td>}
-      {!isHidden("make") && <td data-label="Make">{it.make}</td>}
-      {!isHidden("model") && <td data-label="Model">{it.model}</td>}
-      {!isHidden("serialNumber") && <td className="mono" data-label="Serial">{it.serialNumber}</td>}
-      {!isHidden("holder") && <td data-label="Holder">{it.holderName ?? <span className="subtle">—</span>}</td>}
-      {!isHidden("deviceUIC") && <td className="mono" data-label="UIC">{it.deviceUIC ?? <span className="subtle">—</span>}</td>}
-      {!isHidden("deviceCategory") && <td data-label="Category">{it.deviceCategory ?? <span className="subtle">—</span>}</td>}
+  // Selection mode is DERIVED, not its own state: the phone shows checkboxes
+  // and treats taps as toggles exactly when something is selected. A separate
+  // `isSelecting` flag would be a second source of truth that could disagree
+  // with the selection bar the user is looking at.
+  const selecting = selected.size > 0;
+
+  const gestures = useRowGestures({
+    // Swipe reveals Edit/Retire/Delete, all admin-only — a standard user's
+    // drawer would be empty, so there is nothing to pull open. It is also off
+    // while selecting, so the two gestures never compete for the same finger.
+    swipeEnabled: isAdmin && !selecting,
+    longPressEnabled: true,
+    onLongPress: (id) => {
+      const row = items.find((r) => r.id === id);
+      // Retired rows render no checkbox and are excluded from every bulk
+      // action (selectableIds), so a long press on one must not smuggle it
+      // into the selection.
+      if (row && row.status === "ACTIVE") toggle(row);
+    },
+  });
+
+  // Entering selection mode retracts any open drawer: its buttons act on one
+  // row, which is the opposite of what the selection bar is about to do.
+  const { closeDrawer } = gestures;
+  useEffect(() => {
+    if (selecting) closeDrawer();
+  }, [selecting, closeDrawer]);
+
+  const renderRow = (it: ItemRow) => {
+    const offset = gestures.offsetFor(it.id);
+    return (
+    <tr
+      key={it.id}
+      {...gestures.pointerHandlers(it.id)}
+      style={{
+        // Read by the mobile card rules in globals.css. This is the RESTING
+        // position only — a live drag is written straight to the node by
+        // useRowGestures and settles on this same value, so a swipe costs no
+        // renders. Ignored above 720px, where nothing declares a transform.
+        ["--swipe" as string]: `${offset}px`,
+      }}
+      onClickCapture={(e) => {
+        // Only the card's own stretched link is ever intercepted. Buttons, the
+        // checkbox and the drawer's actions are left completely alone — this
+        // handler runs on desktop too, where the row is an ordinary table row.
+        const link = (e.target as HTMLElement).closest?.("a.card-link");
+        if (!link) return;
+        if (gestures.consumeSuppressedClick(it.id)) {
+          // A swipe or a long press produced this click, not a tap. Navigating
+          // now would throw away the drawer or the selection just made.
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        if (selecting && it.status === "ACTIVE" && isCardLayout()) {
+          e.preventDefault();
+          e.stopPropagation();
+          toggle(it);
+        }
+      }}
+    >
+      <td className="cell-select" data-label="Select">{it.status === "ACTIVE" && <input type="checkbox" checked={selected.has(it.id)} onChange={() => toggle(it)} aria-label={`Select ${it.deviceName ?? ""} ${it.make} ${it.model} ${it.serialNumber}`} />}</td>
+      {!isHidden("deviceName") && <td className="cell-desktop" data-label="Device Name">{it.deviceName ? it.deviceName : <span className="subtle">—</span>}</td>}
+      {!isHidden("make") && <td className="cell-desktop" data-label="Make">{it.make}</td>}
+      {!isHidden("model") && <td className="cell-desktop" data-label="Model">{it.model}</td>}
+      {!isHidden("serialNumber") && <td className="mono cell-desktop" data-label="Serial">{it.serialNumber}</td>}
+      {!isHidden("holder") && <td className="cell-desktop" data-label="Holder">{it.holderName ?? <span className="subtle">—</span>}</td>}
+      {!isHidden("deviceUIC") && <td className="mono cell-desktop" data-label="UIC">{it.deviceUIC ?? <span className="subtle">—</span>}</td>}
+      {!isHidden("deviceCategory") && <td className="cell-desktop" data-label="Category">{it.deviceCategory ?? <span className="subtle">—</span>}</td>}
       {/* Derived server-side (readiness.query.ts), so no client-side narrowing
           of an untrusted stored value is needed — the row already carries a
           real ReadinessState. Accountability used to ride along here as a "Not
           accounted for" badge off Item.isAccountedFor; that flag is gone —
           the Audit column IS the accountability signal now. */}
-      {!isHidden("readiness") && <td data-label="Readiness">{READINESS_LABEL[it.readiness]}</td>}
-      {!isHidden("status") && <td data-label="Status"><StatusBadge status={it.status} /></td>}
-      {!isHidden("auditState") && <td data-label="Audit" style={{ textAlign: "center" }}><AuditLight state={it.auditState} /></td>}
-      <td data-label="">
+      {!isHidden("readiness") && <td className="cell-desktop" data-label="Readiness">{READINESS_LABEL[it.readiness]}</td>}
+      {!isHidden("status") && <td className="cell-desktop" data-label="Status"><StatusBadge status={it.status} /></td>}
+      {!isHidden("auditState") && <td className="cell-desktop" data-label="Audit" style={{ textAlign: "center" }}><AuditLight state={it.auditState} /></td>}
+
+      {/* ---- The mobile card, in three cells of its own ----
+          Every cell above is hidden below 720px and these three replace them.
+          They are deliberately NOT the same cells re-styled: each of those is
+          rendered conditionally on the Columns menu, so a user who hid the
+          Serial column would get a card with no heading and — because the
+          heading carries the link — no way to open the item at all. Building
+          the card from cells the column preferences cannot reach makes that
+          unrepresentable. The cost is that the Columns menu shapes the desktop
+          table only, which is the right place for it. */}
+      <td className="mono cell-serial" data-label="Serial">
+        {/* The stretched link: globals.css gives its ::after the whole row, so
+            tapping anywhere on the card opens the item while the accessibility
+            tree still sees one ordinary link with a real href. */}
+        <Link
+          href={`/i/${it.id}`}
+          className="card-link"
+          aria-label={`View ${it.make} ${it.model}, serial ${it.serialNumber}`}
+        >
+          {it.serialNumber}
+        </Link>
+      </td>
+      <td className="cell-primary" data-label="">
+        <span className="cell-primary__name">{it.deviceName ? it.deviceName : <span className="subtle">Unnamed device</span>}</span>
+        <span className="cell-primary__sub">{it.make} {it.model}</span>
+      </td>
+      <td className="cell-meta" data-label="">
+        <span className="cell-meta__facts">
+          <span className="subtle">{READINESS_LABEL[it.readiness]}</span>
+          <StatusBadge status={it.status} />
+          <AuditLight state={it.auditState} />
+        </span>
+        {/* Swipe is invisible without a hint. Admin-only, because that is
+            exactly when the drawer has something in it. */}
+        {isAdmin && <span className="swipe-grip" aria-hidden="true">‹</span>}
+      </td>
+
+      <td className="row-actions" data-label="">
         <div className="actions actions--end">
-          <Link href={`/i/${it.id}`} className="btn btn-ghost btn-sm">View</Link>
+          <Link href={`/i/${it.id}`} className="btn btn-ghost btn-sm action-view">View</Link>
           {isAdmin && <Link href={`/admin/items/${it.id}/edit`} className="btn btn-ghost btn-sm">Edit</Link>}
           {isAdmin && (
             <form action={toggleItemStatusAction}>
@@ -164,12 +262,23 @@ export function ItemSelectTable({
               model={it.model}
               serialNumber={it.serialNumber}
               holderName={it.holderName}
+              // Retract the drawer when the modal opens. This is an
+              // INTERACTION choice, not a safety mechanism: `closeDrawer` is a
+              // setState and `showModal()` runs in the same handler, so the row
+              // is still transformed at the moment the dialog enters the top
+              // layer — the ordering an earlier version of this comment claimed
+              // does not exist. It does not need to: a top-layer element's
+              // containing block is the viewport regardless of an ancestor's
+              // transform, measured here at a 390px viewport (dialog at left 0,
+              // full width, with the row sitting at -180px).
+              onOpen={closeDrawer}
             />
           )}
         </div>
       </td>
     </tr>
-  );
+    );
+  };
 
   const selectedKeys = () => [...selected.keys()].join(",");
   const create = () => { if (selected.size && !tooMany && !tooManyPerRow) router.push(`/receipts/new?items=${selectedKeys()}`); };
@@ -330,7 +439,13 @@ export function ItemSelectTable({
       )}
 
       <div className="table-wrap" hidden={items.length === 0}>
-        <table className="table">
+        {/* `table--cards` opts THIS table into the mobile card treatment
+            (swipe drawer, tap-to-open, the three card cells). It is a class
+            rather than a change to `.table` because every other table in the
+            app still wants the plain restacked-row layout — receipts, the
+            audit log and the receipt builder have no per-row drawer and no
+            single obvious destination for a tap. */}
+        <table className={`table table--cards${selecting ? " is-selecting" : ""}`}>
           <thead>
             <tr>
               <th>
@@ -368,13 +483,28 @@ export function ItemSelectTable({
       {selected.size > 0 && (
         // zIndex keeps this bar above the table rows it floats over.
         <div className="card stack-sm" style={{ position: "sticky", bottom: 0, zIndex: 2 }}>
-          <div className="row" style={{ justifyContent: "space-between" }}>
+          <div className="row" style={{ justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
             <span>{selected.size} selected · {groupCount} row{groupCount === 1 ? "" : "s"}</span>
-            {tooMany
-              ? <span role="alert" className="alert-error">Too many item types ({groupCount}). Max {MAX_RECEIPT_ROWS} per receipt — split into two.</span>
-              : tooManyPerRow
-              ? <span role="alert" className="alert-error">Too many of one item ({maxGroupSize}). Max {MAX_ITEMS_PER_ROW} per row — split into two.</span>
-              : <button className="btn btn-primary" onClick={create}>Create receipt from {selected.size} selected</button>}
+            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+              {tooMany
+                ? <span role="alert" className="alert-error">Too many item types ({groupCount}). Max {MAX_RECEIPT_ROWS} per receipt — split into two.</span>
+                : tooManyPerRow
+                ? <span role="alert" className="alert-error">Too many of one item ({maxGroupSize}). Max {MAX_ITEMS_PER_ROW} per row — split into two.</span>
+                : <button className="btn btn-primary" onClick={create}>Create receipt from {selected.size} selected</button>}
+              {/* The only way out of selection mode on a phone. `selecting` is
+                  derived from selected.size, and on the card layout every tap
+                  on an ACTIVE card toggles instead of opening — so with the
+                  <thead> checkbox hidden below 720px and selections surviving
+                  paging, a selection made on page 1 left no reachable control
+                  to undo it once you paged away. Reload was the only exit. */}
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setSelected(new Map())}
+              >
+                Clear selection
+              </button>
+            </div>
           </div>
           {/* The bulk "Set accountability" select is gone for good —
               accountability comes from audit evidence (record an audit

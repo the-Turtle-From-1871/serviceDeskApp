@@ -4,6 +4,7 @@ import Link from "next/link";
 import { completeServiceAction } from "@/app/admin/actions/queue";
 import { makeStore, usePersistedPref } from "@/components/persisted-pref";
 import { DueBadge } from "@/components/DueBadge";
+import { useRowGestures } from "@/components/useRowGestures";
 import {
   QUEUE_COLUMNS,
   sortQueueRows,
@@ -44,6 +45,17 @@ export function ServiceQueueTable({ rows }: { rows: QueueRowVM[] }) {
     const filtered = filterQueueRows(rows, { search, type: typeFilter });
     return sortQueueRows(filtered, sort.field, sort.dir);
   }, [rows, search, typeFilter, sort]);
+
+  const gestures = useRowGestures({
+    // The whole page is behind requireAdmin (see admin/queue/page.tsx) and
+    // every row's drawer holds the same one action, so there is never an empty
+    // drawer to pull open.
+    swipeEnabled: true,
+    // The queue has no bulk selection — nothing to long-press INTO. Leaving it
+    // on would arm a 500ms timer on every touch for no reachable outcome.
+    longPressEnabled: false,
+    onLongPress: () => {},
+  });
 
   const toggleCol = (key: QueueSortField) => {
     const next = new Set(hidden);
@@ -110,7 +122,12 @@ export function ServiceQueueTable({ rows }: { rows: QueueRowVM[] }) {
         <div className="card empty">No items match the current search or filter.</div>
       ) : (
         <div className="table-wrap">
-          <table className="table">
+          {/* Same `table--cards` treatment as /items: below 720px each row is a
+              card you tap to open and swipe left for its action. The whole
+              mechanism lives in globals.css and useRowGestures, so this table
+              opts in with a class and three extra cells rather than repeating
+              any of it. No `is-selecting` here — the queue has no selection. */}
+          <table className="table table--cards">
             <thead>
               <tr>
                 {visibleCols.map((c) => (
@@ -121,15 +138,57 @@ export function ServiceQueueTable({ rows }: { rows: QueueRowVM[] }) {
             </thead>
             <tbody>
               {shown.map((r) => (
-                <tr key={r.id}>
-                  {!isHidden("serialNumber") && <td className="mono" data-label="SN">{r.serialNumber}</td>}
-                  {!isHidden("deviceName") && <td data-label="Device Name">{r.deviceName ? r.deviceName : <span className="subtle">—</span>}</td>}
-                  {!isHidden("homeUnit") && <td data-label="Unit">{r.homeUnit ? r.homeUnit : <span className="subtle">—</span>}</td>}
-                  {!isHidden("serviceType") && <td data-label="Service Type">{r.serviceType}</td>}
-                  {!isHidden("due") && <td data-label="Due"><DueBadge dueAt={r.dueAt} /></td>}
-                  <td data-label="">
+                <tr
+                  key={r.id}
+                  {...gestures.pointerHandlers(r.id)}
+                  style={{ ["--swipe" as string]: `${gestures.offsetFor(r.id)}px` }}
+                  onClickCapture={(e) => {
+                    // Only ever intercepts the card's own stretched link, and
+                    // only to cancel the click a swipe left behind. There is no
+                    // selection mode here, so nothing else to decide.
+                    const link = (e.target as HTMLElement).closest?.("a.card-link");
+                    if (!link) return;
+                    if (gestures.consumeSuppressedClick(r.id)) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }
+                  }}
+                >
+                  {!isHidden("serialNumber") && <td className="mono cell-desktop" data-label="SN">{r.serialNumber}</td>}
+                  {!isHidden("deviceName") && <td className="cell-desktop" data-label="Device Name">{r.deviceName ? r.deviceName : <span className="subtle">—</span>}</td>}
+                  {!isHidden("homeUnit") && <td className="cell-desktop" data-label="Unit">{r.homeUnit ? r.homeUnit : <span className="subtle">—</span>}</td>}
+                  {!isHidden("serviceType") && <td className="cell-desktop" data-label="Service Type">{r.serviceType}</td>}
+                  {!isHidden("due") && <td className="cell-desktop" data-label="Due"><DueBadge dueAt={r.dueAt} /></td>}
+
+                  {/* The card, in three cells of its own — same reasoning as
+                      ItemSelectTable: every cell above is rendered conditionally
+                      by the Columns menu, so building the card from them would
+                      let a hidden SN column leave a card with no heading and,
+                      since the heading carries the link, no way to open it. */}
+                  <td className="mono cell-serial" data-label="SN">
+                    <Link
+                      href={`/i/${r.itemId}`}
+                      className="card-link"
+                      aria-label={`View ${r.deviceName ?? "device"}, serial ${r.serialNumber}`}
+                    >
+                      {r.serialNumber}
+                    </Link>
+                  </td>
+                  <td className="cell-primary" data-label="">
+                    <span className="cell-primary__name">{r.deviceName ? r.deviceName : <span className="subtle">Unnamed device</span>}</span>
+                    <span className="cell-primary__sub">{r.homeUnit ? r.homeUnit : "No unit"}</span>
+                  </td>
+                  <td className="cell-meta" data-label="">
+                    <span className="cell-meta__facts">
+                      <span className="subtle">{r.serviceType}</span>
+                      <DueBadge dueAt={r.dueAt} />
+                    </span>
+                    <span className="swipe-grip" aria-hidden="true">‹</span>
+                  </td>
+
+                  <td className="row-actions" data-label="">
                     <div className="actions actions--end">
-                      <Link href={`/i/${r.itemId}`} className="btn btn-ghost btn-sm">View</Link>
+                      <Link href={`/i/${r.itemId}`} className="btn btn-ghost btn-sm action-view">View</Link>
                       <form action={completeServiceAction}>
                         <input type="hidden" name="id" value={r.id} />
                         <input type="hidden" name="itemId" value={r.itemId} />
