@@ -800,7 +800,7 @@ async function loadExistingBySerial(serials: string[]): Promise<Map<string, Exis
     where: { serialNumber: { in: wanted } },
     select: {
       id: true, status: true, serialNumber: true, make: true, model: true, deviceName: true, homeUnit: true,
-      deviceUIC: true, deviceCategory: true, currentUserEmail: true, lastLogonUserPrincipalName: true, lastLogonDate: true,
+      deviceUIC: true, deviceCategory: true, storageLocation: true, currentUserEmail: true, lastLogonUserPrincipalName: true, lastLogonDate: true,
       enrollmentDate: true, compliance: true,
     },
   });

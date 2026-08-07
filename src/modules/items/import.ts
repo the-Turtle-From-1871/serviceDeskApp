@@ -21,6 +21,7 @@ export type ExistingItem = {
   homeUnit: string | null;
   deviceUIC: string | null;
   deviceCategory: string | null;
+  storageLocation: string | null;
   currentUserEmail: string | null;
   lastLogonUserPrincipalName: string | null;
   lastLogonDate: string | null;
@@ -38,6 +39,7 @@ export type NewItemImport = {
   homeUnit?: string;
   deviceUIC?: string;
   deviceCategory?: string;
+  storageLocation?: string;
   notes?: string;
   currentUserEmail?: string;
   lastLogonUserPrincipalName?: string;
@@ -100,6 +102,7 @@ export function planImport(
       homeUnit: r.homeUnit,
       deviceUIC: r.deviceUIC,
       deviceCategory: r.deviceCategory,
+      storageLocation: r.storageLocation,
       notes: r.notes,
       assignedUser: r.assignedUser,
       lastLogonUserPrincipalName: r.lastLogonUserPrincipalName,
@@ -146,6 +149,7 @@ export function planImport(
       if (d.deviceName !== undefined) loggedAfter.deviceName = d.deviceName;
       if (d.deviceUIC !== undefined) loggedAfter.deviceUIC = d.deviceUIC;
       if (d.deviceCategory !== undefined) loggedAfter.deviceCategory = d.deviceCategory;
+      if (d.storageLocation !== undefined) loggedAfter.storageLocation = d.storageLocation;
       if (d.assignedUser !== undefined) loggedAfter.currentUserEmail = d.assignedUser;
 
       // homeUnit: the CSV import is the single source of truth (task 8). A row
@@ -231,6 +235,7 @@ export function planImport(
       homeUnit: d.homeUnit,
       deviceUIC: d.deviceUIC,
       deviceCategory: d.deviceCategory,
+      storageLocation: d.storageLocation,
       notes: d.notes,
       currentUserEmail: d.assignedUser,
       lastLogonUserPrincipalName: d.lastLogonUserPrincipalName,

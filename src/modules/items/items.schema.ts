@@ -131,6 +131,7 @@ export const importRowSchema = z.object({
   homeUnit: optional,
   deviceUIC: optional,
   deviceCategory: categoryOptional,
+  storageLocation: optional,
   notes: optional,
   assignedUser: optional,
   lastLogonUserPrincipalName: optional,

@@ -6,12 +6,12 @@ const UNITS = new Map<string, string>([["DCSIM", "DCSIM"], ["487B", "487FA BATTE
 
 const mk = (row: number, over: Partial<RawRow> = {}): RawRow => ({
   row, make: "M4", model: "Carbine", serialNumber: `S${row}`, deviceName: "Radio",
-  homeUnit: "", deviceUIC: "", deviceCategory: "", notes: "", assignedUser: "", lastLogonUserPrincipalName: "",
+  homeUnit: "", deviceUIC: "", deviceCategory: "", storageLocation: "", notes: "", assignedUser: "", lastLogonUserPrincipalName: "",
   lastLogonDate: "", enrollmentDate: "", compliance: "", ...over,
 });
 
 const existing = (over: Partial<ExistingItem> = {}): ExistingItem => ({
-  id: "id-1", status: "ACTIVE", make: "M4", model: "Carbine", deviceName: "Radio", homeUnit: null, deviceUIC: null, deviceCategory: null, currentUserEmail: null,
+  id: "id-1", status: "ACTIVE", make: "M4", model: "Carbine", deviceName: "Radio", homeUnit: null, deviceUIC: null, deviceCategory: null, storageLocation: null, currentUserEmail: null,
   lastLogonUserPrincipalName: null, lastLogonDate: null, enrollmentDate: null, compliance: null, ...over,
 });
 
@@ -279,5 +279,52 @@ describe("planImport", () => {
       [mk(1, { deviceName: "HI-XYZ-LT-001", homeUnit: "" })], new Map(), UNITS,
     );
     expect(unresolved).toEqual([{ row: 1, deviceName: "HI-XYZ-LT-001", segments: ["HI", "XYZ", "LT", "001"] }]);
+  });
+});
+
+describe("storageLocation", () => {
+  it("sets it on a newly created item", () => {
+    const rows = [{ row: 1, make: "Dell", model: "5540", serialNumber: "NEW-1", deviceName: "", homeUnit: "", deviceUIC: "", deviceCategory: "", storageLocation: "Bldg 400 Cage 3", notes: "", assignedUser: "", lastLogonUserPrincipalName: "", lastLogonDate: "", enrollmentDate: "", compliance: "" }];
+    const plan = planImport(rows, new Map(), new Map());
+    expect(plan.toCreate[0]?.storageLocation).toBe("Bldg 400 Cage 3");
+  });
+
+  it("OVERWRITES the stored value on a matched row, and logs the change", () => {
+    const existing = new Map([["old-1", {
+      id: "i1", status: "ACTIVE", make: "Dell", model: "5540", deviceName: "N1",
+      homeUnit: null, deviceUIC: null, deviceCategory: null, storageLocation: "Bldg 400",
+      currentUserEmail: null, lastLogonUserPrincipalName: null, lastLogonDate: null,
+      enrollmentDate: null, compliance: null,
+    }]]);
+    const rows = [{ row: 1, make: "", model: "", serialNumber: "OLD-1", deviceName: "", homeUnit: "", deviceUIC: "", deviceCategory: "", storageLocation: "Bldg 401", notes: "", assignedUser: "", lastLogonUserPrincipalName: "", lastLogonDate: "", enrollmentDate: "", compliance: "" }];
+    const plan = planImport(rows, existing, new Map());
+    expect(plan.toUpdate[0]?.data.storageLocation).toBe("Bldg 401");
+    expect(plan.toUpdate[0]?.loggedChanges).toContainEqual({ field: "storageLocation", from: "Bldg 400", to: "Bldg 401" });
+  });
+
+  it("leaves the stored value untouched when the cell is blank", () => {
+    const existing = new Map([["old-2", {
+      id: "i2", status: "ACTIVE", make: "Dell", model: "5540", deviceName: "N2",
+      homeUnit: null, deviceUIC: null, deviceCategory: null, storageLocation: "Bldg 400",
+      currentUserEmail: null, lastLogonUserPrincipalName: null, lastLogonDate: null,
+      enrollmentDate: null, compliance: null,
+    }]]);
+    const rows = [{ row: 1, make: "", model: "", serialNumber: "OLD-2", deviceName: "", homeUnit: "", deviceUIC: "", deviceCategory: "", storageLocation: "", notes: "", assignedUser: "", lastLogonUserPrincipalName: "", lastLogonDate: "", enrollmentDate: "", compliance: "" }];
+    const plan = planImport(rows, existing, new Map());
+    expect(plan.unchanged).toHaveLength(1);
+    expect(plan.toUpdate).toHaveLength(0);
+  });
+
+  it("writes no history row for a RETIRED item, but still updates the column", () => {
+    const existing = new Map([["ret-1", {
+      id: "i3", status: "RETIRED", make: "Dell", model: "5540", deviceName: "N3",
+      homeUnit: null, deviceUIC: null, deviceCategory: null, storageLocation: "Bldg 400",
+      currentUserEmail: null, lastLogonUserPrincipalName: null, lastLogonDate: null,
+      enrollmentDate: null, compliance: null,
+    }]]);
+    const rows = [{ row: 1, make: "", model: "", serialNumber: "RET-1", deviceName: "", homeUnit: "", deviceUIC: "", deviceCategory: "", storageLocation: "Bldg 401", notes: "", assignedUser: "", lastLogonUserPrincipalName: "", lastLogonDate: "", enrollmentDate: "", compliance: "" }];
+    const plan = planImport(rows, existing, new Map());
+    expect(plan.toUpdate[0]?.data.storageLocation).toBe("Bldg 401");
+    expect(plan.toUpdate[0]?.loggedChanges).toEqual([]);
   });
 });

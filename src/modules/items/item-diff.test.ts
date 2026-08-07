@@ -61,3 +61,19 @@ describe("diffItemFields", () => {
     ).toEqual([{ field: "compliance", from: "Noncompliant", to: "Compliant" }]);
   });
 });
+
+describe("storageLocation", () => {
+  it("records a change", () => {
+    const changes = diffItemFields({ storageLocation: "Bldg 400" }, { storageLocation: "Bldg 401" });
+    expect(changes).toEqual([{ field: "storageLocation", from: "Bldg 400", to: "Bldg 401" }]);
+  });
+
+  it("records a clear-to-null when the submitted value is blank", () => {
+    const changes = diffItemFields({ storageLocation: "Bldg 400" }, { storageLocation: "" });
+    expect(changes).toEqual([{ field: "storageLocation", from: "Bldg 400", to: null }]);
+  });
+
+  it("reports no change when the value is absent (not submitted)", () => {
+    expect(diffItemFields({ storageLocation: "Bldg 400" }, {})).toEqual([]);
+  });
+});

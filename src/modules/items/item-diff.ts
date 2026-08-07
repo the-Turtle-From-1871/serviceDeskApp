@@ -14,6 +14,7 @@ export type ItemLoggedFields = {
   homeUnit: string | null;
   deviceUIC: string | null;
   deviceCategory: string | null;
+  storageLocation: string | null;
   deviceName: string | null;
   currentUserEmail: string | null;
   currentPosition: string | null;
