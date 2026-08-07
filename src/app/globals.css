@@ -836,7 +836,8 @@ input[type="file"].input {
    file, and the comment in ItemSelectTable's renderRow. */
 .table td.cell-serial,
 .table td.cell-primary,
-.table td.cell-meta {
+.table td.cell-meta,
+.table td.cell-more {
   display: none;
 }
 /* The card's tap target. Inherits its surroundings so that promoting the
@@ -1368,6 +1369,86 @@ input[type="file"].input {
     color: var(--text-subtle);
     font-size: 20px;
     line-height: 1;
+  }
+
+  /* The toggle's own 44px strip and its top border already separate the card's
+     last line from what follows, so the meta row does not also need to pay for
+     bottom padding. Scoped with `:has()` so the service-queue card — which has
+     no More panel and nothing under its meta row — keeps its own spacing. */
+  .table--cards tbody tr:has(td.cell-more) td.cell-meta { padding-bottom: 4px; }
+
+  /* ---- "More": the fields the compact card drops, behind a chevron ----
+     A native <details> at the card's bottom edge. The whole strip is the tap
+     target, full width and over the tap floor, because a bare chevron glyph is
+     about 12px of ink. */
+  .table--cards td.cell-more {
+    display: block;
+    padding: 0;
+    /* Above the stretched card link (z-index 1), or the tap navigates to the
+       item instead of opening the panel — the same reason the checkbox is
+       lifted. Needs a position for z-index to apply at all. */
+    position: relative;
+    z-index: 2;
+    border-top: 1px solid var(--border);
+  }
+  .table--cards .card-more__toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: var(--tap);
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    /* Preflight is not imported, so the UA's `display: list-item` on <summary>
+       survives and paints a disclosure triangle beside our own chevron. The
+       `display: flex` above removes it in Chrome/Firefox; Safari needs the
+       pseudo-element killed by name as well. */
+    list-style: none;
+  }
+  .table--cards .card-more__toggle::-webkit-details-marker { display: none; }
+  .table--cards .card-more__toggle::marker { content: ""; }
+  .table--cards .card-more__toggle:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 3px var(--ring);
+  }
+  .table--cards .card-more__chevron {
+    /* Preflight is not imported, so an svg is inline by default and would sit
+       on the text baseline — same reason `.nav-rail__icon` sets this. */
+    display: block;
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+    transition: transform 160ms ease-out;
+  }
+  .table--cards .card-more[open] .card-more__chevron {
+    transform: rotate(180deg);
+  }
+  /* An icon that spins 180° every time the panel opens is noise for anyone who
+     asked the OS to stop that. The panel still opens; only the spin goes. */
+  @media (prefers-reduced-motion: reduce) {
+    .table--cards .card-more__chevron { transition: none; }
+  }
+  /* Two columns: label, value. `dl` is the honest element here — these are
+     name/value pairs, and it is what a screen reader announces as such. */
+  .table--cards .card-more__list {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 12px;
+    padding: 2px 16px 12px;
+    font-size: 13px;
+  }
+  .table--cards .card-more__list dt {
+    color: var(--text-muted);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .table--cards .card-more__list dd {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   /* ---- Selection mode: checkboxes appear in the header band ----

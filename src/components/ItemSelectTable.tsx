@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { ChevronDown } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { AuditLight } from "@/components/AuditLight";
 import { MarkReadyButton } from "@/components/MarkReadyButton";
@@ -247,6 +248,42 @@ export function ItemSelectTable({
         {/* Swipe is invisible without a hint. Admin-only, because that is
             exactly when the drawer has something in it. */}
         {isAdmin && <span className="swipe-grip" aria-hidden="true">‹</span>}
+      </td>
+
+      {/* The three fields the compact card drops — Holder, UIC and Category —
+          behind a chevron at the card's bottom edge.
+
+          A native <details>, not a useState toggle: it opens before hydration,
+          Enter/Space work on the <summary> for free, and the open state is the
+          element's own so nothing has to be tracked per row in a component that
+          re-renders on every selection change. It is deliberately NOT driven by
+          the Columns menu — the card is built from cells the menu cannot reach
+          (see cell-serial above), so this shows the same three fields for
+          everyone rather than a set that changes with a desktop preference.
+
+          `summary` is in useRowGestures' pointerdown guard, so pressing the
+          chevron cannot start a swipe or a long press, and globals.css lifts it
+          above the stretched card link so the tap toggles instead of
+          navigating. */}
+      <td className="cell-more" data-label="">
+        <details className="card-more">
+          <summary className="card-more__toggle">
+            <span className="card-more__label">More</span>
+            {/* An icon, not a "⌄" glyph: a text chevron is positioned by font
+                metrics, so it sits high in its em box and — once rotated 180°
+                for the open state — lands visibly above the label. An SVG has
+                a box we control. lucide is already this app's icon set. */}
+            <ChevronDown className="card-more__chevron" aria-hidden="true" />
+          </summary>
+          <dl className="card-more__list">
+            <dt>Holder</dt>
+            <dd>{it.holderName ?? <span className="subtle">—</span>}</dd>
+            <dt>UIC</dt>
+            <dd className="mono">{it.deviceUIC ?? <span className="subtle">—</span>}</dd>
+            <dt>Category</dt>
+            <dd>{it.deviceCategory ?? <span className="subtle">—</span>}</dd>
+          </dl>
+        </details>
       </td>
 
       <td className="row-actions" data-label="">
