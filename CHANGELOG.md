@@ -5,6 +5,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-08-07
 
+### Added
+- **The admin dashboard now shows the ten most recent hand receipts.** Until now there was no way to see what had just been issued without already knowing a receipt number to search for: the dashboard listed what was overdue or due soon, which answers "what is late", not "what did we just hand out". The new card sits under the hand-receipt timers and gives each receipt's number, its items, who received it, the date it was created, and whether it is still open or has been closed — and each entry links straight through to the receipt itself. Two limits worth knowing. It is on the **admin** dashboard, so a standard user account does not see it. And closed receipts are permanently deleted 90 days after they close, so once a receipt has been closed for that long it drops off this list along with everything else.
+
 ### Changed
 - **On a phone, the menu has moved to a fixed bar along the bottom of the screen.** The sections are now always visible as tabs with icons, instead of being hidden behind the ☰ button in the top corner that you had to open before you could go anywhere. The tab you are on is marked, so the app also tells you where you are, which the old menu only did once you opened it. Getting between sections is now one tap rather than two, and the tabs sit at the bottom where your thumb already is — this app is meant to be used one-handed while you are holding a device you are checking in or out. On a computer the same sections stay along the top of the page as they always have.
 - **Service queue and Users are back as places you can reach directly.** For admins the tabs are Search, Items, Queue, Users and Dashboard. Those two had been folded into the Dashboard page in July so the menu strip along the top would not get too long — a limit a row of tabs along the bottom does not really have, and they are the two admin pages people open most. Everything else admin — Readiness analytics, Device categories, Units, Audit and New item — is still on the Dashboard, one tap from its tab.
@@ -12,7 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Sign out is on the Account page**, at the bottom, under Change password. It used to live inside the ☰ menu, which no longer exists — the profile icon takes you straight to it. It is on the Account page on a computer too now, in addition to staying in the header, so it is somewhere findable rather than only in a corner you may have scrolled past.
 
 ### Notes
-- No migration, config, or env change. The bottom bar is padded for the home indicator on notched iPhones (`env(safe-area-inset-bottom)`), which matters because this app installs to the home screen and so has no browser chrome below it. It is hidden when printing, and sits below the QR scanner overlay rather than on top of it.
+- No migration, config, or env change. The recent-receipts list is one bounded query ordered by an index that already existed on the receipt table.
+- The bottom bar is padded for the home indicator on notched iPhones (`env(safe-area-inset-bottom)`), which matters because this app installs to the home screen and so has no browser chrome below it. It is hidden when printing, and sits below the QR scanner overlay rather than on top of it.
 - Five tabs is the practical maximum before the labels start being cut short; measured at 375px the tabs are 72px wide and at 320px 61px, with every label still fitting. A test pins the five-item limit so a sixth cannot be added without someone deciding what to drop.
 
 ## 2026-08-06

@@ -1,12 +1,16 @@
 import { defineConfig } from "vitest/config";
-import tsconfigPaths from "vite-tsconfig-paths";
 import { fileURLToPath } from "node:url";
 
 const emptyModule = fileURLToPath(new URL("./tests/helpers/empty-module.ts", import.meta.url));
 
 export default defineConfig({
-  plugins: [tsconfigPaths()],
   resolve: {
+    // Resolves the `@/*` paths from tsconfig.json. This is Vite's native
+    // replacement for the `vite-tsconfig-paths` plugin, which warned on every
+    // run once Vite shipped the built-in (available from Vite 8, which is what
+    // this repo installs). If a `@/...` import ever fails to resolve in a test,
+    // check this flag before suspecting the import.
+    tsconfigPaths: true,
     // `server-only`/`client-only` throw when imported in a plain Node env;
     // stub them so tests can import the underlying server modules directly.
     alias: { "server-only": emptyModule, "client-only": emptyModule },
