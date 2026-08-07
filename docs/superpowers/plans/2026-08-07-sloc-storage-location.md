@@ -748,13 +748,11 @@ And extend the paragraph about the ignored `type` column with a second sentence:
               fleet exports use it for a geographic site, not a storage location.
 ```
 
-- [ ] **Step 3: Add the changelog entry**
+- [x] **Step 3: Add the changelog entry** — **ALREADY DONE in Task 5 (commit `d93b5ff`).**
 
-In `CHANGELOG.md`, under `## 2026-08-07` (create the section at the top of the file if today's does not exist yet), under `### Added`:
+`CHANGELOG.md` already carries an entry under `## 2026-08-07` → `### Added`. **Do not add a second one.**
 
-```markdown
-- **Storage location on items.** Items now carry a storage location — where the device physically sits when nobody is holding it. It imports from the fleet export's **SLoc** column (also accepted: `storageLocation`, `storageLoc`), shows on the item page for signed-in staff, is editable by admins from the item card and the admin edit page, and is matched by the `/items` search box. A blank cell in a CSV leaves the stored value untouched, as with every other imported column; clearing one is done from the item's edit form.
-```
+Instead, **review the existing entry and extend it** so it covers what Tasks 6 and 7 added, which it was written before: that the `/items` search box now matches a storage location, and that a blank cell in a CSV leaves the stored value untouched (clearing one is done from the item's edit form). Keep it one entry, describing the behavior for a reader rather than the diff.
 
 - [ ] **Step 4: Document the header-alias rule**
 
