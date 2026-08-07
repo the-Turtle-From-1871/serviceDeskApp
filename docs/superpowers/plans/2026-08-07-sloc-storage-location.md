@@ -21,6 +21,7 @@
 - **Never run `npm test` while another agent may be running it** — parallel runs truncate the shared test database and produce fake failures in unrelated files. Run the targeted file, as each task specifies.
 - **Prisma migrations:** `prisma migrate dev` cannot run non-interactively in this shell. Use `migrate diff --from-config-datasource --to-schema --script`, then `migrate deploy`.
 - **Do not stage other files.** The working tree may carry another session's in-flight edits. Every commit step stages explicit paths only — never `git add -A` or `git add .`.
+- **`npx tsc --noEmit` does NOT exit clean on this branch, and never did.** It reports **18 pre-existing errors** across exactly three files — `src/modules/audit/audit.service.test.ts`, `src/modules/service-queue/service-queue.service.test.ts`, `src/modules/transfers/transfers.service.test.ts` — all Prisma mock-typing noise in test files. CI does not run `tsc` at all (the three required checks are Semgrep SAST, `next build`, and the security-docs guard), which is how the debt accumulated. The baseline is saved at `.superpowers/sdd/2026-08-07-sloc-storage-location/tsc-baseline.txt`. **Wherever a task says to run `tsc --noEmit`, the pass condition is "no NEW error"** — no error naming `storageLocation`, and none in a file you touched. Compare against the baseline; do not try to reach zero, and do not "fix" those three files as a drive-by.
 
 ## File Structure
 
@@ -438,7 +439,7 @@ Expected: PASS.
 
 Run: `npx tsc --noEmit`
 
-Expected: PASS.
+Expected: the 18 pre-existing baseline errors and **no new one** — nothing naming `storageLocation`, nothing in `items.service.ts`. See Global Constraints.
 
 - [ ] **Step 5: Commit**
 
@@ -510,7 +511,7 @@ Run:
 npx tsc --noEmit
 ```
 
-Expected: FAIL, with errors at each site that builds an `ItemFieldSuggestions` literal. At minimum `src/app/i/[itemId]/page.tsx:72` has `{ make: [], model: [], deviceUIC: [] }` — add `storageLocation: []`. Fix each reported site the same way, then re-run until it passes.
+Expected: NEW errors — beyond the 18 baseline ones — at each site that builds an `ItemFieldSuggestions` literal. At minimum `src/app/i/[itemId]/page.tsx:72` has `{ make: [], model: [], deviceUIC: [] }` — add `storageLocation: []`. Fix each reported site the same way, then re-run until only the 18 baseline errors remain. Do not touch the three baseline files.
 
 - [ ] **Step 5: Add the display row and edit input to the item card**
 
@@ -606,10 +607,10 @@ Expected: PASS. If the first case returns `undefined` instead of `""`, Step 1 us
 Run:
 
 ```bash
-npx tsc --noEmit && npm run test:ui
+npx tsc --noEmit; npm run test:ui
 ```
 
-Expected: both PASS.
+Expected: `tsc` reports only the 18 baseline errors (see Global Constraints — it does not exit 0, which is why these are two statements and not `&&`); `test:ui` PASSES.
 
 - [ ] **Step 10: Commit**
 
@@ -774,9 +775,9 @@ git commit -m "docs(items): document the SLoc storage-location column"
 
 - [ ] **Step 1: Typecheck and lint**
 
-Run: `npx tsc --noEmit && npm run lint`
+Run: `npx tsc --noEmit; npm run lint`
 
-Expected: both PASS.
+Expected: `tsc` reports only the 18 baseline errors and no new one (see Global Constraints); `lint` PASSES. Note `next build` — Step 3 — is the check CI actually gates on.
 
 - [ ] **Step 2: Run the full test suite**
 
