@@ -31,7 +31,7 @@
 | `prisma/migrations/<ts>_item_storage_location/migration.sql` | Create | The DDL. |
 | `src/modules/items/item-diff.ts` | Modify | Add to `ItemLoggedFields` so changes are recorded in history. |
 | `src/modules/items/csv.ts` | Modify | Add to `RawRow`, `HEADER_MAP`, row mapping. |
-| `src/modules/items/csv.test.ts` | Create | First test for this file — header aliasing. |
+| `src/modules/items/csv.test.ts` | **Modify (append)** | Header-aliasing tests. The file already exists with 15 tests — APPEND, never replace. |
 | `src/modules/items/items.schema.ts` | Modify | Add to `importRowSchema`, `editableItemFields`, `newItemSchema`. |
 | `src/modules/items/import.ts` | Modify | Add to `ExistingItem`, `NewItemImport`, both `planImport` branches. |
 | `src/modules/items/items.service.ts` | Modify | `loadExistingBySerial` select, `UPDATABLE_ITEM_COLUMNS`, `ItemFieldSuggestions` + its query, both search filter paths. |
@@ -131,17 +131,19 @@ git commit -m "feat(items): add Item.storageLocation column"
 
 **Files:**
 - Modify: `src/modules/items/csv.ts`
-- Create: `src/modules/items/csv.test.ts`
+- Modify (append only): `src/modules/items/csv.test.ts`
 
 **Interfaces:**
 - Consumes: nothing from Task 1 (this file is pure, no Prisma).
 - Produces: `RawRow.storageLocation: string` (empty string when the column is absent). `planImport` in Task 3 reads it.
 
-**Why a new test file:** `csv.ts` has no test coverage at all today, and its failure mode is silent — an unrecognised header is ignored, so a broken alias map reports a *successful* import with the column quietly dropped.
+**Why these tests matter:** this module's failure mode is silent — an unrecognised header is ignored, so a broken alias map reports a *successful* import with the column quietly dropped. That is exactly how the `DeviceOwnershipUIC` bug reached production and left ~1,000 items with an empty UIC.
+
+**⚠️ `csv.test.ts` ALREADY EXISTS — 121 lines, 15 tests, six commits of history. APPEND to it; never replace it.** Its existing tests guard the UIC alias set (including that production regression), the category aliases, the deliberate bare-`type` exclusion, quoted fields with embedded commas, blank-line skipping, and five error paths. Deleting any of them is a Critical defect: nothing fails, the suite simply covers less. An earlier draft of this plan wrongly said "Create" and claimed the file had no coverage — that was a plan error, and it cost a fix round.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `src/modules/items/csv.test.ts`:
+APPEND this block to the end of `src/modules/items/csv.test.ts`, leaving every existing test untouched:
 
 ```typescript
 import { describe, it, expect } from "vitest";
@@ -217,7 +219,7 @@ In `parseItemsCsv`'s `records.map(...)`, after `deviceCategory: r.deviceCategory
 
 Run: `npx vitest run src/modules/items/csv.test.ts`
 
-Expected: PASS, 3 tests.
+Expected: PASS, **18 tests** — the 15 that already existed plus your 3. A run reporting only 3 means the pre-existing tests were replaced instead of appended; restore them from git before committing.
 
 - [ ] **Step 7: Commit**
 

@@ -187,16 +187,25 @@ public search (`liveSearchAction`), which stays serial- and receipt-only.
 
 | File | What it pins |
 |---|---|
-| `csv.test.ts` *(new)* | `sloc` / `S_Loc` / `Storage Location` all map to `storageLocation`; a bare `location` header does **not**. |
+| `csv.test.ts` *(append)* | `sloc` / `S_Loc` / `Storage Location` all map to `storageLocation`; a bare `location` header does **not**. |
 | `item-diff.test.ts` | A changed storage location produces a `FieldChange`; an unchanged one produces none. |
 | `items.schema.test.ts` | Import blank → `undefined` (leave alone); form blank → clear recorded. |
 | `import.test.ts` | Create sets it; a matched row overwrites it; blank leaves it untouched; a `RETIRED` match writes no history row. |
 | `items.readiness-sort.parity.test.ts` | A search matching only on storage location returns identical ids from both the Prisma and raw paths. |
 
-`csv.ts` has **no test coverage at all** today. The alias map is precisely the
-kind of table that breaks silently — an unrecognised header is ignored, so a
-regression reports a successful import with the column quietly dropped. Adding
-the first test for that file is part of this work.
+The alias map is precisely the kind of table that breaks silently — an
+unrecognised header is ignored, so a regression reports a *successful* import
+with the column quietly dropped. That is how the `DeviceOwnershipUIC` bug
+reached production and left ~1,000 items with an empty UIC.
+
+**`csv.test.ts` already exists** — 121 lines, 15 tests, dating to the original
+import feature — and its existing cases guard that exact regression plus the
+category aliases, the bare-`type` exclusion, quoting, and five error paths. The
+new cases are **appended**. (An earlier draft of this document claimed the file
+had no coverage. That was wrong: it came from reading a code-intelligence
+"no covering tests" result for a single *symbol* as a statement about the
+*file*. The claim reached the plan, the plan told an implementer to "create"
+the file, and 10 tests were deleted before review caught it.)
 
 ## Documentation (same commit)
 
