@@ -187,12 +187,38 @@ function transition(
 }
 
 // The active queue: PENDING rows with the fields the item table renders.
-export function listActiveQueue(): Promise<QueueRow[]> {
-  return prisma.serviceQueueItem.findMany({
+/** Hard cap on the rows the queue page ships to the client.
+ *
+ *  This list is NOT paginated, deliberately: production carries 9 pending
+ *  entries, and `ServiceQueueTable` searches, filters and sorts them in the
+ *  browser — instant on a real queue, and worth keeping that way. But an
+ *  uncapped `findMany` still breaks the "bound every list" rule the moment the
+ *  queue is ever left to grow, and the whole result is serialized into a Client
+ *  Component, so the cap is what makes the page's cost knowable rather than
+ *  proportional to a table nobody is watching.
+ *
+ *  200 is ~22x the live queue: high enough that truncation cannot happen in
+ *  practice, low enough that the payload stays small if something goes wrong
+ *  (a bad import flagging the whole fleet, say). If it is ever reached, the
+ *  page SAYS SO — see `truncated`. Silently dropping rows here would be a
+ *  confident wrong answer about which devices need service. */
+export const QUEUE_MAX_ROWS = 200;
+
+/**
+ * The pending queue, capped.
+ *
+ * Takes one row MORE than the cap purely to detect overflow, which answers
+ * "is there more?" without a second COUNT query on a page that otherwise runs
+ * exactly one.
+ */
+export async function listActiveQueue(): Promise<{ rows: QueueRow[]; truncated: boolean }> {
+  const rows = (await prisma.serviceQueueItem.findMany({
     where: { status: "PENDING" },
     orderBy: { createdAt: "desc" },
     include: { item: { select: queueItemSelect }, transfer: { select: queueTransferSelect } },
-  }) as Promise<QueueRow[]>;
+    take: QUEUE_MAX_ROWS + 1,
+  })) as QueueRow[];
+  return { rows: rows.slice(0, QUEUE_MAX_ROWS), truncated: rows.length > QUEUE_MAX_ROWS };
 }
 
 // The item's current service request (any status), for the item detail card.

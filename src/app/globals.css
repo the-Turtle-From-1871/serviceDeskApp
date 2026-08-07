@@ -1213,6 +1213,15 @@ input[type="file"].input {
      "Retire" is expensive, a mis-tapped "View" is not. */
   .btn-primary,
   .btn-danger { height: var(--tap-lg); }
+  /* The /items toolbar's action row pairs "Print QR codes" (btn-primary, so
+     --tap-lg) with the Columns menu (btn-secondary, --tap). The row is
+     bottom-aligned, so those 4px showed as the primary sticking up above its
+     neighbour — the only uneven row in the toolbar (every other control is
+     44px here and the whole row is 40px on desktop, both measured).
+     Raise the secondary to match rather than shrinking the primary: --tap-lg
+     is deliberate for primary and destructive actions (see the touch floor
+     above), and trimming a tap target to tidy a row is the wrong trade. */
+  .toolbar .col-menu > summary.btn { height: var(--tap-lg); }
   /* Checkboxes are tap targets too, not decorations. 13px is the UA default. */
   .table input[type="checkbox"],
   .col-menu-panel input[type="checkbox"],
