@@ -236,6 +236,7 @@ function itemFilterSql(search: string | null, uic: string | null): Prisma.Sql {
       OR i."make" ILIKE ${pattern}::text
       OR i."model" ILIKE ${pattern}::text
       OR i."serialNumber"::text ILIKE ${pattern}::text
+      OR i."storageLocation" ILIKE ${pattern}::text
       OR ${recipientMatchSql(search ? recipientTokens(search) : [])})
     AND (${uic}::text IS NULL OR i."deviceUIC" = ${uic}::text)`;
 }
@@ -329,6 +330,7 @@ export async function listItems(opts: {
         { make: { contains: search, mode: "insensitive" } },
         { model: { contains: search, mode: "insensitive" } },
         { serialNumber: { contains: search, mode: "insensitive" } },
+        { storageLocation: { contains: search, mode: "insensitive" } },
         // The recipient named on the item's CURRENT custody — an open receipt
         // with this row unreturned. Same rule as READINESS_CASE's DEPLOYED
         // branch, deliberately NOT getHoldingTransfer's stricter

@@ -23,10 +23,10 @@ describe("listItems", () => {
   const containsOf = (branch: SearchBranch, field: string) =>
     branch[field] as { contains: string; mode: string };
 
-  it("searches device name alongside make, model, serial and the open-receipt recipient", async () => {
+  it("searches device name alongside make, model, serial, storage location and the open-receipt recipient", async () => {
     await listItems({ search: "router" });
     const fields = whereOf()!.OR.map((c) => Object.keys(c)[0]);
-    expect(fields).toEqual(["deviceName", "make", "model", "serialNumber", "transferItems"]);
+    expect(fields).toEqual(["deviceName", "make", "model", "serialNumber", "storageLocation", "transferItems"]);
   });
 
   it("matches the recipient only on an OPEN, unreturned receipt, one AND clause per token", async () => {

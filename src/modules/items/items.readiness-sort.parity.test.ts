@@ -48,6 +48,7 @@ type Seed = {
   receiptClosed?: boolean;
   /** Seed the row as returned — custody has ended, so it must NOT match. */
   receiptReturned?: boolean;
+  storageLocation?: string | null;
 };
 
 /* Every row is chosen for two jobs at once: it lands in a readiness bucket
@@ -69,7 +70,7 @@ const SEEDS: Seed[] = [
   { serial: `${PREFIX}08`, make: "Apple", model: "M4", deviceName: "Node eight", uic: null, category: "Printer", lastAuditedAt: null, markedReadyAt: JUN, lastLogonAt: JAN, lastLogonUser: "e@f.mil", expected: "READY_TO_DEPLOY" },
   { serial: `${PREFIX}09`, make: "Zebra", model: "ZT", deviceName: "Node nine", uic: "W1AAAA", category: "Printer", lastAuditedAt: JAN, flagged: true, onOpenReceipt: true, receiverName: "John Smith", expected: "IN_REPAIR" },
   { serial: `${PREFIX}10`, make: "Zebra", model: "ZQ", deviceName: "Node ten", uic: "W2BBBB", category: null, lastAuditedAt: null, retired: true, lastLogonUser: "g@h.mil", expected: "RETIRED" },
-  { serial: `${PREFIX}11`, make: "Dell", model: "5540", deviceName: "Node eleven", uic: "W1AAAA", category: "Laptop", lastAuditedAt: JUN, expected: "UNTRIAGED" },
+  { serial: `${PREFIX}11`, make: "Dell", model: "5540", deviceName: "Node eleven", uic: "W1AAAA", category: "Laptop", lastAuditedAt: JUN, storageLocation: "Cage 7", expected: "UNTRIAGED" },
   { serial: `${PREFIX}12`, make: "Dell", model: "5540", deviceName: "Node twelve", uic: "W1AAAA", category: "Laptop", lastAuditedAt: JAN, onOpenReceipt: true, receiverName: "Doe, Marcus", expected: "DEPLOYED" },
   { serial: `${PREFIX}DELTA-13`, make: "Dell", model: "5540", deviceName: null, uic: "W1AAAA", category: null, lastAuditedAt: null, markedReadyAt: JAN, expected: "READY_TO_DEPLOY" },
   { serial: `${PREFIX}14`, make: "Delta Systems", model: "X1", deviceName: "Node fourteen", uic: "W2BBBB", category: "Switch", lastAuditedAt: JUN, lastLogonUser: "i@j.mil", expected: "DEPLOYED" },
@@ -94,6 +95,7 @@ const FILTERS: { name: string; opts: { search?: string; uic?: string }; size: nu
   // Surname-first. Tokens are AND'd, so this still finds "Jane Doe" (03) and
   // still excludes "Doe, Marcus" (12), who is not a Jane.
   { name: "recipient reversed name", opts: { search: "doe jane" }, size: 1 },
+  { name: "search matches only a storage location", opts: { search: "cage" }, size: 1 },
 ];
 
 /** Each ends in the unique `serialNumber`, so appending `readiness` adds a key
@@ -128,6 +130,7 @@ beforeAll(async () => {
       data: {
         make: s.make, model: s.model, serialNumber: s.serial, deviceName: s.deviceName,
         deviceUIC: s.uic, deviceCategory: s.category, lastAuditedAt: s.lastAuditedAt,
+        storageLocation: s.storageLocation ?? null,
         createdById: admin.id,
         status: s.retired ? "RETIRED" : "ACTIVE",
         lastLogonAt: s.lastLogonAt ?? null,
