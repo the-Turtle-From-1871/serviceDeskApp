@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SignaturePad } from "@/components/SignaturePad";
 
 export type PickableSignature = { id: string; name: string; image: string };
@@ -50,12 +50,36 @@ export function TechnicianSignatureField({
   useEffect(() => { onChange?.(value); }, [value, onChange]);
   useEffect(() => { onPickedChange?.(pickedId); }, [pickedId, onPickedChange]);
 
+  // Same defect family as ReceiptBuilderForm.tsx's ServiceControls `typeRef`
+  // (confirmed there by a dedicated test, not assumed): a CONTROLLED <select>
+  // gives none of its <option>s a `defaultSelected`, so a native
+  // `form.reset()` — triggered by ANY settled action on the surrounding form,
+  // success included — falls back to selecting the first non-disabled
+  // option. Here that snaps the visible dropdown to the first saved
+  // signature's name while `selectedId` (React state) is untouched.
+  //
+  // Severity is lower than the ServiceControls case, and deliberately so:
+  // the hidden `signatureId` input below reads `picked.id`, which is derived
+  // from `selectedId` — never from this <select>'s own DOM value — so what
+  // actually gets POSTED on Create is unaffected. This is a DISPLAY/TRUTH
+  // mismatch (the dropdown can show a different technician than the one
+  // actually attributed), not a wrong-signature submission. Fixed anyway,
+  // because a technician who sees the "wrong" name after saving a draft has
+  // no way to tell that from the real thing without opening devtools.
+  const selectRef = useRef<HTMLSelectElement>(null);
+  useEffect(() => {
+    const sel = selectRef.current;
+    if (!sel) return;
+    for (const opt of Array.from(sel.options)) opt.defaultSelected = opt.value === selectedId;
+  }, [selectedId]);
+
   return (
     <div className="stack-sm">
       {signatures.length > 0 && (
         <label className="stack" style={{ gap: 4 }}>
           <span className="subtle" style={{ fontSize: 12 }}>{label}</span>
           <select
+            ref={selectRef}
             className="select"
             style={{ width: "auto", minWidth: 180 }}
             value={selectedId}

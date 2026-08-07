@@ -16,6 +16,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - **The app now installs properly to a phone's home screen.** Adding it from Safari or Chrome gives you a real app icon and name, and it opens in its own window without the browser address bar. Previously iOS had nothing to work from, so it used a screenshot of whatever page you happened to be on as the icon and opened the site in an ordinary browser tab. This is presentation only — it does not add offline use. Every page still reads live custody data, and showing you a cached property book would mean showing you yesterday's holder for a device, which is worse than showing you an error.
+- **Save a hand receipt as a draft.** The new receipt builder has a "Save draft"
+  button beside its title. It stores everything you have entered — items, both
+  parties, quantities, the return timer and any service flags — so an
+  interrupted handoff no longer has to be retyped. Saved drafts appear under
+  **Account → Draft hand receipts**, where you can resume or delete them.
+  Drafts are private to you.
+- Resuming a draft restores your typed work and warns you if any of its devices
+  have since been retired or removed from inventory, keeping the rest.
 
 ### Changed
 - **You now stay signed in for far longer: 7 days without using the app, and 30 days in total before you are asked to sign in again.** It was 4 hours idle and 10 hours total, which was written for a shift at a desk and did not match how the app is actually used. Anyone who had added it to their phone's home screen was meeting the login form nearly every time they opened it — a home-screen app keeps its own separate sign-in from Safari, so it never inherited a login done in the browser, and the 4-hour window had usually lapsed since the last time it was opened. Signing in twice a day on a personal phone mostly teaches people to keep the password somewhere handy, which is the opposite of the point.
@@ -24,8 +32,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 - **Your phone will now offer your saved email and password on the sign-in page.** Tapping the Email box should bring up the usual suggestion above the keyboard instead of nothing. The field was labelled for your device as a *contact* email address rather than as the account you sign in with, so iOS offered addresses from your contact card — or nothing at all — and never the login it had saved for this site. Nothing about the field changed for you otherwise: it still asks for an email and still brings up the email keyboard. **The first time, you have to let your phone save it**: sign in as normal, and when iOS offers to save the password, accept. There is nothing to suggest until then, so if the box still comes up empty, that is why.
 
+### Security
+- A recipient signature is **never** saved in a draft. A signature attests to a
+  specific list of items, and a draft's list can change, so a resumed draft must
+  be signed again before it can be filed.
+
 ### Notes
-- No migration, config, or env change. The session length is a code constant (`src/lib/session-freshness.ts`); existing sessions pick up the new window on their next request rather than needing anyone to sign in again.
+- No migration, config, or env change for the session-length and home-screen work. The session length is a code constant (`src/lib/session-freshness.ts`); existing sessions pick up the new window on their next request rather than needing anyone to sign in again.
+- Drafts DO add a migration: new table `ReceiptDraft` (`20260806120000_add_receipt_draft`) — apply to Supabase **before** merging, per the migrate-before-push rule.
+- Drafts are deleted automatically 30 days after they were last saved, by the existing nightly `/api/cron/purge` job. No new environment variables.
 
 ## 2026-08-05
 

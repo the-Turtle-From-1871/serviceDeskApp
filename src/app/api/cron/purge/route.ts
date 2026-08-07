@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { purgeExpiredTransfers } from "@/modules/transfers/purge.service";
 import { purgeDeactivatedUsers } from "@/modules/users/account-purge.service";
+import { purgeStaleDrafts } from "@/modules/receipts/drafts.service";
 import { sendOverdueTransferAlerts } from "@/modules/transfers/timer-alert.service";
 import { sendOverdueServiceAlerts } from "@/modules/service-queue/timer-alert.service";
 import { hasValidBearerSecret } from "@/lib/cron-auth";
@@ -11,8 +12,15 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Nightly maintenance worker: permanently purge expired closed receipts (90 days
-// after close) and hard-delete accounts inactive for 3+ months. Both sweeps run
-// independently; a failure in one is reported without blocking the other.
+// after close), hard-delete accounts inactive for 3+ months, purge idle receipt
+// drafts (30 days untouched), and send the two overdue-alert sweeps. The five
+// run CONCURRENTLY via one `Promise.all`, not independently: a single `catch`
+// wraps all of them, so if ANY one rejects, the rest are discarded too — even
+// one that already succeeded — and the whole request returns a blanket 500
+// with no per-sweep result. A caller cannot tell which sweep failed from this
+// response alone; that is `[cron/purge] purge sweep failed:` in the server
+// log. This is a known tradeoff, not a bug to silently "fix" by changing
+// `Promise.all` semantics here — see the review note that added this comment.
 async function handle(req: NextRequest) {
   // Vercel Cron sends `Authorization: Bearer <CRON_SECRET>`. This shared secret is
   // the authentication for the endpoint — there is no user session on a cron hit —
@@ -23,9 +31,10 @@ async function handle(req: NextRequest) {
 
   const now = new Date();
   try {
-    const [transfers, users, transferAlerts, serviceAlerts] = await Promise.all([
+    const [transfers, users, drafts, transferAlerts, serviceAlerts] = await Promise.all([
       purgeExpiredTransfers(now),
       purgeDeactivatedUsers(now),
+      purgeStaleDrafts(now),
       sendOverdueTransferAlerts(now),
       sendOverdueServiceAlerts(now),
     ]);
@@ -33,6 +42,7 @@ async function handle(req: NextRequest) {
       ok: true,
       transfers: { deletedCount: transfers.deletedCount },
       users: { deletedCount: users.deletedCount, skippedCount: users.skipped.length },
+      drafts: { deletedCount: drafts.deletedCount },
       alerts: { overdueTransfers: transferAlerts.alertedCount, overdueService: serviceAlerts.alertedCount },
     });
   } catch (e) {

@@ -7,6 +7,8 @@ import { ChangePasswordForm } from "./ChangePasswordForm";
 import { SignatureSettings } from "./SignatureSettings";
 import { listSignatureNames } from "@/modules/signatures/signatures.service";
 import { SignatureManager } from "./SignatureManager";
+import { listDrafts } from "@/modules/receipts/drafts.service";
+import { DraftList } from "./DraftList";
 
 export default async function AccountPage() {
   let user;
@@ -18,9 +20,10 @@ export default async function AccountPage() {
   }
   const isAdmin = user.role === "ADMIN";
   // Admins use named signatures; everyone else keeps the single saved signature.
-  const [me, signatures] = await Promise.all([
+  const [me, signatures, drafts] = await Promise.all([
     isAdmin ? Promise.resolve(null) : prisma.user.findUnique({ where: { id: user.id }, select: { signatureImage: true } }),
     isAdmin ? listSignatureNames(user.id) : Promise.resolve([]),
+    listDrafts(user.id),
   ]);
 
   return (
@@ -47,6 +50,15 @@ export default async function AccountPage() {
               <SignatureSettings current={me?.signatureImage ?? null} />
             </>
           )}
+        </div>
+        <div className="card stack">
+          <div className="card__title">Draft hand receipts</div>
+          <p className="subtle">
+            In-progress receipts you saved from the builder. Resuming one restores what you
+            typed — the signature is never saved, so you sign again before filing. Drafts are
+            private to you and are removed automatically after 30 days.
+          </p>
+          <DraftList drafts={drafts} />
         </div>
         <div className="card stack">
           <div className="card__title">Change password</div>

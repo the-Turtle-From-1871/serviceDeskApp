@@ -46,6 +46,7 @@ model User {
   signatures          Signature[]           @relation("UserSignatures")
   createdContacts     Contact[]             @relation("CreatedContacts")
   publicAccessUpdates PublicAccessSetting[] @relation("PinUpdates")
+  receiptDrafts       ReceiptDraft[]        @relation("ReceiptDrafts")
 }
 
 // Self-service password reset. Only the SHA-256 hash of the emailed token is
@@ -530,4 +531,37 @@ model PublicAccessSetting {
   updatedById String?
 
   @@index([updatedById])
+}
+
+// An in-progress hand receipt saved from the builder. PRIVATE to its author —
+// a deliberate exception to this app's role-based, org-shared authorization
+// (see CLAUDE.md §1): a filed receipt is a shared organizational record, but a
+// half-typed form is personal working state.
+//
+// The recipient signature is deliberately NOT stored. Ink attests to a specific
+// item list (ReceiptBuilderForm discards it whenever the list changes), so a
+// signature restored onto a since-edited draft would attest to a list it never
+// covered.
+model ReceiptDraft {
+  id     String @id @default(cuid())
+  user   User   @relation("ReceiptDrafts", fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  // Denormalized from `payload` on every save so the account list never has to
+  // deserialize a payload to render a row. Written from the same parsed object,
+  // so they cannot drift.
+  recipientName String?
+  itemCount     Int     @default(0)
+
+  // The builder form's fields, minus the signature. Shape is enforced by
+  // receiptDraftSchema on every write AND every read — a Json column is untyped
+  // at the DB level, and a payload written by an older deploy must not be able
+  // to crash the builder.
+  payload Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, updatedAt]) // the /account list
+  @@index([updatedAt])         // the nightly purge sweep
 }

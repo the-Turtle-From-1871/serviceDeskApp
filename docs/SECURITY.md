@@ -355,6 +355,33 @@ The `.invalid` TLD (RFC 2606) guarantees the address can never collide with a
 real person's. This is the **one deliberate exception** to "provision an
 individual account per technician" — see the corresponding `CLAUDE.md` bullet.
 
+### Hand receipt drafts (owner-scoped)
+
+`ReceiptDraft` rows are **private to the user who saved them** — the only
+owner-scoped surface in an otherwise role-gated, org-shared application.
+
+- **Why an exception.** A filed receipt is a shared organizational record; a
+  half-typed builder form is personal working state. One technician resuming
+  another's partly-entered handoff is confusing, and the row has none of the
+  signature that makes a filed receipt a document.
+- **How it is enforced.** `src/modules/receipts/drafts.service.ts` puts
+  `userId` in the WHERE clause of every query (`findFirst` / `updateMany` /
+  `deleteMany`), so a foreign or forged id touches zero rows rather than
+  throwing. `src/app/actions/drafts.ts` takes the id from `requireUser()` and
+  never from client input. `/receipts/new?draft=<id>` 404s on a draft the
+  caller does not own.
+- **Data held.** Both parties' name, rank, unit, contact number and email, the
+  item ids, quantities, return timer, and service selections. **No signature is
+  ever stored** — the payload schema has no such field and strips unknown keys,
+  and `saveDraftAction` drops it explicitly.
+- **Bounds.** `receiptDraftSchema` caps every string and both arrays before
+  anything reaches the untyped `payload` Json column; 25 drafts per user,
+  enforced inside a Serializable transaction with a bounded retry so two
+  concurrent saves can't both slip past the cap.
+- **Retention.** Deleted when its receipt is filed, on demand from `/account`,
+  or automatically 30 days after last update by the nightly
+  `/api/cron/purge` sweep. Cascade-deleted with the user account.
+
 ---
 
 ## 3. Public surface & the PIN gate
@@ -1669,6 +1696,15 @@ half, unlike the reset token: this token is idempotent rather than single-use,
 so a gateway prefetch does not burn it for the real recipient the way it would
 a one-time reset link — the cost is purely that more parties end up holding a
 copy of a value that, per the paragraph above, never expires on its own.
+
+**13. A saved draft is readable by anyone holding the author's live session.**
+*Accepted* — same exposure as the rest of the signed-in surface. There is no
+separate re-authentication to open `/receipts/new?draft=<id>`, so a compromised
+or shared session can list and open that user's drafts exactly as it can
+everything else `requireUser()` gates. The owner scoping in
+[§2](#2-authorization) stops a *different* account from reaching another
+user's drafts; it does not add a second factor on top of the session that
+already can.
 
 ---
 
