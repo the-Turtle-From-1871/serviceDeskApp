@@ -33,7 +33,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-// jest-dom is not installed here, so assert on the DOM property directly.
+// jest-dom matchers are not used here, so assert on the DOM property directly.
 const submit = () =>
   screen.getByRole("button", { name: /sign in|checking your browser/i }) as HTMLButtonElement;
 

@@ -250,6 +250,42 @@ h3 {
   border-radius: 0;
 }
 
+/* ---------- Account: the profile icon, top-right ----------
+   Account is deliberately NOT a nav item (see navItemsFor): it sits here at
+   every width, so it is in one predictable place and never spends a rail tab.
+   Sized to the tap floor on purpose — it is the smallest control in the header
+   and the only one on a phone. */
+.profile-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: var(--tap);
+  height: var(--tap);
+  border-radius: 999px;
+  color: var(--text-muted);
+}
+.profile-link:hover {
+  color: var(--primary);
+  background: var(--primary-soft);
+  text-decoration: none;
+}
+.profile-link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring);
+}
+.profile-link.is-active {
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+.profile-link__icon {
+  /* Preflight is not imported, so an svg is inline by default and would sit on
+     the text baseline. See the styling notes in CLAUDE.md. */
+  display: block;
+  width: 26px;
+  height: 26px;
+}
+
 /* ---------- Mobile: fixed bottom nav rail ----------
    Replaces the hamburger dropdown the header used to open below 720px. Both
    navs are always in the DOM (AppHeader renders each); these two rules are the
@@ -792,6 +828,35 @@ input[type="file"].input {
 .table .actions--end {
   justify-content: flex-end;
 }
+/* ---------- /items: the mobile card's own cells ----------
+   `.table--cards` rows carry three extra <td>s that build the phone card, and
+   they are dead weight above the 720px breakpoint. They exist as separate
+   cells rather than as restyled data cells because the data cells are rendered
+   conditionally by the Columns menu — see the media query at the foot of this
+   file, and the comment in ItemSelectTable's renderRow. */
+.table td.cell-serial,
+.table td.cell-primary,
+.table td.cell-meta,
+.table td.cell-more {
+  display: none;
+}
+/* The card's tap target. Inherits its surroundings so that promoting the
+   serial to a link costs the desktop table no visual change at all. */
+.card-link {
+  color: inherit;
+  text-decoration: none;
+  /* iOS treats a held LINK as the start of a link-drag, and when that system
+     gesture claims the touch WebKit fires `pointercancel` — which kills the
+     500ms long-press timer, so lifting the finger is just a tap and the item
+     opens instead of entering selection mode. `-webkit-touch-callout` on the
+     row suppresses the preview sheet but NOT the drag, so this is the third
+     property of the set and the one that keeps the pointer stream ours.
+     It does not inherit, so it has to sit on the anchor itself.
+     See the matching `draggable={false}`, which is the same instruction to
+     engines that ignore this property. */
+  -webkit-user-drag: none;
+}
+
 /* The serial number is the primary key a human matches against a sticker on
    real hardware, so it gets tabular figures (equal-width digits make two
    serials comparable down the column) and never breaks across lines. */
@@ -1148,6 +1213,15 @@ input[type="file"].input {
      "Retire" is expensive, a mis-tapped "View" is not. */
   .btn-primary,
   .btn-danger { height: var(--tap-lg); }
+  /* The /items toolbar's action row pairs "Print QR codes" (btn-primary, so
+     --tap-lg) with the Columns menu (btn-secondary, --tap). The row is
+     bottom-aligned, so those 4px showed as the primary sticking up above its
+     neighbour — the only uneven row in the toolbar (every other control is
+     44px here and the whole row is 40px on desktop, both measured).
+     Raise the secondary to match rather than shrinking the primary: --tap-lg
+     is deliberate for primary and destructive actions (see the touch floor
+     above), and trimming a tap target to tidy a row is the wrong trade. */
+  .toolbar .col-menu > summary.btn { height: var(--tap-lg); }
   /* Checkboxes are tap targets too, not decorations. 13px is the UA default. */
   .table input[type="checkbox"],
   .col-menu-panel input[type="checkbox"],
@@ -1170,6 +1244,382 @@ input[type="file"].input {
   .card { padding: 18px 16px; }
   .table td { padding: 10px 16px; }
   .table tr { border-bottom: 10px solid var(--bg); }
+
+  /* ================================================================
+     /items — the row IS a card: tap to open, swipe left for actions
+     ================================================================
+     Opt-in via `.table--cards`, NOT a change to `.table`: every other table
+     in the app wants the plain restacked row above. Receipts, the audit log
+     and the receipt builder have no per-row drawer and no single obvious
+     destination for a tap on the row.
+
+     The whole layout rests on one fact — under this breakpoint the rules
+     above have already made every tr/td a block or flex box, so there are no
+     table boxes left and `transform`, `position: absolute` and `overflow`
+     behave exactly as they would on divs. None of this works above 720px,
+     and none of it is declared there. */
+  .table--cards {
+    /* MUST equal DRAWER_WIDTH in components/swipe-row.ts — the gesture clamps
+       the card's travel to this number, so if the two drift the card slides
+       past the drawer onto bare background (or stops short of the last
+       button). Three 60px actions; see that constant for why 60 and not more. */
+    --swipe-drawer-w: 180px;
+  }
+  .table--cards tbody {
+    /* Clips each card's drawer, which parks just off the right edge. Also
+       what keeps that drawer out of `.table-wrap`'s `overflow-x: auto`
+       scrollable area: an absolutely positioned descendant otherwise widens
+       it, and the entire list becomes horizontally scrollable at rest. */
+    overflow: hidden;
+    /* The gap between cards is each row's own `border-bottom: 10px solid
+       var(--bg)`, which slides away with the row it belongs to — leaving a
+       pale strip under the drawer of an open card. Painting the same colour
+       behind the rows keeps the gap continuous across the full width. */
+    background: var(--bg);
+  }
+  .table--cards tbody tr {
+    position: relative;
+    background: var(--surface);
+    /* --swipe is written per row by ItemSelectTable (0 at rest, negative
+       while open or under a finger). */
+    transform: translateX(var(--swipe, 0px));
+    transition: transform 180ms ease-out;
+    /* The browser keeps vertical scrolling outright; the pointer handlers only
+       ever see the horizontal gestures they are allowed to claim. Without
+       this the two fight and the list feels stuck.
+       `pinch-zoom` is listed explicitly: `pan-y` alone permits ONLY vertical
+       panning, which silently disables pinch-to-zoom over the whole list —
+       and magnifying a serial number is exactly what someone does on a phone
+       (WCAG 1.4.4). Naming both keeps the gesture arbitration above while
+       leaving zoom to the browser. */
+    touch-action: pan-y pinch-zoom;
+    /* The card is a stretched <a> and the long press fires at 500ms — which is
+       exactly when the OS claims the same gesture on the same element. On iOS
+       a pressed link raises the callout/preview sheet ("Open / Copy / Share"),
+       so selection mode would turn on and vibrate UNDER a system sheet; on
+       Android the press starts a text-selection drag whose handles then eat the
+       swipe. Both properties inherit, so setting them on the row covers the
+       link and the card text inside it.
+       Scoped to the card layout only, so the desktop table stays selectable.
+       The tradeoff is deliberate: long-press on a card is the app's selection
+       gesture, so the text under it cannot also be the browser's. Neither of
+       these is reproducible in desktop Chromium — verify on a device. */
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  /* `:hover` sticks after a tap on touch devices, which would leave whichever
+     card you last touched permanently tinted. */
+  .table--cards tbody tr:hover { background: var(--surface); }
+  /* Swipe is not a keyboard gesture. Tabbing into the drawer slides it in, so
+     keyboard and screen-reader users reach Edit/Retire/Delete by the ordinary
+     route — in CSS, so it works before hydration too. `:focus-visible` is
+     load-bearing: plain `:focus-within` would also fire on the card's own link
+     when tapped, popping the drawer open on every tap.
+     The two selectors reach exactly the drawer's own three controls (the
+     second is the Retire button, which lives inside its own <form>) and
+     nothing deeper. Scoping matters: a plain `.row-actions :focus-visible`
+     also matches inside the delete <dialog>, which is a child of the drawer —
+     `showModal()` moves focus into it, so the drawer would re-open behind its
+     own modal and stay open on dismissal. Measured. */
+  .table--cards tbody tr:has(.row-actions > .actions > :not(dialog):focus-visible),
+  .table--cards tbody tr:has(.row-actions > .actions > form :focus-visible) {
+    transform: translateX(calc(-1 * var(--swipe-drawer-w)));
+  }
+
+  /* The desktop table's cells, off. The card is built from the three cells
+     below instead — see the note in globals.css's Tables section. */
+  .table--cards td.cell-desktop { display: none; }
+
+  /* ---- Card header: the serial, and the link that covers the whole card ----
+     Inherits the promoted-serial styling from `.table td.mono[data-label]`
+     above (order: -1, tinted band, 16px), so this only has to turn it back on
+     and host the link. */
+  .table--cards td.cell-serial { display: flex; }
+  .table--cards td.cell-serial .card-link { color: var(--text); }
+  /* The global `a:hover { text-decoration: underline }` is a pointer
+     affordance, and on a touch screen hover STICKS after a tap — come back
+     from the item page and one card's serial is underlined for no reason,
+     as if it were a different kind of row. Same reasoning as the `tr:hover`
+     rule above. */
+  .table--cards td.cell-serial .card-link:hover { text-decoration: none; }
+  /* The stretched link. Its ::after takes the whole row (the nearest
+     positioned ancestor), so a tap anywhere on the card opens the item while
+     the accessibility tree still sees one ordinary link. Anything meant to
+     stay tappable — the checkbox, the drawer — sits above it. */
+  .table--cards td.cell-serial .card-link::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+  }
+
+  /* ---- Card body: what the device is ---- */
+  .table--cards td.cell-primary {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    padding: 8px 16px 4px;
+  }
+  .table--cards .cell-primary__name { font-weight: 600; font-size: 15px; }
+  .table--cards .cell-primary__sub { color: var(--text-muted); font-size: 13px; }
+
+  /* ---- Card footer: the operational signals, on one line ---- */
+  .table--cards td.cell-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 0 16px 10px;
+  }
+  .table--cards .cell-meta__facts {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-width: 0;
+    font-size: 13px;
+  }
+  /* A swipe nobody can see is a swipe nobody finds. Admin-only, because that
+     is exactly when the drawer has something in it. */
+  /* A pull tab at the CENTRE of the card's right edge — a drawer pull, gripped
+     rather than pointed.
+
+     It replaced a `‹` chevron for two reasons. Apple's convention is that a
+     chevron means NAVIGATION ("tap this, go to another screen"), which is what
+     tapping the card already does — so the mark argued with the gesture it was
+     advertising. And the card now carries a second chevron, the More arrow at
+     its foot, so two chevrons meant two different things on one card.
+
+     It is the only treatment considered whose silhouette BREAKS the card's
+     edge, which is what makes it register without being looked at directly.
+     `pointer-events: none` keeps it a hint and nothing more: a press lands on
+     the card underneath and starts the swipe, which is the whole point. */
+  .table--cards .swipe-grip {
+    position: absolute;
+    top: 50%;
+    right: 0;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    width: 14px;
+    height: 44px;
+    border-radius: 999px 0 0 999px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-right: none;
+    pointer-events: none;
+    z-index: 1;
+  }
+  .table--cards .swipe-grip i {
+    width: 2px;
+    height: 12px;
+    border-radius: 999px;
+    background: var(--text-subtle);
+  }
+
+  /* The toggle's own 44px strip and its top border already separate the card's
+     last line from what follows, so the meta row does not also need to pay for
+     bottom padding. Scoped with `:has()` so the service-queue card — which has
+     no More panel and nothing under its meta row — keeps its own spacing. */
+  .table--cards tbody tr:has(td.cell-more) td.cell-meta { padding-bottom: 4px; }
+
+  /* ---- "More": the fields the compact card drops, behind a chevron ----
+     A native <details> at the card's bottom edge. The whole strip is the tap
+     target, full width and over the tap floor, because a bare chevron glyph is
+     about 12px of ink. */
+  .table--cards td.cell-more {
+    display: block;
+    padding: 0;
+    /* Above the stretched card link (z-index 1), or the tap navigates to the
+       item instead of opening the panel — the same reason the checkbox is
+       lifted. Needs a position for z-index to apply at all. */
+    position: relative;
+    z-index: 2;
+    border-top: 1px solid var(--border);
+  }
+  .table--cards .card-more__toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: var(--tap);
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    /* Preflight is not imported, so the UA's `display: list-item` on <summary>
+       survives and paints a disclosure triangle beside our own chevron. The
+       `display: flex` above removes it in Chrome/Firefox; Safari needs the
+       pseudo-element killed by name as well. */
+    list-style: none;
+  }
+  .table--cards .card-more__toggle::-webkit-details-marker { display: none; }
+  .table--cards .card-more__toggle::marker { content: ""; }
+  .table--cards .card-more__toggle:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 3px var(--ring);
+  }
+  .table--cards .card-more__chevron {
+    /* Preflight is not imported, so an svg is inline by default and would sit
+       on the text baseline — same reason `.nav-rail__icon` sets this. */
+    display: block;
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+    transition: transform 160ms ease-out;
+  }
+  .table--cards .card-more[open] .card-more__chevron {
+    transform: rotate(180deg);
+  }
+  /* An icon that spins 180° every time the panel opens is noise for anyone who
+     asked the OS to stop that. The panel still opens; only the spin goes. */
+  @media (prefers-reduced-motion: reduce) {
+    .table--cards .card-more__chevron { transition: none; }
+  }
+  /* Two columns: label, value. `dl` is the honest element here — these are
+     name/value pairs, and it is what a screen reader announces as such. */
+  .table--cards .card-more__list {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 12px;
+    padding: 2px 16px 12px;
+    font-size: 13px;
+  }
+  .table--cards .card-more__list dt {
+    color: var(--text-muted);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .table--cards .card-more__list dd {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  /* ---- Selection mode: checkboxes appear in the header band ----
+     Absolutely positioned so entering the mode costs the card no height —
+     the list must not reflow under the finger that just long-pressed it. */
+  /* VISUALLY hidden, not `display: none`. A checkbox that is `display: none`
+     leaves the accessibility tree too, and long-press — a 500ms touch gesture —
+     would then be the ONLY way into selection mode: no screen-reader, switch-
+     access or keyboard user could select anything on a phone, which takes
+     "Create receipt from N selected" and "Print QR codes" away from them
+     entirely. Clipped like `.sr-only`, the checkbox stays focusable and
+     announced, and the two rules below give it a real box the moment it is
+     either focused or in use. */
+  .table--cards td.cell-select {
+    display: block;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  /* No stacked-cell label here. `.table td::before { content: attr(data-label) }`
+     gives every restacked cell its column name, which is right for a full-width
+     row and wrong for a 44px box pinned in a corner: "Select" wrapped one
+     letter per line and spilled down over the card. */
+  .table--cards td.cell-select::before { content: none; }
+  /* `:has(input)` is what keeps a RETIRED card clean: its select cell renders
+     with no checkbox inside (retired rows are excluded from every bulk action),
+     and giving that empty cell a 44px box over the stretched link would put a
+     dead zone in the corner of the card that swallows taps meant to open it. */
+  .table--cards.is-selecting td.cell-select:has(input),
+  .table--cards td.cell-select:focus-within {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    top: 0;
+    right: 8px;
+    width: var(--tap);
+    height: var(--tap);
+    margin: 0;
+    overflow: visible;
+    clip-path: none;
+    /* Over the stretched link, or the checkbox cannot be tapped. */
+    z-index: 2;
+  }
+  /* Keeps a long serial from running under the checkbox. */
+  .table--cards.is-selecting td.cell-serial { padding-right: 56px; }
+
+  /* ---- The action drawer ----
+     Parked at the card's right edge and dragged into view by the row's own
+     transform — one variable moves both, so there is no counter-transform to
+     keep in sync. */
+  .table--cards td.row-actions {
+    position: absolute;
+    left: 100%;
+    top: 0;
+    bottom: 0;
+    width: var(--swipe-drawer-w);
+    padding: 0;
+    display: flex;
+    /* NOT inherited-by-default: the generic mobile cell rule above sets
+       `align-items: baseline` on every `.table td` so a label and its value
+       sit on one text baseline. Left alone, that collapses this drawer's
+       buttons to the height of their own text — 20px measured, less than half
+       the 44px tap floor — in the middle of a 148px card. */
+    align-items: stretch;
+    /* Shows through the 1px gaps below as hairline dividers. */
+    background: var(--border);
+    z-index: 3;
+  }
+  .table--cards td.row-actions .actions {
+    flex: 1;
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 1px;
+  }
+  /* `:not(dialog)` is NOT optional. DeleteItemButton renders its confirmation
+     <dialog> as a sibling of its button, so a bare `> *` would set `display`
+     on a closed dialog — and an author `display` beats the UA's
+     `dialog:not([open]) { display: none }`, which is precisely the bug
+     CLAUDE.md documents: every closed dialog renders full-size and eats the
+     taps meant for the row underneath. */
+  .table--cards td.row-actions .actions > :not(dialog) {
+    flex: 1 1 0;
+    display: flex;
+    min-width: 0;
+  }
+  .table--cards td.row-actions .actions .btn {
+    flex: 1;
+    width: 100%;
+    height: auto;
+    border: none;
+    border-radius: 0;
+    padding: 0 4px;
+    font-size: 13px;
+    white-space: normal;
+    text-align: center;
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  .table--cards td.row-actions .actions .btn-danger {
+    background: var(--danger-soft);
+    color: var(--danger);
+  }
+  /* Only Delete is a bare button here — Retire is wrapped in its own <form> —
+     so this reaches the irreversible action and nothing else. It gets the
+     solid fill; retiring is a state change, deleting is not. */
+  .table--cards td.row-actions .actions > button.btn-danger {
+    background: var(--danger);
+    color: var(--primary-fg);
+  }
+  /* Tapping the card IS View. The drawer is for what a tap cannot express.
+     The child combinator is load-bearing: `.actions > :not(dialog)` above
+     scores (0,3,2) because `:not()` takes its argument's specificity, so a
+     descendant `.action-view` at (0,3,1) loses and the link stays visible —
+     measured, four buttons in a three-button drawer. */
+  .table--cards td.row-actions .actions > .action-view { display: none; }
 }
 
 /* ---------- Scanner sheet ----------

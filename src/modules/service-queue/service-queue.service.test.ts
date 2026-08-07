@@ -41,6 +41,7 @@ import {
   completeServiceItem,
   reopenServiceItem,
   listActiveQueue,
+  QUEUE_MAX_ROWS,
   getServiceRequestForItem,
 } from "./service-queue.service";
 import { ServiceQueueError } from "./service-queue.errors";
@@ -338,12 +339,56 @@ describe("reopenServiceItem", () => {
 });
 
 describe("listActiveQueue", () => {
+  // listActiveQueue only counts and slices these, so a minimal row is enough —
+  // cast past Prisma's full row type rather than fabricating ten unused fields.
+  const fakeRows = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ id: `sq${i}`, itemId: `i${i}`, status: "PENDING" })) as never;
+
   it("queries PENDING rows with item + transfer includes", async () => {
+    vi.mocked(prisma.serviceQueueItem.findMany).mockResolvedValueOnce(fakeRows(3));
     await listActiveQueue();
     const arg = vi.mocked(prisma.serviceQueueItem.findMany).mock.calls[0][0];
     expect(arg.where).toEqual({ status: "PENDING" });
     expect(arg.include.item.select).toMatchObject({ serialNumber: true, deviceName: true, homeUnit: true });
     expect(arg.include.transfer.select).toMatchObject({ receiptNumber: true });
+  });
+
+  // The whole result is serialized into a Client Component, so an uncapped
+  // findMany here ships the entire pending table to the browser — the "bound
+  // every list" rule. The page is deliberately NOT paginated (production runs
+  // 9 pending entries and the table searches/sorts in the browser), so the cap
+  // is the bound.
+  it("asks for one row MORE than the cap, so overflow is known without a COUNT", async () => {
+    vi.mocked(prisma.serviceQueueItem.findMany).mockResolvedValueOnce(fakeRows(3));
+    await listActiveQueue();
+    expect(vi.mocked(prisma.serviceQueueItem.findMany).mock.calls[0]?.[0]?.take).toBe(
+      QUEUE_MAX_ROWS + 1,
+    );
+  });
+
+  it("reports not-truncated, and returns every row, below the cap", async () => {
+    vi.mocked(prisma.serviceQueueItem.findMany).mockResolvedValueOnce(fakeRows(9));
+    const { rows, truncated } = await listActiveQueue();
+    expect(rows).toHaveLength(9);
+    expect(truncated).toBe(false);
+  });
+
+  // The extra row is a probe, never a row the page renders — otherwise the
+  // table would show one more than the cap it just announced.
+  it("trims the probe row and reports truncated at the cap", async () => {
+    vi.mocked(prisma.serviceQueueItem.findMany).mockResolvedValueOnce(fakeRows(QUEUE_MAX_ROWS + 1));
+    const { rows, truncated } = await listActiveQueue();
+    expect(rows).toHaveLength(QUEUE_MAX_ROWS);
+    expect(truncated).toBe(true);
+  });
+
+  // Exactly at the cap is NOT truncation: the probe row came back empty, so
+  // there is nothing hidden and the page must not claim there is.
+  it("does not claim truncation when the queue is exactly the cap", async () => {
+    vi.mocked(prisma.serviceQueueItem.findMany).mockResolvedValueOnce(fakeRows(QUEUE_MAX_ROWS));
+    const { rows, truncated } = await listActiveQueue();
+    expect(rows).toHaveLength(QUEUE_MAX_ROWS);
+    expect(truncated).toBe(false);
   });
 });
 
