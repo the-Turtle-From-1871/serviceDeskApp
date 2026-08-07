@@ -219,6 +219,34 @@ describe("ItemSelectTable — mobile card structure", () => {
     window.localStorage.clear();
   });
 
+  // The three fields the compact card drops live behind the bottom chevron.
+  // jsdom cannot measure the 44px strip or prove the tap beats the stretched
+  // link — both were measured in a browser — but it can pin that the panel is a
+  // native <details> (so it works without JS and takes Enter/Space for free)
+  // and that it carries exactly the fields the card gave up.
+  it("puts Holder, UIC and Category behind a native details toggle", () => {
+    const { container } = renderRows();
+    const details = container.querySelector("td.cell-more details.card-more");
+    expect(details).not.toBeNull();
+    expect((details as HTMLDetailsElement).open).toBe(false);
+    // A <summary> is what makes it keyboard-operable without a single handler.
+    expect(details!.querySelector(":scope > summary")).not.toBeNull();
+    const terms = [...details!.querySelectorAll("dt")].map((d) => d.textContent);
+    expect(terms).toEqual(["Holder", "UIC", "Category"]);
+  });
+
+  // Not driven by the Columns menu, exactly like the card cells above: the panel
+  // exists to show what the CARD dropped, which is a fixed set, not what a
+  // desktop preference happens to have hidden.
+  it("shows the same three fields regardless of the Columns preference", () => {
+    window.localStorage.setItem("items:hiddenCols", JSON.stringify(["holder", "deviceUIC", "deviceCategory"]));
+    const { container } = renderRows();
+    // First row only — renderRows() draws two, so an unscoped query returns six.
+    const terms = [...container.querySelectorAll("tbody tr:first-child td.cell-more dt")].map((d) => d.textContent);
+    expect(terms).toEqual(["Holder", "UIC", "Category"]);
+    window.localStorage.clear();
+  });
+
   it("keeps View out of the drawer — tapping the card is View", () => {
     const { container } = renderRows();
     const drawer = container.querySelector("td.row-actions");

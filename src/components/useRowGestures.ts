@@ -234,7 +234,9 @@ export function useRowGestures({
       // one round and only a real-browser swipe caught it; jsdom has no
       // hit-testing, so the target there is whatever element the test names.)
       // The drawer's own links are inside `td.row-actions`, which is matched.
-      if ((e.target as HTMLElement | null)?.closest?.("td.row-actions, button, input, label")) {
+      // `summary` is the card's "More" chevron: a press there must open the
+      // details panel, not drag the card out from under the finger.
+      if ((e.target as HTMLElement | null)?.closest?.("td.row-actions, button, input, label, summary")) {
         return;
       }
       // One gesture at a time. `gesture.current` is a single slot, so a second
