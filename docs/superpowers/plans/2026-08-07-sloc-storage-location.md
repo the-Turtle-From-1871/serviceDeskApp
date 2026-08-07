@@ -486,15 +486,11 @@ In `src/modules/items/items.schema.ts`, in `editableItemFields`, after `deviceCa
 
 This one edit gives both admin surfaces the field at once — `adminItemEditSchema` and `itemDetailsSchema` are both built from this object. **Do not add it to `userItemDetailsSchema`**; a standard USER still edits exactly two fields.
 
-- [ ] **Step 2: Add it to the create schema**
+- [x] **Step 2: Add it to the create schema** — **ALREADY DONE in Task 4's fix round (commit `68d25b9`).**
 
-In the same file, in `newItemSchema`, after `deviceCategory: categoryNew,` add:
+`newItemSchema` already carries `storageLocation: optional,` after `deviceCategory: categoryNew,`. Task 4's real-DB test had to create an item holding a storage location, and `createItem` re-parses its input through `newItemSchema`, so the line came forward with it. Verify it is present and move on — do not re-add it.
 
-```typescript
-  storageLocation: optional,
-```
-
-`optional` here, not `clearable`: a row that does not exist yet has no value to clear, and writing `""` puts an empty string where every filter would treat it as a value.
+For the record of why that helper: `optional`, not `clearable` — a row that does not exist yet has no value to clear, and writing `""` puts an empty string where every filter would treat it as a value.
 
 - [ ] **Step 3: Extend the suggestion vocabulary**
 
