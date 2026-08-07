@@ -95,6 +95,7 @@ export const newItemSchema = z.object({
   homeUnit: optional,
   deviceUIC: optional,
   deviceCategory: categoryNew,
+  storageLocation: optional,
   notes: optional,
 });
 

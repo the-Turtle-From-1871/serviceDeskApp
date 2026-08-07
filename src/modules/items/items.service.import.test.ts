@@ -156,3 +156,18 @@ test("commitImport learns a resolution and applies it to every matching new row"
   const homeUnits = (await prisma.item.findMany({ select: { homeUnit: true } })).map((i) => i.homeUnit);
   expect(homeUnits).toEqual(["456th Signal Co", "456th Signal Co"]);
 });
+
+test("commitImport overwrites an existing item's storageLocation from the CSV and logs the change", async () => {
+  await createItem({ make: "Dell", model: "5540", serialNumber: "SL1", deviceName: "Radio", homeUnit: undefined, notes: undefined, storageLocation: "Bldg 400" }, admin.id);
+
+  const csv = "serialNumber,deviceName,SLoc\nSL1,Radio,Bldg 401\n";
+  const res = await commitImport(csv, "items.csv", [], admin);
+  expect(res.updated).toBe(1);
+
+  const item = await prisma.item.findUniqueOrThrow({ where: { serialNumber: "SL1" } });
+  expect(item.storageLocation).toBe("Bldg 401");
+
+  const edits = await prisma.itemEdit.findMany({ where: { itemId: item.id } });
+  expect(edits).toHaveLength(1);
+  expect(edits[0].changes).toEqual([{ field: "storageLocation", from: "Bldg 400", to: "Bldg 401" }]);
+});
