@@ -38,6 +38,11 @@ describe("check-security-docs WATCHED list", () => {
     // the same file — pinned here so a regression dropping either rule (or
     // the entry itself) doesn't slip through unnoticed on this branch's PR.
     "next.config.ts",
+    // Hand receipt drafts: the only owner-scoped (non-role-gated) surface in
+    // the app, holding party PII.
+    "src/modules/receipts/drafts.service.ts",
+    "src/app/actions/drafts.ts",
+    "src/modules/receipts/drafts.form.ts",
   ];
 
   it.each(introducedThisBranch)("covers %s", (path) => {

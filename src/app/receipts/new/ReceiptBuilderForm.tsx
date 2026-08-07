@@ -14,6 +14,8 @@ import { parseItemScan } from "@/modules/items/scan-url";
 import { lookupScannedItem } from "@/app/actions/scan";
 import { QrScanner } from "@/components/QrScanner";
 import { beep } from "@/lib/beep";
+import { saveDraftAction } from "@/app/actions/drafts";
+import type { ReceiptDraftPayload } from "@/modules/receipts/drafts.schema";
 
 // `holderName` is the item's current holder, used to warn when a scan brings in
 // equipment held by someone other than the sender on the form. It rides along
@@ -173,19 +175,59 @@ function QtyInput({ name, value, onChange, label }: { name: string; value: strin
 // Per-serial "Needs service?" capture. Checking it reveals the service type;
 // choosing "Other" reveals a custom-message input. Field names are namespaced by
 // itemId so parseServiceMap can reconstruct the per-item selection server-side.
-function ServiceControls({ itemId }: { itemId: string }) {
-  const [needs, setNeeds] = useState(false);
-  const [type, setType] = useState("REIMAGE");
+function ServiceControls({ itemId, initial }: {
+  itemId: string;
+  initial?: { serviceType: string; note: string; days: string };
+}) {
+  const [needs, setNeeds] = useState(!!initial);
+  const [type, setType] = useState(initial?.serviceType ?? "REIMAGE");
   // Lifted (rather than left uncontrolled on the conditionally-rendered input)
   // so a typed note survives unchecking/rechecking "Needs service?".
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState(initial?.note ?? "");
   // Optional per-serial completion deadline, in days from when the receipt is
   // filed. Blank means NO deadline (parseServiceMap → null → dueAt null); there
   // is no per-type default substituted server-side (sla.ts). This surface only
   // ever CREATES flags, so days-from-now is the right unit and needs no prefill;
   // in the rare case the serial is already in the queue, blank leaves that
   // existing deadline alone rather than wiping it (see upsertServiceRequest).
-  const [days, setDays] = useState("");
+  const [days, setDays] = useState(initial?.days ?? "");
+  // Same defect class as PartyFields' `dcsimRef` above (lines ~70-85): React
+  // resets the form after ANY settled action, restoring every control to the
+  // `defaultChecked` captured at mount — and a controlled checkbox does not
+  // get `defaultChecked` kept in step for free. Before this branch the only
+  // settle was a FAILED create; `formAction={saveDraft}` makes a SUCCESSFUL
+  // save settle the form too. So: DCSIM recipient, tick "Needs service?" on a
+  // few devices, Save draft — the boxes silently uncheck. `needs` (React
+  // state) is untouched, so the type/days inputs stay visible and it READS
+  // like a rendering glitch, not data loss — but `service[itemId][needs]`
+  // then posts nothing on Create, `parseServiceMap` drops the flag, and the
+  // device never reaches the service queue. A later Save draft persists
+  // `service: []`, making the loss durable. Verified by
+  // ReceiptBuilderForm.drafts.test.tsx's Save-draft-checkbox test.
+  const needsRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (needsRef.current) needsRef.current.defaultChecked = needs;
+  }, [needs]);
+  // Same defect family, confirmed by a dedicated test rather than assumed: a
+  // CONTROLLED <select> is given no `defaultSelected` on any of its options
+  // (React tracks the current selection purely via the `value` prop, not via
+  // the option's default), so the native `form.reset()` triggered by ANY
+  // settled action — Save draft succeeding included — falls back to the HTML
+  // spec's rule "select the first option that is not disabled". A device
+  // marked REPAIR or OTHER silently reverts to REIMAGE in the DOM while
+  // `type` (React state) stays unchanged, so the visible dropdown disagrees
+  // with state and, on the next Create, the WRONG type is what gets posted
+  // (unlike TechnicianSignatureField's picker below, this select's value IS
+  // read directly by the browser at submit time — there is no hidden input
+  // standing in for it). Fixed by imperatively keeping each <option>'s
+  // `defaultSelected` in step with `type`, so the native reset has a real
+  // default to fall back to instead of "first non-disabled".
+  const typeRef = useRef<HTMLSelectElement>(null);
+  useEffect(() => {
+    const sel = typeRef.current;
+    if (!sel) return;
+    for (const opt of Array.from(sel.options)) opt.defaultSelected = opt.value === type;
+  }, [type]);
   // One horizontal row, not a stack-sm column: the checkbox, the type, and the
   // note sit inline so an item occupies a single table row on a desktop. `.row`
   // still wraps, so a narrow screen stacks them as before.
@@ -193,6 +235,7 @@ function ServiceControls({ itemId }: { itemId: string }) {
     <div className="row" style={{ gap: 8 }}>
       <label className="row" style={{ gap: 6, whiteSpace: "nowrap" }}>
         <input
+          ref={needsRef}
           type="checkbox"
           name={`service[${itemId}][needs]`}
           checked={needs}
@@ -203,6 +246,7 @@ function ServiceControls({ itemId }: { itemId: string }) {
       {needs && (
         <div className="row" style={{ gap: 6, flexWrap: "wrap", flex: "1 1 auto", minWidth: 0 }}>
           <select
+            ref={typeRef}
             className="select"
             style={{ width: "auto", minWidth: 130 }}
             name={`service[${itemId}][type]`}
@@ -247,12 +291,34 @@ function ServiceControls({ itemId }: { itemId: string }) {
   );
 }
 
-export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures }: {
+export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, draftId: initialDraftId, draftValues, droppedItemsNotice }: {
   initialItems: BuilderItem[];
   senderPrefill?: Prefill;
   signatures: PickableSignature[];
+  draftId?: string;
+  draftValues?: ReceiptDraftPayload;
+  droppedItemsNotice?: string;
 }) {
   const [state, action, pending] = useActionState(createReceiptAction, undefined);
+
+  // A separate useActionState from the Create one above: a failed draft save
+  // must never render as a failed receipt, and vice versa.
+  const [draftState, saveDraft, savingDraft] = useActionState(saveDraftAction, undefined);
+
+  // Blank until this form has been saved once. Held in state (not just seeded
+  // from the prop) so the id returned by the FIRST save is posted by the
+  // second — otherwise every save creates another draft.
+  const [draftId, setDraftId] = useState(initialDraftId ?? "");
+
+  // Guarded render-time write, compared on the action state's IDENTITY — the
+  // "storing information from previous renders" pattern used by
+  // SignatureManager.tsx:28-35 and ItemDetailsCard.tsx:43-47. NOT a useEffect:
+  // the repo lints react-hooks/set-state-in-effect as an error.
+  const [prevDraftState, setPrevDraftState] = useState(draftState);
+  if (draftState !== prevDraftState) {
+    setPrevDraftState(draftState);
+    if (draftState && "draftId" in draftState && draftState.draftId) setDraftId(draftState.draftId);
+  }
   // The item list is now the form's own state, seeded from the URL. It must NOT
   // go back to being a prop: re-deriving it from `?items=` on each change would
   // remount this component and discard the drawn signature and every typed
@@ -273,8 +339,20 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures }: 
   // node_modules/next/dist/docs/01-app/01-getting-started/04-linking-and-navigating.md
   useEffect(() => {
     if (items.length === 0) return; // `?items=` empty would notFound() on reload
-    window.history.replaceState(null, "", `?items=${items.map((i) => i.itemId).join(",")}`);
-  }, [items]);
+    // Built by hand, NOT via `new URLSearchParams(...).toString()`: URLSearchParams
+    // percent-encodes the comma in the item list (`i1,i2` -> `i1%2Ci2`), which
+    // would change the URL's shape from what this effect has always written and
+    // what ReceiptBuilderForm.test.tsx pins byte-for-byte ("?items=i1,i2").
+    //
+    // Keep the draft binding in the URL. Dropping it here is not cosmetic: an
+    // iOS tab reload — the very scenario this effect exists to survive — would
+    // silently unbind the draft, and the next "Save draft" would create a
+    // SECOND draft instead of updating the first. `draftId` is state, so this
+    // also picks up the id returned by the first save on a previously-fresh
+    // builder.
+    const qs = `items=${items.map((i) => i.itemId).join(",")}${draftId ? `&draft=${draftId}` : ""}`;
+    window.history.replaceState(null, "", `?${qs}`);
+  }, [items, draftId]);
 
   const removeItem = (itemId: string) => {
     const removed = items.find((i) => i.itemId === itemId);
@@ -383,7 +461,40 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures }: 
   // ABSENT entry means "untouched" and renders the live item count; a present
   // one is the operator's explicit value and wins from then on. Storing only
   // overrides is what makes tracking-until-edited fall out for free.
-  const [qtyEdits, setQtyEdits] = useState<Record<string, { auth?: string; issued?: string }>>({});
+  //
+  // A resumed draft's `lines` array holds EVERY line that existed when it was
+  // saved, touched or not (draftPayloadFromForm doesn't distinguish), so
+  // seeding an override for all of them unconditionally would freeze every
+  // line's qty at its saved value — resuming a 2-item line and then scanning a
+  // third would leave Issued reading "2" against three printed serials. This
+  // is the exact frozen-qty bug QtyInput's own comment (above) already
+  // documents as having shipped once. So a saved value equal to the LIVE
+  // default (computed from `initialItems` via the same groupItemsIntoLines
+  // this component already uses) is treated as "untouched" and left ABSENT,
+  // and only a value that actually differs — the operator having typed
+  // something else before saving — becomes an override.
+  //
+  // Decided PER FIELD, not per line: Authorized and Issued are independent on
+  // a DA 2062 (that's why they're two inputs), so an operator who edited only
+  // Authorized and left Issued tracking must resume with Issued STILL
+  // tracking. Requiring both fields to match the default before treating the
+  // line as untouched re-froze the field they never touched — same bug class
+  // as the line-level version of this, just one level finer. A line where
+  // NEITHER field differs must produce no entry at all (not an object with
+  // two `undefined` values), so `qtyEdits` never lies about what was edited.
+  const [qtyEdits, setQtyEdits] = useState<Record<string, { auth?: string; issued?: string }>>(() => {
+    const liveDefault = new Map(groupItemsIntoLines(initialItems).map((l) => [`${l.make} ${l.model}`, l.defaultQty]));
+    const edits: Record<string, { auth?: string; issued?: string }> = {};
+    for (const l of draftValues?.lines ?? []) {
+      const key = `${l.make} ${l.model}`;
+      const def = liveDefault.get(key);
+      const entry: { auth?: string; issued?: string } = {};
+      if (def === undefined || l.qtyAuth !== String(def)) entry.auth = l.qtyAuth;
+      if (def === undefined || l.qtyIssued !== String(def)) entry.issued = l.qtyIssued;
+      if (Object.keys(entry).length > 0) edits[key] = entry;
+    }
+    return edits;
+  });
   const lineKey = (ln: { make: string; model: string }) => `${ln.make} ${ln.model}`;
   const qtyValue = (ln: { make: string; model: string; defaultQty: number }, field: "auth" | "issued") =>
     qtyEdits[lineKey(ln)]?.[field] ?? String(ln.defaultQty);
@@ -392,12 +503,12 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures }: 
 
   // Optional return timer, in days from when the receipt is filed. Blank = no
   // timer. Posted as `returnDays`, parsed by receiptSchema.
-  const [returnDays, setReturnDays] = useState("");
+  const [returnDays, setReturnDays] = useState(draftValues?.returnDays ?? "");
 
-  const [senderIsDcsim, setSenderIsDcsim] = useState(senderPrefill?.isDcsim ?? false);
-  const [receiverIsDcsim, setReceiverIsDcsim] = useState(false);
-  const [senderName, setSenderName] = useState(senderPrefill?.name ?? "");
-  const [receiverName, setReceiverName] = useState("");
+  const [senderIsDcsim, setSenderIsDcsim] = useState(draftValues?.sender.isDcsim ?? senderPrefill?.isDcsim ?? false);
+  const [receiverIsDcsim, setReceiverIsDcsim] = useState(draftValues?.receiver.isDcsim ?? false);
+  const [senderName, setSenderName] = useState(draftValues?.sender.name ?? senderPrefill?.name ?? "");
+  const [receiverName, setReceiverName] = useState(draftValues?.receiver.name ?? "");
   const [pickedId, setPickedId] = useState<string | null>(null);
   const receipt = state && "receiptNumber" in state ? state.receiptNumber : undefined;
 
@@ -456,6 +567,13 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures }: 
     return `Held by ${holder}, not ${senderName}`;
   };
 
+  // Only rows the operator actually checked are saved (parseServiceMap drops
+  // the rest), so a present entry means "Needs service? was on".
+  const draftService = useMemo(
+    () => new Map((draftValues?.service ?? []).map((s) => [s.itemId, s])),
+    [draftValues],
+  );
+
   if (receipt) {
     return (
       <div className="card stack-sm">
@@ -472,6 +590,47 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures }: 
 
   return (
     <form action={action} className="stack">
+      {/* The title lives INSIDE the form because the Save-draft button must:
+          `formAction` only applies to a submit button within the form it posts.
+          `.row` + `.spacer` is the shared title-left/action-right idiom from
+          items/page.tsx:67-77, and `.row` wraps, so on a phone the button drops
+          below the heading instead of crushing it. */}
+      <div className="row">
+        <h1 className="page-title">New hand receipt</h1>
+        <button
+          type="submit"
+          formAction={saveDraft}
+          /* Without this the browser refuses to submit while a `required`
+             field is blank — which is exactly the state a draft captures. */
+          formNoValidate
+          className="btn btn-secondary spacer"
+          style={{ minHeight: "var(--tap)" }}
+          disabled={savingDraft}
+        >
+          {savingDraft ? "Saving…" : "Save draft"}
+        </button>
+      </div>
+      {draftValues && (
+        <p role="status" className="alert-success">
+          Draft restored — please sign again before filing. A signature is never saved with a draft.
+        </p>
+      )}
+      {/* Pre-formatted server-side (formatDroppedItemsNotice, drafts.resume.ts)
+          so the naming logic — which devices, by serial + make/model, versus
+          how many are simply gone from inventory with no identifier to show —
+          lives in one pure, unit-tested place rather than being rebuilt here. */}
+      {droppedItemsNotice && (
+        <p role="alert" className="alert-error">{droppedItemsNotice}</p>
+      )}
+      {draftState && "error" in draftState && draftState.error && (
+        <p role="alert" className="alert-error">{draftState.error}</p>
+      )}
+      {draftState && "draftId" in draftState && (
+        <p role="status" aria-live="polite" className="alert-success">
+          Draft saved. Find it under Account → Draft hand receipts.
+        </p>
+      )}
+      <input type="hidden" name="draftId" value={draftId} />
       {items.map((it) => <input key={it.itemId} type="hidden" name="itemId" value={it.itemId} />)}
       <fieldset className="card stack-sm">
         <legend className="card__title">Items ({lines.length} {lines.length === 1 ? "row" : "rows"})</legend>
@@ -525,7 +684,7 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures }: 
                         {ln.serials[k]}
                         {holderWarning(itemId) && <span className="subtle">{holderWarning(itemId)}</span>}
                       </td>
-                      {receiverIsDcsim && <td className="is-stacked" data-label="Service"><ServiceControls itemId={itemId} /></td>}
+                      {receiverIsDcsim && <td className="is-stacked" data-label="Service"><ServiceControls itemId={itemId} initial={draftService.get(itemId)} /></td>}
                       {k === 0 && (
                         <>
                           {/* rowSpan stays. The quantities are per LINE, not per serial —
@@ -566,8 +725,8 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures }: 
           items) still seeds the fields on load — a pick just overrides it, which is
           what you want when the items are coming back from someone other than
           whoever the receipt says last held them. */}
-      <PartyFields role="sender" prefill={senderPrefill} isDcsim={senderIsDcsim} onIsDcsimChange={setSenderIsDcsim} name={senderName} onNameChange={setSenderName} />
-      <PartyFields role="receiver" isDcsim={receiverIsDcsim} onIsDcsimChange={onReceiverDcsimChange} hideName={hideReceiverName} name={receiverName} onNameChange={setReceiverName} />
+      <PartyFields role="sender" prefill={draftValues ? draftValues.sender : senderPrefill} isDcsim={senderIsDcsim} onIsDcsimChange={setSenderIsDcsim} name={senderName} onNameChange={setSenderName} />
+      <PartyFields role="receiver" prefill={draftValues?.receiver} isDcsim={receiverIsDcsim} onIsDcsimChange={onReceiverDcsimChange} hideName={hideReceiverName} name={receiverName} onNameChange={setReceiverName} />
       {/* Return timer (optional): blank = no timer. Presets set the days field. */}
       <fieldset className="card stack-sm">
         <legend className="card__title">Return by (optional)</legend>
