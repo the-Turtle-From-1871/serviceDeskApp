@@ -37,7 +37,7 @@ const surfaces = [
 ] as const;
 
 describe.each(surfaces)("%s", (_name, schema) => {
-  it("round-trips all seven editable fields", () => {
+  it("round-trips all eight editable fields", () => {
     const parsed = schema.parse(base);
     expect(parsed).toEqual(base);
     expect(Object.keys(parsed).sort()).toEqual([...EDITABLE_FIELDS].sort());
@@ -144,7 +144,7 @@ describe("itemIdentitySchema (admin edit page's separate identity form)", () => 
     },
   );
 
-  it("strips the seven editable fields — this form corrects identity ONLY", () => {
+  it("strips the eight editable fields — this form corrects identity ONLY", () => {
     const parsed = itemIdentitySchema.parse({ ...identity, ...base });
     expect(parsed).toEqual(identity);
     for (const f of EDITABLE_FIELDS) expect(parsed).not.toHaveProperty(f);
