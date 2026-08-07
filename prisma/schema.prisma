@@ -93,6 +93,20 @@ model Item {
   // Importable (see csv.ts) so the existing catalogue can be backfilled in bulk
   // through the normal CSV import rather than by hand. Normalized on write.
   deviceCategory             String?
+  // Where the device physically sits when nobody is holding it — the fleet
+  // export's "SLoc" column. Free text and NOT a managed vocabulary (unlike
+  // deviceCategory/homeUnit): it is a lookup value read one item at a time,
+  // with no analytics or filter grouping the fleet by it, so an unrecognised
+  // SLoc arriving in a CSV must never fail a row.
+  //
+  // Deliberately NOT @map'd: the raw-SQL half of the /items search filter names
+  // PHYSICAL columns, and currentUserEmail @map("currentUser") is the standing
+  // example of what diverging names cost. Deliberately NOT indexed either — it
+  // joins deviceName/make/model in an ILIKE '%q%' branch and none of those is
+  // indexed; only serialNumber carries a trigram GIN, because it backs the
+  // public per-keystroke search. Revisit if the fleet grows an order of
+  // magnitude.
+  storageLocation            String?
   notes                      String?
   // The email of the person actually using the device. Distinct from the
   // hand-receipt holder (derived from the latest OPEN Transfer), which stays the
