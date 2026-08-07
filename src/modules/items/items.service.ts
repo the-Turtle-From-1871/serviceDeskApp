@@ -498,6 +498,7 @@ const UPDATABLE_ITEM_COLUMNS = new Set<string>([
   "homeUnit",
   "deviceUIC",
   "deviceCategory",
+  "storageLocation",
   "notes",
   "currentUserEmail",
   "currentPosition",
