@@ -4,7 +4,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SuggestCombobox } from "./SuggestCombobox";
 
-// jest-dom is not installed here, so assert on the DOM property directly
+// jest-dom matchers are not used here, so assert on the DOM property directly
 afterEach(cleanup);
 
 const OPTIONS = ["Dell", "HP", "Panasonic", "Getac"];
