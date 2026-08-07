@@ -196,6 +196,7 @@ const editableItemFields = {
   currentPosition: clearable,
   notes: clearable,
   deviceCategory: categoryClearable,
+  storageLocation: clearable,
 } as const;
 
 /** The admin item-edit page's field set (`/admin/items/[itemId]/edit`). */

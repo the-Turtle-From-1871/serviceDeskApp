@@ -7,7 +7,7 @@ import {
   MAX_CATEGORY_NAME,
 } from "./items.schema";
 
-// The seven — and only seven — fields both edit surfaces expose.
+// The eight — and only eight — fields both edit surfaces expose.
 const EDITABLE_FIELDS = [
   "deviceName",
   "homeUnit",
@@ -16,6 +16,7 @@ const EDITABLE_FIELDS = [
   "currentPosition",
   "notes",
   "deviceCategory",
+  "storageLocation",
 ] as const;
 
 const base = {
@@ -26,6 +27,7 @@ const base = {
   currentPosition: "Supply",
   notes: "Screen scratched",
   deviceCategory: "Laptop",
+  storageLocation: "Bldg 400 Cage 3",
 };
 
 // Both surfaces share ONE field definition, so run one suite over both.
@@ -58,6 +60,7 @@ describe.each(surfaces)("%s", (_name, schema) => {
       currentPosition: "   ",
       notes: "",
       deviceCategory: "   ",
+      storageLocation: "  ",
     });
     expect(parsed.homeUnit).toBe("");
     expect(parsed.deviceUIC).toBe("");
@@ -67,6 +70,7 @@ describe.each(surfaces)("%s", (_name, schema) => {
     // A blank category CLEARS it — categoryOptional (import) would drop this to
     // undefined, which reads as "not submitted".
     expect(parsed.deviceCategory).toBe("");
+    expect(parsed.storageLocation).toBe("");
   });
 
   it("requires a device name (it backs a NOT NULL column)", () => {
@@ -95,7 +99,7 @@ describe("userItemDetailsSchema", () => {
   it("stays narrow: ONLY currentUserEmail + currentPosition survive", () => {
     const parsed = userItemDetailsSchema.parse(base);
     expect(parsed).toEqual({ currentUserEmail: "SGT Smith", currentPosition: "Supply" });
-    for (const f of ["deviceName", "homeUnit", "deviceUIC", "notes", "deviceCategory"]) {
+    for (const f of ["deviceName", "homeUnit", "deviceUIC", "notes", "deviceCategory", "storageLocation"]) {
       expect(parsed).not.toHaveProperty(f);
     }
   });
@@ -211,5 +215,32 @@ describe("newItemSchema — deviceUIC and deviceCategory", () => {
 
   it("still accepts a realistic serial", () => {
     expect(newItemSchema.parse({ ...base, serialNumber: "5CG1234ABC" }).serialNumber).toBe("5CG1234ABC");
+  });
+});
+
+describe("storageLocation across the three schemas", () => {
+  it("keeps a blank as \"\" on the edit schema, so emptying the box CLEARS it", () => {
+    const parsed = adminItemEditSchema.parse({
+      deviceName: "N1", homeUnit: "", deviceUIC: "", currentUserEmail: "",
+      currentPosition: "", notes: "", deviceCategory: "", storageLocation: "  ",
+    });
+    expect(parsed.storageLocation).toBe("");
+  });
+
+  it("maps a blank to undefined on the import schema, so it leaves the stored value alone", () => {
+    const parsed = importRowSchema.parse({ serialNumber: "ABC123", storageLocation: "  " });
+    expect(parsed.storageLocation).toBeUndefined();
+  });
+
+  it("maps a blank to undefined on the create schema", () => {
+    const parsed = newItemSchema.parse({
+      make: "Dell", model: "5540", serialNumber: "ABC123", deviceName: "N1", storageLocation: "",
+    });
+    expect(parsed.storageLocation).toBeUndefined();
+  });
+
+  it("trims a real value on every one of them", () => {
+    expect(importRowSchema.parse({ serialNumber: "A", storageLocation: " Bldg 400 " }).storageLocation).toBe("Bldg 400");
+    expect(newItemSchema.parse({ make: "D", model: "5", serialNumber: "A", deviceName: "N", storageLocation: " Bldg 400 " }).storageLocation).toBe("Bldg 400");
   });
 });

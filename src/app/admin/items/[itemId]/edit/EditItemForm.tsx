@@ -13,6 +13,7 @@ type ItemValues = {
   homeUnit: string | null;
   deviceUIC: string | null;
   deviceCategory: string | null;
+  storageLocation: string | null;
   deviceName: string | null;
   currentUserEmail: string | null;
   currentPosition: string | null;
@@ -27,6 +28,7 @@ const fields = [
   // text so a new class of device needs no migration; the combobox below just
   // nudges toward existing spellings.
   ["deviceCategory", "Category", false],
+  ["storageLocation", "Storage location (SLoc)", false],
   ["currentUserEmail", "Current user email", false],
   ["currentPosition", "Current position", false],
 ] as const;
@@ -49,6 +51,7 @@ export function EditItemForm({
     homeUnit: units,
     deviceUIC: suggestions.deviceUIC,
     deviceCategory: categories,
+    storageLocation: suggestions.storageLocation,
   };
 
   return (

@@ -433,7 +433,7 @@ export async function listItemUics(
   return rows.map((r) => r.deviceUIC).filter((u): u is string => u !== null);
 }
 
-export type ItemFieldSuggestions = { make: string[]; model: string[]; deviceUIC: string[] };
+export type ItemFieldSuggestions = { make: string[]; model: string[]; deviceUIC: string[]; storageLocation: string[] };
 
 /**
  * The free-text catalogue vocabularies, for the suggestion comboboxes.
@@ -468,6 +468,10 @@ export async function listItemFieldSuggestions(): Promise<ItemFieldSuggestions> 
     (SELECT 'deviceUIC' AS field, "deviceUIC" AS value, COUNT(*)::int AS n
        FROM "Item" WHERE btrim(COALESCE("deviceUIC", '')) <> ''
        GROUP BY "deviceUIC" ORDER BY n DESC, value ASC LIMIT ${SUGGESTION_CAP})
+    UNION ALL
+    (SELECT 'storageLocation' AS field, "storageLocation" AS value, COUNT(*)::int AS n
+       FROM "Item" WHERE btrim(COALESCE("storageLocation", '')) <> ''
+       GROUP BY "storageLocation" ORDER BY n DESC, value ASC LIMIT ${SUGGESTION_CAP})
   `);
 
   // Sorted in JS rather than trusting the UNION ALL to preserve each arm's
@@ -479,7 +483,7 @@ export async function listItemFieldSuggestions(): Promise<ItemFieldSuggestions> 
       .sort((a, b) => b.n - a.n || a.value.localeCompare(b.value))
       .map((r) => r.value);
 
-  return { make: bucket("make"), model: bucket("model"), deviceUIC: bucket("deviceUIC") };
+  return { make: bucket("make"), model: bucket("model"), deviceUIC: bucket("deviceUIC"), storageLocation: bucket("storageLocation") };
 }
 
 export type ItemEditor = { id: string; name: string };
