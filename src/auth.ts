@@ -17,11 +17,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // Trust the host header behind a platform proxy (e.g. Vercel) so Auth.js
   // does not reject requests with UntrustedHost in production.
   trustHost: true,
-  // 10 hours, down from the Auth.js default of 30 days. This bounds the cookie
-  // and the JWT's own `exp`, but it ROLLS — Auth.js re-signs the token with a
-  // fresh expiry on every `auth()` call — so on its own it is an idle timeout,
-  // not an absolute one. The absolute bound and the 4-hour idle cut-off are the
-  // `authAt`/`lastActiveAt` claims enforced in the `jwt` callback below. See
+  // 30 days. This bounds the cookie and the JWT's own `exp`, but it ROLLS —
+  // Auth.js re-signs the token with a fresh expiry on every `auth()` call — so
+  // on its own it is an idle timeout, not an absolute one. The absolute bound
+  // and the 7-day idle cut-off are the `authAt`/`lastActiveAt` claims enforced
+  // in the `jwt` callback below. It must never be shorter than the absolute
+  // bound, or the cookie would expire before the claim it is supposed to carry;
+  // reading the same constant is what guarantees that. See
   // `src/lib/session-freshness.ts`.
   session: { strategy: "jwt", maxAge: SESSION_MAX_AGE_SECONDS },
   pages: { signIn: "/login" },
@@ -46,7 +48,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (user) {
         token.id = user.id;
         token.role = user.role;
-        // Start of the 10-hour workday. `authAt` is never moved again — that is
+        // Start of the absolute window. `authAt` is never moved again — that is
         // what makes the absolute bound absolute.
         token.authAt = Date.now();
         token.lastActiveAt = token.authAt;
@@ -84,7 +86,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // advances because `src/proxy.ts` ran for the same request — which makes
       // its MATCHER load-bearing for the idle clock. Every authenticated
       // surface is matched today; excluding one would leave users working there
-      // bounced 4 hours after their last *matched* request.
+      // bounced one idle window after their last *matched* request. (The
+      // matcher's exclusions are metadata routes — favicon, manifest, app icons
+      // — which nobody navigates to, so no user's clock rides on them.)
       const now = Date.now();
       const freshness = sessionFreshness(
         {

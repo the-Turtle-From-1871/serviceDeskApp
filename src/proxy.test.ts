@@ -529,6 +529,39 @@ describe("proxy — config.matcher exclusion for the MDM import route", () => {
   });
 });
 
+describe("proxy — config.matcher exclusion for the install metadata routes", () => {
+  // Same harness, same reason as the block above: this pins the matcher STRING.
+  //
+  // The coarse login gate redirects ANY matched path to /login when there is no
+  // session. The browser fetches these three on its own, with no session and no
+  // way to report a problem — so an iPhone doing "Add to Home Screen" received
+  // login-page HTML where it expected a manifest and a PNG, and fell back to a
+  // screenshot icon in a Safari-chrome window. Nothing errors; the install is
+  // just quietly wrong, which is why it needs a test rather than a look.
+  const matcher = new RegExp(`^${config.matcher[0]}$`);
+  const runsProxy = (path: string) => matcher.test(path);
+
+  it.each(["/manifest.webmanifest", "/icon", "/apple-icon"])(
+    "excludes %s so a logged-out install can read it",
+    (path) => {
+      expect(runsProxy(path)).toBe(false);
+    },
+  );
+
+  it("keeps favicon.ico excluded", () => {
+    // Predates this change; listed so a rewrite of the alternation cannot drop
+    // it while the new entries pass.
+    expect(runsProxy("/favicon.ico")).toBe(false);
+  });
+
+  it.each(["/icons", "/iconography", "/apple-icons"])(
+    "does NOT exclude %s, proving these exclusions are segment-anchored too",
+    (path) => {
+      expect(runsProxy(path)).toBe(true);
+    },
+  );
+});
+
 describe("proxy — scoped receipt link", () => {
   const HR = "HR-000123";
   const link = async (receiptNumber = HR) =>

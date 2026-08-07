@@ -30,7 +30,7 @@ test("admin can sign in", async ({ page }) => {
 });
 
 test("the session cookie is re-issued on every request", async ({ page, context }) => {
-  // This is the mechanism the 4-hour idle timeout rides on, and nothing else
+  // This is the mechanism the idle timeout rides on, and nothing else
   // can see it. The unit tests drive the `jwt` callback directly, so they prove
   // the POLICY but not that the refreshed token ever reaches the browser — and
   // only the proxy copies the session action's Set-Cookie onto the response
@@ -38,8 +38,8 @@ test("the session cookie is re-issued on every request", async ({ page, context 
   // re-signs a token and discards it.
   //
   // So if the proxy matcher ever stopped covering an authenticated route, the
-  // idle clock would silently degrade to "4 hours from sign-in" with the whole
-  // unit suite still green. This test fails instead.
+  // idle clock would silently degrade to "one idle window from sign-in" with
+  // the whole unit suite still green. This test fails instead.
   await signIn(page);
   const cookieValue = async () =>
     (await context.cookies()).find((c) => c.name === SESSION_COOKIE)?.value;

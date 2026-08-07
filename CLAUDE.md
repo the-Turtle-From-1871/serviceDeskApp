@@ -10,7 +10,15 @@
 - Validation & Utils: Zod, `pdf-lib`, `qrcode`
 - Styling: **two systems, on purpose** — see the styling rule below
 - Charts: `recharts`; icons: `lucide-react`; PNG export: `html-to-image`
-- Testing & Linting: Vitest (Integration), Playwright, ESLint 9
+- Testing & Linting: Vitest (unit + integration + jsdom component tests), Playwright, ESLint 9
+
+## Repo Map
+- `src/app/**` — routes and pages, plus the **Server Actions** in `src/app/actions/*` and `src/app/admin/actions/*`. Actions are the primary write path, and every one starts with `requireUser()`/`requireAdmin()` (see §1).
+- `src/modules/<domain>/` — 11 domain modules: `items`, `transfers`, `receipts`, `returns`, `service-queue`, `users`, `audit`, `auth`, `contacts`, `signatures`, `timers`. Convention: **`X.service.ts` reaches the DB** (all 14 import Prisma), **`X.schema.ts` is Zod**, and **pure logic is split into its own leaf file** — `readiness.ts`, `recipient-search.ts`, `audit.status.ts` — so it can be unit-tested directly and imported somewhere a DB client must not go.
+- `src/lib/**` — 49 cross-cutting utilities. Three are **proxy-safe and must stay that way**: `rate-limit.ts`, `public-access-cookie.ts` and `session-freshness.ts` must never import Prisma, bcrypt or `server-only`, because `src/proxy.ts` imports them and its bundle must carry no DB client. Each says so in its own header comment.
+- `src/components/**` — shared components. `src/components/ui/*` is the Tailwind/shadcn zone; everything else is the legacy `globals.css` world (see Styling, next).
+- `src/proxy.ts` — **Next 16 renamed middleware to proxy.** Grepping for `middleware.ts` finds nothing. It holds the coarse login gate, the PIN gate and the route rate limits — but never authz, which stays per-route.
+- Tests sit **beside** their subject (`x.ts` → `x.test.ts`). `*.test.tsx` are jsdom component tests run by `npm run test:ui`, with jsdom opted in per file (see Core Commands).
 
 ## Styling — Two Systems Coexist (read before touching CSS)
 - **`globals.css` is the original design system** (the "property book" ledger look) and backs every pre-existing page via classes like `.card` / `.stack` / `.btn` / `.table`. It is NOT being migrated wholesale.
@@ -30,9 +38,11 @@
 - Dev Server: `npm run dev`
 - Build App: `npm run build`
 - Database Client: `npx prisma generate`
-- Database Migration: `npx prisma migrate dev`
+- Database Migration: `npm run db:migrate`
 - Run Linters: `npm run lint`
-- Run Integration Tests: `npx vitest run integration`
+- **Run the tests: `npm test`** — the whole Vitest suite (~118 files; `include` also covers `tests/**` and `scripts/**/*.test.mjs`). `npx vitest run <pattern>` runs a subset, but note the pattern is a **filename** filter: `npx vitest run integration` matches exactly ONE file (`seal.integration.test.ts`), so it is not "the integration tests" and a green result from it is close to no evidence at all.
+- Component tests: `npm run test:ui` (`*.test.tsx`). jsdom is opt-in **per file** via a `// @vitest-environment jsdom` docblock on line 1 (Vitest 4 removed `environmentMatchGlobs`). Still no layout engine — see the styling rules above.
+- Security-docs guard: `npm run check:security-docs`
 - Run E2E Tests: `npx playwright test`
 
 ## CI/CD & Branch Protection (`main` is protected)
@@ -117,10 +127,17 @@
 - **It fails OPEN** on a store error, on purpose (availability of an internal tool over a lockout). Do not "fix" this to fail closed without an explicit decision; it is recorded in `docs/SECURITY.md` §12 and its Known gaps.
 
 ### 4b. Session Lifecycle
-- **10 hours absolute, 4 hours idle** — `src/lib/session-freshness.ts` (pure policy) enforced in the `jwt` callback of `src/auth.ts`.
-- **`session.maxAge` alone is NOT an absolute expiry.** Auth.js JWT sessions roll: every `auth()` call re-signs the token with a fresh `exp` and re-sets the cookie, so `maxAge` behaves as an idle timeout. The absolute bound is the `authAt` claim, stamped once at sign-in — **never move it**. `lastActiveAt` is the one that moves.
-- **Enforce it in the `jwt` callback, not the proxy.** The callback runs on every `auth()` call (Server Actions, Route Handlers, RSC), so a proxy-only check would leave a 9-hour-idle session able to POST an action. **But only the proxy WRITES the refreshed cookie** — bare `auth()` discards it — so the proxy matcher is part of this control. Narrowing it silently degrades the idle clock to "4 hours from sign-in"; `tests/e2e/auth.spec.ts` is the only thing that would notice.
-- **A missing claim is backfilled from the token's `iat`, NEVER from `now`.** Backfilling to `now` looks equivalent and is a replay hole: writing a new cookie cannot invalidate the old string, so a pre-deploy cookie could be re-pasted to mint a fresh 10-hour session for up to 30 days. Backfill each claim independently, or a half-present claim set restarts the absolute clock. A future-dated stamp is clock skew, not an expiry.
+- **30 days absolute, 7 days idle** — `src/lib/session-freshness.ts` (pure policy) enforced in the `jwt` callback of `src/auth.ts`. **Widened from 10h/4h on 2026-08-06** because the app is installed to the iOS home screen, and a home-screen web app has its **own cookie jar** — it never inherits a Safari login, so a 4-hour idle window meant the login form on most mornings. Do not "restore" the old numbers as a hardening drive-by; the tradeoff is written up in `docs/SECURITY.md` and its Known gaps.
+- **Length is NOT this app's revocation lever, and never was.** `requireUser`/`requireAdmin` re-read `role` + `isActive` per request and the `jwt` callback re-checks `passwordChangedAt` per call, so deactivate/reset cuts a live session instantly — a 29-day-old one included. That is what makes a long window affordable; keep both checks per-request or the whole justification collapses.
+- **`session.maxAge` alone is NOT an absolute expiry.** Auth.js JWT sessions roll: every `auth()` call re-signs the token with a fresh `exp` and re-sets the cookie, so `maxAge` behaves as an idle timeout. The absolute bound is the `authAt` claim, stamped once at sign-in — **never move it**. `lastActiveAt` is the one that moves. `maxAge` reads `SESSION_MAX_AGE_SECONDS` so it can never be shorter than the claim it carries.
+- **Enforce it in the `jwt` callback, not the proxy.** The callback runs on every `auth()` call (Server Actions, Route Handlers, RSC), so a proxy-only check would leave a long-idle session able to POST an action. **But only the proxy WRITES the refreshed cookie** — bare `auth()` discards it — so the proxy matcher is part of this control. Narrowing it silently degrades the idle clock to "one window from sign-in"; `tests/e2e/auth.spec.ts` is the only thing that would notice. The matcher's exclusions are deliberately all routes nobody navigates to (`favicon.ico`, `manifest.webmanifest`, `icon`, `apple-icon`), so none of them carries a user's clock.
+- **A missing claim is backfilled from the token's `iat`, NEVER from `now`.** Backfilling to `now` looks equivalent and is a replay hole: writing a new cookie cannot invalidate the old string, so a pre-deploy cookie could be re-pasted to mint a fresh session indefinitely. Backfill each claim independently, or a half-present claim set restarts the absolute clock. A future-dated stamp is clock skew, not an expiry.
+
+### 4c. Home-screen install (manifest + icons)
+- **`src/app/manifest.ts` + `icon.tsx` + `apple-icon.tsx` make "Add to Home Screen" install a real app.** Icons are **generated** via `next/og` `ImageResponse` from the ledger palette rather than checked in as binaries — retune `--primary` and they follow.
+- **iOS ignores the manifest's `display`/`name`.** The `appleWebApp` block in `src/app/layout.tsx` is what gives a standalone window and a title; deleting it silently reverts iOS installs to a Safari-chrome tab while Android stays correct.
+- **These three routes MUST stay excluded from the `src/proxy.ts` matcher.** The coarse login gate redirects any matched path to `/login`, so a logged-out install gets login-page HTML where it expected JSON and a PNG — no error anywhere, just a screenshot icon and a browser window. `proxy.test.ts` pins it.
+- **There is deliberately NO service worker and no offline cache.** Every page reads live custody data; a cached property book would show yesterday's holder, which is worse than an error. Adding one is a feature decision, not a PWA checklist item.
 
 ### 5. Error Handling
 - Catch exceptions gracefully in Server Actions. Return generic messages to the client (e.g., `"Something went wrong"`) and log detailed stack traces strictly on the server.
