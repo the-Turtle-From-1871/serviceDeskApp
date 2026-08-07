@@ -1,16 +1,22 @@
-export type NavItem = { label: string; href: string };
+// The icon is a plain string KEY, not a component: this module is pure and
+// unit-tested (nav.test.ts), and importing lucide-react here would drag a React
+// dependency into it. AppHeader maps the key to the actual icon — one nav
+// definition, resolved at the only place that renders it.
+export type NavIcon = "search" | "items" | "dashboard" | "account" | "signin";
+
+export type NavItem = { label: string; href: string; icon: NavIcon };
 
 export function navItemsFor({ loggedIn, isAdmin }: { loggedIn: boolean; isAdmin: boolean }): NavItem[] {
-  const search: NavItem = { label: "Search", href: "/" };
-  if (!loggedIn) return [search, { label: "Staff sign in", href: "/login" }];
-  const items: NavItem[] = [search, { label: "Items", href: "/items" }];
+  const search: NavItem = { label: "Search", href: "/", icon: "search" };
+  if (!loggedIn) return [search, { label: "Staff sign in", href: "/login", icon: "signin" }];
+  const items: NavItem[] = [search, { label: "Items", href: "/items", icon: "items" }];
   if (isAdmin) {
     // The admin sub-sections (Queue, Users, Audit) and the New-item action live
     // UNDER the Dashboard hub (/admin) rather than as separate header links, so
     // the header stays short. See the "Manage" section in admin/page.tsx.
-    items.push({ label: "Dashboard", href: "/admin" });
+    items.push({ label: "Dashboard", href: "/admin", icon: "dashboard" });
   }
-  items.push({ label: "Account", href: "/account" });
+  items.push({ label: "Account", href: "/account", icon: "account" });
   return items;
 }
 

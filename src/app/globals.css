@@ -60,6 +60,13 @@
      `--tap-lg` is reserved for primary and destructive actions. */
   --tap: 44px;
   --tap-lg: 48px;
+
+  /* Height of the mobile bottom nav rail's tab row, ABOVE its 1px top border
+     and the safe-area inset. The rail is fixed, so this is also how much
+     bottom padding the page needs to clear it — both read this one value, or
+     they drift and the footer ends up trapped underneath. Comfortably over
+     --tap: the rail is the entire mobile nav. */
+  --nav-rail-h: 56px;
 }
 
 * {
@@ -237,59 +244,105 @@ h3 {
   gap: 4px;
   flex-wrap: wrap;
 }
-.nav-toggle {
-  display: none;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--ledger-radius-sm);
-  background: var(--surface);
-  cursor: pointer;
-}
-.nav-toggle:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px var(--ring);
-}
-.nav-toggle__bar {
-  width: 18px;
-  height: 2px;
-  border-radius: 2px;
-  background: var(--text);
-}
-
-@media (max-width: 720px) {
-  .app-header__inner { flex-wrap: wrap; }
-  .nav-toggle { display: inline-flex; }
-  .app-nav {
-    flex-basis: 100%;
-    display: none;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 6px;
-    padding-top: 8px;
-  }
-  .app-nav--open { display: flex; }
-  .app-nav .btn { width: 100%; }
-  .app-nav form { width: 100%; }
-}
-
 .nav-link.is-active {
   color: var(--primary);
   box-shadow: inset 0 -2px 0 var(--primary);
   border-radius: 0;
 }
+
+/* ---------- Mobile: fixed bottom nav rail ----------
+   Replaces the hamburger dropdown the header used to open below 720px. Both
+   navs are always in the DOM (AppHeader renders each); these two rules are the
+   only thing deciding which one is visible, so there is no viewport check in
+   JS and no wrong-nav flash on first paint. */
+.nav-rail {
+  display: none;
+}
 @media (max-width: 720px) {
-  /* Underline reads oddly stacked; use a left accent + tint instead. */
-  .app-nav .nav-link.is-active {
-    box-shadow: none;
-    border-left: 3px solid var(--primary);
+  /* The header keeps the brand only — the rail owns navigation. */
+  .app-nav { display: none; }
+
+  .nav-rail {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    /* Under .scan-sheet (z-index 50) on purpose: the QR scanner is a
+       full-screen surface and must cover the rail, not sit behind it. */
+    z-index: 40;
+    display: flex;
+    align-items: stretch;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    /* Shadow points UP, away from the screen edge. */
+    box-shadow: 0 -2px 8px rgb(25 28 24 / 0.06);
+    /* The home indicator on a notched iPhone sits inside the viewport. Without
+       this the last row of the rail is under it — and this app installs to the
+       iOS home screen (see layout.tsx appleWebApp), where there is no browser
+       chrome to absorb it. */
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .nav-rail__item {
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    /* Explicit, not padding-derived: the page's bottom clearance is computed
+       from --nav-rail-h, so the rendered height has to equal it exactly. */
+    height: var(--nav-rail-h);
+    padding: 0 4px;
+    /* --text-muted, NOT --muted: the latter is a surface tint in this palette
+       and renders the label at 1.08:1 on the rail — invisible. Measured. */
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1.1;
+    text-align: center;
+    /* Squares off the tap area: an inset accent needs a full-bleed box. */
+    border-top: 2px solid transparent;
+  }
+  .nav-rail__item:hover {
+    text-decoration: none;
+  }
+  .nav-rail__item:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--ring);
+  }
+  .nav-rail__icon {
+    /* Preflight is not imported, so an svg is inline by default and sits on the
+       text baseline. See the styling notes in CLAUDE.md. */
+    display: block;
+    width: 21px;
+    height: 21px;
+    flex: 0 0 auto;
+  }
+  .nav-rail__label {
+    /* A long label ("Staff sign in") must not widen its tab past its share. */
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* Mirrors the desktop nav's inset underline, flipped to the screen edge the
+     rail is anchored to. Colour is never the only signal — the label weight
+     changes too, and the link carries aria-current. */
+  .nav-rail__item.is-active {
+    color: var(--primary);
+    border-top-color: var(--primary);
     background: var(--primary-soft);
-    border-radius: var(--ledger-radius-sm);
+    font-weight: 600;
+  }
+
+  /* Clear the rail so the footer and the last list row are not trapped under
+     it. Scoped with :has() rather than applied to every mobile page, because
+     the rail only exists where AppHeader renders — /login has no rail and
+     should not carry 57px of dead space. Browsers without :has() lose only the
+     clearance, not the nav. */
+  body:has(.nav-rail) {
+    /* +1px for the rail's own top border. */
+    padding-bottom: calc(var(--nav-rail-h) + 1px + env(safe-area-inset-bottom));
   }
 }
 
@@ -988,6 +1041,7 @@ input[type="file"].input {
 
 @media print {
   .app-header,
+  .nav-rail,
   .site-footer,
   .no-print {
     display: none !important;
@@ -1081,8 +1135,9 @@ input[type="file"].input {
 
   /* Touch floor. `.btn` is 40px and `.btn-sm` 32px by default — both under the
      44px minimum, and between them they are the primary tap target on every
-     list row and in the whole mobile nav. Raising them here repairs six files
-     at once without touching a single component. */
+     list row. Raising them here repairs six files at once without touching a
+     single component. (The nav is no longer among them — it is the bottom
+     rail on mobile, which sizes its own tabs from --nav-rail-h.) */
   .btn { height: var(--tap); }
   .btn-sm {
     height: var(--tap);
@@ -1093,7 +1148,6 @@ input[type="file"].input {
      "Retire" is expensive, a mis-tapped "View" is not. */
   .btn-primary,
   .btn-danger { height: var(--tap-lg); }
-  .nav-toggle { width: var(--tap); height: var(--tap); }
   /* Checkboxes are tap targets too, not decorations. 13px is the UA default. */
   .table input[type="checkbox"],
   .col-menu-panel input[type="checkbox"],
