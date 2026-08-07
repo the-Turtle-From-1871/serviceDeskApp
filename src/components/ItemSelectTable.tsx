@@ -252,8 +252,13 @@ export function ItemSelectTable({
           <AuditLight state={it.auditState} />
         </span>
         {/* Swipe is invisible without a hint. Admin-only, because that is
-            exactly when the drawer has something in it. */}
-        {isAdmin && <span className="swipe-grip" aria-hidden="true">‹</span>}
+            exactly when the drawer has something in it. Absolutely positioned
+            by globals.css onto the CARD's right edge — it anchors to the <tr>,
+            which is the positioned ancestor, so it stays in this cell in the
+            DOM while sitting at the card's vertical centre on screen. */}
+        {isAdmin && (
+          <span className="swipe-grip" aria-hidden="true"><i /><i /></span>
+        )}
       </td>
 
       {/* The three fields the compact card drops — Holder, UIC and Category —

@@ -269,6 +269,19 @@ describe("ItemSelectTable — mobile card structure", () => {
     window.localStorage.clear();
   });
 
+  // The pull tab is a hint, not a control: it must never reach the
+  // accessibility tree (a screen reader has the drawer via focus, and would
+  // otherwise hear two meaningless bars), and it must not swallow the press
+  // that starts the swipe. jsdom cannot check `pointer-events`, so the CSS
+  // half was measured in a browser; this pins the markup half.
+  it("hides the swipe pull tab from assistive tech", () => {
+    const { container } = renderRows();
+    const grip = container.querySelector("tbody tr .swipe-grip");
+    expect(grip).not.toBeNull();
+    expect(grip!.getAttribute("aria-hidden")).toBe("true");
+    expect(grip!.textContent).toBe("");
+  });
+
   it("keeps View out of the drawer — tapping the card is View", () => {
     const { container } = renderRows();
     const drawer = container.querySelector("td.row-actions");

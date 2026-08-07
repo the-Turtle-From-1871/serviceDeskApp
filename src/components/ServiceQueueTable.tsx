@@ -191,7 +191,9 @@ export function ServiceQueueTable({ rows }: { rows: QueueRowVM[] }) {
                       <span className="subtle">{r.serviceType}</span>
                       <DueBadge dueAt={r.dueAt} />
                     </span>
-                    <span className="swipe-grip" aria-hidden="true">‹</span>
+                    {/* The pull tab. Positioned onto the card's right edge by
+                        globals.css — see the .swipe-grip block there. */}
+                    <span className="swipe-grip" aria-hidden="true"><i /><i /></span>
                   </td>
 
                   <td className="row-actions" data-label="">

@@ -1374,11 +1374,42 @@ input[type="file"].input {
   }
   /* A swipe nobody can see is a swipe nobody finds. Admin-only, because that
      is exactly when the drawer has something in it. */
+  /* A pull tab at the CENTRE of the card's right edge — a drawer pull, gripped
+     rather than pointed.
+
+     It replaced a `‹` chevron for two reasons. Apple's convention is that a
+     chevron means NAVIGATION ("tap this, go to another screen"), which is what
+     tapping the card already does — so the mark argued with the gesture it was
+     advertising. And the card now carries a second chevron, the More arrow at
+     its foot, so two chevrons meant two different things on one card.
+
+     It is the only treatment considered whose silhouette BREAKS the card's
+     edge, which is what makes it register without being looked at directly.
+     `pointer-events: none` keeps it a hint and nothing more: a press lands on
+     the card underneath and starts the swipe, which is the whole point. */
   .table--cards .swipe-grip {
-    flex: 0 0 auto;
-    color: var(--text-subtle);
-    font-size: 20px;
-    line-height: 1;
+    position: absolute;
+    top: 50%;
+    right: 0;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    width: 14px;
+    height: 44px;
+    border-radius: 999px 0 0 999px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-right: none;
+    pointer-events: none;
+    z-index: 1;
+  }
+  .table--cards .swipe-grip i {
+    width: 2px;
+    height: 12px;
+    border-radius: 999px;
+    background: var(--text-subtle);
   }
 
   /* The toggle's own 44px strip and its top border already separate the card's
