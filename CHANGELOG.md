@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## 2026-08-07
 
 ### Fixed
+- **Selecting an item no longer resizes the "Print QR codes" and "Columns" buttons.** Ticking the first item made the Print button grow and the Columns button shrink beside it, and they shifted again each time the count crossed into double or triple figures. The Print button was adding the number of selected items to its own label, and on a phone the two buttons share one row of fixed width, so whatever one gained the other lost. The label is now fixed — the count is still on screen, in the bar along the bottom that reads how many items are selected and how many rows they make.
 - **Press and hold on an iPhone now starts selecting items instead of opening the item.** Holding a card was opening the item page every time, which made selecting several items for a hand receipt or a QR sheet impossible by touch. The cause was iOS treating a held card as the start of *dragging a link* — the system took over the press, and by the time you lifted your finger the app only ever saw an ordinary tap. Cards no longer offer themselves to be dragged, so the hold reaches the app. There is also a backstop: a press held for half a second or more will never open the item, even if something else interrupts it. A quick tap still opens the item exactly as before, and on the service queue — where holding does nothing — a slow tap still opens the item too.
 
 ### Added
