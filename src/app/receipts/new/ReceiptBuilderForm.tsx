@@ -252,13 +252,13 @@ function ServiceControls({ itemId, initial }: {
   );
 }
 
-export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, draftId: initialDraftId, draftValues, droppedItemCount }: {
+export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, draftId: initialDraftId, draftValues, droppedItemsNotice }: {
   initialItems: BuilderItem[];
   senderPrefill?: Prefill;
   signatures: PickableSignature[];
   draftId?: string;
   draftValues?: ReceiptDraftPayload;
-  droppedItemCount?: number;
+  droppedItemsNotice?: string;
 }) {
   const [state, action, pending] = useActionState(createReceiptAction, undefined);
 
@@ -576,12 +576,12 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, dr
           Draft restored — please sign again before filing. A signature is never saved with a draft.
         </p>
       )}
-      {!!droppedItemCount && (
-        <p role="alert" className="alert-error">
-          {droppedItemCount} device{droppedItemCount === 1 ? "" : "s"} from this draft
-          {droppedItemCount === 1 ? " is" : " are"} no longer available and{" "}
-          {droppedItemCount === 1 ? "has" : "have"} been removed from the list.
-        </p>
+      {/* Pre-formatted server-side (formatDroppedItemsNotice, drafts.resume.ts)
+          so the naming logic — which devices, by serial + make/model, versus
+          how many are simply gone from inventory with no identifier to show —
+          lives in one pure, unit-tested place rather than being rebuilt here. */}
+      {droppedItemsNotice && (
+        <p role="alert" className="alert-error">{droppedItemsNotice}</p>
       )}
       {draftState && "error" in draftState && draftState.error && (
         <p role="alert" className="alert-error">{draftState.error}</p>

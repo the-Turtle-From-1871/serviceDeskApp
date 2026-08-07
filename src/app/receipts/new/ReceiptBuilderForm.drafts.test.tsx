@@ -33,6 +33,7 @@ vi.mock("@/components/SignaturePad", () => ({
 
 import { ReceiptBuilderForm } from "./ReceiptBuilderForm";
 import { receiptDraftSchema } from "@/modules/receipts/drafts.schema";
+import { formatDroppedItemsNotice } from "@/modules/receipts/drafts.resume";
 
 const ITEMS = [{ itemId: "i1", make: "Dell", model: "5420", serialNumber: "SN1", holderName: null }];
 
@@ -86,9 +87,21 @@ describe("resuming a draft", () => {
     expect((container.querySelector('input[name="returnDays"]') as HTMLInputElement).value).toBe("7");
   });
 
-  it("warns when items were dropped as no longer available", () => {
-    render(<ReceiptBuilderForm initialItems={ITEMS} signatures={[]} draftId="d1" draftValues={values} droppedItemCount={2} />);
-    expect(screen.getByText(/2 devices from this draft/i)).toBeTruthy();
+  it("names the dropped device by serial, in a single role=alert element", () => {
+    // Real formatter, not a hand-typed literal: proves the component renders
+    // whatever formatDroppedItemsNotice produces VERBATIM, with no re-wording
+    // or re-pluralizing of its own — the naming logic lives in one place.
+    const notice = formatDroppedItemsNotice([{ id: "i2", serialNumber: "SN2", make: "Dell", model: "5420" }]);
+    render(<ReceiptBuilderForm initialItems={ITEMS} signatures={[]} draftId="d1" draftValues={values} droppedItemsNotice={notice} />);
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("SN2");
+    expect(alert.textContent).toContain("Dell 5420");
+    expect(alert.className).toContain("alert-error");
+  });
+
+  it("shows no dropped-items alert when nothing was dropped", () => {
+    render(<ReceiptBuilderForm initialItems={ITEMS} signatures={[]} draftId="d1" draftValues={values} droppedItemsNotice="" />);
+    expect(screen.queryByText(/no longer/i)).toBeNull();
   });
 
   it("shows no restore notice on a fresh builder", () => {

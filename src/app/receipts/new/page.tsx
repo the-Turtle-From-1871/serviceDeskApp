@@ -8,7 +8,7 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { ReceiptBuilderForm } from "./ReceiptBuilderForm";
 import { getDraft } from "@/modules/receipts/drafts.service";
 import { DraftError } from "@/modules/receipts/drafts.errors";
-import { splitDraftItems } from "@/modules/receipts/drafts.resume";
+import { splitDraftItems, formatDroppedItemsNotice, type DroppedDraftItem } from "@/modules/receipts/drafts.resume";
 
 export default async function NewReceiptPage({ searchParams }: { searchParams: Promise<{ items?: string; draft?: string }> }) {
   const user = await requireUser();
@@ -50,7 +50,12 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
   const ids = draft ? (parsedItems.length ? parsedItems : draft.payload.itemIds) : parsedItems;
   if (ids.length === 0) notFound();
 
-  const loaded = (await Promise.all(ids.map((id) => getItem(id)))).filter((i) => i && i.status === "ACTIVE") as NonNullable<Awaited<ReturnType<typeof getItem>>>[];
+  // Kept alongside `loaded` (not discarded) so a dropped item can be NAMED:
+  // `null` means the id no longer resolves to any row at all (deleted from
+  // inventory outright); a non-null, non-ACTIVE row means retired — and in
+  // either case it was already fetched, so naming it costs no extra query.
+  const fetched = await Promise.all(ids.map((id) => getItem(id)));
+  const loaded = fetched.filter((i) => i && i.status === "ACTIVE") as NonNullable<Awaited<ReturnType<typeof getItem>>>[];
 
   // A draft whose devices have ALL since been retired or deleted must say so.
   // Falling through to notFound() would read as "your draft vanished".
@@ -79,6 +84,16 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
   // and click) rendered a draft-worded "removed from this draft" alert with no
   // draft in play.
   const { droppedIds } = splitDraftItems(ids, loaded);
+  // `fetched` is index-aligned with `ids` (Promise.all preserves order), so a
+  // dropped id's fetch result — whether a retired row or `null` — is a direct
+  // lookup here. Per §4 of the design spec, the banner must NAME what it can
+  // (serial + make/model of a retired item) rather than a bare count.
+  const fetchedById = new Map(ids.map((id, i) => [id, fetched[i]]));
+  const dropped: DroppedDraftItem[] = droppedIds.map((id) => {
+    const item = fetchedById.get(id);
+    return item ? { id, serialNumber: item.serialNumber, make: item.make, model: item.model } : { id };
+  });
+  const droppedItemsNotice = draft ? formatDroppedItemsNotice(dropped) : "";
 
   const lines = groupItemsIntoLines(loaded.map((i) => ({ itemId: i.id, make: i.make, model: i.model, serialNumber: i.serialNumber })));
   const tooMany = lines.length > MAX_RECEIPT_ROWS;
@@ -143,7 +158,7 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
             signatures={signatures}
             draftId={draft?.id}
             draftValues={draft?.payload}
-            droppedItemCount={draft ? droppedIds.length : 0}
+            droppedItemsNotice={droppedItemsNotice}
           />
         )}
       </main>

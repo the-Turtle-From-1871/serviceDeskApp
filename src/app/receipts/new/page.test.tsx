@@ -22,12 +22,12 @@ vi.mock("@/components/SiteHeader", () => ({ SiteHeader: () => <div data-testid="
 // assertions read the same wiring NewReceiptPage actually computed — not a
 // re-derivation of it.
 vi.mock("./ReceiptBuilderForm", () => ({
-  ReceiptBuilderForm: (props: { initialItems: { itemId: string }[]; draftId?: string; droppedItemCount?: number }) => (
+  ReceiptBuilderForm: (props: { initialItems: { itemId: string }[]; draftId?: string; droppedItemsNotice?: string }) => (
     <div
       data-testid="builder"
       data-items={props.initialItems.map((i) => i.itemId).join(",")}
       data-draftid={props.draftId ?? ""}
-      data-dropped={props.droppedItemCount ?? 0}
+      data-dropped-notice={props.droppedItemsNotice ?? ""}
     />
   ),
 }));
@@ -47,17 +47,56 @@ afterEach(() => {
 // `?items=` link containing a since-retired id rendered a draft-worded
 // "removed from this draft" alert with no draft in play — reachable from
 // `/items` when a device is retired between page load and click.
-describe("NewReceiptPage — the dropped-item count is draft-only", () => {
-  it("reports zero dropped items on the plain ?items= path, even with a retired id among them", async () => {
+describe("NewReceiptPage — the dropped-items notice is draft-only", () => {
+  it("reports no dropped-items notice on the plain ?items= path, even with a retired id among them", async () => {
     getItem.mockImplementation(async (id: string) => (id === "retired" ? item("retired", "RETIRED") : item(id)));
 
     const el = await NewReceiptPage({ searchParams: Promise.resolve({ items: "retired,active" }) });
     render(el);
 
     const builder = screen.getByTestId("builder");
-    expect(builder.dataset.dropped).toBe("0");
+    expect(builder.dataset.droppedNotice).toBe("");
     expect(builder.dataset.draftid).toBe("");
     expect(builder.dataset.items).toBe("active");
+  });
+});
+
+// Finding 5: the design spec (§4) calls for NAMING a dropped device, not just
+// counting it — "SN ABC123 was retired and has been removed". The data was
+// already fetched (getItem was called for every id) and discarded by the old
+// filter; page.tsx now keeps it and classifies retired-vs-deleted.
+describe("NewReceiptPage — the dropped-items notice names what it can", () => {
+  it("names a single retired device by serial and make/model", async () => {
+    getDraft.mockResolvedValue({ id: "d1", payload: { itemIds: ["i1", "i2"], lines: [], sender: {}, receiver: {}, returnDays: "", service: [] }, updatedAt: new Date() });
+    getItem.mockImplementation(async (id: string) => (id === "i2" ? item("i2", "RETIRED") : item(id)));
+
+    const el = await NewReceiptPage({ searchParams: Promise.resolve({ draft: "d1" }) });
+    render(el);
+
+    const notice = screen.getByTestId("builder").dataset.droppedNotice;
+    expect(notice).toMatch(/SN-i2/);
+    expect(notice).toMatch(/Dell 5420/);
+  });
+
+  it("names a retired device AND accounts for one deleted outright, without inventing an identifier for the deleted one", async () => {
+    // i2 was retired (nameable — still a row, just not ACTIVE); i3 was
+    // deleted from inventory entirely (getItem resolves null — no row, so
+    // nothing to name). Both must be reported; neither silently dropped.
+    getDraft.mockResolvedValue({ id: "d1", payload: { itemIds: ["i1", "i2", "i3"], lines: [], sender: {}, receiver: {}, returnDays: "", service: [] }, updatedAt: new Date() });
+    getItem.mockImplementation(async (id: string) => {
+      if (id === "i2") return item("i2", "RETIRED");
+      if (id === "i3") return null;
+      return item(id);
+    });
+
+    const el = await NewReceiptPage({ searchParams: Promise.resolve({ draft: "d1" }) });
+    render(el);
+
+    const notice = screen.getByTestId("builder").dataset.droppedNotice;
+    expect(notice).toMatch(/SN-i2/); // the retired one is named
+    expect(notice).not.toMatch(/SN-i3/); // there is no such serial to invent
+    expect(notice).toMatch(/1 device.*no longer in inventory/); // the deleted one is still accounted for
+    expect(screen.getByTestId("builder").dataset.items).toBe("i1"); // only the survivor loads
   });
 });
 
@@ -104,6 +143,6 @@ describe("NewReceiptPage — the URL wins over the draft payload when both are p
 
     const builder = screen.getByTestId("builder");
     expect(builder.dataset.items).toBe("i1");
-    expect(builder.dataset.dropped).toBe("0"); // not stale-reported as 1
+    expect(builder.dataset.droppedNotice).toBe(""); // not stale-reported
   });
 });
