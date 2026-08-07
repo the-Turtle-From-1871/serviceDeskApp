@@ -372,6 +372,49 @@ describe("ItemSelectTable — long-press selection", () => {
     expect(click.defaultPrevented).toBe(true);
   });
 
+  // Reported from a real iPhone: holding a card OPENED the item instead of
+  // selecting. iOS can hand a held link to its own drag gesture and fire
+  // `pointercancel`, which kills the long-press timer — and the lift still
+  // produces a click, so the hold read as a tap. The `-webkit-user-drag` /
+  // `draggable={false}` guards are what stop the takeover; this pins the
+  // fail-safe, so that if one ever gets through the press still cannot
+  // navigate. Not reproducible in Chromium OR WebKit with synthetic events —
+  // both suppress correctly — so it is pinned at the unit level instead.
+  it("never navigates from a held card, even if the pointer is taken away mid-press", () => {
+    const { container } = renderRows();
+    const row = container.querySelectorAll("tbody tr")[0];
+    fireEvent.pointerDown(row, { button: 0, pointerId: 1, pointerType: "touch", clientX: 10, clientY: 10 });
+    // iOS takes the touch for its own gesture before our timer can fire.
+    fireEvent.pointerCancel(row, { pointerId: 1, pointerType: "touch", clientX: 10, clientY: 10 });
+    act(() => { vi.advanceTimersByTime(LONG_PRESS_MS + 50); });
+
+    const link = container.querySelector("td.cell-serial a.card-link")!;
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+    act(() => { link.dispatchEvent(click); });
+    expect(click.defaultPrevented).toBe(true);
+  });
+
+  // The other half of that rule: the fail-safe keys off DURATION, so a quick
+  // tap must still open the item. Otherwise the card stops working entirely.
+  it("still navigates from a quick tap", () => {
+    const { container } = renderRows();
+    const row = container.querySelectorAll("tbody tr")[0];
+    fireEvent.pointerDown(row, { button: 0, pointerId: 1, pointerType: "touch", clientX: 10, clientY: 10 });
+    act(() => { vi.advanceTimersByTime(80); });
+    fireEvent.pointerUp(row, { button: 0, pointerId: 1, pointerType: "touch", clientX: 10, clientY: 10 });
+
+    const link = container.querySelector("td.cell-serial a.card-link")!;
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+    act(() => { link.dispatchEvent(click); });
+    expect(click.defaultPrevented).toBe(false);
+  });
+
+  it("marks the card link undraggable, so iOS cannot start a link-drag on it", () => {
+    const { container } = renderRows();
+    const link = container.querySelector("td.cell-serial a.card-link")!;
+    expect(link.getAttribute("draggable")).toBe("false");
+  });
+
   it("turns a tap into a toggle once selection mode is on", () => {
     const second = { ...ROW, id: "item-3", serialNumber: "SN3" };
     const { container } = renderRows([ROW, second, RETIRED]);
