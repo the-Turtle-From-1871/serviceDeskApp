@@ -5,12 +5,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-08-07
 
+### Added
+- **The admin dashboard now shows the ten most recent hand receipts.** Until now there was no way to see what had just been issued without already knowing a receipt number to search for: the dashboard listed what was overdue or due soon, which answers "what is late", not "what did we just hand out". The new card sits under the hand-receipt timers and gives each receipt's number, its items, who received it, the date it was created, and whether it is still open or has been closed — and each entry links straight through to the receipt itself. Two limits worth knowing. It is on the **admin** dashboard, so a standard user account does not see it. And closed receipts are permanently deleted 90 days after they close, so once a receipt has been closed for that long it drops off this list along with everything else.
+
 ### Changed
 - **On a phone, the menu has moved to a fixed bar along the bottom of the screen.** Search, Items, Dashboard and Account are now always visible as tabs with icons, instead of being hidden behind the ☰ button in the top corner that you had to open before you could go anywhere. The tab you are on is marked, so the app also tells you where you are, which the old menu only did once you opened it. Getting between sections is now one tap rather than two, and the tabs sit at the bottom where your thumb already is — this app is meant to be used one-handed while you are holding a device you are checking in or out. Nothing changed on a computer: the menu is still along the top of the page as it always has been.
 - **Sign out has moved to the Account page on a phone**, at the bottom, under Change password. It used to live inside the ☰ menu, which no longer exists — the Account tab takes you straight to it. It is also on the Account page on a computer now, in addition to staying in the header, so it is somewhere findable rather than only in a corner you may have scrolled past.
 
 ### Notes
-- No migration, config, or env change. The bottom bar is padded for the home indicator on notched iPhones (`env(safe-area-inset-bottom)`), which matters because this app installs to the home screen and so has no browser chrome below it. It is hidden when printing, and sits below the QR scanner overlay rather than on top of it.
+- No migration, config, or env change. The list is one bounded query ordered by an index that already existed on the receipt table.
+- The bottom bar is padded for the home indicator on notched iPhones (`env(safe-area-inset-bottom)`), which matters because this app installs to the home screen and so has no browser chrome below it. It is hidden when printing, and sits below the QR scanner overlay rather than on top of it.
 
 ## 2026-08-06
 

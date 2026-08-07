@@ -1,7 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireAdmin, AuthError } from "@/lib/authz";
-import { getTimerDashboard, type TransferTimerRow, type ServiceTimerRow } from "./dashboard/dashboard.service";
+import {
+  getTimerDashboard,
+  getRecentReceipts,
+  type TransferTimerRow,
+  type ServiceTimerRow,
+  type RecentReceiptRow,
+} from "./dashboard/dashboard.service";
 import { DueBadge } from "@/components/DueBadge";
 import { getPinMeta } from "@/lib/public-access";
 import { PublicAccessPinForm } from "./PublicAccessPinForm";
@@ -37,6 +43,25 @@ function TimerList({ rows, empty, nowMs }: { rows: TimerRow[]; empty: string; no
   );
 }
 
+function RecentReceiptList({ rows }: { rows: RecentReceiptRow[] }) {
+  if (rows.length === 0) return <p className="subtle">No hand receipts yet.</p>;
+  return (
+    <ul>
+      {rows.map((r) => (
+        <li key={r.receiptNumber}>
+          <Link href={`/receipts/${r.receiptNumber}`}>{r.receiptNumber}</Link> — {r.itemSummary}{" "}
+          <span className="subtle">
+            to {r.receiverName} · {new Date(r.createdAt).toLocaleDateString()}
+          </span>{" "}
+          <span className={`badge ${r.status === "OPEN" ? "badge-open" : "badge-closed"}`}>
+            {r.status === "OPEN" ? "Open" : "Closed"}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export default async function AdminHome() {
   try {
     await requireAdmin();
@@ -45,8 +70,12 @@ export default async function AdminHome() {
     throw e;
   }
 
-  const { overdueTransfers, soonTransfers, overdueService, soonService, nowMs } = await getTimerDashboard();
-  const pinMeta = await getPinMeta();
+  const [timers, recentReceipts, pinMeta] = await Promise.all([
+    getTimerDashboard(),
+    getRecentReceipts(),
+    getPinMeta(),
+  ]);
+  const { overdueTransfers, soonTransfers, overdueService, soonService, nowMs } = timers;
 
   return (
     <div className="stack">
@@ -57,6 +86,15 @@ export default async function AdminHome() {
         <TimerList rows={overdueTransfers.map(toReceiptRow)} empty="Nothing overdue." nowMs={nowMs} />
         <h3 className="subtle">Due soon ({soonTransfers.length})</h3>
         <TimerList rows={soonTransfers.map(toReceiptRow)} empty="Nothing due soon." nowMs={nowMs} />
+      </section>
+
+      {/* Recency, not accountability: the timer lists above answer "what's due",
+          this answers "what did we just issue". Closed receipts are purged 90
+          days after closing, so the window is bounded by that. */}
+      <section className="card stack-sm">
+        <h2>Recent hand receipts</h2>
+        <RecentReceiptList rows={recentReceipts} />
+        <p><Link href="/receipts/new">Create a hand receipt →</Link></p>
       </section>
 
       <section className="card stack-sm">
