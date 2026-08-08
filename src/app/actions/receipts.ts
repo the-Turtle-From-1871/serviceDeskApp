@@ -1,4 +1,5 @@
 "use server";
+import { Prisma } from "@prisma/client";
 import { requireUser, AuthError } from "@/lib/authz";
 import { createTransfer, getTransferByReceiptNumber } from "@/modules/transfers/transfers.service";
 import { receiptSchema } from "@/modules/transfers/transfers.schema";
@@ -12,6 +13,7 @@ import { upsertServiceRequest } from "@/modules/service-queue/service-queue.serv
 import { parseServiceMap } from "@/modules/service-queue/service-form";
 import { parseReceiptForm } from "./receipts.parse";
 import { getOwnedSignature } from "@/modules/signatures/signatures.service";
+import { upsertContactFromParty } from "@/modules/contacts/contacts.service";
 import { computeDueAt } from "@/modules/timers/due";
 import { deleteDraft } from "@/modules/receipts/drafts.service";
 
@@ -94,6 +96,45 @@ export async function createReceiptAction(_prev: unknown, formData: FormData) {
         await deleteDraft(draftId, user.id);
       } catch (err) {
         console.error(`[createReceiptAction] draft cleanup failed for ${draftId}:`, err);
+      }
+    }
+
+    // Save each OUTSIDE party into the shared contact book, so the next receipt
+    // for this person autofills from the ContactCombobox instead of being
+    // re-typed. Both sides are considered, not just the receiver: either party
+    // can be an outside person — a recipient being issued kit, or a sender
+    // handing it back — which is the same `!isDcsim` gate the combobox uses to
+    // decide whether to offer the book at all. A DCSIM party is one of our own
+    // technicians, who has an account and is not in the book.
+    //
+    // Best-effort, in the same style as the blocks around it: the receipt is
+    // filed and authoritative, so a book hiccup is logged and never surfaced as
+    // a failed receipt. The role — not the email — goes in the log line, so
+    // party PII stays out of the server logs.
+    // The SENDER is create-only. Its four fields are seeded on load from
+    // `senderPrefill` (receipts/new/page.tsx), which is `getLastReceiver` — the
+    // FROZEN party snapshot on the item's open receipt, which can be months
+    // old. On a turn-in the operator usually leaves them untouched, so treating
+    // them as "the most recent thing we know" is backwards: refreshing from
+    // them would revert an admin's correction to that contact's unit or phone
+    // number using data older than the correction. Creating from them is still
+    // right — an outside person handing kit back who is not in the book yet is
+    // exactly who the book is missing. The RECEIVER is typed (or picked) fresh
+    // for this receipt, so that side refreshes.
+    for (const [role, party] of [["sender", parsed.data.sender], ["receiver", parsed.data.receiver]] as const) {
+      if (party.isDcsim) continue;
+      try {
+        await upsertContactFromParty(party, user.id, { refreshExisting: role === "receiver" });
+      } catch (err) {
+        // Scrubbed: `err` itself must not be serialized here. A Prisma
+        // validation error embeds the offending arguments in its message, which
+        // on this path are the party's name, unit, phone and email — so logging
+        // the raw error would put party PII in the server logs and quietly
+        // break the claim in docs/SECURITY.md §2. Name and Prisma code are
+        // enough to tell a constraint violation from an outage.
+        const code = err instanceof Prisma.PrismaClientKnownRequestError ? ` (${err.code})` : "";
+        const name = err instanceof Error ? err.name : typeof err;
+        console.error(`[createReceiptAction] contact save failed for the ${role}: ${name}${code}`);
       }
     }
 

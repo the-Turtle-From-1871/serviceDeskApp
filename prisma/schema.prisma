@@ -492,6 +492,14 @@ model Contact {
   // last name is a plain indexed DB sort. Parsing a surname out of one column
   // misfiles "Van Der Berg" and "Doe Jr.". Transfer.receiverName stays a single
   // String; autofill composes "First Last" when filling it.
+  //
+  // A parse DOES now exist, in ONE place: `parsePartyName`
+  // (src/modules/contacts/party-name.ts), used only by `upsertContactFromParty`
+  // to file a hand-receipt party whose name arrived as one free-text field. It
+  // does not retract the warning above — it splits on a comma where there is
+  // one, refuses anything it cannot split into two non-empty halves, and is
+  // best-effort on a row an admin can correct. Do not add a second parser, and
+  // do not collapse these two columns back into one.
   firstName     String
   lastName      String
   unit          String?

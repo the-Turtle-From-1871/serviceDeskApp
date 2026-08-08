@@ -387,6 +387,60 @@ owner-scoped surface in an otherwise role-gated, org-shared application.
   or automatically 30 days after last update by the nightly
   `/api/cron/purge` sweep. Cascade-deleted with the user account.
 
+### The contact book — one non-admin write path (`upsertContactFromParty`)
+
+`Contact` is a shared, org-wide book of **outside** people (name, rank, unit,
+phone number, email). Reads are unscoped by design and every hand-edit is
+admin-only: `createContactAction` / `updateContactAction` / `deleteContactAction`
+(`src/app/admin/actions/contacts.ts`) all begin with `requireAdmin()`.
+
+**`upsertContactFromParty` is the single exception, and it is deliberate.**
+Filing a hand receipt auto-saves each non-DCSIM party into the book so the next
+receipt for that person autofills instead of being re-typed. `createReceiptAction`
+is gated by `requireUser()`, not `requireAdmin()` — so a standard `USER` filing a
+receipt now both **creates and updates** shared contact rows.
+
+- **Why this is acceptable.** No new data is exposed: a `USER` who can file a
+  receipt has already typed that person's name, rank, unit, phone and email onto
+  a signed document that is itself readable on the public receipt surface. The
+  widening is over *who may write*, not over *what may be read*.
+- **What a `USER` can now do that they could not before.** Refresh the rank, unit
+  and phone number of an existing entry — from the **receiver** side only. They
+  cannot change a contact's **email** (it is the citext-unique match key — a
+  different address creates a different row, it never renames one), cannot change
+  a contact's **name** (the split is written on insert only, see below), cannot
+  delete a contact, and cannot reassign `createdById`.
+- **Bounds.** DCSIM parties are skipped on both sides (the caller and the service
+  function), so our own technicians never enter the book. A name that cannot be
+  split into the two required columns, or a party with no email, is skipped
+  rather than saved as a placeholder. Field normalization goes through the same
+  `newContactSchema` the admin form uses, so an auto-saved row is shaped exactly
+  like a hand-typed one; an over-long rank is dropped rather than failing the
+  save. A blank rank is omitted from the update so it cannot null an existing one.
+- **Two create-only fields, both guarding against silent corruption of curated
+  data.** `firstName`/`lastName` are written on insert only: the receipt carries
+  one free-text name and a `Contact` stores two columns, so the split is a lossy
+  parse — and the builder's own autofill round-trips through it (`onPick` writes
+  `"First Last"` back into that single field), meaning a contact curated as
+  "Mary Jo"/"Smith" would re-parse to "Mary"/"Jo Smith" and be silently refiled
+  by an operator who typed nothing. The **sender** side is create-only in full:
+  its fields are prefilled from `getLastReceiver`, the frozen party snapshot on
+  the item's open receipt, which can be months stale — refreshing from it would
+  revert a newer admin correction.
+- **Failure posture.** Best-effort and non-fatal — the receipt is already filed
+  and authoritative, so a book failure is logged and never surfaced. Only the
+  **role** (`sender` / `receiver`), the error name and any Prisma error code are
+  logged: the caught error is deliberately **not** serialized, because a Prisma
+  validation error embeds the offending arguments, which on this path are the
+  party's name, unit, phone and email.
+- **Recourse.** Every auto-saved row is an ordinary contact: an admin can correct
+  or delete it from the contact book on `/admin/users`.
+
+`src/modules/contacts/contacts.service.ts` is on the `check-security-docs` watch
+list for exactly this reason — it is the only file where the book's write
+boundary lives, and it must not widen again without a doc change.
+*Last reviewed: 2026-08-07.*
+
 ---
 
 ## 3. Public surface & the PIN gate

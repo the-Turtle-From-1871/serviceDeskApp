@@ -7,6 +7,7 @@ const getTransferByReceiptNumber = vi.fn();
 const sendReceiptEmails = vi.fn();
 const renderReceiptPdf = vi.fn();
 const upsertServiceRequest = vi.fn();
+const upsertContactFromParty = vi.fn();
 
 vi.mock("@/lib/authz", () => ({
   requireUser: () => requireUser(),
@@ -27,6 +28,12 @@ vi.mock("@/modules/receipts/render", () => ({
 }));
 vi.mock("@/modules/service-queue/service-queue.service", () => ({
   upsertServiceRequest: (input: unknown) => upsertServiceRequest(input),
+}));
+vi.mock("@/modules/contacts/contacts.service", () => ({
+  // Forwards EVERY argument: the third (`{ refreshExisting }`) is what makes the
+  // sender create-only, so a two-arg forwarder would silently drop the thing
+  // these tests exist to pin.
+  upsertContactFromParty: (...args: unknown[]) => upsertContactFromParty(...args),
 }));
 vi.mock("@/modules/items/qr", () => ({
   receiptUrl: (n: string) => `https://example.test/receipts/${n}`,
@@ -62,6 +69,7 @@ beforeEach(() => {
   getTransferByReceiptNumber.mockResolvedValue({ receiptNumber: "HR-000001", lines: [] });
   renderReceiptPdf.mockResolvedValue(undefined);
   sendReceiptEmails.mockResolvedValue(undefined);
+  upsertContactFromParty.mockResolvedValue(null);
 });
 
 describe("createReceiptAction — DCSIM recipient signature", () => {
@@ -213,5 +221,95 @@ describe("createReceiptAction — 'Needs service?' is DCSIM-recipient only", () 
 
     expect(res).toEqual({ receiptNumber: "HR-000001" });
     expect(upsertServiceRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe("createReceiptAction — outside parties are saved to the contact book", () => {
+  /** A non-DCSIM recipient; the sender in makeFormData is non-DCSIM too. */
+  const OUTSIDE_RECEIVER = {
+    receiverName: "Doe, Jane",
+    receiverRank: "SGT",
+    receiverUnit: "B Co",
+    receiverContact: "808",
+    receiverEmail: "jd@u.mil",
+    receiverSignature: DRAWN_SIG,
+  };
+
+  it("saves BOTH parties when neither is DCSIM, attributed to the acting user", async () => {
+    const res = await createReceiptAction(undefined, makeFormData(OUTSIDE_RECEIVER));
+
+    expect(res).toEqual({ receiptNumber: "HR-000001" });
+    expect(upsertContactFromParty).toHaveBeenCalledTimes(2);
+    expect(upsertContactFromParty).toHaveBeenCalledWith(
+      expect.objectContaining({ isDcsim: false, name: "Jane", email: "jane@u.mil" }),
+      USER.id,
+      expect.anything(),
+    );
+    expect(upsertContactFromParty).toHaveBeenCalledWith(
+      expect.objectContaining({ isDcsim: false, name: "Doe, Jane", email: "jd@u.mil" }),
+      USER.id,
+      expect.anything(),
+    );
+  });
+
+  it("the sender is create-only; only the receiver refreshes an existing entry", async () => {
+    // The sender's fields are prefilled from getLastReceiver — a frozen party
+    // snapshot on the item's open receipt — so refreshing the book from them
+    // would overwrite a newer admin correction with older data.
+    await createReceiptAction(undefined, makeFormData(OUTSIDE_RECEIVER));
+
+    expect(upsertContactFromParty).toHaveBeenCalledWith(
+      expect.objectContaining({ email: "jane@u.mil" }), USER.id, { refreshExisting: false },
+    );
+    expect(upsertContactFromParty).toHaveBeenCalledWith(
+      expect.objectContaining({ email: "jd@u.mil" }), USER.id, { refreshExisting: true },
+    );
+  });
+
+  it("skips a DCSIM party — the book holds outside people only", async () => {
+    const fd = makeFormData({ receiverIsDcsim: "on", receiverName: "DCSIM Tech", receiverSignature: DRAWN_SIG });
+
+    await createReceiptAction(undefined, fd);
+
+    // Only the (non-DCSIM) sender is saved.
+    expect(upsertContactFromParty).toHaveBeenCalledTimes(1);
+    expect(upsertContactFromParty).toHaveBeenCalledWith(
+      expect.objectContaining({ isDcsim: false, email: "jane@u.mil" }),
+      USER.id,
+      expect.anything(),
+    );
+  });
+
+  it("a failed contact save is swallowed — the receipt is already filed and stays successful", async () => {
+    upsertContactFromParty.mockRejectedValue(new Error("db is down"));
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await createReceiptAction(undefined, makeFormData(OUTSIDE_RECEIVER));
+
+    expect(res).toEqual({ receiptNumber: "HR-000001" });
+    // One party failing must not stop the other from being attempted.
+    expect(upsertContactFromParty).toHaveBeenCalledTimes(2);
+    errors.mockRestore();
+  });
+
+  it("keeps party PII out of the logs when a save fails — including the error object", async () => {
+    // A Prisma validation error embeds the offending arguments in its message,
+    // which here are the party's name, unit, phone and email. So the assertion
+    // has to cover EVERY argument passed to console.error, not just the format
+    // string — logging `err` alongside a clean message would still leak.
+    upsertContactFromParty.mockRejectedValue(
+      new Error("Invalid `prisma.contact.upsert()` invocation: email: 'jd@u.mil', unit: 'B Co'"),
+    );
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await createReceiptAction(undefined, makeFormData(OUTSIDE_RECEIVER));
+
+    const logged = errors.mock.calls.flat().map((a) => (a instanceof Error ? a.stack ?? a.message : String(a))).join("\n");
+    expect(logged).toContain("contact save failed for the receiver");
+    expect(logged).toContain("contact save failed for the sender");
+    expect(logged).not.toContain("jd@u.mil");
+    expect(logged).not.toContain("jane@u.mil");
+    expect(logged).not.toContain("B Co");
+    errors.mockRestore();
   });
 });

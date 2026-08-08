@@ -150,6 +150,13 @@ export const WATCHED = [
   // stored. A change here could start persisting ink without touching either
   // file above.
   [/^src\/modules\/receipts\/drafts\.form\.ts$/, "keeps signatures out of stored drafts (§2)"],
+  // Every hand-edit of the shared contact book is admin-only, but
+  // upsertContactFromParty is written to by createReceiptAction under a bare
+  // requireUser — the ONE non-admin write path into a book of outside people's
+  // names, ranks, units, phone numbers and emails. The DCSIM skip, the
+  // email-is-the-match-key rule and the create-only createdById are what keep
+  // that widening as narrow as documented, and all three live only here.
+  [/^src\/modules\/contacts\/contacts\.service\.ts$/, "the contact book's one non-admin write path (§2)"],
 ];
 
 function git(args) {

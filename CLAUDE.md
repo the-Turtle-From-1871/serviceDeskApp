@@ -76,6 +76,17 @@
   pattern to items, receipts or the queue. The signature is never stored in a
   draft (a signature attests to a specific item list, which a draft can change),
   and both files are on the `check-security-docs` watch list.
+- **ONE non-admin write path into the shared contact book: `upsertContactFromParty`.**
+  Every hand-edit of a `Contact` is admin-only (`admin/actions/contacts.ts`), but
+  `createReceiptAction` runs under `requireUser` and auto-saves each **non-DCSIM**
+  party, so a standard `USER` creates and refreshes shared rows. Accepted — those
+  details are already on a signed receipt — and kept narrow by four rules that
+  need a `docs/SECURITY.md` change to relax: the match key is the citext-unique
+  **email** (a write can never rename an existing contact, only add a new row);
+  `createdById` **and the name split** are written on insert only; **DCSIM parties
+  are skipped on both sides**; and there is no delete path. `contacts.service.ts`
+  is on the `check-security-docs` watch list. Mechanics — the name parser, which
+  side refreshes and why — are in `.claude/rules/backend-constraints.md`.
 - Resolve identity, names, and signature blobs **server-side from the DB scoped to the acting user**; never trust client-posted names, ids, roles, or signatures.
 - Public-by-design endpoints (login, home search, receipt + item lookup) are a reviewed exception and must stay read-only and PII-minimal — never widen them without explicit review.
 - There is NO public self-registration — it was removed. Accounts are provisioned ONLY by an admin (`createUserAction` / `createUser`); do not re-add a public `/register` flow without an explicit decision. (`registerSchema` is retained unused for a possible future re-implementation.)
