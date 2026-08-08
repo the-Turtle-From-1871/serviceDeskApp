@@ -306,9 +306,10 @@ converts — so the data is correct regardless of where the server runs.
 
 - **Vercel** runs the Next.js app (server components + serverless route handlers + the Node-runtime proxy). Git-integration deploys build on push.
 - **Supabase** provides Postgres. The app uses the **transaction pooler** (port 6543, `pgbouncer=true`) at runtime; migrations use the **session/direct** connection (port 5432). See [`../DEPLOY.md`](../DEPLOY.md).
-- **CI** (`.github/workflows/ci.yml`) runs **three** required checks, and `main` is branch-protected so a merge needs all three green (admins may bypass):
+- **CI** (`.github/workflows/ci.yml`) runs **two** required checks, and `main` is branch-protected so a merge needs both green (admins may bypass):
   - **`Semgrep SAST`** — runs from the official `semgrep/semgrep` docker image (a host `pipx` install breaks on the runner's Python 3.12); SARIF is informational, the blocking gate fails only on ERROR severity. Push + PR.
   - **`Build (next build)`** — push + PR.
-  - **`Security docs current`** — `scripts/check-security-docs.mjs`, which fails a PR that touches a watched security file without touching `docs/SECURITY.md`. **PR-only**, because it diffs against the merge base, which is meaningless for a push to `main`; run it locally with `npm run check:security-docs`.
+
+  A third check, **`Security docs current`**, failed a PR that touched a watched security file without touching `docs/SECURITY.md`. It was **removed on 2026-08-08** along with `scripts/check-security-docs.mjs`; keeping that document current is now a convention, not a gate.
 
   Apply prod migrations **before** merging — Vercel's build never runs `migrate deploy`. See `CLAUDE.md` → CI/CD & Branch Protection.

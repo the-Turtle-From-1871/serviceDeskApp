@@ -108,8 +108,9 @@ three specific places:
   `src/modules/items/items.readiness-sort.parity.test.ts`. Tests run against a real
   migrated Postgres, not mocks.
 - **Security is inventoried, not assumed.** `docs/SECURITY.md` is 1,615 lines of control
-  inventory with a Known-gaps register, and a CI job (`Security docs current`) fails a PR
-  that touches a watched security file without touching it.
+  inventory with a Known-gaps register. A CI job (`Security docs current`) used to fail a
+  PR that touched a watched security file without touching it; it was removed 2026-08-08,
+  so keeping that document current is now a convention.
 
 The 2026-08-05 security assessment (`SECURITY_ASSESSMENT.md`) found **no authorization
 bypass, no injection vector, and no unintended data exposure**. All 49 Server Actions and
@@ -367,7 +368,6 @@ CREATE DATABASE handreceipt_test;
 | `npm run test:ui` | Only the jsdom component tests (`*.test.tsx`). |
 | `npm run lint` | ESLint 9. |
 | `npx playwright test` | E2E. Seed first with `npm run db:seed:e2e`. |
-| `npm run check:security-docs` | Runs the `Security docs current` CI gate locally. |
 | `npm run db:migrate` / `db:deploy` / `db:reset` | `prisma migrate dev` / `deploy` / `reset --force`. |
 | `npm run db:seed:analytics` | **Dev only.** Populates demo analytics data; refuses any non-local `DATABASE_URL`. |
 
@@ -974,7 +974,6 @@ all defined in `.github/workflows/ci.yml`:
 |---|---|---|---|
 | `Semgrep SAST` | `sast` | push + PR | Runs Semgrep from the official `semgrep/semgrep:1.90.0` **docker image** via `docker run`. SARIF upload is informational; the blocking gate fails only on ERROR severity. |
 | `Build (next build)` | `build` | push + PR | `npm ci && npm run build` with dummy env values. |
-| `Security docs current` | `security-docs` | **PR only** | `node scripts/check-security-docs.mjs "origin/$BASE_REF"` — fails a PR that touches a watched security file without touching `docs/SECURITY.md`. |
 
 `strict` is on (the branch must be up to date with `main`). Admins may bypass in an
 emergency (`enforce_admins: false`), but the default path is **branch → PR → green → merge**,
@@ -1047,12 +1046,12 @@ a rule stick.
 | 16 | **`POST /api/auth/callback/*` is closed with a 404 and must stay closed.** | It is a second front door to the credential check that bypasses Turnstile, the per-account bucket, and the botnet counter — all of which live in `loginAction`. `signIn()` runs in process; the app never uses it. |
 | 17 | **`src/lib/rate-limit.ts` must never import Prisma, bcrypt, or `server-only`.** | `src/proxy.ts` imports it, and the proxy bundle must stay free of a DB client. Same rule for `public-access-cookie.ts`. |
 | 18 | **`Item.currentUserEmail` is NOT an email-validated field.** | The CSV importer copies `assignedUser` into it verbatim, so live rows hold values like `"SGT Smith"`. The inputs use `inputMode="email"`, **never `type="email"`** — a browser-side constraint there would block saving the *other* fields on exactly the badly-imported rows the edit form exists to clean up. |
-| 19 | **`DEPLOYED` and `IN_REPAIR` are absent from the readiness target enum on purpose.** | They are derived, so a POST asking for them is **rejected**, not ignored. Widening that enum is a security change; `admin/actions/readiness.ts` is on the `check-security-docs` watch list for exactly that reason. |
+| 19 | **`DEPLOYED` and `IN_REPAIR` are absent from the readiness target enum on purpose.** | They are derived, so a POST asking for them is **rejected**, not ignored. Widening that enum is a security change; `admin/actions/readiness.ts` is security-sensitive for exactly that reason. |
 | 20 | **Category and unit normalization runs at FIVE write sites** — CSV import, admin edit page, item card, bulk selection bar, new-item form. | All five must call `normalizeCategoryName` *and* `learnCategories`. Miss either half and an item holds a string matching no vocabulary row, so the in-use count under-reports and an admin can delete a category still in use. |
 | 21 | **`categoryOptional` is IMPORT-only; edit forms use `categoryClearable`.** | The former maps blank → `undefined`, which `diffItemFields` reads as "not submitted" — correct for a partial CSV, wrong for a form, where it made clearing the box a silent no-op that still reported "Saved". |
 | 22 | **RLS is not the authorization boundary.** | The app reaches Postgres only through Prisma on a privileged role that **bypasses RLS**. Never assume the DB scopes rows for you. Never disable RLS on a table, never add a permissive policy, never `GRANT EXECUTE` on a `public` function to `anon`/`authenticated`. |
 | 23 | **Public receipts and item pages are enumerable BY DESIGN.** | Do not gate `/receipts/*`, `/receipts/*/pdf`, `/i/*` or the public search behind auth, and do not make receipt identifiers unguessable, when re-auditing. It is an accepted team requirement, boxed in `CLAUDE.md`. Hardening it is a deliberate feature change requiring an explicit request, not a security bug to auto-remediate. |
-| 24 | **Do not extend the receipt-link token to `/i/*` or any broader grant** without an explicit decision. | `receipt-link-token.ts` is on the `check-security-docs` watch list for exactly that reason. |
+| 24 | **Do not extend the receipt-link token to `/i/*` or any broader grant** without an explicit decision. | `receipt-link-token.ts` is security-sensitive for exactly that reason. |
 | 25 | **Docs are part of the change, not a follow-up.** | Any commit that alters behavior, UI, data, an endpoint, a command, an env var, or an architectural rule MUST update the affected documentation **in the same commit**. Any `feat:`/`fix:` MUST add a `CHANGELOG.md` entry under today's date. Any change to authn/authz, crypto/tokens/cookies/secrets, the public surface, retention windows, or CI security posture MUST update `docs/SECURITY.md` and bump its *Last reviewed* date — and that one is enforced by CI. **When you add a new security-relevant file, add it to the watch list at the top of `scripts/check-security-docs.mjs`**, or it silently escapes the guardrail. |
 | 26 | **Only one agent or developer runs `npm test` at a time.** | It truncates a shared `handreceipt_test` database. Two concurrent runs corrupt each other and masquerade as flaky tests in unrelated files. |
 | 27 | **Turnstile refuses automated browsers, including Playwright.** | `playwright.config.ts` pins Cloudflare's always-pass test keys. With real keys the e2e sign-in hangs at "Checking your browser…" and looks like a broken login. Never respond to that by weakening the challenge. |
@@ -1087,7 +1086,7 @@ Twenty-one tickets, organised by theme. Each states the need, an approach, the f
 | [B14](#b14--f5--equalise-login-timing-to-close-the-account-enumeration-oracle) | F5 — equalise login timing | Security | S | P3 |
 | [B15](#b15--u4--add-baseline-security-response-headers) | U4 — add baseline security response headers | Security | S | P2 |
 | [B16](#b16--an-authentication-and-privileged-mutation-event-log) | An authentication and privileged-mutation event log | Security | M | P2 |
-| [B17](#b17--u9--close-the-security-doc-guardrails-own-blind-spots) | U9 — close the `check-security-docs` guardrail's blind spots | Technical debt | S | **P1** |
+| [B17](#b17--u9--close-the-security-doc-guardrails-own-blind-spots) | ~~U9 — close the security-doc guardrail's blind spots~~ **(obsolete: the guardrail was removed 2026-08-08)** | Technical debt | — | — |
 | [B18](#b18--run-the-test-suite-in-ci) | Run the test suite in CI | Technical debt | S | **P1** |
 | [B19](#b19--broaden-end-to-end-browser-coverage) | Broaden end-to-end browser coverage | Technical debt | M | P2 |
 | [B20](#b20--u6--add-the-target-database-guard-to-seed-e2ets) | U6 — add the target-database guard to `seed-e2e.ts` | Security | S | P3 |
@@ -1192,8 +1191,7 @@ default anon grants.
 
 **Files.** New migration under `prisma/migrations/`;
 `prisma/manual/2026-07-20_lockdown_anon_grants.sql` (supersede or annotate);
-`docs/SECURITY.md:858-874`; `prisma/schema.prisma:523`; and add `^prisma/` to the watch list
-in `scripts/check-security-docs.mjs:35-142` (see [B17](#b17--u9--close-the-security-doc-guardrails-own-blind-spots)).
+`docs/SECURITY.md:858-874`; `prisma/schema.prisma:523`.
 
 **Effort:** M (roughly 2 hours of DDL plus a production verification session).
 **Priority:** **P1** — it is cheap, and it is the item most likely to keep the rest of the
@@ -1302,7 +1300,7 @@ surface already received deliberately — see `src/app/actions/auth.ts:307-343`,
 **Files.** `src/auth.ts:35-37`. **Effort:** S. **Priority:** P3 — real but low yield against
 a small admin-provisioned roster that is throttled and CAPTCHA-gated.
 
-**Dependency.** `src/auth.ts` is on the `check-security-docs` watch list, so this needs a
+**Dependency.** `src/auth.ts` is security-sensitive, so this needs a
 `docs/SECURITY.md` update in the same commit.
 
 ---
@@ -2046,33 +2044,18 @@ or make the change deliberately and write down the decision.
 
 ### Technical debt / refactoring
 
-#### B17 — U9: close the `check-security-docs` guardrail's blind spots
+#### B17 — U9: close the security-doc guardrail’s blind spots — **OBSOLETE**
 
-**Problem.** `scripts/check-security-docs.mjs` is the mechanism that keeps `docs/SECURITY.md`
-honest, and it is the structural reason the drift this handover reports went unnoticed. Its
-`WATCHED` list (`:35-142`) does **not** cover:
+**Resolved by removal, 2026-08-08.** This item proposed widening the `WATCHED` list in
+`scripts/check-security-docs.mjs` (to cover `prisma/`, `seal.ts`, `purge-cron.yml` and the
+script itself) and running its guard test in CI. The `Security docs current` job, the script
+and its test were all deleted instead, and the check was dropped from branch protection, so
+there is no watch list left to widen.
 
-- **`prisma/`** — which is why [B12](#b12--get-the-rls-posture-into-version-control-then-verify-it-in-production)'s
-  missing trigger escaped notice entirely;
-- **`src/modules/transfers/seal.ts`** — the file that defines *what the Ed25519 signature
-  binds*. Note `src/lib/crypto.ts` **is** watched (`:88`) while `seal.ts` is not, so the manifest
-  can be narrowed without the guardrail firing;
-- **`.github/workflows/purge-cron.yml`** (only `ci.yml` is watched, `:132`);
-- **itself** — so the watch list can be edited in a passing PR.
-
-Additionally, **its own guard test never runs in CI** — the three CI jobs are `sast`,
-`security-docs` and `build`, with no vitest step.
-
-**Approach.** Add the four regexes to `WATCHED`; run
-`scripts/check-security-docs.test.mjs` in CI (naturally solved by
-[B18](#b18--run-the-test-suite-in-ci)).
-
-**Files.** `scripts/check-security-docs.mjs:35-142`; `.github/workflows/ci.yml`.
-
-**Effort:** S (about 30 minutes). **Priority:** **P1** — `SECURITY_ASSESSMENT.md:374` calls this
-"the highest-leverage process item in the report", and the assessment's concluding paragraph
-names fixing it as *the single change most likely to keep the report's conclusions true a year
-from now*.
+**What this leaves open:** nothing mechanically enforces that `docs/SECURITY.md` moves with a
+security change. That document now lists the security-relevant files itself (see *Keeping this
+current*), including the three this item flagged as uncovered. If the gate is ever wanted back,
+the original watch list is in git history.
 
 **Risk.** Watching `prisma/` broadly will fire on every routine migration, which trains people
 to reach for the sanctioned `[skip security-doc]` bypass and blunts the guardrail. Consider

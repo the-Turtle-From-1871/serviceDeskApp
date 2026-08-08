@@ -277,8 +277,8 @@ allowlist of `READY_TO_DEPLOY` / `UNTRIAGED` / `RETIRED` / `ACTIVE`;
 for them is rejected rather than silently ignored.** Those two come from an open
 unreturned hand receipt / MDM logon and from a `PENDING` `ServiceQueueItem`
 respectively, and must stay unforgeable by hand. Widening that enum is a
-security change, not a feature toggle — which is why the file is on the
-`check-security-docs` watch list.
+security change, not a feature toggle — so a change here needs an update to
+this document in the same commit.
 
 **Permanent item deletion is `requireAdmin()`-gated and has no undo.**
 `deleteItemAction` (`src/app/admin/actions/items.ts`) is the sole caller of
@@ -453,8 +453,8 @@ receipt now both **creates and updates** shared contact rows.
   whose author was since deleted (`ON DELETE SET NULL`) yields a null rather
   than being misattributed to whoever ran the script.
 
-`src/modules/contacts/contacts.service.ts` is on the `check-security-docs` watch
-list for exactly this reason — it is the only file where the book's write
+`src/modules/contacts/contacts.service.ts` is security-sensitive: update this
+document when you change it for exactly this reason — it is the only file where the book's write
 boundary lives, and it must not widen again without a doc change.
 *Last reviewed: 2026-08-07.*
 
@@ -710,7 +710,7 @@ either — `dir` is narrowed to the literal `ASC`/`DESC`.
 ranked SQL `CASE` whose state names and ranks are **bound parameters**, so
 nothing about them reaches the statement as text. A caller that forgets to
 branch on them gets a typed `ItemError` rather than a malformed `ORDER BY`.
-`sort-keys.ts` is on the `check-security-docs` watch list because adding a key
+`sort-keys.ts` is security-sensitive: update `docs/SECURITY.md` when you change it because adding a key
 there widens what may be spliced; the `*.sql.ts` fragment files are not, because
 they bind every value and splice nothing.
 
@@ -820,8 +820,8 @@ so the CC list is a PII disclosure surface, not formatting.
 them; an **empty** value disables them, which is deliberately distinct from unset
 (unset means "use the defaults"). Because the defaults are real addresses baked
 into the source, editing that list changes who receives receipt PII with no
-config change and no deploy-time signal — which is why the file is on the
-`check-security-docs` watch list.
+config change and no deploy-time signal — so a change here needs an update to
+this document in the same commit.
 
 **Recipients can see each other.** CC is not BCC: every party on a receipt learns
 the other addresses on it. That is intended here (the parties are named on the
@@ -938,9 +938,8 @@ the sealed serial list printed beside them, so the practical exposure is small �
 but the *claim* must match the manifest. Note the UI already gets this right on
 the failure path ("a sealed field was altered", `ReceiptSealVerify.tsx:11`) while
 its success string is looser ("the receipt is intact"). **If you widen or narrow
-the manifest, update this paragraph in the same commit** — and note `seal.ts` is
-NOT yet on the `check-security-docs` watch list, so nothing will remind you
-(gap **U2** of the 2026-08-05 assessment).
+the manifest, update this paragraph in the same commit** — nothing will remind
+you, so this one is on you.
 
 ---
 
@@ -1113,9 +1112,9 @@ intermediate `env:` var and quote the expansion. Semgrep enforces this
 (`run-shell-injection`) — it caught exactly this bug in the `Security docs
 current` job before it merged.
 
-**`main` is branch-protected** — all three checks required (`Semgrep SAST`,
-`Build (next build)`, `Security docs current`), `strict` mode (the branch must be
-up to date). Admin bypass exists for emergencies only.
+**`main` is branch-protected** — two checks required (`Semgrep SAST`,
+`Build (next build)`), `strict` mode (the branch must be up to date). Admin
+bypass exists for emergencies only.
 
 **There is no pre-push review gate — it was removed on 2026-07-30.** An `xhigh`
 review marker used to be required per-commit, enforced by a Claude Code
@@ -1127,11 +1126,11 @@ but it is a convention now, not enforcement. Two things worth knowing: a stale
 means nothing), and `.claude/settings.json` is untracked local config, so
 removing the hook in one clone does not remove it from anyone else's — check
 your own if a push is unexpectedly blocked. The only enforced gates are the
-three required CI checks above, and they run on the PR, not on the push.
+two required CI checks above, and they run on the PR, not on the push.
 
-**This document is itself CI-enforced.** The `Security docs current` job runs
-`scripts/check-security-docs.mjs` on every PR and fails it when a watched
-security file changes without this file changing. See
+**This document is NO LONGER CI-enforced.** A `Security docs current` job used to
+fail any PR that changed a watched security file without changing this file; it
+was removed on 2026-08-08. Keeping this document current is now a convention. See
 [Keeping this current](#keeping-this-current).
 
 **Dependencies are vetted before install** — `npm view <package>` first, to catch
@@ -1789,22 +1788,18 @@ already can.
 Edit this file **in the same commit as the code**, the same rule the project
 applies to `CLAUDE.md` and `CHANGELOG.md`.
 
-### This is enforced
+### This is a convention, not a gate (changed 2026-08-08)
 
-The **`Security docs current`** CI job fails any PR that changes a watched
-security file without changing this document.
+A **`Security docs current`** CI job used to fail any PR that changed a watched
+security file without changing this document. It was **removed on 2026-08-08**,
+along with `scripts/check-security-docs.mjs`, its test and the
+`check:security-docs` npm script. Nothing now catches a security change that
+ships without its entry here.
 
-```bash
-npm run check:security-docs        # run it locally, against origin/main
-node scripts/check-security-docs.mjs <baseRef>
-```
-
-Exit codes: `0` pass or bypassed · `1` policy violation · `2` config problem
-(e.g. the base ref isn't fetched — never silently treated as a pass).
-
-**The watch list is at the top of `scripts/check-security-docs.mjs`** (exported as
-`WATCHED`, and asserted by `scripts/check-security-docs.test.mjs`). It currently
-covers, by area:
+That makes the list below the thing to read rather than a red check to wait for.
+**When you change one of these files, open this document in the same commit.**
+(The removed script's watch list is recoverable from git history if the gate is
+ever reinstated.) By area:
 
 - **authn / session** — `auth.ts`, `lib/authz.ts`, `lib/session-freshness.ts`,
   `modules/users/users.service.ts`, `lib/password.ts`, `app/actions/auth.ts`
@@ -1825,33 +1820,20 @@ covers, by area:
 - **infrastructure** — `next.config.ts`, `.github/workflows/ci.yml`,
   `scripts/gmail-token-rotation/` (directory-wide)
 
-**A new security-relevant file must be added there**, or it escapes the guardrail
-silently — that list is the one part of this system that can rot without
-anything complaining.
+Three more belong on that list and were never on the removed script's — they are
+listed here now because a human list has no reason to leave them out:
 
-> **Audited 2026-08-05. All 37 patterns still match a real file** (no dead
-> entries). But four security-relevant files **are NOT covered**, and each can
-> therefore change without this document being touched:
->
-> | Unwatched file | Why it matters |
-> |---|---|
-> | `src/modules/transfers/seal.ts` | Defines **which fields the receipt seal binds**. `lib/crypto.ts` is watched, but the manifest — the thing that decides what "unaltered" means in §7 — is not. It can be narrowed silently. |
-> | `src/lib/signature.ts` | The shared signature validator (PNG prefix + 250 KB cap) behind three of the four signature entry points. Its limits are a stated control. |
-> | `prisma/schema.prisma` | Carries the RLS posture comments and the uniqueness/nullability constraints several controls rest on. No `prisma/` path is watched at all. |
-> | `scripts/check-security-docs.mjs` | **The guardrail does not watch itself.** The watch list can be narrowed in a PR that passes its own check. |
->
-> This is gap **U9** (with **U2** for `seal.ts`) of the 2026-08-05 security
-> assessment and backlog item **B17**. It is recorded rather than fixed here
-> because adding entries changes what future PRs are blocked on — a policy
-> change the team should make deliberately, not a documentation correction.
-> Previous audit (2026-08-04) reported 30 patterns with nothing escaping; the
-> list has grown to 37 since, and these four were added to the codebase without
-> being added to it.
+- `src/modules/transfers/seal.ts` — defines **which fields the receipt seal
+  binds**, i.e. what "unaltered" means in §7.
+- `src/lib/signature.ts` — the shared signature validator (PNG prefix + 250 KB
+  cap) behind three of the four signature entry points.
+- `prisma/schema.prisma` — carries the RLS posture comments and the
+  uniqueness/nullability constraints several controls rest on.
 
-**Bypass:** put `[skip security-doc]` in a commit message when a change genuinely
-doesn't alter the posture (a rename, a comment, a mechanical refactor). The check
-then passes but prints what it waived, so the bypass is visible in review rather
-than silent.
+**A change that genuinely doesn't alter the posture** (a rename, a comment, a
+mechanical refactor) needs no entry here — that judgement now sits with the
+author and the reviewer rather than with a `[skip security-doc]` commit-message
+token.
 
 ### What triggers an update
 

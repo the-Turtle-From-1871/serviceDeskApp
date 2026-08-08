@@ -3,6 +3,15 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-08-08
+
+### Removed
+- **The `Security docs current` CI check is gone.** It failed any pull request that changed one of a watched list of security-relevant files without also changing `docs/SECURITY.md`, and it was one of three checks required to merge. The check, the script behind it (`scripts/check-security-docs.mjs`), its test and the `npm run check:security-docs` command have all been deleted, and it has been dropped from the required checks on `main` — merging now needs `Semgrep SAST` and `Build (next build)` only. Nothing user-facing changes. What changes for contributors is that keeping `docs/SECURITY.md` current is now a convention upheld in review rather than something CI refuses to merge without: that document now carries the list of security-relevant files itself, so it is the thing to read when touching authentication, authorization, tokens, cookies, the public surface or the CI security posture.
+
+  #### Notes
+  - No migration, environment variable or deploy step. The branch-protection change was applied to the repository directly and needs no action on anyone's clone.
+  - If the gate is ever wanted back, the deleted script and its watch list are recoverable from git history.
+
 ## 2026-08-07
 
 ### Fixed
