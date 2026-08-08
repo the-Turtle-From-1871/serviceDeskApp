@@ -123,7 +123,13 @@ export type ContactPartyInput = {
  */
 export async function upsertContactFromParty(
   party: ContactPartyInput,
-  createdById: string,
+  // Nullable for the BACKFILL only (`backfill.ts`): it attributes each row to the
+  // technician who filed that receipt, and `Transfer.createdByUserId` is nullable
+  // (ON DELETE SET NULL), so a receipt filed by a since-deleted account has no id
+  // to credit. `Contact.createdBy` is nullable for the same reason — the shared
+  // book must outlive the account that happened to add a row. The live path
+  // always passes a real id from `requireUser()`.
+  createdById: string | null,
   { refreshExisting = true }: { refreshExisting?: boolean } = {}
 ): Promise<Contact | null> {
   // Defence in depth: the caller already skips DCSIM parties, but this function
