@@ -378,9 +378,8 @@ nothing is ever deleted, so a bad import is a correction, never a loss.
   password. Until then the seeded value is the live password, so seed a strong
   one (step 3).
 - **`main` is branch-protected, and deploys come from it.** Merging needs a PR
-  with all **three** required checks green — `Semgrep SAST`, `Build (next build)`
-  and `Security docs current` (`.github/workflows/ci.yml`; the first two run on
-  push and PR, the third on PRs only because it diffs against the merge base).
+  with both required checks green — `Semgrep SAST` and `Build (next build)`
+  (`.github/workflows/ci.yml`; both run on push and PR).
   `strict` is on, so the branch must be up to date with `main`. Vercel deploys
   production on merge. Admins can bypass in an emergency
   (`enforce_admins: false`), but the default path is branch → PR → green → merge.

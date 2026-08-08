@@ -26,10 +26,11 @@ export default defineConfig({
     // NOTHING in this repo could render a component, and a green suite was zero
     // evidence for any UI change — a form bug that saved one contact's phone
     // number onto the next one survived all 338 tests and seven code reviews.
-    // scripts/**/*.test.mjs covers guardrail scripts themselves (e.g.
-    // check-security-docs.test.mjs asserting the WATCHED list still names
-    // every security-relevant file) — those are plain Node, not app code, so
-    // they stay .mjs rather than joining the src/ TypeScript tree.
+    // scripts/**/*.test.mjs covers the repo's own tooling scripts — plain Node,
+    // not app code, so they stay .mjs rather than joining the src/ TypeScript
+    // tree. The glob currently matches nothing (the security-docs guardrail it
+    // was added for was retired); it stays so a new script test is picked up
+    // without anyone having to remember this file.
     include: ["src/**/*.test.ts", "src/**/*.test.tsx", "tests/**/*.test.ts", "scripts/**/*.test.mjs"],
     fileParallelism: false, // integration tests share one test DB
     setupFiles: ["tests/helpers/setup-env.ts"],

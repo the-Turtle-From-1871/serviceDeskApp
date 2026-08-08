@@ -108,7 +108,6 @@ inline.
 | `npm start`       | Production server                             |
 | `npm test`        | Vitest suite (needs the test DB up)           |
 | `npm run test:ui` | The jsdom component tests only (`*.test.tsx`). jsdom has **no layout engine** — this is not evidence for a CSS or mobile change. |
-| `npm run check:security-docs` | The `Security docs current` CI gate, run locally: fails when a watched security file changed without `docs/SECURITY.md`. |
 | `npm run db:migrate` | `prisma migrate dev` (local)               |
 | `npm run db:deploy`  | `prisma migrate deploy` (prod)             |
 | `npm run db:seed`    | Seed the admin account                     |
@@ -144,7 +143,7 @@ src/
   auth.ts              # Auth.js config
   proxy.ts             # rate limit + PIN gate + coarse auth gate (Next 16 proxy, Node runtime)
 prisma/                # schema, migrations, seed
-scripts/               # copy-wasm, check-security-docs, gmail-token-rotation
+scripts/               # copy-wasm, backfill-contacts, gmail-token-rotation
 tests/                 # test helpers (db reset/migrate, factories) + e2e specs
 docs/                  # architecture, security inventory, design notes
 ```
@@ -182,8 +181,8 @@ Hosted on **Vercel** (app) + **Supabase** (Postgres). Full steps — connection
 strings, env vars, migrations, and the Vercel-Hobby commit-author-email
 requirement — are in [`DEPLOY.md`](./DEPLOY.md).
 
-`main` is branch-protected: merging needs a PR whose three required checks pass
-(`Semgrep SAST`, `Build (next build)`, `Security docs current`), and Vercel
+`main` is branch-protected: merging needs a PR whose two required checks pass
+(`Semgrep SAST`, `Build (next build)`), and Vercel
 deploys production from `main` on merge. `next build` does **not** run
 migrations, so apply any new migration to Supabase *before* the merge deploys.
 
