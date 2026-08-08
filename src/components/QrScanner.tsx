@@ -1,8 +1,27 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+// TYPE-ONLY, so it is erased at build and does NOT pull the runtime module into
+// this bundle — the dynamic import below is what keeps zxing-wasm out of the
+// builder's initial payload, and a value import here would undo that.
+import type { BarcodeFormat } from "barcode-detector/ponyfill";
+
+// The formats both scan surfaces enable. Shared so the two cannot drift.
+//
+// Dell's service-tag barcode is Code 39 on older labels and Code 128 on newer
+// ones; recent labels also carry a DataMatrix square. HP prints Code 128.
+// Each enabled format costs time in EVERY detect() call, so this list is
+// deliberately short — if decoding is visibly slow on a real phone, drop
+// data_matrix first.
+export const SCAN_FORMATS: readonly BarcodeFormat[] = ["qr_code", "code_39", "code_128", "data_matrix"];
 
 type Notice = { kind: "ok" | "err"; text: string } | null;
-type Props = { onDecode: (text: string) => void; onClose: () => void; notice?: Notice };
+type Props = {
+  onDecode: (text: string) => void;
+  onClose: () => void;
+  notice?: Notice;
+  /** Defaults to QR only, so an existing caller is unchanged. */
+  formats?: readonly BarcodeFormat[];
+};
 
 type Status = "starting" | "running" | "denied" | "unavailable" | "loadfailed";
 
@@ -15,13 +34,19 @@ type Status = "starting" | "running" | "denied" | "unavailable" | "loadfailed";
 //
 // `notice` is rendered ON TOP of the sheet: the sheet is opaque and full-screen,
 // so scan feedback left in the form behind it is invisible when it fires.
-export function QrScanner({ onDecode, onClose, notice }: Props) {
+export function QrScanner({ onDecode, onClose, notice, formats = ["qr_code"] }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [status, setStatus] = useState<Status>("starting");
   // Kept in a ref so the effect below subscribes ONCE and never re-binds on an
   // unstable callback — same reasoning as SignaturePad.tsx:14-15.
   const onDecodeRef = useRef(onDecode);
   useEffect(() => { onDecodeRef.current = onDecode; }, [onDecode]);
+  // Same reason, different lifetime: this one is read ONCE, when the detector is
+  // constructed below. A caller that changes `formats` while the sheet is open
+  // does not get a new detector — re-running the effect to build one would stop
+  // and re-acquire the camera stream mid-scan. Remount the sheet instead.
+  const formatsRef = useRef(formats);
+  useEffect(() => { formatsRef.current = formats; }, [formats]);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -34,7 +59,13 @@ export function QrScanner({ onDecode, onClose, notice }: Props) {
         return;
       }
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        // A linear barcode needs materially more horizontal resolution than a
+        // QR code to resolve — the bars are thin and there is no error
+        // correction. `ideal` is a request, not a requirement, so a device that
+        // cannot honour it still gets a working camera.
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment", width: { ideal: 1920 } },
+        });
       } catch {
         // On iOS a denial is permanent for the site: Safari remembers it and JS
         // cannot re-prompt, so getUserMedia just fails forever. The UI below
@@ -71,7 +102,7 @@ export function QrScanner({ onDecode, onClose, notice }: Props) {
 
       let detector: InstanceType<typeof BarcodeDetector>;
       try {
-        detector = new BarcodeDetector({ formats: ["qr_code"] });
+        detector = new BarcodeDetector({ formats: [...formatsRef.current] });
         // Force the module to load NOW, against a throwaway 1×1 canvas, so a
         // failure (offline, blocked CSP, missing wasm) surfaces as a visible
         // status instead of being swallowed frame-by-frame in tick() — which
