@@ -435,6 +435,23 @@ receipt now both **creates and updates** shared contact rows.
   party's name, unit, phone and email.
 - **Recourse.** Every auto-saved row is an ordinary contact: an admin can correct
   or delete it from the contact book on `/admin/users`.
+- **The one-off backfill is an operator SCRIPT, not an admin action.**
+  `npm run backfill:contacts` (`scripts/backfill-contacts.ts` →
+  `src/modules/contacts/backfill.ts`) seeds the book from parties already on
+  existing receipts. It is deliberately not a button: a permanent admin surface
+  performing a bulk write of PII-bearing rows would be a new privileged endpoint
+  to gate and defend, for a job that runs once. It **adds no new authority** —
+  it delegates every row to `upsertContactFromParty`, so the DCSIM skip, the
+  create-only name and the email match key apply identically, and it is
+  idempotent. Its authorization is possession of `DATABASE_URL`, i.e. the same
+  operator access that could write the table directly. Two safety properties are
+  load-bearing and must stay: **dry run is the default** and `--apply` is
+  required to write (it points at whatever `DATABASE_URL` it finds, including
+  production, with no undo), and it **prints the redacted target database**
+  before doing anything. `createdById` became nullable for this path only, so
+  each row is credited to the technician who filed that receipt — and a receipt
+  whose author was since deleted (`ON DELETE SET NULL`) yields a null rather
+  than being misattributed to whoever ran the script.
 
 `src/modules/contacts/contacts.service.ts` is on the `check-security-docs` watch
 list for exactly this reason — it is the only file where the book's write

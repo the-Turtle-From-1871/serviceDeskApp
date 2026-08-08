@@ -47,6 +47,10 @@ describe("check-security-docs WATCHED list", () => {
     // email-is-the-match-key rule and the create-only name/createdById all live
     // in this file and nowhere else.
     "src/modules/contacts/contacts.service.ts",
+    // The bulk backfill of the same book, and the script whose dry-run default
+    // is the only thing standing between a typo and a mass write to production.
+    "src/modules/contacts/backfill.ts",
+    "scripts/backfill-contacts.ts",
     "src/modules/receipts/drafts.form.ts",
   ];
 

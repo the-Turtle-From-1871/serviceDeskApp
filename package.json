@@ -14,6 +14,7 @@
     "test:ui:watch": "vitest .test.tsx",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
+    "backfill:contacts": "node --conditions=react-server --import tsx scripts/backfill-contacts.ts",
     "db:seed": "node --conditions=react-server --import tsx prisma/seed.ts",
     "db:seed:e2e": "node --conditions=react-server --import tsx prisma/seed-e2e.ts",
     "db:seed:analytics": "node --conditions=react-server --import tsx prisma/seed-analytics-demo.ts",

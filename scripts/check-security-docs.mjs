@@ -157,6 +157,13 @@ export const WATCHED = [
   // email-is-the-match-key rule and the create-only createdById are what keep
   // that widening as narrow as documented, and all three live only here.
   [/^src\/modules\/contacts\/contacts\.service\.ts$/, "the contact book's one non-admin write path (§2)"],
+  // The bulk backfill of that same book. It adds no authority of its own (every
+  // row goes through upsertContactFromParty), but it is a mass write of
+  // PII-bearing rows that runs against whatever DATABASE_URL it is given —
+  // production included. Dry-run-by-default and the redacted target banner are
+  // the safety properties, and they live only in these two files.
+  [/^src\/modules\/contacts\/backfill\.ts$/, "the bulk contact-book backfill (§2)"],
+  [/^scripts\/backfill-contacts\.ts$/, "the backfill's dry-run-by-default guard (§2)"],
 ];
 
 function git(args) {
