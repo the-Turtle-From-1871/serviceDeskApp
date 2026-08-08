@@ -42,6 +42,20 @@ export function getItemBySerial(serialNumber: string) {
   });
 }
 
+/** The columns a scan needs, in one query: identity for display, status for the
+ *  ACTIVE gate. Deliberately NOT the whole row — the result is returned from a
+ *  Server Action into a Client Component, so every column selected here is
+ *  serialized into the RSC payload and reaches the browser.
+ *
+ *  `serialNumber` is @unique @db.Citext, so this matches regardless of casing
+ *  and can return at most one row. */
+export function getItemBySerialForScan(serialNumber: string) {
+  return prisma.item.findUnique({
+    where: { serialNumber },
+    select: { id: true, make: true, model: true, serialNumber: true, status: true },
+  });
+}
+
 // Just the fields needed to render a QR label — avoids pulling admin-only
 // columns (e.g. `notes`) on the logged-in QR-PDF route under the public /i path.
 export function getItemQrFields(id: string) {

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const requireUser = vi.fn();
 const getItem = vi.fn();
+const getItemBySerialForScan = vi.fn();
 const getLastReceiver = vi.fn();
 
 vi.mock("@/lib/authz", () => ({
@@ -10,12 +11,13 @@ vi.mock("@/lib/authz", () => ({
 }));
 vi.mock("@/modules/items/items.service", () => ({
   getItem: (id: string) => getItem(id),
+  getItemBySerialForScan: (sn: string) => getItemBySerialForScan(sn),
 }));
 vi.mock("@/modules/transfers/transfers.service", () => ({
   getLastReceiver: (id: string) => getLastReceiver(id),
 }));
 
-import { lookupScannedItem } from "./scan";
+import { lookupScannedItem, lookupScannedSerial, resolveScannedSerial } from "./scan";
 import { AuthError } from "@/lib/authz";
 
 const ITEM = {
@@ -32,6 +34,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   requireUser.mockResolvedValue({ id: "u1", role: "USER", name: "Op" });
   getItem.mockResolvedValue(ITEM);
+  getItemBySerialForScan.mockResolvedValue(ITEM);
   getLastReceiver.mockResolvedValue(null);
 });
 
@@ -104,5 +107,97 @@ describe("lookupScannedItem", () => {
   it("refuses blank input without a query", async () => {
     expect(await lookupScannedItem("  ")).toEqual({ ok: false, code: "NOT_FOUND" });
     expect(getItem).not.toHaveBeenCalled();
+  });
+});
+
+describe("lookupScannedSerial", () => {
+  it("resolves a serial to the item's display fields", async () => {
+    const res = await lookupScannedSerial("SN1");
+    expect(getItemBySerialForScan).toHaveBeenCalledWith("SN1");
+    expect(res).toEqual({
+      ok: true,
+      item: { id: "i1", make: "Dell", model: "L5420", serialNumber: "SN1" },
+      holderName: null,
+    });
+  });
+
+  it("never returns admin-only fields", async () => {
+    const res = await lookupScannedSerial("SN1");
+    expect(JSON.stringify(res)).not.toContain("ADMIN ONLY");
+  });
+
+  // The Express Service Code fallback. The raw value is tried first, so a
+  // numeric serial that really exists can never be overtaken by a conversion.
+  it("falls back to the alternate serial only when the first misses", async () => {
+    getItemBySerialForScan.mockResolvedValueOnce(null).mockResolvedValueOnce(ITEM);
+    const res = await lookupScannedSerial("17237164935", "7X2K9L3");
+    expect(getItemBySerialForScan).toHaveBeenNthCalledWith(1, "17237164935");
+    expect(getItemBySerialForScan).toHaveBeenNthCalledWith(2, "7X2K9L3");
+    expect(res).toMatchObject({ ok: true });
+  });
+
+  it("does not query the alternate when the first serial hits", async () => {
+    await lookupScannedSerial("SN1", "7X2K9L3");
+    expect(getItemBySerialForScan).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a serial that is in no item", async () => {
+    getItemBySerialForScan.mockResolvedValue(null);
+    expect(await lookupScannedSerial("NOPE1234")).toEqual({ ok: false, code: "NOT_FOUND" });
+  });
+
+  // Mirrors lookupScannedItem — a scan must not be a backdoor around the ACTIVE
+  // filter the builder applies on load.
+  it("refuses a retired item", async () => {
+    getItemBySerialForScan.mockResolvedValue({ ...ITEM, status: "RETIRED" });
+    expect(await lookupScannedSerial("SN1")).toEqual({ ok: false, code: "RETIRED" });
+  });
+
+  it("checks auth before touching any data", async () => {
+    requireUser.mockRejectedValue(new AuthError("UNAUTHENTICATED"));
+    expect(await lookupScannedSerial("SN1")).toEqual({ ok: false, code: "UNAUTHORIZED" });
+    expect(getItemBySerialForScan).not.toHaveBeenCalled();
+  });
+
+  it("refuses blank input without a query", async () => {
+    expect(await lookupScannedSerial("  ")).toEqual({ ok: false, code: "NOT_FOUND" });
+    expect(getItemBySerialForScan).not.toHaveBeenCalled();
+  });
+
+  it("returns FAILED and logs on an unexpected error", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    getItemBySerialForScan.mockRejectedValue(new Error("db is on fire"));
+    expect(await lookupScannedSerial("SN1")).toEqual({ ok: false, code: "FAILED" });
+    expect(err).toHaveBeenCalled();
+    err.mockRestore();
+  });
+});
+
+describe("resolveScannedSerial", () => {
+  it("returns the item id", async () => {
+    expect(await resolveScannedSerial("SN1")).toEqual({ ok: true, itemId: "i1" });
+  });
+
+  // Deliberately UNLIKE lookupScannedSerial: /items is a lookup surface, not a
+  // transfer surface, and a retired item has a perfectly good page to open.
+  it("resolves a retired item too", async () => {
+    getItemBySerialForScan.mockResolvedValue({ ...ITEM, status: "RETIRED" });
+    expect(await resolveScannedSerial("SN1")).toEqual({ ok: true, itemId: "i1" });
+  });
+
+  it("falls back to the alternate serial", async () => {
+    getItemBySerialForScan.mockResolvedValueOnce(null).mockResolvedValueOnce(ITEM);
+    expect(await resolveScannedSerial("17237164935", "7X2K9L3")).toEqual({ ok: true, itemId: "i1" });
+  });
+
+  it("refuses an unknown serial", async () => {
+    getItemBySerialForScan.mockResolvedValue(null);
+    expect(await resolveScannedSerial("NOPE1234")).toEqual({ ok: false, code: "NOT_FOUND" });
+  });
+
+  it("checks auth before touching any data", async () => {
+    requireUser.mockRejectedValue(new AuthError("UNAUTHENTICATED"));
+    expect(await resolveScannedSerial("SN1")).toEqual({ ok: false, code: "UNAUTHORIZED" });
+    expect(getItemBySerialForScan).not.toHaveBeenCalled();
   });
 });
