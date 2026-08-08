@@ -7,6 +7,7 @@ import { holdersForItems } from "@/modules/transfers/holders.query";
 import { SiteHeader } from "@/components/SiteHeader";
 import { ItemSelectTable } from "@/components/ItemSelectTable";
 import { ItemsSearchInput } from "./ItemsSearchInput";
+import { ItemsScanButton } from "./ItemsScanButton";
 import { auditState } from "@/modules/audit/audit.status";
 import { firstParam } from "@/lib/search-params";
 
@@ -76,11 +77,16 @@ export default async function ItemsListPage({
           {isAdmin && <Link href="/admin/items/import" className="btn btn-secondary">Import CSV</Link>}
         </div>
 
-        <ItemsSearchInput
-          q={q ?? ""}
-          sortKeys={result.sortKeys}
-          uic={result.uic}
-        />
+        {/* The scan button sits with the search box because it does the same
+            job by other means: both narrow the list to one device. */}
+        <div className="row" style={{ gap: 8, alignItems: "flex-start" }}>
+          <ItemsSearchInput
+            q={q ?? ""}
+            sortKeys={result.sortKeys}
+            uic={result.uic}
+          />
+          <ItemsScanButton />
+        </div>
 
         {/* ItemSelectTable renders even with zero rows, because it OWNS the
             filter/sort controls. Swapping it for an empty-state card
