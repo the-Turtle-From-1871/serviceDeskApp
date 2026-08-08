@@ -97,16 +97,29 @@ Two other changes inside it:
 
 ### 3. Resolution — `src/app/actions/scan.ts`
 
-A sibling to `lookupScannedItem`:
+**Two** sibling actions to `lookupScannedItem`, because the two surfaces want
+different things:
 
 ```ts
-export async function lookupScannedSerial(serial: string): Promise<ScanLookup>
+export async function lookupScannedSerial(serial: string, altSerial?: string): Promise<ScanLookup>
+export async function resolveScannedSerial(serial: string, altSerial?: string): Promise<SerialResolution>
 ```
 
-Same `requireUser()` guard, same `ScanLookup` return type, same ACTIVE-only rule
-(a scan must not become a backdoor around the filter the builder applies on load),
-same explicit field subset rather than the Prisma row. It resolves through the
-existing `getItemBySerial` in `items.service.ts`.
+`lookupScannedSerial` is the **builder's** path: same `requireUser()` guard, same
+`ScanLookup` return type, same ACTIVE-only rule (a scan must not become a backdoor
+around the filter the builder applies on load), same explicit field subset rather
+than the Prisma row.
+
+`resolveScannedSerial` is the **items list's** path: it returns an item id and
+nothing else, and it deliberately does **not** apply the ACTIVE filter. That rule
+exists because the builder is about to put the item on a hand receipt; the items
+list only opens a page, and a retired device is exactly the kind of thing someone
+scans to ask "what is this and why is it on the shelf". Folding the two together
+would mean a mode flag on one action.
+
+Both share a private `findBySerial` helper and resolve through a new
+`getItemBySerialForScan` in `items.service.ts` — the existing `getItemBySerial`
+selects `id` alone and is left untouched for `createItemAction`'s P2002 branch.
 
 No schema change. No new index — `serialNumber` is already unique, so this is a
 primary-key-grade lookup, not the trigram search path used for type-ahead.
@@ -131,8 +144,14 @@ Rule: an all-digit candidate of **8–11 characters** is converted with
 `BigInt(value).toString(36).toUpperCase()` and **left-padded to 7 characters with
 `0`**. The padding is not cosmetic — a tag beginning with `0` loses that character
 in the numeric form, and padding is what restores it (the `0ABC123` row above).
-Anything that does not convert to exactly 7 alphanumeric characters is left as the
-original value, which then either resolves as a serial in its own right or does not.
+
+**The conversion is a fallback, never a substitution.** The parse returns the raw
+value as `serial` and the converted tag as `altSerial`, and the action tries the
+raw value first — the alternate is only queried if it misses. Converting outright
+would rewrite a genuinely numeric 10-digit serial into a 7-character tag naming a
+*different* machine, and silently adding the wrong laptop to a hand receipt is far
+worse than the failure this feature exists to fix. Trying raw first makes that
+unrepresentable, at the cost of one extra query only on a miss.
 
 Without this, scanning the wrong barcode on the label reports "no item in the
 book" while the operator is holding a machine that is plainly in the book, with
@@ -161,7 +180,7 @@ as a QR code does.
 
 A scan button beside the search input opens the same overlay.
 
-- **Match** → navigate to `/i/<id>`.
+- **Match** → navigate to `/i/<id>`, retired items included.
 - **No match** → navigate to `/items?q=<serial>`.
 
 The second case deliberately adds no new UI. The create-from-search flow already
@@ -195,11 +214,12 @@ needs a secure context.
 ## Documentation
 
 - `CHANGELOG.md` — user-facing feature, entry under today's date.
-- `docs/SECURITY.md` — **not required.** `src/app/actions/scan.ts` is not on the
-  watch list in `scripts/check-security-docs.mjs`. Note that
-  `src/app/admin/actions/items.ts` **is** watched: if the create path turns out to
-  need a change there, `docs/SECURITY.md` must move in the same commit or the
-  required `Security docs current` check fails the PR.
+- `docs/SECURITY.md` — **not required.** This change adds no authn/authz, crypto,
+  token or public-surface behaviour: both new actions are `requireUser()`-gated
+  exactly like `lookupScannedItem` beside them, and the item-create path is reused
+  unchanged (its own admin gate still applies). Note the `Security docs current` CI
+  gate that would previously have had an opinion here **was removed on 2026-08-08**,
+  so this is a judgement call rather than a check — see that day's CHANGELOG entry.
 - `.claude/rules/ui-styling.md` — review while implementing; the scan sheet is UI
   covered by that rule's path globs.
 
