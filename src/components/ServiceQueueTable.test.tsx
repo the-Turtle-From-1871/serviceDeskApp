@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { ServiceQueueTable } from "./ServiceQueueTable";
+import { DRAWER_WIDTH } from "./swipe-row";
 import type { QueueRowVM } from "./service-queue-view";
 
 vi.mock("@/app/admin/actions/queue", () => ({ completeServiceAction: vi.fn() }));
@@ -69,6 +70,28 @@ describe("ServiceQueueTable — mobile card structure", () => {
     // Present for the desktop table, flagged as the action the drawer hides
     // because tapping the card already is View.
     expect(drawer!.querySelector("a.action-view")).not.toBeNull();
+  });
+
+  // The tab is the tap half of the swipe, and the queue shares it with /items —
+  // an identical-looking tab that only worked on one of the two tables would
+  // read as a bug. No admin gate here: the whole route is behind requireAdmin.
+  it("makes the pull tab a named button that opens the drawer", () => {
+    const { container } = renderTable();
+    const row = container.querySelector("tbody tr") as HTMLElement;
+    const grip = row.querySelector(".swipe-grip") as HTMLButtonElement;
+    expect(grip.tagName).toBe("BUTTON");
+    // The card sits in a <table> carrying the Mark Completed <form>; a bare
+    // button would default to submit.
+    expect(grip.getAttribute("type")).toBe("button");
+    expect(grip.getAttribute("aria-label")).toBe("Show actions");
+    expect(row.style.getPropertyValue("--swipe")).toBe("0px");
+
+    act(() => { fireEvent.click(grip); });
+    expect(row.style.getPropertyValue("--swipe")).toBe(`${-DRAWER_WIDTH}px`);
+    expect(grip.getAttribute("aria-label")).toBe("Hide actions");
+
+    act(() => { fireEvent.click(grip); });
+    expect(row.style.getPropertyValue("--swipe")).toBe("0px");
   });
 
   // The queue has no bulk selection, so it must not carry the selection-mode
