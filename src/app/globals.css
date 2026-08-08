@@ -1429,7 +1429,17 @@ input[type="file"].input {
        sliver at the screen edge and read as a rendering glitch; :active below
        is the deliberate feedback instead. */
     -webkit-tap-highlight-color: transparent;
-    z-index: 2;
+    /* 3, not 2. Above the stretched card link (1) is only half of it: the tab
+       is centred on the whole ROW, so an expanded "More" panel grows the card
+       and slides the tab down over `td.cell-more` — which is also z-index 2
+       and comes LATER in tree order, so at equal z-index it wins the tie and
+       hit-tests on top. Measured at 390px with More open: the bottom 19px of
+       the 44px tab toggled the More panel instead of opening the drawer.
+       Harmless while the tab was `pointer-events: none`; a dead half once it
+       became a control. This does NOT put it over the drawer: `td.row-actions`
+       is z-index 3 as well and comes later still, so the tie goes to the
+       drawer — which is what keeps its buttons reachable while it is open. */
+    z-index: 3;
   }
   /* The tab is 14px of visible ink — a third of the 44px tap floor — because
      its width is a VISUAL decision (any wider and it stops reading as an edge

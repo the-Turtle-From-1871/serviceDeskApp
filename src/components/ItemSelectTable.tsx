@@ -272,12 +272,19 @@ export function ItemSelectTable({
             // only non-visual route to the drawer on a phone.
             aria-label={gestures.openId === it.id ? "Hide actions" : "Show actions"}
             aria-expanded={gestures.openId === it.id}
+            // Names the drawer this button controls. Note the drawer ALSO
+            // slides in from CSS alone when focus lands inside it
+            // (`tr:has(.row-actions … :focus-visible)` in globals.css), which
+            // this button cannot know about — so `aria-expanded` describes the
+            // tab's own state, not every way the drawer can be on screen.
+            aria-controls={`row-actions-${it.id}`}
             onClick={() => {
-              // A swipe or a long press that happens to lift off over the tab
-              // still synthesises a click here. Spending the same suppression
-              // flag the card link uses is what stops that click undoing the
-              // gesture that produced it.
-              if (gestures.consumeSuppressedClick(it.id)) return;
+              // A swipe that happens to lift off over the tab still
+              // synthesises a click here. Spending the same suppression flag
+              // the card link uses is what stops that click undoing the
+              // gesture that produced it. `holdSuppresses: false` because the
+              // tab does not navigate — see the note on the hook's type.
+              if (gestures.consumeSuppressedClick(it.id, { holdSuppresses: false })) return;
               gestures.toggleDrawer(it.id);
             }}
           >
@@ -322,7 +329,7 @@ export function ItemSelectTable({
         </details>
       </td>
 
-      <td className="row-actions" data-label="">
+      <td className="row-actions" data-label="" id={`row-actions-${it.id}`}>
         <div className="actions actions--end">
           <Link href={`/i/${it.id}`} className="btn btn-ghost btn-sm action-view">View</Link>
           {isAdmin && <Link href={`/admin/items/${it.id}/edit`} className="btn btn-ghost btn-sm">Edit</Link>}

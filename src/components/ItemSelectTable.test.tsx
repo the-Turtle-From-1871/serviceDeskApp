@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ItemSelectTable } from "./ItemSelectTable";
-import { LONG_PRESS_MS, CARD_LAYOUT_QUERY, DRAWER_WIDTH, AXIS_LOCK_PX } from "./swipe-row";
+import { LONG_PRESS_MS, LONG_PRESS_SLOP_PX, CARD_LAYOUT_QUERY, DRAWER_WIDTH, AXIS_LOCK_PX } from "./swipe-row";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
@@ -306,16 +306,9 @@ describe("ItemSelectTable — mobile card structure", () => {
     expect(grip.getAttribute("aria-expanded")).toBe("false");
   });
 
-  // One drawer at a time: the tab drives the same single `openId` slot the
-  // swipe does, so opening a second row must retract the first.
-  it("closes any other open drawer when a second row's tab is tapped", () => {
-    const { container } = renderRows();
-    const rows = container.querySelectorAll("tbody tr");
-    act(() => { fireEvent.click(rows[0].querySelector(".swipe-grip")!); });
-    act(() => { fireEvent.click(rows[1].querySelector(".swipe-grip")!); });
-    expect((rows[0] as HTMLElement).style.getPropertyValue("--swipe")).toBe("0px");
-    expect((rows[1] as HTMLElement).style.getPropertyValue("--swipe")).toBe(`${-DRAWER_WIDTH}px`);
-  });
+  // (One drawer at a time, and the tab's behaviour under a real pointer, are
+  // pinned in the gesture suite below — those need the card-layout matchMedia
+  // mock that `onPointerDown` consults.)
 
   // The tab is rendered on exactly the condition `swipeEnabled` carries, so it
   // never offers a drawer that is empty (a standard user's) or one that
@@ -358,6 +351,7 @@ describe("ItemSelectTable — long-press selection", () => {
     holderName: null,
   };
   const RETIRED = { ...ROW, id: "item-2", serialNumber: "SN2", status: "RETIRED" as const };
+  let realSetPointerCapture: HTMLElement["setPointerCapture"];
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -371,10 +365,16 @@ describe("ItemSelectTable — long-press selection", () => {
     })) as unknown as typeof window.matchMedia;
     // jsdom tracks no live pointers, so the real setPointerCapture throws
     // NotFoundError for a synthetic pointerId. The swipe path claims the
-    // pointer the moment a gesture commits to the horizontal axis.
+    // pointer the moment a gesture commits to the horizontal axis. Restored
+    // in afterEach — a permanent prototype patch would silently disarm any
+    // later test that needs to observe a real capture failure.
+    realSetPointerCapture = window.HTMLElement.prototype.setPointerCapture;
     window.HTMLElement.prototype.setPointerCapture = () => {};
   });
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    window.HTMLElement.prototype.setPointerCapture = realSetPointerCapture;
+    vi.useRealTimers();
+  });
 
   function renderRows(items = [ROW, RETIRED]) {
     return render(
@@ -484,6 +484,55 @@ describe("ItemSelectTable — long-press selection", () => {
     const click = new MouseEvent("click", { bubbles: true, cancelable: true });
     act(() => { link.dispatchEvent(click); });
     expect(click.defaultPrevented).toBe(false);
+  });
+
+  // One drawer at a time — in ONE tap.
+  //
+  // The pointerdown here is not decoration. `onPointerDown` is what dismisses
+  // the other row's drawer, and it used to spend the incoming click doing so,
+  // so the second row's tab needed pressing twice: the first press retracted
+  // the other drawer and did nothing visible under the finger. A bare
+  // `fireEvent.click` never reaches that code and reported this as working
+  // when a real finger did not (confirmed with CDP touch events at 390px).
+  it("opens a second row's drawer and closes the first in a single tap", () => {
+    const { container } = renderRows();
+    const rows = container.querySelectorAll("tbody tr");
+    const tap = (row: Element) => {
+      const grip = row.querySelector(".swipe-grip")!;
+      act(() => {
+        fireEvent.pointerDown(grip, { button: 0, pointerId: 1, pointerType: "touch", clientX: 380, clientY: 40 });
+        fireEvent.pointerUp(grip, { button: 0, pointerId: 1, pointerType: "touch", clientX: 380, clientY: 40 });
+        fireEvent.click(grip);
+      });
+    };
+    tap(rows[0]);
+    expect((rows[0] as HTMLElement).style.getPropertyValue("--swipe")).toBe(`${-DRAWER_WIDTH}px`);
+
+    tap(rows[1]);
+    expect((rows[0] as HTMLElement).style.getPropertyValue("--swipe")).toBe("0px");
+    expect((rows[1] as HTMLElement).style.getPropertyValue("--swipe")).toBe(`${-DRAWER_WIDTH}px`);
+  });
+
+  // The hold fail-safe in `consumeSuppressedClick` refuses any click ending a
+  // press of ≥ LONG_PRESS_MS, so that a hold can never NAVIGATE. The tab does
+  // not navigate, so it opts out: a press held a beat too long — long enough
+  // to trip that arm, but moved just enough to cancel the long-press timer —
+  // would otherwise leave the newly-advertised control doing nothing at all.
+  it("still opens the drawer when the tab is pressed slowly", () => {
+    const { container } = renderRows();
+    const row = container.querySelectorAll("tbody tr")[0] as HTMLElement;
+    const grip = row.querySelector(".swipe-grip")!;
+    fireEvent.pointerDown(grip, { button: 0, pointerId: 1, pointerType: "touch", clientX: 380, clientY: 40 });
+    // Past the long-press slop (so the timer is cancelled) but short of the
+    // axis lock (so no swipe is ever committed), then held past the threshold.
+    fireEvent.pointerMove(grip, { pointerId: 1, pointerType: "touch", clientX: 380, clientY: 40 + LONG_PRESS_SLOP_PX + 1 });
+    act(() => { vi.advanceTimersByTime(LONG_PRESS_MS + 100); });
+    fireEvent.pointerUp(grip, { button: 0, pointerId: 1, pointerType: "touch", clientX: 380, clientY: 40 + LONG_PRESS_SLOP_PX + 1 });
+    // Selection mode must NOT have engaged — the slop break cancelled it.
+    expect(container.querySelector("table.is-selecting")).toBeNull();
+
+    act(() => { fireEvent.click(grip); });
+    expect(row.style.getPropertyValue("--swipe")).toBe(`${-DRAWER_WIDTH}px`);
   });
 
   // The pull tab is a <button>, and useRowGestures refuses a press that starts

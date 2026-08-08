@@ -201,11 +201,17 @@ export function ServiceQueueTable({ rows }: { rows: QueueRowVM[] }) {
                       className="swipe-grip"
                       aria-label={gestures.openId === r.id ? "Hide actions" : "Show actions"}
                       aria-expanded={gestures.openId === r.id}
+                      // Same caveat as /items: the drawer also opens from CSS
+                      // when focus lands inside it, which this button cannot
+                      // see, so aria-expanded is the tab's own state.
+                      aria-controls={`row-actions-${r.id}`}
                       onClick={() => {
                         // A swipe that lifts off over the tab still synthesises
                         // a click here; spending the suppression flag stops it
-                        // undoing the swipe that produced it.
-                        if (gestures.consumeSuppressedClick(r.id)) return;
+                        // undoing the swipe that produced it. `holdSuppresses`
+                        // is moot here (longPressEnabled is false) but passed
+                        // for symmetry with /items.
+                        if (gestures.consumeSuppressedClick(r.id, { holdSuppresses: false })) return;
                         gestures.toggleDrawer(r.id);
                       }}
                     >
@@ -213,7 +219,7 @@ export function ServiceQueueTable({ rows }: { rows: QueueRowVM[] }) {
                     </button>
                   </td>
 
-                  <td className="row-actions" data-label="">
+                  <td className="row-actions" data-label="" id={`row-actions-${r.id}`}>
                     <div className="actions actions--end">
                       <Link href={`/i/${r.itemId}`} className="btn btn-ghost btn-sm action-view">View</Link>
                       <form action={completeServiceAction}>
