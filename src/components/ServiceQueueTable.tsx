@@ -191,9 +191,26 @@ export function ServiceQueueTable({ rows }: { rows: QueueRowVM[] }) {
                       <span className="subtle">{r.serviceType}</span>
                       <DueBadge dueAt={r.dueAt} />
                     </span>
-                    {/* The pull tab. Positioned onto the card's right edge by
-                        globals.css — see the .swipe-grip block there. */}
-                    <span className="swipe-grip" aria-hidden="true"><i /><i /></span>
+                    {/* The pull tab: the swipe's hint AND a tap target that
+                        opens the same drawer. Positioned onto the card's right
+                        edge by globals.css — see the .swipe-grip block there.
+                        Unconditional, like `swipeEnabled` above: the route is
+                        behind requireAdmin and every drawer holds an action. */}
+                    <button
+                      type="button"
+                      className="swipe-grip"
+                      aria-label={gestures.openId === r.id ? "Hide actions" : "Show actions"}
+                      aria-expanded={gestures.openId === r.id}
+                      onClick={() => {
+                        // A swipe that lifts off over the tab still synthesises
+                        // a click here; spending the suppression flag stops it
+                        // undoing the swipe that produced it.
+                        if (gestures.consumeSuppressedClick(r.id)) return;
+                        gestures.toggleDrawer(r.id);
+                      }}
+                    >
+                      <i /><i />
+                    </button>
                   </td>
 
                   <td className="row-actions" data-label="">

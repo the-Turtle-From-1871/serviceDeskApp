@@ -58,6 +58,14 @@ export type RowGestures = {
    *  renders at all. Both paths settle on the same value. */
   offsetFor: (rowId: string) => number;
   closeDrawer: () => void;
+  /** Open this row's drawer, or close it if it is the one already open.
+   *
+   *  The tap half of the same affordance the swipe advertises — the pull tab
+   *  calls this. Deliberately NOT viewport-guarded the way `onPointerDown` is:
+   *  the tab lives inside `td.cell-meta`, which the desktop table hides
+   *  outright, so there is no width at which a caller can reach this and see
+   *  nothing move. */
+  toggleDrawer: (rowId: string) => void;
   /** Whether this row's next card click was produced by a gesture rather than
    *  a tap, and so must not navigate. Reads AND clears. Call once, from a
    *  capture-phase click handler. */
@@ -144,6 +152,13 @@ export function useRowGestures({
   }, []);
 
   const closeDrawer = useCallback(() => setOpenId(null), []);
+
+  // Functional update, so this never needs `openId` in a dependency array — the
+  // tab's onClick would otherwise be a fresh function on every drawer change.
+  const toggleDrawer = useCallback(
+    (rowId: string) => setOpenId((cur) => (cur === rowId ? null : rowId)),
+    [],
+  );
 
   /** Settle a row back to its pre-gesture position. The drag is written
    *  straight to the node, so React will not undo it for us. */
@@ -236,7 +251,15 @@ export function useRowGestures({
       // The drawer's own links are inside `td.row-actions`, which is matched.
       // `summary` is the card's "More" chevron: a press there must open the
       // details panel, not drag the card out from under the finger.
-      if ((e.target as HTMLElement | null)?.closest?.("td.row-actions, button, input, label, summary")) {
+      //
+      // `.swipe-grip` is the ONE button excluded, and the exclusion is
+      // load-bearing. The pull tab is the mark that advertises the swipe, so it
+      // is exactly where a finger starts one — and a matched target returns
+      // here before a gesture is ever created, which would make dragging from
+      // the tab do nothing at all. Excluded, a press there behaves like a press
+      // on the card (swipe, or long-press into selection) while a plain tap
+      // still produces the click the tab's own handler acts on.
+      if ((e.target as HTMLElement | null)?.closest?.("td.row-actions, button:not(.swipe-grip), input, label, summary")) {
         return;
       }
       // One gesture at a time. `gesture.current` is a single slot, so a second
@@ -434,6 +457,7 @@ export function useRowGestures({
     openId,
     offsetFor,
     closeDrawer,
+    toggleDrawer,
     consumeSuppressedClick,
     pointerHandlers,
   };

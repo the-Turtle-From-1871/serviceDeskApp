@@ -251,13 +251,38 @@ export function ItemSelectTable({
           <StatusBadge status={it.status} />
           <AuditLight state={it.auditState} />
         </span>
-        {/* Swipe is invisible without a hint. Admin-only, because that is
-            exactly when the drawer has something in it. Absolutely positioned
-            by globals.css onto the CARD's right edge — it anchors to the <tr>,
+        {/* Swipe is invisible without a hint — and a hint nobody can press is
+            a gesture some people simply never find, so the tab is also the tap
+            target that opens the same drawer. Absolutely positioned by
+            globals.css onto the CARD's right edge — it anchors to the <tr>,
             which is the positioned ancestor, so it stays in this cell in the
-            DOM while sitting at the card's vertical centre on screen. */}
-        {isAdmin && (
-          <span className="swipe-grip" aria-hidden="true"><i /><i /></span>
+            DOM while sitting at the card's vertical centre on screen.
+
+            Rendered on exactly the condition `swipeEnabled` carries, so the
+            tab is present precisely when the drawer it opens is reachable: an
+            ordinary user's drawer is empty, and during selection mode the
+            drawer is force-closed (see the effect above) — a tab that could
+            re-open it there would fight that. */}
+        {isAdmin && !selecting && (
+          <button
+            type="button"
+            className="swipe-grip"
+            // The tab is two bars of ink; its NAME is what it does. It is a
+            // real control now, so it must not be aria-hidden — this is the
+            // only non-visual route to the drawer on a phone.
+            aria-label={gestures.openId === it.id ? "Hide actions" : "Show actions"}
+            aria-expanded={gestures.openId === it.id}
+            onClick={() => {
+              // A swipe or a long press that happens to lift off over the tab
+              // still synthesises a click here. Spending the same suppression
+              // flag the card link uses is what stops that click undoing the
+              // gesture that produced it.
+              if (gestures.consumeSuppressedClick(it.id)) return;
+              gestures.toggleDrawer(it.id);
+            }}
+          >
+            <i /><i />
+          </button>
         )}
       </td>
 

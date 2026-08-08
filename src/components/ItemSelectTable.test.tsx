@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ItemSelectTable } from "./ItemSelectTable";
-import { LONG_PRESS_MS, CARD_LAYOUT_QUERY } from "./swipe-row";
+import { LONG_PRESS_MS, CARD_LAYOUT_QUERY, DRAWER_WIDTH, AXIS_LOCK_PX } from "./swipe-row";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
@@ -269,17 +269,68 @@ describe("ItemSelectTable — mobile card structure", () => {
     window.localStorage.clear();
   });
 
-  // The pull tab is a hint, not a control: it must never reach the
-  // accessibility tree (a screen reader has the drawer via focus, and would
-  // otherwise hear two meaningless bars), and it must not swallow the press
-  // that starts the swipe. jsdom cannot check `pointer-events`, so the CSS
-  // half was measured in a browser; this pins the markup half.
-  it("hides the swipe pull tab from assistive tech", () => {
+  // The pull tab is now a CONTROL, not a decoration: tapping it opens the same
+  // drawer the swipe does, so it must be a real button with a real name. (It
+  // used to be an aria-hidden <span> with `pointer-events: none`; the tests
+  // below replace that one.) jsdom cannot check the 44px hit box or that the
+  // tab out-stacks the stretched card link — both measured in a browser — so
+  // what is pinned here is the markup and the state it drives.
+  it("makes the swipe pull tab a named button, not a decoration", () => {
     const { container } = renderRows();
-    const grip = container.querySelector("tbody tr .swipe-grip");
+    const grip = container.querySelector("tbody tr .swipe-grip") as HTMLButtonElement;
     expect(grip).not.toBeNull();
-    expect(grip!.getAttribute("aria-hidden")).toBe("true");
-    expect(grip!.textContent).toBe("");
+    expect(grip.tagName).toBe("BUTTON");
+    // `type` matters: the card lives in a <table> that contains the Retire
+    // <form>, and a bare button defaults to submit.
+    expect(grip.getAttribute("type")).toBe("button");
+    expect(grip.getAttribute("aria-hidden")).toBeNull();
+    expect(grip.getAttribute("aria-label")).toBe("Show actions");
+    expect(grip.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("opens the row's action drawer when the tab is tapped, and closes it on a second tap", () => {
+    const { container } = renderRows();
+    const row = container.querySelectorAll("tbody tr")[0] as HTMLElement;
+    const grip = row.querySelector(".swipe-grip") as HTMLButtonElement;
+    expect(row.style.getPropertyValue("--swipe")).toBe("0px");
+
+    act(() => { fireEvent.click(grip); });
+    // The drawer is revealed by sliding the row exactly its width; the value
+    // React renders from `openId` is the same one a settled swipe writes.
+    expect(row.style.getPropertyValue("--swipe")).toBe(`${-DRAWER_WIDTH}px`);
+    expect(grip.getAttribute("aria-expanded")).toBe("true");
+    expect(grip.getAttribute("aria-label")).toBe("Hide actions");
+
+    act(() => { fireEvent.click(grip); });
+    expect(row.style.getPropertyValue("--swipe")).toBe("0px");
+    expect(grip.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  // One drawer at a time: the tab drives the same single `openId` slot the
+  // swipe does, so opening a second row must retract the first.
+  it("closes any other open drawer when a second row's tab is tapped", () => {
+    const { container } = renderRows();
+    const rows = container.querySelectorAll("tbody tr");
+    act(() => { fireEvent.click(rows[0].querySelector(".swipe-grip")!); });
+    act(() => { fireEvent.click(rows[1].querySelector(".swipe-grip")!); });
+    expect((rows[0] as HTMLElement).style.getPropertyValue("--swipe")).toBe("0px");
+    expect((rows[1] as HTMLElement).style.getPropertyValue("--swipe")).toBe(`${-DRAWER_WIDTH}px`);
+  });
+
+  // The tab is rendered on exactly the condition `swipeEnabled` carries, so it
+  // never offers a drawer that is empty (a standard user's) or one that
+  // selection mode is force-closing behind it.
+  it("offers no tab to a standard user, whose drawer would be empty", () => {
+    const { container } = renderRows({ isAdmin: false });
+    expect(container.querySelector("tbody tr .swipe-grip")).toBeNull();
+  });
+
+  it("withdraws the tab in selection mode", () => {
+    const { container } = renderRows();
+    expect(container.querySelector("tbody tr .swipe-grip")).not.toBeNull();
+    act(() => { fireEvent.click(container.querySelector('tbody input[type="checkbox"]')!); });
+    expect(screen.getByText(/1 selected · /)).toBeTruthy();
+    expect(container.querySelector("tbody tr .swipe-grip")).toBeNull();
   });
 
   it("keeps View out of the drawer — tapping the card is View", () => {
@@ -318,6 +369,10 @@ describe("ItemSelectTable — long-press selection", () => {
       addEventListener: () => {},
       removeEventListener: () => {},
     })) as unknown as typeof window.matchMedia;
+    // jsdom tracks no live pointers, so the real setPointerCapture throws
+    // NotFoundError for a synthetic pointerId. The swipe path claims the
+    // pointer the moment a gesture commits to the horizontal axis.
+    window.HTMLElement.prototype.setPointerCapture = () => {};
   });
   afterEach(() => vi.useRealTimers());
 
@@ -429,6 +484,33 @@ describe("ItemSelectTable — long-press selection", () => {
     const click = new MouseEvent("click", { bubbles: true, cancelable: true });
     act(() => { link.dispatchEvent(click); });
     expect(click.defaultPrevented).toBe(false);
+  });
+
+  // The pull tab is a <button>, and useRowGestures refuses a press that starts
+  // on a control — so making the tab tappable would have killed the very
+  // gesture it advertises, right where a finger reaches for it. `.swipe-grip`
+  // is excluded from that guard; this pins both halves of the result: the drag
+  // still opens the drawer, and the click the release synthesises does not
+  // then close it again.
+  it("still starts a swipe when the finger lands on the pull tab", () => {
+    const { container } = renderRows();
+    const row = container.querySelectorAll("tbody tr")[0] as HTMLElement;
+    const grip = row.querySelector(".swipe-grip") as HTMLButtonElement;
+
+    fireEvent.pointerDown(grip, { button: 0, pointerId: 1, pointerType: "touch", clientX: 380, clientY: 40 });
+    // Past the axis lock, then the full width of the drawer.
+    fireEvent.pointerMove(grip, { pointerId: 1, pointerType: "touch", clientX: 380 - AXIS_LOCK_PX - 1, clientY: 40 });
+    fireEvent.pointerMove(grip, { pointerId: 1, pointerType: "touch", clientX: 380 - DRAWER_WIDTH, clientY: 40 });
+    act(() => {
+      fireEvent.pointerUp(grip, { button: 0, pointerId: 1, pointerType: "touch", clientX: 380 - DRAWER_WIDTH, clientY: 40 });
+    });
+    expect(row.style.getPropertyValue("--swipe")).toBe(`${-DRAWER_WIDTH}px`);
+
+    // The browser synthesises a click at the end of that gesture, and it lands
+    // on the tab the finger lifted from. Toggling on it would slam the drawer
+    // shut the instant the swipe opened it.
+    act(() => { fireEvent.click(grip); });
+    expect(row.style.getPropertyValue("--swipe")).toBe(`${-DRAWER_WIDTH}px`);
   });
 
   it("marks the card link undraggable, so iOS cannot start a link-drag on it", () => {

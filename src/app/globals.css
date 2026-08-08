@@ -1394,8 +1394,18 @@ input[type="file"].input {
 
      It is the only treatment considered whose silhouette BREAKS the card's
      edge, which is what makes it register without being looked at directly.
-     `pointer-events: none` keeps it a hint and nothing more: a press lands on
-     the card underneath and starts the swipe, which is the whole point. */
+
+     It is a real <button> and TAPPING it opens the drawer, so it no longer
+     carries `pointer-events: none` — a mark that advertises a gesture and then
+     ignores the finger that reaches for it is the worse of the two failures,
+     and a swipe is undiscoverable for anyone who never tries one. Two
+     consequences to keep:
+       - it must sit ABOVE the stretched card link (z-index 1), exactly like
+         td.cell-more, or the tap navigates to the item instead;
+       - `.swipe-grip` is excluded from the pointerdown guard in
+         useRowGestures, so a press that STARTS here still becomes a swipe.
+     Preflight is not imported, so the UA's own button chrome (border, padding,
+     system font, background) survives and has to be reset here by hand. */
   .table--cards .swipe-grip {
     position: absolute;
     top: 50%;
@@ -1407,18 +1417,47 @@ input[type="file"].input {
     gap: 2px;
     width: 14px;
     height: 44px;
+    padding: 0;
+    appearance: none;
+    -webkit-appearance: none;
     border-radius: 999px 0 0 999px;
     background: var(--surface-2);
     border: 1px solid var(--border);
     border-right: none;
-    pointer-events: none;
-    z-index: 1;
+    cursor: pointer;
+    /* The grey flash iOS paints over a tapped control would land on a 14px
+       sliver at the screen edge and read as a rendering glitch; :active below
+       is the deliberate feedback instead. */
+    -webkit-tap-highlight-color: transparent;
+    z-index: 2;
+  }
+  /* The tab is 14px of visible ink — a third of the 44px tap floor — because
+     its width is a VISUAL decision (any wider and it stops reading as an edge
+     detail). The hit box is extended inward instead, to 44x52, and stays
+     invisible. It reaches ~44px in from the card's right edge, which is padding
+     and the tail of the meta row; nothing interactive lives there, and a tap
+     that lands slightly wide of the tab now opens the drawer rather than
+     navigating away. */
+  .table--cards .swipe-grip::before {
+    content: "";
+    position: absolute;
+    inset: -4px 0 -4px -30px;
   }
   .table--cards .swipe-grip i {
     width: 2px;
     height: 12px;
     border-radius: 999px;
     background: var(--text-subtle);
+  }
+  /* Pressed and open states. The tab is under the finger at the moment it is
+     pressed, so the feedback has to be in the bars, not the fill. */
+  .table--cards .swipe-grip:active i,
+  .table--cards .swipe-grip[aria-expanded="true"] i {
+    background: var(--text);
+  }
+  .table--cards .swipe-grip:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: -2px;
   }
 
   /* The toggle's own 44px strip and its top border already separate the card's
