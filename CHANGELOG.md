@@ -5,10 +5,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-08-08
 
+### Fixed
+- **Tapping outside the "Sort & filter" menu now just closes it, instead of also pressing whatever was behind it.** With the menu open, a tap on the page outside it — most easily **Import CSV** or **+ Log new item**, which sit directly above the toolbar — closed the menu *and* activated that button, so you would find yourself on the import page having only meant to dismiss the menu. The first tap outside is now spent entirely on closing the menu; the control you tapped is not pressed. Tapping it again, with the menu closed, works normally.
+
 ### Changed
 - **Sorting and unit filtering on the items list are now one "Sort & filter" button instead of four separate controls.** The list's toolbar used to carry a Sort by dropdown, an Asc/Desc button, a Then by dropdown and a Unit (UIC) dropdown side by side. On a phone they wrapped into three rows of controls before the first device appeared. They are now behind a single button, which shows what is currently applied — "Sort & filter · Make ▲ · 2/6 IN" — so you can still read the order and the active unit filter without opening anything.
 
-  Tapping the button opens a panel with all four choices in it: **Unit**, **Sort by**, **Direction** and **Then by**. On a phone the panel slides up from the bottom of the screen and has a **Done** button; on a computer it drops down under the button. Either way, picking something applies it immediately and the panel stays open, so you can set the unit and the order in one visit. It closes when you tap outside it, press Escape, or press Done.
+  Tapping the button opens a panel holding all four as dropdowns: **Unit**, **Sort by**, **Direction** and **Then by**. On a phone the panel slides up from the bottom of the screen and has a **Done** button — and each dropdown opens the usual iPhone picker wheel, which is far quicker than scrolling a long list of units. On a computer the panel drops down under the button. Either way, picking something applies it immediately and the panel stays open, so you can set the unit and the order in one visit. It closes when you tap outside it, press Escape, or press Done.
 
   Nothing about the sorting itself changed — the same columns are sortable, "Then by" is still only offered once you have picked something to sort by, and changing the order or the unit still takes you back to page 1. The arrow marking the sorted column in the table header is unchanged, and any bookmarked or shared `/items` link keeps working exactly as before.
 
