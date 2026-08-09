@@ -617,21 +617,26 @@ describe("ItemSelectTable — long-press selection", () => {
 
 /**
  * The "Sort & filter" popup menu, which replaced four toolbar controls (Sort
- * by, Asc/Desc, Then by, Unit).
+ * by, Asc/Desc, Then by, Unit). The panel now holds those same four as native
+ * <select>s rather than the radio lists it shipped with.
  *
  * READ THIS BEFORE ADDING A TEST HERE. **jsdom implements no Popover API at
  * all** — `showPopover` is undefined and `:popover-open` never matches — while
  * it DOES apply the UA's `[popover]:not(:popover-open) { display: none }`. So
  * the panel is permanently hidden in this environment and there is no way to
  * open it: every query into it passes `hidden: true`, and none of these tests
- * exercises opening, dismissing or focus at all.
+ * exercises opening, dismissing or focus.
  *
- * Which means NONE of this is evidence that the sheet clears the safe-area
- * inset, that the dropdown anchors under its button, that Escape returns focus
- * to the trigger, or that a tap outside closes it. All of that was measured in
- * a real browser at 390x844 and at desktop width. What these pin is the
- * structure the CSS and the platform depend on — the part a later edit breaks
- * silently.
+ * TWO CONSEQUENCES, both deliberate:
+ *   - None of this is evidence that the sheet clears the safe-area inset, that
+ *     the dropdown anchors under its button, that Escape returns focus to the
+ *     trigger, or that a tap outside closes it. That was measured in a real
+ *     browser at 390x844 and at desktop width.
+ *   - `useDismissSwallowsTap` is INERT here. It gates on
+ *     `matches(":popover-open")`, which jsdom answers false for, so the
+ *     swallow never arms and cannot be unit-tested. The behaviour it fixes —
+ *     an outside tap closing the menu AND pressing "Import CSV" underneath —
+ *     is browser-verified only.
  */
 describe("ItemSelectTable — Sort & filter menu", () => {
   const MENU_ID = "items-sortfilter";
@@ -659,11 +664,9 @@ describe("ItemSelectTable — Sort & filter menu", () => {
 
   // `hidden: true` throughout — see the note above; the panel can never be
   // opened here, so the accessibility tree excludes all of it.
-  const groupNamed = (name: string) => screen.getByRole("radiogroup", { name, hidden: true });
-  const radioIn = (group: HTMLElement, name: string | RegExp) =>
-    within(group).getByRole("radio", { name, hidden: true }) as HTMLInputElement;
-  const radiosIn = (group: HTMLElement) =>
-    within(group).getAllByRole("radio", { hidden: true }) as HTMLInputElement[];
+  const fieldNamed = (name: string) =>
+    screen.getByRole("combobox", { name, hidden: true }) as HTMLSelectElement;
+  const optionsOf = (sel: HTMLSelectElement) => [...sel.options].map((o) => o.textContent);
 
   // The whole reason this component splits its markup the way it does. The UA
   // hides a closed popover with `[popover]:not(:popover-open) { display: none }`
@@ -680,7 +683,7 @@ describe("ItemSelectTable — Sort & filter menu", () => {
     const panel = popover.querySelector(":scope > .popup-menu__panel");
     expect(panel).not.toBeNull();
     // And the content lives inside that wrapper, not beside it.
-    expect(within(panel as HTMLElement).getByRole("radiogroup", { name: "Sort by", hidden: true })).toBeTruthy();
+    expect(within(panel as HTMLElement).getByRole("combobox", { name: "Sort by", hidden: true })).toBeTruthy();
   });
 
   // popovertarget is what supplies the implicit aria-expanded/aria-details
@@ -696,8 +699,8 @@ describe("ItemSelectTable — Sort & filter menu", () => {
     // button defaults to submit.
     expect(trigger.getAttribute("type")).toBe("button");
     // The chevron's open-state rotation selector is
-    // `.menu-trigger:has(+ [popover]:popover-open)`, which only works while the
-    // popover is the trigger's immediate next sibling.
+    // `.menu-trigger:has(+ [popover]:popover-open)`, and the outside-tap
+    // swallow finds the panel by id — both need this adjacency to hold.
     expect(trigger.nextElementSibling).toBe(container.querySelector(`#${MENU_ID}`));
   });
 
@@ -708,17 +711,17 @@ describe("ItemSelectTable — Sort & filter menu", () => {
     expect(screen.getByRole("button", { name: /Sort & filter/ }).textContent).toContain("Make ▲ · WABC01");
   });
 
-  it("checks the radio matching the current sort key", () => {
-    renderMenu();
-    const sortBy = groupNamed("Sort by");
-    expect(radioIn(sortBy, "Make").checked).toBe(true);
-    expect(radioIn(sortBy, "Default (newest)").checked).toBe(false);
-    expect(radioIn(groupNamed("Direction"), /Ascending/).checked).toBe(true);
+  it("offers the four fields as selects, each showing the current value", () => {
+    renderMenu({ uic: "WXYZ99" });
+    expect(fieldNamed("Unit").value).toBe("WXYZ99");
+    expect(fieldNamed("Sort by").value).toBe("make");
+    expect(fieldNamed("Direction").value).toBe("asc");
+    expect(fieldNamed("Then by").value).toBe("");
   });
 
   it("falls back to Default (newest) when nothing is sorted", () => {
     renderMenu({ sort: null, sortKeys: [] });
-    expect(radioIn(groupNamed("Sort by"), "Default (newest)").checked).toBe(true);
+    expect(fieldNamed("Sort by").value).toBe("");
     expect(screen.getByRole("button", { name: /Sort & filter/ }).textContent).toContain("Newest");
   });
 
@@ -727,14 +730,14 @@ describe("ItemSelectTable — Sort & filter menu", () => {
   // with `disabled={!sort}` on both selects.
   it("leaves Direction and Then by inert until a primary key is chosen", () => {
     renderMenu({ sort: null, sortKeys: [] });
-    for (const r of radiosIn(groupNamed("Direction"))) expect(r.disabled).toBe(true);
-    for (const r of radiosIn(groupNamed("Then by"))) expect(r.disabled).toBe(true);
+    expect(fieldNamed("Direction").disabled).toBe(true);
+    expect(fieldNamed("Then by").disabled).toBe(true);
   });
 
   it("enables them once a primary key is set", () => {
     renderMenu();
-    for (const r of radiosIn(groupNamed("Direction"))) expect(r.disabled).toBe(false);
-    for (const r of radiosIn(groupNamed("Then by"))) expect(r.disabled).toBe(false);
+    expect(fieldNamed("Direction").disabled).toBe(false);
+    expect(fieldNamed("Then by").disabled).toBe(false);
   });
 
   // Ordering a column within itself resolves nothing, and parseSortKeys
@@ -742,25 +745,27 @@ describe("ItemSelectTable — Sort & filter menu", () => {
   // be a choice with no effect.
   it("excludes the primary key from the Then by options", () => {
     renderMenu();
-    const thenBy = groupNamed("Then by");
-    expect(within(thenBy).queryByRole("radio", { name: "Make", hidden: true })).toBeNull();
-    expect(radioIn(thenBy, "Model")).toBeTruthy();
+    const thenBy = optionsOf(fieldNamed("Then by"));
+    expect(thenBy).not.toContain("Make");
+    expect(thenBy).toContain("Model");
     // Every other sortable column is still offered, plus the "—" opt-out.
-    expect(radiosIn(thenBy)).toHaveLength(SORTABLE_COLUMNS.length);
+    expect(thenBy).toHaveLength(SORTABLE_COLUMNS.length);
+    // Sort by offers all of them, plus its own default.
+    expect(optionsOf(fieldNamed("Sort by"))).toHaveLength(SORTABLE_COLUMNS.length + 1);
   });
 
   it("pushes the chosen sort key, keeping the current direction", () => {
     renderMenu();
-    act(() => { fireEvent.click(radioIn(groupNamed("Sort by"), "Model")); });
+    act(() => { fireEvent.change(fieldNamed("Sort by"), { target: { value: "model" } }); });
     expect(push).toHaveBeenCalledWith("/items?sort=model&dir=asc");
   });
 
-  // The menu offers Ascending and Descending as two radios, so it asks for a
+  // The menu offers Ascending and Descending as two options, so it asks for a
   // direction outright. A flip would make re-picking the current one reverse
   // the list.
   it("pushes a direction outright rather than flipping it", () => {
     renderMenu();
-    act(() => { fireEvent.click(radioIn(groupNamed("Direction"), /Descending/)); });
+    act(() => { fireEvent.change(fieldNamed("Direction"), { target: { value: "desc" } }); });
     expect(push).toHaveBeenCalledWith("/items?sort=make&dir=desc");
   });
 
@@ -770,27 +775,27 @@ describe("ItemSelectTable — Sort & filter menu", () => {
   // menu never builds a URL.
   it("pushes a compound sort as paired comma lists", () => {
     renderMenu();
-    act(() => { fireEvent.click(radioIn(groupNamed("Then by"), "Serial")); });
+    act(() => { fireEvent.change(fieldNamed("Then by"), { target: { value: "serialNumber" } }); });
     expect(push).toHaveBeenCalledWith("/items?sort=make%2CserialNumber&dir=asc%2Casc");
   });
 
   it("pushes a unit filter and drops back to page 1", () => {
     renderMenu({ page: 3 });
-    act(() => { fireEvent.click(radioIn(groupNamed("Unit"), "WXYZ99")); });
+    act(() => { fireEvent.change(fieldNamed("Unit"), { target: { value: "WXYZ99" } }); });
     expect(push).toHaveBeenCalledWith("/items?sort=make&dir=asc&uic=WXYZ99");
   });
 
   it("clears the unit filter from All units", () => {
     renderMenu({ uic: "WXYZ99" });
-    act(() => { fireEvent.click(radioIn(groupNamed("Unit"), "All units")); });
+    act(() => { fireEvent.change(fieldNamed("Unit"), { target: { value: "" } }); });
     expect(push).toHaveBeenCalledWith("/items?sort=make&dir=asc");
   });
 
-  // A lone "All units" radio is a control that cannot change anything.
-  it("offers no Unit group when there are no units to filter by", () => {
+  // A lone "All units" option is a control that cannot change anything.
+  it("offers no Unit field when there are no units to filter by", () => {
     renderMenu({ uics: [] });
-    expect(screen.queryByRole("radiogroup", { name: "Unit", hidden: true })).toBeNull();
-    expect(groupNamed("Sort by")).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Unit", hidden: true })).toBeNull();
+    expect(fieldNamed("Sort by")).toBeTruthy();
   });
 
   // Sheet-only, and hidden above 720px by globals.css. It closes the panel
@@ -804,11 +809,14 @@ describe("ItemSelectTable — Sort & filter menu", () => {
     expect(done.getAttribute("popovertargetaction")).toBe("hide");
   });
 
-  // The four controls this replaced. Leaving one behind would mean two
-  // surfaces writing the same querystring.
-  it("leaves no duplicate sort or unit control in the toolbar", () => {
+  // The four controls this replaced. Leaving one behind would mean two surfaces
+  // writing the same querystring. Note the selects moved INTO the popover, so
+  // this has to exclude the panel rather than look for selects at all.
+  it("leaves no duplicate sort or unit control loose in the toolbar", () => {
     const { container } = renderMenu();
-    expect(container.querySelector(".toolbar select")).toBeNull();
+    const loose = [...container.querySelectorAll(".toolbar select")]
+      .filter((el) => !el.closest(`#${MENU_ID}`));
+    expect(loose).toHaveLength(0);
     expect(screen.queryByRole("button", { name: /^(Asc|Desc)/, hidden: true })).toBeNull();
   });
 });

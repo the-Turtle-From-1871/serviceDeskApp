@@ -707,7 +707,15 @@ input[type="file"].input {
    Safari 26+ (vs the Popover API's Safari 17+), and this app is installed to
    the iOS home screen — so the anchored dropdown is gated behind BOTH a
    min-width and an @supports, and anything that fails either gate keeps the
-   sheet. That is the whole fallback; there is no second code path. */
+   sheet. That is the whole fallback; there is no second code path.
+
+   The panel holds four native <select>s. It was four groups of radios — 27 rows
+   that scrolled on a phone and pushed Direction and Then by below the fold —
+   and selects collapse it to four controls that fit without scrolling, with the
+   iOS wheel picker doing the work for the long unit list. The panel keeps its
+   max-height and `overflow-y: auto` anyway: nothing guarantees a future field
+   list stays this short, and an uncapped sheet grows off the top of the screen
+   rather than scrolling. */
 
 /* The trigger. `.btn` is already inline-flex — this only lays out its parts and
    lets the state text, not the label, be the thing that shrinks. */
@@ -773,18 +781,15 @@ input[type="file"].input {
   box-shadow: var(--ledger-shadow-md);
   padding: 10px 8px 0;
 }
-.popup-menu__group {
-  padding: 2px 0;
-}
-.popup-menu__group + .popup-menu__group {
-  margin-top: 6px;
-  padding-top: 8px;
-  border: none;
-  border-top: 1px solid var(--border);
+/* One caption + its <select>. A real <label> wraps both, so tapping the caption
+   opens the picker too — on a phone that roughly doubles the target. */
+.popup-menu__field {
+  display: block;
+  padding: 6px 8px;
 }
 .popup-menu__legend {
-  margin: 0 0 2px;
-  padding: 0 10px;
+  display: block;
+  margin: 0 0 4px;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -793,42 +798,16 @@ input[type="file"].input {
      1.08:1 on this surface. */
   color: var(--text-muted);
 }
-.popup-menu__option {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  /* The documented touch floor. A radio's own box is ~18px, so the row is the
-     real tap target — same reasoning as `.col-menu-panel label`. */
-  min-height: var(--tap);
-  padding: 6px 10px;
-  border-radius: var(--ledger-radius-sm);
-  font-size: 15px;
-  cursor: pointer;
+.popup-menu__field > .select {
+  width: 100%;
+  /* The documented touch floor. `.select` only reaches it under the 720px
+     media query, and this panel is a dropdown above that width too. */
+  height: var(--tap);
 }
-/* Guarded, because hover STICKS on touch: an unguarded rule leaves the last
-   option you tapped tinted as though it were still selected — next to a
-   checked-state tint that means something. */
-@media (hover: hover) {
-  .popup-menu__option:hover {
-    background: var(--surface-2);
-  }
-}
-.popup-menu__option:has(input:checked) {
-  background: var(--primary-soft);
-  font-weight: 600;
-}
-.popup-menu__option:has(input:disabled) {
+.popup-menu__field:has(.select:disabled) .popup-menu__legend {
   color: var(--text-subtle);
-  cursor: not-allowed;
 }
-.popup-menu__option input[type="radio"] {
-  flex: none;
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  accent-color: var(--primary);
-}
-/* Sticky, so "Done" is reachable without scrolling a long unit list to its end. */
+/* Sticky, so "Done" stays reachable if a future field list ever scrolls. */
 .popup-menu__footer {
   position: sticky;
   bottom: 0;
