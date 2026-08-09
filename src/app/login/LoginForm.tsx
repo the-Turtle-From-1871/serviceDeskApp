@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useActionState, useState, useSyncExternalStore } from "react";
 import { loginAction } from "@/app/actions/auth";
 import { TurnstileWidget, type TurnstileStatus } from "@/components/TurnstileWidget";
+import { ResendVerificationForm } from "@/components/ResendVerificationForm";
 
 // The interactive part of /login. Split out so the page shell (brand, headings)
 // stays a Server Component instead of shipping as client JS.
@@ -73,10 +74,27 @@ export function LoginForm({ turnstileSiteKey }: { turnstileSiteKey: string | nul
       {turnstileSiteKey && (
         <TurnstileWidget siteKey={turnstileSiteKey} resetOn={state} onStatus={setChallenge} />
       )}
-      {state?.error && <p role="alert" className="alert-error">{state.error}</p>}
+      {/* Right password, unconfirmed address. Safe to name specifically ONLY
+          because reaching this state required the correct password — see
+          modules/auth/credentials.ts. */}
+      {state && "unverified" in state && (
+        <div className="alert-warning stack-sm" role="alert">
+          <p style={{ margin: 0 }}>
+            Confirm your email address before signing in. We sent a link to{" "}
+            <strong>{state.email}</strong>.
+          </p>
+          <ResendVerificationForm email={state.email} />
+        </div>
+      )}
+      {state && "error" in state && state.error && (
+        <p role="alert" className="alert-error">{state.error}</p>
+      )}
       <button disabled={pending || waiting} type="submit" className="btn btn-primary btn-block">
         {pending ? "Signing in…" : waiting ? "Checking your browser…" : "Sign in"}
       </button>
+      <p className="subtle" style={{ textAlign: "center", margin: 0 }}>
+        Don&rsquo;t have an account? <Link href="/register">Create one</Link>
+      </p>
     </form>
   );
 }
