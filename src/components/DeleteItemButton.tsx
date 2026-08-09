@@ -99,9 +99,10 @@ export function DeleteItemButton({
                   if (res?.error) setError(res.error);
                   else ref.current?.close();
                 } catch {
-                  // requireAdmin() throws when the caller lost admin between page
-                  // load and this click (demoted/deactivated in another tab or by
-                  // another admin — both take effect on the next request, by
+                  // requireCapability("MANAGE_ITEMS") throws when the caller lost
+                  // that capability between page load and this click (demoted,
+                  // deactivated, or the grant revoked in another tab or by
+                  // another admin — all take effect on the next request, by
                   // design). Without this catch the throw rejects this handler's
                   // promise before setPending(false) runs, so the button would be
                   // stuck on "Deleting…" forever with no explanation. Never

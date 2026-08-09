@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { requireAdmin, AuthError } from "@/lib/authz";
+import { requireCapability, AuthError } from "@/lib/authz";
 import {
   getDashboard,
   isRangeKey,
@@ -27,7 +27,7 @@ export const metadata = { title: "Readiness analytics" };
  *
  * ADMIN-ONLY. It aggregates the whole catalogue across every unit, which is a
  * broader view than the per-item pages a standard USER can reach, so it is
- * gated with requireAdmin() like the rest of /admin. requireAdmin re-reads
+ * gated with requireCapability("VIEW_ANALYTICS") like the rest of /admin. requireCapability re-reads
  * role + isActive from the DB per request, so a demotion takes effect on the
  * next navigation.
  *
@@ -48,7 +48,7 @@ export default async function AnalyticsPage({
   }>;
 }) {
   try {
-    await requireAdmin();
+    await requireCapability("VIEW_ANALYTICS");
   } catch (e) {
     if (e instanceof AuthError) redirect(e.code === "FORBIDDEN" ? "/" : "/login");
     throw e;

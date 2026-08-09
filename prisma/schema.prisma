@@ -9,6 +9,25 @@ datasource db {
 enum Role {
   ADMIN
   USER
+  VIEWER
+}
+
+// The unit of authorization. A role supplies a BASELINE set (see
+// src/modules/users/capabilities.ts, which is the single definition of that
+// mapping); UserCapability rows ADD to it. There is deliberately no negative
+// grant — a subtractive model makes the effective set depend on the order two
+// tables are read in, and the wrong answer to "does a deny beat a grant?" is a
+// privilege bug. To reduce an account below its baseline, change its role.
+enum Capability {
+  VIEW_INVENTORY
+  VIEW_ALL_RECEIPTS
+  CREATE_RECEIPTS
+  EDIT_ITEM_HOLDER
+  MANAGE_ITEMS
+  MANAGE_QUEUE
+  PROCESS_RETURNS
+  VIEW_ANALYTICS
+  ADMINISTER
 }
 
 model User {
@@ -47,6 +66,24 @@ model User {
   createdContacts     Contact[]             @relation("CreatedContacts")
   publicAccessUpdates PublicAccessSetting[] @relation("PinUpdates")
   receiptDrafts       ReceiptDraft[]        @relation("ReceiptDrafts")
+  capabilities        UserCapability[]      @relation("UserCapabilities")
+  capabilitiesGranted UserCapability[]      @relation("GrantedCapabilities")
+}
+
+// One additive grant of one capability to one user. `grantedById` is the admin
+// who approved it and is SET NULL rather than cascaded: deleting the approver's
+// account must not silently revoke everyone they ever granted.
+model UserCapability {
+  id          String     @id @default(cuid())
+  user        User       @relation("UserCapabilities", fields: [userId], references: [id], onDelete: Cascade)
+  userId      String
+  capability  Capability
+  grantedBy   User?      @relation("GrantedCapabilities", fields: [grantedById], references: [id], onDelete: SetNull)
+  grantedById String?
+  grantedAt   DateTime   @default(now())
+
+  @@unique([userId, capability])
+  @@index([userId])
 }
 
 // Self-service password reset. Only the SHA-256 hash of the emailed token is

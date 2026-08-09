@@ -1,6 +1,6 @@
 "use server";
 import { revalidatePath } from "next/cache";
-import { requireAdmin } from "@/lib/authz";
+import { requireCapability } from "@/lib/authz";
 import {
   createItem,
   getItemBySerial,
@@ -25,7 +25,7 @@ import { resolutionSchema, type UnitResolution } from "@/modules/items/units.ser
 import type { SkippedRow, UnresolvedRow } from "@/modules/items/import";
 
 export async function createItemAction(_prev: unknown, formData: FormData) {
-  const admin = await requireAdmin();
+  const admin = await requireCapability("MANAGE_ITEMS");
   // Read off formData, NOT parsed.data: newItemSchema is a z.object() and
   // strips unknown keys, so these would silently vanish from the parsed result.
   const fromSearch = formData.get("fromSearch") === "1";
@@ -106,7 +106,7 @@ export async function createItemAction(_prev: unknown, formData: FormData) {
 // user-level action so admin changes land in the same ItemEdit history rather
 // than bypassing it.
 export async function updateItemAction(_prev: unknown, formData: FormData) {
-  const admin = await requireAdmin();
+  const admin = await requireCapability("MANAGE_ITEMS");
   const id = String(formData.get("id"));
   const parsed = adminItemEditSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
@@ -160,7 +160,7 @@ export async function updateItemAction(_prev: unknown, formData: FormData) {
 // Routes through the SAME updateItemFields as every other edit, so the change
 // is diffed and recorded in ItemEdit history rather than bypassing it.
 export async function updateItemIdentityAction(_prev: unknown, formData: FormData) {
-  const admin = await requireAdmin();
+  const admin = await requireCapability("MANAGE_ITEMS");
   const id = String(formData.get("id") ?? "").trim();
   if (!id) return { error: "Missing item." };
 
@@ -212,18 +212,19 @@ export async function updateItemIdentityAction(_prev: unknown, formData: FormDat
 // on my shelf right now". Everything else about the state — in repair, issued
 // out, logged on since — the app already knows.
 //
-// ADMIN-ONLY, enforced here on the server. The UI hides the button from a
-// standard USER, but hiding is not a guard: requireAdmin() re-reads role +
-// isActive from the DB per request, so a demoted account loses this
-// immediately. Deliberately NOT folded into updateItemDetailsAction's
-// role-picked schema — routing it through its own action keeps the
-// USER-editable field set exactly as narrow as it was.
+// Requires MANAGE_ITEMS, enforced here on the server. The UI hides the button
+// from anyone without it, but hiding is not a guard: requireCapability re-reads
+// role, isActive AND the capability grants from the DB per request, so a
+// demoted account — or one whose grant was revoked — loses this immediately.
+// Deliberately NOT folded into updateItemDetailsAction's capability-picked
+// schema — routing it through its own action keeps the holder-only editable
+// field set exactly as narrow as it was.
 const markReadySchema = z.object({
   itemIds: z.array(z.string().min(1)).min(1, "Select at least one item."),
 });
 
 export async function markItemsReadyAction(formData: FormData) {
-  await requireAdmin();
+  await requireCapability("MANAGE_ITEMS");
 
   const parsed = markReadySchema.safeParse({
     itemIds: String(formData.get("itemIds") ?? "").split(",").filter(Boolean),
@@ -247,7 +248,7 @@ export async function markItemsReadyAction(formData: FormData) {
 }
 
 export async function toggleItemStatusAction(formData: FormData) {
-  await requireAdmin();
+  await requireCapability("MANAGE_ITEMS");
   const id = String(formData.get("id"));
   const next = formData.get("status") === "RETIRED" ? "RETIRED" : "ACTIVE";
   await setItemStatus(id, next);
@@ -265,7 +266,7 @@ export async function toggleItemStatusAction(formData: FormData) {
 // keeps its own snapshot (serialNumber/make/model on the line, signatures on
 // the transfer) exactly as issued.
 export async function deleteItemAction(formData: FormData) {
-  await requireAdmin();
+  await requireCapability("MANAGE_ITEMS");
   const id = String(formData.get("id") ?? "");
   if (!id) return { error: "No item was specified." };
   try {
@@ -294,7 +295,7 @@ function readCsvFile(formData: FormData): { file: File } | { error: string } {
 export async function analyzeImportAction(
   formData: FormData
 ): Promise<{ counts: { toImport: number; toUpdate: number; unchanged: number; skipped: number; autoDetected: number }; skipped: SkippedRow[]; unresolved: UnresolvedRow[]; mismatches: { serialNumber: string }[] } | { error: string }> {
-  await requireAdmin();
+  await requireCapability("MANAGE_ITEMS");
   const f = readCsvFile(formData);
   if ("error" in f) return f;
   try {
@@ -311,7 +312,7 @@ export async function analyzeImportAction(
 export async function commitImportAction(
   formData: FormData
 ): Promise<{ added: number; updated: number; skipped: SkippedRow[]; unchanged: number; detected: number; mismatches: { serialNumber: string }[] } | { error: string }> {
-  const admin = await requireAdmin();
+  const admin = await requireCapability("MANAGE_ITEMS");
   const f = readCsvFile(formData);
   if ("error" in f) return f;
 

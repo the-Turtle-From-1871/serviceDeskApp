@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const requireAdmin = vi.fn();
+const requireCapability = vi.fn();
 const getOwnedSignature = vi.fn();
 const processReturn = vi.fn();
 const sendReturnEmail = vi.fn();
@@ -9,7 +9,7 @@ const getTransferByReceiptNumber = vi.fn();
 const revalidatePath = vi.fn();
 
 vi.mock("@/lib/authz", () => ({
-  requireAdmin: () => requireAdmin(),
+  requireCapability: () => requireCapability(),
   AuthError: class AuthError extends Error {
     code: string;
     constructor(code: string) {
@@ -60,7 +60,7 @@ const basePlan = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  requireAdmin.mockResolvedValue(ADMIN);
+  requireCapability.mockResolvedValue(ADMIN);
   processReturn.mockResolvedValue({
     plan: basePlan,
     receiptNumber: "HR-000001",

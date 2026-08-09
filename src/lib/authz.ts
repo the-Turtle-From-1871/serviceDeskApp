@@ -1,7 +1,18 @@
 import "server-only"; // authorization logic is server-only
-import type { Role } from "@prisma/client";
+import type { Capability, Role } from "@prisma/client";
+import { effectiveCapabilities } from "@/modules/users/capabilities";
 
-export type SessionUser = { id: string; role: Role; name: string; email: string };
+// `capabilities` is the RESOLVED effective set (role baseline ∪ grants), not the
+// raw grant rows. Resolving it in exactly one place — defaultGetSession, below —
+// means no call site can forget to apply the baseline and so refuse an admin who
+// happens to hold no grant rows of their own.
+export type SessionUser = {
+  id: string;
+  role: Role;
+  name: string;
+  email: string;
+  capabilities: Capability[];
+};
 
 export class AuthError extends Error {
   constructor(public code: "UNAUTHENTICATED" | "FORBIDDEN") {
@@ -31,10 +42,28 @@ const defaultGetSession: GetSession = async () => {
   const { default: prisma } = await import("@/lib/prisma");
   const fresh = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { role: true, isActive: true },
+    // Capabilities ride along on the read that ALREADY re-reads role/isActive —
+    // one query, no N+1, and a revoked grant dies on the next request exactly
+    // as a demotion does. The JWT deliberately never carries capabilities: a
+    // token minted before a grant would be stale, and per-request freshness is
+    // the entire justification for the 30-day session window.
+    select: {
+      role: true,
+      isActive: true,
+      capabilities: { select: { capability: true } },
+    },
   });
   if (!fresh || !fresh.isActive) return null;
-  return { user: { ...session.user, role: fresh.role } };
+  return {
+    user: {
+      ...session.user,
+      role: fresh.role,
+      capabilities: effectiveCapabilities(
+        fresh.role,
+        fresh.capabilities.map((c) => c.capability),
+      ),
+    },
+  };
 };
 
 export async function requireUser(
@@ -45,10 +74,31 @@ export async function requireUser(
   return session.user;
 }
 
-export async function requireAdmin(
+/**
+ * The authorization primitive. Gate on a CAPABILITY — never on a role directly,
+ * and never on "the caller happens to own this row": inventory, receipts and the
+ * queue are shared org-wide.
+ */
+export async function requireCapability(
+  capability: Capability,
   getSession: GetSession = defaultGetSession
 ): Promise<SessionUser> {
   const user = await requireUser(getSession);
-  if (user.role !== "ADMIN") throw new AuthError("FORBIDDEN");
+  if (!user.capabilities.includes(capability)) throw new AuthError("FORBIDDEN");
   return user;
+}
+
+/**
+ * Kept as the gate for genuinely administrative surfaces — users, audit,
+ * contacts, named signatures, the access PIN, receipt timers, seal verification.
+ *
+ * It is now a THIN ALIAS for the ADMINISTER capability rather than a role check.
+ * That is what let the capability model land without editing 29 call sites at
+ * once, and it means a granted ADMINISTER works everywhere immediately. Call
+ * sites wanting something narrower call requireCapability directly.
+ */
+export async function requireAdmin(
+  getSession: GetSession = defaultGetSession
+): Promise<SessionUser> {
+  return requireCapability("ADMINISTER", getSession);
 }

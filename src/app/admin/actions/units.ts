@@ -1,19 +1,20 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { requireAdmin } from "@/lib/authz";
+import { requireCapability } from "@/lib/authz";
 import { ItemError } from "@/modules/items/items.errors";
 import { learnUnits, renameUnit, deleteUnit, resolutionSchema } from "@/modules/items/units.service";
 import { parseUnitBlock } from "@/modules/items/units.parse";
 
-/* Managing the unit vocabulary is an ADMIN capability, enforced here on the
-   server. requireAdmin() re-reads role + isActive from the DB per request, so
-   a demoted or deactivated account loses it immediately. */
+/* Managing the unit vocabulary requires MANAGE_ITEMS, enforced here on the
+   server. requireCapability re-reads role, isActive and the capability grants
+   from the DB per request, so a demoted or deactivated account — or one whose
+   grant was revoked — loses it immediately. */
 
 const idSchema = z.string().min(1, "Missing unit.");
 
 export async function createUnitAction(_prev: unknown, formData: FormData) {
-  await requireAdmin();
+  await requireCapability("MANAGE_ITEMS");
   const parsed = resolutionSchema.safeParse({
     abbreviation: String(formData.get("abbreviation") ?? ""),
     fullName: String(formData.get("fullName") ?? ""),
@@ -31,7 +32,7 @@ export async function createUnitAction(_prev: unknown, formData: FormData) {
 }
 
 export async function renameUnitAction(_prev: unknown, formData: FormData) {
-  const admin = await requireAdmin();
+  const admin = await requireCapability("MANAGE_ITEMS");
   const id = idSchema.safeParse(String(formData.get("id") ?? ""));
   if (!id.success) return { error: "Missing unit." };
   const fullName = String(formData.get("fullName") ?? "").trim();
@@ -53,7 +54,7 @@ export async function renameUnitAction(_prev: unknown, formData: FormData) {
 }
 
 export async function deleteUnitAction(formData: FormData) {
-  await requireAdmin();
+  await requireCapability("MANAGE_ITEMS");
   const id = idSchema.safeParse(String(formData.get("id") ?? ""));
   if (!id.success) return { error: "Missing unit." };
 
@@ -69,7 +70,7 @@ export async function deleteUnitAction(formData: FormData) {
 }
 
 export async function bulkLearnUnitsAction(_prev: unknown, formData: FormData) {
-  await requireAdmin();
+  await requireCapability("MANAGE_ITEMS");
   const { units, errors } = parseUnitBlock(String(formData.get("block") ?? ""));
   if (errors.length > 0) return { error: errors.slice(0, 5).join(" ") };
   if (units.length === 0) return { error: "Nothing to add." };

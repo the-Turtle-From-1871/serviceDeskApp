@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { requireAdmin } from "@/lib/authz";
+import { requireCapability } from "@/lib/authz";
 import {
   markItemsReady,
   clearItemsReady,
@@ -36,7 +36,7 @@ import { MAX_CATEGORY_NAME } from "@/modules/items/items.schema";
    The UI renders them as disabled options that say so.
 
    ADMIN-ONLY, enforced here on the server. The UI hides these controls from a
-   standard USER, but hiding is not a guard: requireAdmin() re-reads role +
+   standard USER, but hiding is not a guard: requireCapability("MANAGE_QUEUE") re-reads role +
    isActive from the DB per request, so a demoted or deactivated account loses
    them immediately. Kept out of updateItemDetailsAction's role-picked schema on
    purpose — that keeps the USER-editable field set exactly as narrow as it was
@@ -93,7 +93,7 @@ type CategoryResult =
   | { ok: true; updated: number; unchanged: number; category: string };
 
 export async function setReadinessAction(formData: FormData): Promise<ReadinessResult> {
-  await requireAdmin();
+  await requireCapability("MANAGE_QUEUE");
 
   const parsed = setReadinessSchema.safeParse({
     itemIds: idsFrom(formData),
@@ -126,7 +126,10 @@ export async function setReadinessAction(formData: FormData): Promise<ReadinessR
 }
 
 export async function setItemsCategoryAction(formData: FormData): Promise<CategoryResult> {
-  const admin = await requireAdmin();
+  // MANAGE_ITEMS, not MANAGE_QUEUE: this assigns a device CATEGORY, which is
+  // part of the item vocabulary, and only lives in this file for historical
+  // reasons.
+  const admin = await requireCapability("MANAGE_ITEMS");
 
   const parsed = setCategorySchema.safeParse({
     itemIds: idsFrom(formData),

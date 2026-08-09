@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const requireAdmin = vi.fn();
+const requireCapability = vi.fn();
 const markItemsReady = vi.fn();
 const clearItemsReady = vi.fn();
 const setItemsStatus = vi.fn();
@@ -9,7 +9,7 @@ const revalidatePath = vi.fn();
 
 // items.schema is NOT mocked — the real Zod constraints run, so this proves the
 // server refuses a forged target rather than merely hiding it in the UI.
-vi.mock("@/lib/authz", () => ({ requireAdmin: () => requireAdmin() }));
+vi.mock("@/lib/authz", () => ({ requireCapability: () => requireCapability() }));
 vi.mock("@/modules/items/items.service", () => ({
   MAX_BULK_ITEMS: 500,
   markItemsReady: (ids: string[]) => markItemsReady(ids),
@@ -35,7 +35,7 @@ function fd(entries: Record<string, string>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  requireAdmin.mockResolvedValue(ADMIN);
+  requireCapability.mockResolvedValue(ADMIN);
   markItemsReady.mockResolvedValue({ updated: 2 });
   clearItemsReady.mockResolvedValue({ updated: 2 });
   setItemsStatus.mockResolvedValue({ updated: 2 });
@@ -43,12 +43,12 @@ beforeEach(() => {
 });
 
 describe("setReadinessAction — admin gate", () => {
-  it("calls requireAdmin BEFORE any write, and writes nothing when it rejects", async () => {
-    requireAdmin.mockRejectedValue(new Error("FORBIDDEN"));
+  it("calls requireCapability BEFORE any write, and writes nothing when it rejects", async () => {
+    requireCapability.mockRejectedValue(new Error("FORBIDDEN"));
     await expect(
       setReadinessAction(fd({ itemIds: "i1", target: "READY_TO_DEPLOY" })),
     ).rejects.toThrow("FORBIDDEN");
-    expect(requireAdmin).toHaveBeenCalledTimes(1);
+    expect(requireCapability).toHaveBeenCalledTimes(1);
     expect(markItemsReady).not.toHaveBeenCalled();
     expect(clearItemsReady).not.toHaveBeenCalled();
     expect(setItemsStatus).not.toHaveBeenCalled();
@@ -140,8 +140,8 @@ describe("setReadinessAction — input bounds", () => {
 });
 
 describe("setItemsCategoryAction", () => {
-  it("calls requireAdmin BEFORE any write, and writes nothing when it rejects", async () => {
-    requireAdmin.mockRejectedValue(new Error("FORBIDDEN"));
+  it("calls requireCapability BEFORE any write, and writes nothing when it rejects", async () => {
+    requireCapability.mockRejectedValue(new Error("FORBIDDEN"));
     await expect(
       setItemsCategoryAction(fd({ itemIds: "i1", category: "Laptops" })),
     ).rejects.toThrow("FORBIDDEN");

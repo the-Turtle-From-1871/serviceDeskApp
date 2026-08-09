@@ -1,6 +1,6 @@
 "use server";
 import { revalidatePath } from "next/cache";
-import { requireAdmin, AuthError } from "@/lib/authz";
+import { requireCapability, AuthError } from "@/lib/authz";
 import { processReturn } from "@/modules/returns/returns.service";
 import { sendReturnEmail } from "@/modules/returns/send-return-email";
 import { getTransferByReceiptNumber } from "@/modules/transfers/transfers.service";
@@ -15,7 +15,7 @@ type Result = { ok: true; plan: ReturnPlan; receiptNumber: string; closed: boole
 export async function processReturnAction(_prev: unknown, formData: FormData): Promise<Result> {
   let admin;
   try {
-    admin = await requireAdmin();
+    admin = await requireCapability("PROCESS_RETURNS");
   } catch (e) {
     if (e instanceof AuthError) return { error: "You are not authorized to process returns." };
     throw e;

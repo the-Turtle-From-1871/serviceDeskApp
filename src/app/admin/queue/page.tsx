@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { requireAdmin, AuthError } from "@/lib/authz";
+import { requireCapability, AuthError } from "@/lib/authz";
 import { listActiveQueue, QUEUE_MAX_ROWS } from "@/modules/service-queue/service-queue.service";
 import { serviceTypeLabel } from "@/modules/service-queue/service-queue.status";
 import { ServiceQueueTable } from "@/components/ServiceQueueTable";
@@ -7,7 +7,7 @@ import type { QueueRowVM } from "@/components/service-queue-view";
 
 export default async function AdminQueuePage() {
   try {
-    await requireAdmin();
+    await requireCapability("MANAGE_QUEUE");
   } catch (e) {
     if (e instanceof AuthError) redirect(e.code === "FORBIDDEN" ? "/" : "/login");
     throw e;

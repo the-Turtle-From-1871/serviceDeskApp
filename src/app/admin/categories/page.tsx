@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { requireAdmin, AuthError } from "@/lib/authz";
+import { requireCapability, AuthError } from "@/lib/authz";
 import { listCategoriesWithCounts } from "@/modules/items/categories.service";
 import { CategoryManager } from "./CategoryManager";
 
@@ -11,7 +11,7 @@ export const metadata = { title: "Device categories" };
  *  guard travels with the route rather than depending on its parent. */
 export default async function CategoriesPage() {
   try {
-    await requireAdmin();
+    await requireCapability("MANAGE_ITEMS");
   } catch (e) {
     if (e instanceof AuthError) redirect(e.code === "FORBIDDEN" ? "/" : "/login");
     throw e;

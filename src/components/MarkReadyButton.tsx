@@ -9,8 +9,9 @@ import { markItemsReadyAction } from "@/app/admin/actions/items";
  * Shared by the /items selection bar (many ids) and the item detail page (one),
  * so the wording and the outcome message cannot drift between the two surfaces.
  *
- * Rendered only for admins, but that is presentation — markItemsReadyAction
- * re-checks with requireAdmin(), which is the actual boundary.
+ * Rendered only for those holding MANAGE_QUEUE, but that is presentation —
+ * markItemsReadyAction re-checks with requireCapability("MANAGE_QUEUE"), which
+ * is the actual boundary.
  *
  * NOT a plain <form action={...}>: the action returns a result object so the
  * caller can report "0 changed", which React's form-action signature (void)

@@ -5,10 +5,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-08-08
 
-### Fixed
-- **Tapping outside the "Sort & filter" menu now just closes it, instead of also pressing whatever was behind it.** With the menu open, a tap on the page outside it — most easily **Import CSV** or **+ Log new item**, which sit directly above the toolbar — closed the menu *and* activated that button, so you would find yourself on the import page having only meant to dismiss the menu. The first tap outside is now spent entirely on closing the menu; the control you tapped is not pressed. Tapping it again, with the menu closed, works normally.
+### Added
+- **Permissions are now granted one at a time, instead of only as "admin" or "not admin".** Access is decided by nine named capabilities — viewing inventory, viewing all hand receipts, creating hand receipts, editing an item's holder, managing items, managing the service queue, processing returns, viewing analytics, and administering the application. An administrator can give one person a single capability without making them an administrator, so the technician who handles returns can be given exactly that and nothing else.
+
+  **Nobody's access changes with this release.** Each existing role already carries a set of capabilities matching what it could do before: an administrator holds all nine, and a standard user holds the same four things they could always do — read inventory, read hand receipts, create hand receipts, and correct an item's holder and position.
+- **A read-only account type.** A "viewer" can read the property book and nothing else — it cannot create a hand receipt or change an item. Nothing creates a viewer account yet; this release only makes the level exist.
 
 ### Changed
+- **Each administrative screen now asks for the specific permission it needs**, rather than for administrator access in general. Managing items, categories and units asks for item management; the service queue and readiness ask for queue management; processing a return asks for returns; the analytics dashboard asks for analytics. User management, audits, the contact book, saved signatures, the access PIN, receipt timers and receipt seal verification continue to require full administrative access.
+- **Editing an item now requires permission to do so.** Correcting a device's holder or position previously needed only a signed-in account of any kind; it now requires the holder-editing permission, so a read-only account is refused. Anyone who could edit before still can.
+- **Losing a permission takes effect immediately, on the next page you load** — the same as being demoted or deactivated already did. Permissions are re-read from the database on every protected request rather than being carried in your sign-in token.
+
+  #### Notes
+  - Migration `20260808120000_capability_foundation` adds the `Capability` enum, the `VIEWER` role value and the `UserCapability` table. **No data backfill is needed** — existing accounts draw their access from their role's baseline.
+  - Apply the migration to Supabase **before** merging, per migrate-before-push: `next build` never runs `migrate deploy`, so deployed code selecting `UserCapability` against a database without that table is a 500.
 - **Sorting and unit filtering on the items list are now one "Sort & filter" button instead of four separate controls.** The list's toolbar used to carry a Sort by dropdown, an Asc/Desc button, a Then by dropdown and a Unit (UIC) dropdown side by side. On a phone they wrapped into three rows of controls before the first device appeared. They are now behind a single button, which shows what is currently applied — "Sort & filter · Make ▲ · 2/6 IN" — so you can still read the order and the active unit filter without opening anything.
 
   Tapping the button opens a panel holding all four as dropdowns: **Unit**, **Sort by**, **Direction** and **Then by**. On a phone the panel slides up from the bottom of the screen and has a **Done** button — and each dropdown opens the usual iPhone picker wheel, which is far quicker than scrolling a long list of units. On a computer the panel drops down under the button. Either way, picking something applies it immediately and the panel stays open, so you can set the unit and the order in one visit. It closes when you tap outside it, press Escape, or press Done.
@@ -27,6 +37,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   - Anyone running the old script should switch to the command in §0 of the hand-off document. The script will keep working where it already sits — it is only unmaintained now — but a fresh copy is no longer available from the repository.
 
 ### Fixed
+- **Tapping outside the "Sort & filter" menu now just closes it, instead of also pressing whatever was behind it.** With the menu open, a tap on the page outside it — most easily **Import CSV** or **+ Log new item**, which sit directly above the toolbar — closed the menu *and* activated that button, so you would find yourself on the import page having only meant to dismiss the menu. The first tap outside is now spent entirely on closing the menu; the control you tapped is not pressed. Tapping it again, with the menu closed, works normally.
 - **The nightly import script follows redirects, and now refuses an HTML page even when the server says 200.** Two faults in `handoff/Send-MdmImport.ps1`, both of which stop the fleet import silently. It called `curl` without `-L`, so it never followed a redirect — pointing it at the bare `dcsim.us` (which permanently redirects to `www.dcsim.us`) killed the run with an unexplained `308` before anything was sent. And its guard against being handed a web page instead of data only ran when the server returned an error code. That is the wrong way round: following a redirect can land on the **login page, which answers 200 with HTML**, so the one case the guard exists to catch was the one case it could not see — the job would have reported a clean success while importing nothing. The guard now runs on every response.
 
   #### Notes

@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { requireAdmin, AuthError } from "@/lib/authz";
+import { requireCapability, AuthError } from "@/lib/authz";
 import { ImportItemsForm } from "./ImportItemsForm";
 
 // A full-fleet MDM refresh is an all-UPDATE import running inside
@@ -18,7 +18,7 @@ export const maxDuration = 60;
 
 export default async function ImportItemsPage() {
   try {
-    await requireAdmin();
+    await requireCapability("MANAGE_ITEMS");
   } catch (e) {
     if (e instanceof AuthError) redirect(e.code === "FORBIDDEN" ? "/" : "/login");
     throw e;

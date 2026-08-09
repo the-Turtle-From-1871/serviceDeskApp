@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { roleBaseline } from "@/modules/users/capabilities";
 
 const requireUser = vi.fn();
-const requireAdmin = vi.fn();
+const requireCapability = vi.fn();
 const updateItemFields = vi.fn();
 const createItem = vi.fn();
 const getItemBySerial = vi.fn();
@@ -13,7 +14,7 @@ const revalidatePath = vi.fn();
 // server actually strips admin-only fields from a USER's submission.
 vi.mock("@/lib/authz", () => ({
   requireUser: () => requireUser(),
-  requireAdmin: () => requireAdmin(),
+  requireCapability: (c: string) => requireCapability(c),
 }));
 // Only updateItemFields is exercised here; the rest are declared because the
 // admin actions module (imported below for the identity tests) names them.
@@ -59,8 +60,8 @@ import { updateItemDetailsAction } from "./items";
 import { updateItemIdentityAction, createItemAction, deleteItemAction } from "@/app/admin/actions/items";
 import { Prisma } from "@prisma/client";
 
-const ADMIN = { id: "a1", role: "ADMIN" as const, name: "Admin" };
-const USER = { id: "u1", role: "USER" as const, name: "User" };
+const ADMIN = { id: "a1", role: "ADMIN" as const, name: "Admin", capabilities: roleBaseline("ADMIN") };
+const USER = { id: "u1", role: "USER" as const, name: "User", capabilities: roleBaseline("USER") };
 
 function fd(entries: Record<string, string>) {
   const f = new FormData();
@@ -89,9 +90,19 @@ beforeEach(() => {
   deleteItem.mockResolvedValue(undefined);
 });
 
-describe("updateItemDetailsAction — role-gated fields", () => {
+describe("updateItemDetailsAction — capability-gated fields", () => {
+  // Pins WHICH capability the gate demands. Asserting only that some gate ran
+  // would still pass if this action were widened to any signed-in session,
+  // which is exactly what must not happen — a VIEWER can read the property book
+  // and must not be able to write to it.
+  it("demands EDIT_ITEM_HOLDER, so read access alone cannot write", async () => {
+    requireCapability.mockResolvedValue(USER);
+    await updateItemDetailsAction(undefined, fd({ id: "item-1", currentPosition: "Supply" }));
+    expect(requireCapability).toHaveBeenCalledWith("EDIT_ITEM_HOLDER");
+  });
+
   it("USER may change ONLY currentUserEmail + currentPosition; forged admin-only fields are stripped server-side", async () => {
-    requireUser.mockResolvedValue(USER);
+    requireCapability.mockResolvedValue(USER);
     const res = await updateItemDetailsAction(
       undefined,
       fd({
@@ -117,7 +128,7 @@ describe("updateItemDetailsAction — role-gated fields", () => {
   });
 
   it("ADMIN may change all eight editable fields", async () => {
-    requireUser.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     const res = await updateItemDetailsAction(undefined, fd({ id: "item-1", ...ADMIN_FIELDS }));
     expect(res).toEqual({ ok: true });
     const [, data] = updateItemFields.mock.calls[0];
@@ -125,7 +136,7 @@ describe("updateItemDetailsAction — role-gated fields", () => {
   });
 
   it("ADMIN cannot rewrite item identity — make/model/serialNumber are stripped", async () => {
-    requireUser.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     await updateItemDetailsAction(
       undefined,
       fd({ id: "item-1", ...ADMIN_FIELDS, make: "Dell", model: "5420", serialNumber: "SN-HACK" }),
@@ -135,7 +146,7 @@ describe("updateItemDetailsAction — role-gated fields", () => {
   });
 
   it("ADMIN blanks CLEAR the nullable fields instead of no-opping", async () => {
-    requireUser.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     await updateItemDetailsAction(
       undefined,
       fd({ id: "item-1", ...ADMIN_FIELDS, homeUnit: "", deviceUIC: "  ", notes: "", deviceCategory: "  ", currentUserEmail: "", currentPosition: "", storageLocation: "  " }),
@@ -155,7 +166,7 @@ describe("updateItemDetailsAction — role-gated fields", () => {
   });
 
   it("normalizes an ADMIN's category and teaches it to the managed vocabulary", async () => {
-    requireUser.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     await updateItemDetailsAction(undefined, fd({ id: "item-1", ...ADMIN_FIELDS, deviceCategory: "  Tough   Book " }));
     const [, data] = updateItemFields.mock.calls[0];
     expect(data.deviceCategory).toBe("Tough Book");
@@ -163,14 +174,14 @@ describe("updateItemDetailsAction — role-gated fields", () => {
   });
 
   it("rejects a blank device name from an ADMIN (NOT NULL column)", async () => {
-    requireUser.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     const res = await updateItemDetailsAction(undefined, fd({ id: "item-1", ...ADMIN_FIELDS, deviceName: "  " }));
     expect(res).toEqual({ error: "Device name is required" });
     expect(updateItemFields).not.toHaveBeenCalled();
   });
 
   it("rejects a missing item id before touching the DB", async () => {
-    requireUser.mockResolvedValue(USER);
+    requireCapability.mockResolvedValue(USER);
     const res = await updateItemDetailsAction(undefined, fd({ currentUserEmail: "jane@u.mil", currentPosition: "Supply" }));
     expect(res).toEqual({ error: "Missing item." });
     expect(updateItemFields).not.toHaveBeenCalled();
@@ -195,15 +206,15 @@ function p2002(): Error {
 
 describe("updateItemIdentityAction", () => {
   beforeEach(() => {
-    requireAdmin.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
   });
 
-  it("calls requireAdmin BEFORE any write, and writes nothing when it rejects", async () => {
-    requireAdmin.mockRejectedValue(new Error("FORBIDDEN"));
+  it("calls requireCapability BEFORE any write, and writes nothing when it rejects", async () => {
+    requireCapability.mockRejectedValue(new Error("FORBIDDEN"));
     await expect(
       updateItemIdentityAction(undefined, fd({ id: "item-1", ...IDENTITY })),
     ).rejects.toThrow("FORBIDDEN");
-    expect(requireAdmin).toHaveBeenCalledTimes(1);
+    expect(requireCapability).toHaveBeenCalledTimes(1);
     // A non-admin gets nothing written — not a partial save, not a history row.
     expect(updateItemFields).not.toHaveBeenCalled();
     expect(revalidatePath).not.toHaveBeenCalled();
@@ -300,14 +311,14 @@ describe("createItemAction", () => {
     deviceCategory: "  Docking   Station ", notes: "",
   };
 
-  it("calls requireAdmin BEFORE any write, and writes nothing when it rejects", async () => {
-    requireAdmin.mockRejectedValue(new Error("FORBIDDEN"));
+  it("calls requireCapability BEFORE any write, and writes nothing when it rejects", async () => {
+    requireCapability.mockRejectedValue(new Error("FORBIDDEN"));
     await expect(createItemAction(undefined, fd(NEW_ITEM))).rejects.toThrow("FORBIDDEN");
     expect(createItem).not.toHaveBeenCalled();
   });
 
   it("persists deviceUIC and the NORMALIZED category, with the creator from the SERVER session", async () => {
-    requireAdmin.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     await createItemAction(undefined, fd(NEW_ITEM));
     expect(createItem).toHaveBeenCalledWith(
       expect.objectContaining({ deviceUIC: "WABC01", deviceCategory: "Docking Station" }),
@@ -316,13 +327,13 @@ describe("createItemAction", () => {
   });
 
   it("teaches a typed category to the managed vocabulary", async () => {
-    requireAdmin.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     await createItemAction(undefined, fd(NEW_ITEM));
     expect(learnCategories).toHaveBeenCalledWith(["Docking Station"]);
   });
 
   it("does not call learnCategories when no category was typed", async () => {
-    requireAdmin.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     await createItemAction(undefined, fd({ ...NEW_ITEM, deviceCategory: "" }));
     expect(learnCategories).not.toHaveBeenCalled();
   });
@@ -330,13 +341,13 @@ describe("createItemAction", () => {
   // The item is already committed by the time learnCategories runs. Reporting
   // its failure would tell the admin their item was not created when it was.
   it("still reports success when learnCategories fails", async () => {
-    requireAdmin.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     learnCategories.mockRejectedValue(new Error("vocabulary down"));
     await expect(createItemAction(undefined, fd(NEW_ITEM))).resolves.toEqual({ itemId: "new-1" });
   });
 
   it("names the conflicting serial on a P2002 and links to the item holding it", async () => {
-    requireAdmin.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     createItem.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError("dup", { code: "P2002", clientVersion: "7" }),
     );
@@ -347,7 +358,7 @@ describe("createItemAction", () => {
   });
 
   it("still returns the collision error when the colliding item cannot be resolved", async () => {
-    requireAdmin.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     createItem.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError("dup", { code: "P2002", clientVersion: "7" }),
     );
@@ -358,7 +369,7 @@ describe("createItemAction", () => {
   });
 
   it("returns a generic message and logs server-side on an unexpected failure", async () => {
-    requireAdmin.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     createItem.mockRejectedValue(new Error("connection reset"));
     const res = await createItemAction(undefined, fd(NEW_ITEM));
@@ -368,7 +379,7 @@ describe("createItemAction", () => {
   });
 
   it("revalidates the item list, the category admin page and analytics", async () => {
-    requireAdmin.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     await createItemAction(undefined, fd(NEW_ITEM));
     expect(revalidatePath).toHaveBeenCalledWith("/items");
     expect(revalidatePath).toHaveBeenCalledWith("/admin/categories");
@@ -376,14 +387,14 @@ describe("createItemAction", () => {
   });
 
   it("rejects a blank make before touching the DB", async () => {
-    requireAdmin.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     const res = await createItemAction(undefined, fd({ ...NEW_ITEM, make: "" }));
     expect(res.error).toMatch(/Make is required/);
     expect(createItem).not.toHaveBeenCalled();
   });
 
   it("returns to the filtered list when the form came from a search", async () => {
-    requireAdmin.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     createItem.mockResolvedValue({ id: "new-1", serialNumber: "ABC123" });
     const result = await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "" }));
     expect(result.itemId).toBe("new-1");
@@ -391,7 +402,7 @@ describe("createItemAction", () => {
   });
 
   it("carries the unit filter back with it when the new item matches it", async () => {
-    requireAdmin.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     createItem.mockResolvedValue({ id: "new-1", serialNumber: "ABC123", deviceUIC: "WABC01" });
     const result = await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "WABC01" }));
     expect(result.itemId).toBe("new-1");
@@ -400,7 +411,7 @@ describe("createItemAction", () => {
 
   // Concatenation would produce ?q=A&B C — a different search, matching nothing.
   it("percent-encodes a serial containing URL metacharacters", async () => {
-    requireAdmin.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     createItem.mockResolvedValue({ id: "new-1", serialNumber: "A&B C#1" });
     const result = await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1" }));
     expect(result.itemId).toBe("new-1");
@@ -408,7 +419,7 @@ describe("createItemAction", () => {
   });
 
   it("does NOT redirect when the form was opened directly", async () => {
-    requireAdmin.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     const result = await createItemAction(undefined, fd(NEW_ITEM));
     expect(result.itemId).toBe("new-1");
     expect(result.searchHref).toBeUndefined();
@@ -418,7 +429,7 @@ describe("createItemAction", () => {
   // while the success paths (which assert searchHref is set) prove that the
   // link is only built when the item is successfully created.
   it("does NOT redirect when the serial collided", async () => {
-    requireAdmin.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     createItem.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError("dup", { code: "P2002", clientVersion: "7" }),
     );
@@ -428,7 +439,7 @@ describe("createItemAction", () => {
   });
 
   it("drops the unit filter from the redirect when the new item's deviceUIC is null", async () => {
-    requireAdmin.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     createItem.mockResolvedValue({ id: "new-1", serialNumber: "ABC123", deviceUIC: null });
     const result = await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "WABC01" }));
     expect(result.itemId).toBe("new-1");
@@ -436,7 +447,7 @@ describe("createItemAction", () => {
   });
 
   it("drops the unit filter from the redirect when the new item's deviceUIC differs from it", async () => {
-    requireAdmin.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     createItem.mockResolvedValue({ id: "new-1", serialNumber: "ABC123", deviceUIC: "WXYZ02" });
     const result = await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "WABC01" }));
     expect(result.itemId).toBe("new-1");
@@ -446,23 +457,23 @@ describe("createItemAction", () => {
 
 // ---------------------------------------------------------------------------
 // deleteItemAction — permanent delete. deleteItem() itself enforces NO
-// permissions (see its docstring in items.service.ts), so requireAdmin() here
+// permissions (see its docstring in items.service.ts), so requireCapability() here
 // is the ENTIRE authorization boundary. The point of these tests is not just
 // that a rejection throws (that would be true even if the guard ran after the
 // delete) but that the destructive call never happens when it rejects.
 // ---------------------------------------------------------------------------
 
 describe("deleteItemAction", () => {
-  it("calls requireAdmin BEFORE any write, and never calls deleteItem when it rejects", async () => {
-    requireAdmin.mockRejectedValue(new Error("FORBIDDEN"));
+  it("calls requireCapability BEFORE any write, and never calls deleteItem when it rejects", async () => {
+    requireCapability.mockRejectedValue(new Error("FORBIDDEN"));
     await expect(deleteItemAction(fd({ id: "item-1" }))).rejects.toThrow("FORBIDDEN");
-    expect(requireAdmin).toHaveBeenCalledTimes(1);
+    expect(requireCapability).toHaveBeenCalledTimes(1);
     expect(deleteItem).not.toHaveBeenCalled();
     expect(revalidatePath).not.toHaveBeenCalled();
   });
 
-  it("deletes the item by id when requireAdmin resolves", async () => {
-    requireAdmin.mockResolvedValue(ADMIN);
+  it("deletes the item by id when requireCapability resolves", async () => {
+    requireCapability.mockResolvedValue(ADMIN);
     const res = await deleteItemAction(fd({ id: "item-1" }));
     expect(res).toBeUndefined();
     expect(deleteItem).toHaveBeenCalledTimes(1);
