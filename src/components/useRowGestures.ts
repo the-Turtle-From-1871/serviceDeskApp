@@ -204,6 +204,43 @@ export function useRowGestures({
     };
   }, [endGesture]);
 
+  // Once a gesture is claimed as a horizontal swipe, the browser must not be
+  // allowed to scroll the same touch. `touch-action: pan-y pinch-zoom` on the
+  // row (globals.css) keeps vertical panning for the browser for the WHOLE
+  // touch, not merely its opening samples — so a drag that starts horizontally
+  // and then drifts down, or one begun while the list is already moving, is
+  // handed to the scroller mid-swipe and the browser takes the pointer away
+  // with `pointercancel`. By then the card has followed the finger for real,
+  // and every cancel path here calls `settle()` — so it snaps back to closed.
+  // That is the "the card slides left and then goes back by itself while I'm
+  // scrolling" bug, and it is invisible in desktop Chromium, which resolves
+  // the same arbitration before the axis is ever claimed.
+  //
+  // `preventDefault` on the touch stream is the only thing that stops it, and
+  // the listener MUST be registered with `{ passive: false }` here: React
+  // attaches its own touch handlers passively at the root container, so an
+  // `onTouchMove={(e) => e.preventDefault()}` prop is silently a no-op.
+  // Ordering works out because a pointermove dispatches completely — setting
+  // `g.axis` in onPointerMove below — before the browser fires the matching
+  // touchmove, so the very sample that claims the swipe is also the first one
+  // refused, while it is still `cancelable` (i.e. before the scroll begins;
+  // once it has, the browser stops asking).
+  //
+  // Single-finger only. A second finger landing during a swipe is a pinch, and
+  // `touch-action` names `pinch-zoom` deliberately — magnifying a serial
+  // number is exactly what someone does on a phone (WCAG 1.4.4). The gesture
+  // slot stays occupied by the first finger, so without the touch count this
+  // would quietly disable zoom for the length of every drag.
+  useEffect(() => {
+    const claimTouch = (e: TouchEvent) => {
+      if (gesture.current?.axis !== "horizontal") return;
+      if (e.touches.length !== 1) return;
+      if (e.cancelable) e.preventDefault();
+    };
+    document.addEventListener("touchmove", claimTouch, { passive: false });
+    return () => document.removeEventListener("touchmove", claimTouch);
+  }, []);
+
   const consumeSuppressedClick = useCallback(
     (rowId: string, opts?: { holdSuppresses?: boolean }) => {
       if (suppressClick.current === rowId) {
