@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { ItemSelectTable } from "./ItemSelectTable";
-import { SORTABLE_COLUMNS } from "./items-view";
+import { SORTABLE_COLUMNS, estimateTextEm } from "./items-view";
 import { LONG_PRESS_MS, LONG_PRESS_SLOP_PX, CARD_LAYOUT_QUERY, DRAWER_WIDTH, AXIS_LOCK_PX } from "./swipe-row";
 
 // One shared spy rather than a fresh vi.fn() per useRouter() call, so the
@@ -341,22 +341,26 @@ describe("ItemSelectTable — mobile card structure", () => {
     const { container } = renderRows({ items: [{ ...ROW, homeUnit: "     " }] });
     const dd = container.querySelector("td.cell-more dd.card-more__fit");
     expect(dd!.textContent).toBe("—");
-    expect(dd!.querySelector("span")!.style.getPropertyValue("--len")).toBe("");
+    expect(dd!.querySelector("span")!.style.getPropertyValue("--w")).toBe("");
   });
 
   // The fit sizing is CSS (`clamp` over a container query), so jsdom — which has
   // no layout engine and does not resolve `cqi` — cannot show the rendered size.
-  // What it CAN pin is the one input React owns: the character count reaching
-  // CSS as `--len` on the span, not on the dd. Drop it and the clamp silently
-  // falls back to its 12-character default for every unit, which looks fine on
-  // short strings and long ones alike until someone measures.
-  it("hands the home unit's length to CSS as --len", () => {
+  // What it CAN pin is the one input React owns: the estimated width reaching
+  // CSS as `--w` on the span, not on the dd. Drop it and the clamp silently
+  // falls back to its 20em default for every unit, which looks fine on short
+  // strings and long ones alike until someone measures.
+  it("hands the home unit's estimated width to CSS as --w", () => {
     const { container } = renderRows();
     const dd = container.querySelector("td.cell-more dd.card-more__fit");
     expect(dd).not.toBeNull();
     const span = dd!.querySelector("span");
     expect(span!.textContent).toBe(ROW.homeUnit);
-    expect(span!.style.getPropertyValue("--len")).toBe(String(ROW.homeUnit.length));
+    expect(span!.style.getPropertyValue("--w")).toBe(String(estimateTextEm(ROW.homeUnit)));
+    // Not the character count — that is the bug this replaced. A unit full of
+    // spaces and commas is far narrower than its length implies, and charging
+    // it as if it were all capitals is what drove the font onto its floor.
+    expect(estimateTextEm(ROW.homeUnit)).toBeLessThan(ROW.homeUnit.length * 0.64);
   });
 
   // Not driven by the Columns menu, exactly like the card cells above: the panel

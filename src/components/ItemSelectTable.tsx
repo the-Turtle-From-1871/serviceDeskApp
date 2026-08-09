@@ -13,6 +13,7 @@ import { MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW } from "@/modules/transfers/receipt
 import {
   READINESS_LABEL,
   ITEM_COLUMNS,
+  estimateTextEm,
   parseHiddenCols,
   present,
   selectableIds,
@@ -364,13 +365,16 @@ export function ItemSelectTable({
                 those, because a closed <details> has no layout to measure. See
                 `.card-more__fit` in globals.css for the arithmetic.
 
-                `--len` counts the TRIMMED string, which is also what renders —
-                charging CSS for whitespace the value does not show would shrink
-                the font for nothing. */}
+                `--w` is the string's estimated width in em, from measured Geist
+                glyph widths — NOT its character count. A count charges a comma
+                and a W alike, and unit names are full of spaces, which is what
+                pushed the font onto its floor and wrapped the line on a narrow
+                phone. Estimated from the TRIMMED string, which is also what
+                renders. */}
             <dt className="card-more__fit-label">Home unit</dt>
             <dd className="card-more__fit">
               {homeUnit
-                ? <span style={{ ["--len" as string]: homeUnit.length }}>{homeUnit}</span>
+                ? <span style={{ ["--w" as string]: estimateTextEm(homeUnit) }}>{homeUnit}</span>
                 : orDash(null)}
             </dd>
             {/* SLOC is the ONE row that disappears when it is empty, rather

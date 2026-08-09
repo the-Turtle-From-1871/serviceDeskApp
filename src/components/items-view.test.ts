@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   sortItemRows,
   parseSortPref,
+  estimateTextEm,
   parseHiddenCols,
   present,
   selectableIds,
@@ -236,6 +237,43 @@ describe("sortFilterSummary", () => {
     for (const c of SORTABLE_COLUMNS) {
       expect(sortFilterSummary(c.key, "asc", null)).toBe(`${c.label} ▲`);
     }
+  });
+});
+
+// The width estimate behind the one-line Home unit. The property that matters
+// is DIRECTIONAL: it must never come in UNDER the real rendered width, because
+// the font size is the column width divided by this number — an under-estimate
+// is a line that overflows. Real-width accuracy was measured in a browser
+// (2.8-5.3% over across the catalogue's 18 unit strings); what is pinned here
+// is the arithmetic that cannot be checked without a layout engine.
+describe("estimateTextEm", () => {
+  // The whole reason the flat character count was wrong: a comma and a space
+  // are about a quarter em, a W is nearly a whole one.
+  it("charges narrow glyphs less than wide ones", () => {
+    expect(estimateTextEm(",,,,")).toBeLessThan(estimateTextEm("WWWW"));
+    expect(estimateTextEm("    ")).toBeLessThan(estimateTextEm("MMMM"));
+    expect(estimateTextEm("IIII")).toBeLessThan(estimateTextEm("OOOO"));
+  });
+
+  // The catalogue's longest unit: 53 characters, nine of them spaces. The old
+  // sizing charged 53 × 0.64 = 33.9em and put the font on its floor; the real
+  // width is about 28.7em, which is the room this recovers.
+  it("estimates a space-heavy unit name well below its character count", () => {
+    const unit = "DET 3, COMPANY C 2D BATTALION 641ST AVIATION REGIMENT";
+    expect(estimateTextEm(unit)).toBeLessThan(unit.length * 0.64);
+    expect(estimateTextEm(unit)).toBeGreaterThan(unit.length * 0.4);
+  });
+
+  it("grows with the string and is zero for an empty one", () => {
+    expect(estimateTextEm("")).toBe(0);
+    expect(estimateTextEm("HHC")).toBeLessThan(estimateTextEm("HHC, 1-506 IN"));
+  });
+
+  // An unknown glyph must not read as zero width — that would size the font as
+  // if the text were shorter than it is, which is the overflow direction.
+  it("charges an unlisted glyph a conservative width", () => {
+    expect(estimateTextEm("é")).toBeGreaterThan(0.5);
+    expect(estimateTextEm("★")).toBeGreaterThan(0.5);
   });
 });
 

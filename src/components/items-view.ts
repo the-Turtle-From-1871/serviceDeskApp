@@ -158,6 +158,64 @@ export function selectAllState(items: ItemRow[], selected: ReadonlySet<string>):
   return hits === ids.length ? "all" : "some";
 }
 
+/* ── Text width estimation, for the card More panel's one-line Home unit ──────
+ *
+ * Widths in em for Geist (this app's `--font-sans`), MEASURED in a browser at
+ * font-size 100px rather than guessed. Only the glyphs that actually appear in
+ * unit names are listed; anything else falls back to a per-class default below.
+ *
+ * Why a table at all: the row used to be sized from the character COUNT times
+ * one flat ceiling, which charges "DET 3, COMPANY C 2D BATTALION 641ST AVIATION
+ * REGIMENT" — nine spaces and a comma, all about a quarter em — as if every
+ * character were a capital. That over-estimate is what pushed the font onto its
+ * floor and made the value wrap on a narrow phone, i.e. it defeated the very
+ * thing the sizing exists for. A comma is 0.20em and a W is 0.95em; treating
+ * them alike wastes up to 17% of the line.
+ */
+const GLYPH_EM: Record<string, number> = {
+  " ": 0.25, ",": 0.20, ".": 0.25, "'": 0.20, "(": 0.27, ")": 0.27,
+  "-": 0.42, "/": 0.45, "&": 0.62, "#": 0.48, ":": 0.27, ";": 0.27,
+  A: 0.67, B: 0.68, C: 0.70, D: 0.69, E: 0.60, F: 0.59, G: 0.70, H: 0.71,
+  I: 0.27, J: 0.60, K: 0.70, L: 0.58, M: 0.88, N: 0.74, O: 0.74, P: 0.65,
+  Q: 0.73, R: 0.67, S: 0.64, T: 0.55, U: 0.69, V: 0.67, W: 0.95, X: 0.67,
+  Y: 0.58, Z: 0.62,
+  "0": 0.66, "1": 0.38, "2": 0.62, "3": 0.61, "4": 0.62, "5": 0.62,
+  "6": 0.59, "7": 0.52, "8": 0.63, "9": 0.59,
+  // Unit names are nearly all uppercase, but not entirely ("Environmental"),
+  // and the class fallback over-estimated that one by a third — a smaller font
+  // than it needed, on a value with room to spare.
+  a: 0.55, c: 0.55, e: 0.56, f: 0.40, i: 0.24, l: 0.27, m: 0.88, n: 0.58,
+  o: 0.57, r: 0.38, t: 0.39, v: 0.54, y: 0.54,
+};
+
+/** Unlisted glyphs, by class. Deliberately on the HIGH side of what Geist
+ *  actually draws: over-estimating costs a fraction of a pixel of font size,
+ *  while under-estimating overflows the line the whole mechanism exists to
+ *  keep to one. */
+function fallbackEm(ch: string): number {
+  if (ch >= "A" && ch <= "Z") return 0.75;
+  if (ch >= "0" && ch <= "9") return 0.66;
+  if (ch >= "a" && ch <= "z") return 0.62;
+  return 0.60;
+}
+
+/** Safety margin on the estimate. Covers rounding in the table, the fallbacks,
+ *  and the case that matters most: the webfont failing to load, so the text is
+ *  drawn in `system-ui` with metrics this table never saw. */
+const WIDTH_SAFETY = 1.02;
+
+/** Estimated rendered width of `text`, in em.
+ *
+ *  Pure and synchronous on purpose — it runs during render for every row on the
+ *  page, and the panel it sizes lives inside a CLOSED `<details>`, so there is
+ *  no layout to measure even if measuring were affordable. CSS divides the
+ *  column width by this number to get a font size (see `.card-more__fit`). */
+export function estimateTextEm(text: string): number {
+  let em = 0;
+  for (const ch of text) em += GLYPH_EM[ch] ?? fallbackEm(ch);
+  return Math.round(em * WIDTH_SAFETY * 100) / 100;
+}
+
 /** A displayable value, or null when there is nothing to show.
  *
  *  ONE definition of "missing" for the card's More panel, because this data is
