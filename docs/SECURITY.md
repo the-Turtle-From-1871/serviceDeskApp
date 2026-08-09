@@ -222,25 +222,51 @@ complexity or rotation rule (above) only makes sense alongside this.
 
 ## 2. Authorization
 
-Authorization is **role-based** (`ADMIN` / `USER`), never ownership-based —
-inventory, receipts, and the queue are shared org-wide.
+Authorization is **capability-based** (`Capability`, nine values), never
+ownership-based — inventory, receipts, and the queue are shared org-wide.
 
-**Every Server Action and Route Handler starts with `requireUser()` or
-`requireAdmin()`** — never a bare `auth()`. Roughly 60 call sites. Throws a typed
-`AuthError` (`UNAUTHENTICATED` / `FORBIDDEN`). `src/lib/authz.ts`
+**A role is a baseline capability set, not a check.** `VIEWER` →
+`VIEW_INVENTORY`. `USER` → that plus `VIEW_ALL_RECEIPTS`, `CREATE_RECEIPTS`,
+`EDIT_ITEM_HOLDER`. `ADMIN` → all nine. `UserCapability` rows **add** to the
+baseline, so an individual can hold one privileged capability without being made
+an administrator. `src/modules/users/capabilities.ts` is the single definition of
+that mapping and is pure (no Prisma runtime import), so it is unit-tested
+directly.
 
-**Role and `isActive` are re-read from the DB on every protected request.** The
-JWT only carries the role captured at login, so this is what makes a demotion or
-deactivation take effect on the *next request* instead of at token expiry.
+**Grants are additive only — there is no negative grant.** This is deliberate: a
+subtractive model makes the effective set depend on the order two tables are read
+in, and the wrong answer to "does a deny row beat a grant row?" is a privilege
+bug. Reducing an account below its baseline is done by changing its role.
+
+**Every Server Action and Route Handler starts with `requireUser()`,
+`requireCapability()` or `requireAdmin()`** — never a bare `auth()`. Roughly 60
+call sites. Throws a typed `AuthError` (`UNAUTHENTICATED` / `FORBIDDEN`).
+`src/lib/authz.ts`
+
+**`requireAdmin()` is a thin alias for `requireCapability("ADMINISTER")`.** It
+remains the gate on user management, audits, the contact book, named signatures,
+the access PIN, receipt timers and seal verification. Narrower surfaces name
+their own capability: `MANAGE_ITEMS` (items, categories, units, import, QR
+sheets), `MANAGE_QUEUE` (service queue, readiness, deadlines),
+`PROCESS_RETURNS`, `VIEW_ANALYTICS`.
+
+**Role, `isActive` AND the capability grants are re-read from the DB on every
+protected request.** The JWT carries none of them — it only holds the identity
+captured at login — so a demotion, a deactivation **or a revoked grant** takes
+effect on the *next request* instead of at token expiry. The grants ride along on
+the same query that re-reads the role, so this costs no extra round trip.
 `src/lib/authz.ts` → `defaultGetSession`
 
 **The authz module is `server-only`** — line 1 of `src/lib/authz.ts`.
 
 **Field-level restriction is enforced server-side, not hidden in the UI.** A
-`USER` may edit only an item's current-holder email and current position;
-`deviceName` / `homeUnit` / `deviceUIC` / `notes` / `deviceCategory` /
-`storageLocation` are admin-only. `updateItemDetailsAction` **picks the Zod
-schema by role**, so a crafted POST can't widen the field set. Both edit
+caller holding only `EDIT_ITEM_HOLDER` may edit an item's current-holder email
+and current position; `deviceName` / `homeUnit` / `deviceUIC` / `notes` /
+`deviceCategory` / `storageLocation` need `MANAGE_ITEMS`.
+`updateItemDetailsAction` **requires `EDIT_ITEM_HOLDER` and picks the Zod schema
+by `MANAGE_ITEMS`**, so a crafted POST can't widen the field set — and a
+`VIEWER`, holding neither, is refused outright rather than falling through to the
+narrow schema. Both edit
 surfaces (the item card and `/admin/items/<id>/edit`) now share ONE field
 definition — `editableItemFields` in `src/modules/items/items.schema.ts` — so
 the admin set cannot drift between them; `userItemDetailsSchema` stays
@@ -456,7 +482,7 @@ receipt now both **creates and updates** shared contact rows.
 `src/modules/contacts/contacts.service.ts` is security-sensitive: update this
 document when you change it for exactly this reason — it is the only file where the book's write
 boundary lives, and it must not widen again without a doc change.
-*Last reviewed: 2026-08-07.*
+*Last reviewed: 2026-08-08.*
 
 ---
 
