@@ -1,17 +1,15 @@
-import NextAuth from "next-auth";
+import NextAuth, { CredentialsSignin } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import { z } from "zod";
 import prisma from "@/lib/prisma";
-import { verifyPassword } from "@/lib/password";
+import { checkCredentials, EMAIL_NOT_VERIFIED } from "@/modules/auth/credentials";
 import {
   SESSION_MAX_AGE_SECONDS,
   sessionFreshness,
 } from "@/lib/session-freshness";
 
-const credsSchema = z.object({
-  email: z.string().trim().email().transform((v) => v.toLowerCase()),
-  password: z.string().min(1),
-});
+class EmailNotVerifiedError extends CredentialsSignin {
+  code = EMAIL_NOT_VERIFIED;
+}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   // Trust the host header behind a platform proxy (e.g. Vercel) so Auth.js
@@ -30,14 +28,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
     Credentials({
       credentials: { email: {}, password: {} },
+      // The check itself lives in modules/auth/credentials.ts so it can be
+      // unit-tested without booting NextAuth. All this layer does is translate
+      // its result into what @auth/core expects: null for a generic failure,
+      // and a typed error for the one case the UI is allowed to name.
       authorize: async (raw) => {
-        const parsed = credsSchema.safeParse(raw);
-        if (!parsed.success) return null;
-        const { email, password } = parsed.data;
-        const user = await prisma.user.findUnique({ where: { email } });
-        if (!user || !user.isActive) return null;
-        if (!(await verifyPassword(password, user.passwordHash))) return null;
-        return { id: user.id, name: user.name, email: user.email, role: user.role };
+        const result = await checkCredentials(raw);
+        if (result.ok) return result.user;
+        if (result.reason === "unverified") throw new EmailNotVerifiedError();
+        return null;
       },
     }),
   ],

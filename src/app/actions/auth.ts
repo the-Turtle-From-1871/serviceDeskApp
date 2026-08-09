@@ -4,6 +4,7 @@ import { after } from "next/server";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { signIn, signOut } from "@/auth";
+import { EMAIL_NOT_VERIFIED } from "@/modules/auth/credentials";
 import prisma from "@/lib/prisma";
 import { emailField, passwordField, registerSchema } from "@/modules/users/users.schema";
 import { createSelfRegisteredUser } from "@/modules/users/users.service";
@@ -242,6 +243,15 @@ export async function loginAction(_prev: unknown, formData: FormData) {
     });
   } catch (error) {
     if (error instanceof AuthError) {
+      // Right password, unconfirmed address. NOT a credential failure: the
+      // bcrypt compare succeeded, so counting it would let ordinary sign-up
+      // traffic drive the app-wide botnet escalation. The rate-limit token
+      // stays spent — this is still a failed sign-in attempt — but the message
+      // is specific, which is safe precisely because reaching it required the
+      // correct password.
+      if ((error as { code?: string }).code === EMAIL_NOT_VERIFIED) {
+        return { unverified: true as const, email };
+      }
       // A real credential check that came back wrong — the only thing the
       // escalation should count. Throttled, malformed and challenge-refused
       // submissions never reached a password, so counting them would let an
@@ -264,6 +274,10 @@ export async function loginAction(_prev: unknown, formData: FormData) {
   // The other shape of failure: @auth/core returned an error URL instead of
   // throwing. Treated identically to a thrown AuthError.
   if (/[?&]error=/.test(destination)) {
+    // Same two cases as the thrown branch above, and for the same reasons.
+    if (destination.includes(`code=${EMAIL_NOT_VERIFIED}`)) {
+      return { unverified: true as const, email };
+    }
     await recordAuthFailure("login");
     return { error: "Invalid email or password." };
   }
@@ -464,6 +478,49 @@ export async function registerAction(_prev: unknown, formData: FormData) {
       });
     } catch (e) {
       console.error("[registerAction] deferred work failed:", e);
+    }
+  });
+
+  return { ok: true as const };
+}
+
+
+// Re-sends the confirmation link. Its OWN rate-limit scope: sharing
+// "register" would let a resend flood spend the budget that stops
+// account-creation spam, and vice versa — one capability, one scope.
+//
+// Generic and deferred for the same anti-enumeration reason as registration,
+// and it NEVER refunds: volume is the abuse here too.
+export async function resendVerificationAction(_prev: unknown, formData: FormData) {
+  const parsed = emailField.safeParse(String(formData.get("email") ?? ""));
+  if (!parsed.success) return { error: "Enter a valid email address." };
+  const email = parsed.data;
+
+  const keys = await identityRateLimitKeys("verify-resend", email);
+  const throttled = await spendAuthBudget(keys);
+  if (throttled) return throttled;
+
+  after(async () => {
+    try {
+      const base = defaultBaseUrl().replace(/\/$/, "");
+      if (!base) {
+        console.error("[resendVerificationAction] no base URL configured (set APP_URL); skipping");
+        return;
+      }
+      const user = await prisma.user.findUnique({ where: { email } });
+      // Silently no-op for unknown, inactive, and ALREADY-VERIFIED accounts —
+      // re-sending to a confirmed address would let anyone mail-bomb a known
+      // user through a form that reports nothing back.
+      if (!user || !user.isActive || user.emailVerifiedAt) return;
+
+      const raw = await createEmailVerificationToken(user.id);
+      await sendVerificationEmail({
+        to: user.email,
+        name: user.name,
+        verifyUrl: `${base}/verify-email?token=${raw}`,
+      });
+    } catch (e) {
+      console.error("[resendVerificationAction] deferred work failed:", e);
     }
   });
 
