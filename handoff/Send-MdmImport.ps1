@@ -97,7 +97,11 @@ try {
 
         $tmp = Join-Path $env:TEMP "mdm-import-$PID.stderr.txt"
         try {
-            $rawBody = & $curl.Source -sS -X POST $Uri `
+            # -L follows redirects. The apex dcsim.us answers a permanent 308 to
+            # www.dcsim.us, and curl does NOT follow unless told to, so without
+            # this the job dies on a bare 308 having sent nothing. (PowerShell 7's
+            # Invoke-RestMethod, the other branch above, follows by default.)
+            $rawBody = & $curl.Source -sSL -X POST $Uri `
                 -H "Authorization: Bearer $Secret" `
                 -F "file=@$($file.FullName)" `
                 -w "`n%{http_code}" 2>$tmp
@@ -111,16 +115,22 @@ try {
         $statusCode = [int]$lines[-1]
         $bodyText = ($lines[0..($lines.Length - 2)] -join "`n") -replace '^\s+|\s+$', ''
 
-        if ($statusCode -ne 200) {
-            if ($bodyText -match '<html|<!DOCTYPE') {
-                Fail @"
+        # Checked on EVERY response, including a 200 — NOT nested under the
+        # status check below. Now that -L follows redirects, a redirect chain can
+        # end on the login page, which answers 200 with HTML. A guard reachable
+        # only on a non-200 would let exactly that case through, and the job
+        # would report success while importing nothing.
+        if ($bodyText -match '<html|<!DOCTYPE') {
+            Fail @"
 The server returned HTTP $statusCode with an HTML page instead of JSON.
 
-If the status is 200, this means the request was redirected to the login page --
-the import endpoint has lost its exemption from the login gate. THE JOB WOULD
-LOOK SUCCESSFUL WHILE IMPORTING NOTHING. Report this to the app owner.
+This means the request was redirected to the login page -- the import endpoint
+has lost its exemption from the login gate. THE JOB WOULD OTHERWISE LOOK
+SUCCESSFUL WHILE IMPORTING NOTHING. Report this to the app owner.
 "@
-            }
+        }
+
+        if ($statusCode -ne 200) {
             Fail "HTTP $statusCode - $bodyText"
         }
 
