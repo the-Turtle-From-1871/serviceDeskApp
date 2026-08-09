@@ -210,10 +210,12 @@ describe("ItemSelectTable — mobile card structure", () => {
     expect(container.querySelector("table.table.table--cards")).not.toBeNull();
   });
 
-  // Reported: selecting an item resized the "Print QR codes" AND "Columns"
-  // buttons. On a phone the two share one fixed-width row, so the ` (N)` this
-  // label used to append widened this button by 8.9px and shrank Columns by
-  // exactly that much — then jittered again at (10) and (100). jsdom has no
+  // Reported: selecting an item resized the "Print QR codes" button and the one
+  // beside it. On a phone the toolbar's buttons share a flex row, so the ` (N)`
+  // this label used to append widened this button by 8.9px and shrank its
+  // neighbour by exactly that much — then jittered again at (10) and (100).
+  // (Measured against the Columns menu, which is desktop-only now; the
+  // neighbour is Sort & filter and the row behaves the same.) jsdom has no
   // layout engine, so what is pinned here is the CAUSE: the label is constant.
   // The count is not lost — the selection bar below reads "N selected · N rows".
   it("keeps the Print QR label constant when items are selected, so the toolbar cannot resize", () => {

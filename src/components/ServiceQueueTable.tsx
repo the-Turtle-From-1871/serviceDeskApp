@@ -98,6 +98,9 @@ export function ServiceQueueTable({ rows }: { rows: QueueRowVM[] }) {
           onPrimary={(key) => setSort({ ...sort, field: key as QueueSortField | null })}
           onDir={(dir) => setSort({ ...sort, dir })}
         />
+        {/* Desktop only — `.col-menu` is `display: none` below 720px, where the
+            row is a card built from cells this menu cannot reach. Same rule as
+            /items; it lives in globals.css, not in a width check here. */}
         <details className="col-menu spacer">
           <summary className="btn btn-secondary">Columns</summary>
           <div className="col-menu-panel">

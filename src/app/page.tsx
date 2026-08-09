@@ -60,9 +60,13 @@ export default async function HomePage() {
               <Link className="btn btn-secondary" href="/login">
                 Log in
               </Link>
-              <Link className="btn btn-ghost" href="/register">
-                Create account
-              </Link>
+              {/* No "Create account" button here. Registering is a step INSIDE
+                  signing in — the login form ends with "Don't have an account?
+                  Create one" — so offering it as a third peer button made this
+                  row read as three equally likely destinations when only two
+                  are: unlock with the PIN, or log in. /register itself is
+                  unchanged and still reachable, from the login form and from
+                  the explanation below. */}
             </div>
           </div>
         )}

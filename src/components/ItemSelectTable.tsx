@@ -240,8 +240,10 @@ export function ItemSelectTable({
           Serial column would get a card with no heading and — because the
           heading carries the link — no way to open the item at all. Building
           the card from cells the column preferences cannot reach makes that
-          unrepresentable. The cost is that the Columns menu shapes the desktop
-          table only, which is the right place for it. */}
+          unrepresentable. The corollary is that the Columns menu shapes the
+          desktop table only — which is why globals.css hides the menu itself
+          below 720px: every column it can reach is already `.cell-desktop`, so
+          on a phone its checkboxes changed nothing on screen. */}
       <td className="mono cell-serial" data-label="Serial">
         {/* The stretched link: globals.css gives its ::after the whole row, so
             tapping anywhere on the card opens the item while the accessibility
@@ -546,10 +548,13 @@ export function ItemSelectTable({
             title={selected.size === 0 ? "Select items to print QR labels" : undefined}
           >
             {/* The label is CONSTANT on purpose. It used to append ` (N)`, and
-                on a phone this button and Columns share one fixed-width row —
+                on a phone this button shares a flex row with its neighbour —
                 so the suffix appearing widened this button by 8.9px and shrank
-                Columns by exactly that much, then jittered again at (10) and
-                (100). The count is not lost: the selection bar below reads
+                the control beside it by exactly that much, then jittered again
+                at (10) and (100). (The neighbour was the Columns menu when that
+                was measured; the menu is desktop-only now, so it is Sort &
+                filter, and the row still resizes the same way.) The count is
+                not lost: the selection bar below reads
                 "N selected · N rows", and it is on screen under precisely the
                 same condition (selected.size > 0), so this was showing the same
                 number twice at the cost of the toolbar resizing. Measured at
@@ -557,6 +562,9 @@ export function ItemSelectTable({
             Print QR codes
           </button>
         )}
+        {/* Desktop only — `.col-menu` is `display: none` below 720px, where the
+            row is a card and every column below is already hidden. Not a
+            viewport check in JS: nothing here may branch on width. */}
         <details className="col-menu spacer">
           <summary className="btn btn-secondary">Columns</summary>
           <div className="col-menu-panel">
