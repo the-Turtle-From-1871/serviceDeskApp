@@ -63,6 +63,16 @@ const fd = (entries: Record<string, string>) => {
 
 const creds = () => fd({ email: "tech@example.com", password: "hunter2hunter2" });
 
+/** The refusal message, or undefined if the action did not refuse.
+ *
+ *  `loginAction` returns one of three shapes now — `{error}`, `{unverified,
+ *  email}` and `{ok: true}` — so a bare `res?.error` does not type-check
+ *  against the union. Narrowing once here keeps the assertions readable AND
+ *  makes a test that expected a lockout but got a SUCCESS fail on the message
+ *  rather than on a property that silently reads `undefined`. */
+const errorOf = (res: Awaited<ReturnType<typeof loginAction>>) =>
+  res && "error" in res ? res.error : undefined;
+
 beforeEach(() => {
   vi.clearAllMocks();
   __resetRateLimitStateForTests();
@@ -84,8 +94,8 @@ describe("loginAction rate limiting", () => {
     }
 
     const blocked = await loginAction(undefined, creds());
-    expect(blocked?.error).toMatch(/Too many attempts from this network/);
-    expect(blocked?.error).toMatch(/minutes/);
+    expect(errorOf(blocked)).toMatch(/Too many attempts from this network/);
+    expect(errorOf(blocked)).toMatch(/minutes/);
   });
 
   it("refuses BEFORE calling signIn, so a locked-out attacker costs no bcrypt", async () => {
@@ -121,7 +131,7 @@ describe("loginAction rate limiting", () => {
     // The budget is already gone, even though not one attempt has completed.
     signIn.mockRejectedValue(new AuthError("CredentialsSignin"));
     const blocked = await loginAction(undefined, creds());
-    expect(blocked?.error).toMatch(/Too many attempts from this network/);
+    expect(errorOf(blocked)).toMatch(/Too many attempts from this network/);
     expect(inFlight).toHaveLength(AUTH_POLICY.limit);
   });
 
@@ -156,7 +166,7 @@ describe("loginAction rate limiting", () => {
       });
     }
     const blocked = await loginAction(undefined, creds());
-    expect(blocked?.error).toMatch(/Too many attempts/);
+    expect(errorOf(blocked)).toMatch(/Too many attempts/);
   });
 
   it("does NOT refund on an unexpected server error", async () => {
@@ -174,7 +184,7 @@ describe("loginAction rate limiting", () => {
     }
     signIn.mockRejectedValue(new AuthError("CredentialsSignin"));
     const blocked = await loginAction(undefined, creds());
-    expect(blocked?.error).toMatch(/Too many attempts from this network/);
+    expect(errorOf(blocked)).toMatch(/Too many attempts from this network/);
   });
 
   it("keeps the generic failure message — the limiter must not leak account state", async () => {
@@ -231,7 +241,7 @@ describe("loginAction rate limiting", () => {
 
     // Now ceiling-refused. The victim's count must not be reset by it.
     const blocked = await loginAction(undefined, fd({ email: victim, password: "wrong" }));
-    expect(blocked?.error).toMatch(/Too many attempts/);
+    expect(errorOf(blocked)).toMatch(/Too many attempts/);
     expect(__memoryHitCountForTests(victimKey)).toBeGreaterThanOrEqual(2);
   });
 
@@ -244,7 +254,7 @@ describe("loginAction rate limiting", () => {
       await loginAction(undefined, fd({ email: "alice@example.com", password: "wrong" }));
     }
     expect(
-      (await loginAction(undefined, fd({ email: "alice@example.com", password: "wrong" })))?.error,
+      errorOf(await loginAction(undefined, fd({ email: "alice@example.com", password: "wrong" }))),
     ).toMatch(/Too many attempts/);
 
     const bob = await loginAction(undefined, fd({ email: "bob@example.com", password: "wrong" }));
@@ -260,7 +270,7 @@ describe("loginAction rate limiting", () => {
       undefined,
       fd({ email: "  ALICE@Example.COM ", password: "wrong" }),
     );
-    expect(shouted?.error).toMatch(/Too many attempts/);
+    expect(errorOf(shouted)).toMatch(/Too many attempts/);
   });
 
   it("does NOT let one hammered account drain the whole network's ceiling", async () => {
@@ -296,7 +306,7 @@ describe("loginAction rate limiting", () => {
     // ...so the next fresh account is refused by the ceiling.
     signIn.mockRejectedValue(new AuthError("CredentialsSignin"));
     const blocked = await loginAction(undefined, fd({ email: "next@example.com", password: "x" }));
-    expect(blocked?.error).toMatch(/Too many attempts/);
+    expect(errorOf(blocked)).toMatch(/Too many attempts/);
   });
 
   it("stops a spray across many accounts from one network", async () => {
@@ -315,7 +325,7 @@ describe("loginAction rate limiting", () => {
       undefined,
       fd({ email: "victim-last@example.com", password: "wrong" }),
     );
-    expect(blocked?.error).toMatch(/Too many attempts/);
+    expect(errorOf(blocked)).toMatch(/Too many attempts/);
   });
 });
 

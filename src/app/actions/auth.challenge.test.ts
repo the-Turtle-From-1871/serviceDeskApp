@@ -44,6 +44,16 @@ const creds = (token?: string, email = "tech@example.com") => {
   return f;
 };
 
+/** The refusal message, or undefined if the action did not refuse.
+ *
+ *  `loginAction` returns one of three shapes now — `{error}`, `{unverified,
+ *  email}` and `{ok: true}` — so a bare `res?.error` does not type-check
+ *  against the union. Narrowing once here keeps the assertions readable AND
+ *  makes a test that expected a refusal but got a SUCCESS fail on the message
+ *  rather than on a property that silently reads `undefined`. */
+const errorOf = (res: Awaited<ReturnType<typeof loginAction>>) =>
+  res && "error" in res ? res.error : undefined;
+
 const configureTurnstile = () => {
   vi.stubEnv("NEXT_PUBLIC_TURNSTILE_SITE_KEY", SITE_KEY);
   vi.stubEnv("TURNSTILE_SECRET_KEY", SECRET_KEY);
@@ -82,7 +92,7 @@ describe("loginAction — Turnstile", () => {
     // The point of the widget: keep headless scripts away from bcrypt entirely.
     configureTurnstile();
     const res = await loginAction(undefined, creds());
-    expect(res?.error).toMatch(CHALLENGE_MESSAGE);
+    expect(errorOf(res)).toMatch(CHALLENGE_MESSAGE);
     expect(signIn).not.toHaveBeenCalled();
   });
 
@@ -98,7 +108,7 @@ describe("loginAction — Turnstile", () => {
     configureTurnstile();
     siteverify({ success: false, "error-codes": ["invalid-input-response"] });
     const res = await loginAction(undefined, creds("forged"));
-    expect(res?.error).toMatch(CHALLENGE_MESSAGE);
+    expect(errorOf(res)).toMatch(CHALLENGE_MESSAGE);
     expect(signIn).not.toHaveBeenCalled();
   });
 
@@ -141,7 +151,7 @@ describe("loginAction — Turnstile under a detected attack", () => {
 
     fetchMock.mockRejectedValue(new Error("ETIMEDOUT"));
     const res = await loginAction(undefined, creds("unverifiable"));
-    expect(res?.error).toMatch(CHALLENGE_MESSAGE);
+    expect(errorOf(res)).toMatch(CHALLENGE_MESSAGE);
     expect(signIn).not.toHaveBeenCalled();
   });
 
