@@ -66,6 +66,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   #### Notes
   - No database, environment or deployment change.
   - On Safari older than version 26 the panel appears as the bottom sheet at every window size rather than as a dropdown. It behaves identically; only the position differs.
+
+### Fixed
+- **Your iPhone can now save the sign-in and offer it back with Face ID / Touch ID.** The login fields have advertised themselves to password managers correctly since 2026-08-06, but on a phone nothing was ever offered — because iOS had never been given the chance to *save* the password in the first place, so there was nothing in the keychain to fill. Signing in used to move you to the items list without the browser treating it as leaving the page, and that is precisely the moment Safari decides whether to ask "Would you like to save this password?". It never asked, so autofill had nothing, which looked exactly like the autofill being broken.
+
+  Signing in now leaves the login page properly, so iOS offers to save the password on your next successful sign-in — and from then on tapping the email field offers the saved login. Nothing else about signing in changed: the same challenge, the same lockout rules after repeated wrong passwords, and the same page you land on afterwards.
+
+  #### Notes
+  - No database, environment or deployment change.
+  - **The prompt appears on the next sign-in, not retroactively** — you have to sign in once more for iOS to capture it. If you would rather not wait, add it by hand in Settings → Passwords.
+  - A password saved earlier against an old `*.vercel.app` address is stored under that address and will never be offered on `www.dcsim.us`; save it again on the current one.
+  - Signing in is now a full page load rather than an in-page transition, so it may appear marginally slower on a poor connection.
+
 ### Removed
 - **The `Send-MdmImport.ps1` wrapper script is gone; the scheduled fleet import now uses `curl.exe` directly.** The script existed to pre-check the mistakes people actually make and to refuse a response that was a web page rather than data, but it needed repeated repair to survive the locked-down machine it runs on — .NET calls refused under Constrained Language Mode, then redirects, then the guard being on the wrong side of a status check. `handoff/automated-mdm-import.md` now documents a plain `curl.exe` command instead, which needs no execution policy, works on Windows PowerShell 5.1 and 7 alike, and makes no .NET calls at all. **The import endpoint itself is unchanged** — same address, same secret, same behaviour.
 

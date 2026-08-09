@@ -39,14 +39,11 @@ vi.mock("next/headers", () => ({
   headers: async () => new Headers({ "x-forwarded-for": TEST_IP, ...extraHeaders.current }),
 }));
 
-// `loginAction` issues its own redirect now that it decides success from a
-// RETURN value rather than a thrown marker. Throwing here keeps the assertions
-// able to see that it happened.
-vi.mock("next/navigation", () => ({
-  redirect: (url: string) => {
-    throw Object.assign(new Error(`NEXT_REDIRECT:${url}`), { digest: "NEXT_REDIRECT" });
-  },
-}));
+// `loginAction` no longer calls `redirect()` at all: a Server Action redirect is
+// a client-side router navigation, and WebKit only offers to save a password
+// after a real document navigation, so the action returns `{ ok: true }` and
+// `LoginForm` navigates itself. Success is therefore a RETURN VALUE here too —
+// there is no `next/navigation` mock left to install.
 
 import { loginAction, requestPasswordResetAction, resetPasswordAction } from "./auth";
 import {
@@ -131,12 +128,12 @@ describe("loginAction rate limiting", () => {
   it("REFUNDS the token when the sign-in succeeds", async () => {
     // The load-bearing property: the service desk shares one NAT egress IP, so
     // charging successes would take the whole desk offline after five logins.
-    // With `redirect: false`, success is a RETURNED destination and the action
-    // redirects to it itself.
+    // With `redirect: false`, success is a RETURNED destination, which the
+    // action turns into its own `{ ok: true }` for the client to navigate on.
     signIn.mockResolvedValue("http://localhost/items");
 
     for (let i = 0; i < AUTH_POLICY.limit * 4; i++) {
-      await expect(loginAction(undefined, creds())).rejects.toThrow("NEXT_REDIRECT");
+      expect(await loginAction(undefined, creds()), `try ${i + 1}`).toEqual({ ok: true });
     }
 
     // The budget is back, so a genuine typo still gets its full five tries.
@@ -292,9 +289,9 @@ describe("loginAction rate limiting", () => {
     }
     // ...then sign in correctly, which must NOT hand the ceiling back...
     signIn.mockResolvedValue("http://localhost/items");
-    await expect(
-      loginAction(undefined, fd({ email: "real@example.com", password: "right" })),
-    ).rejects.toThrow("NEXT_REDIRECT");
+    expect(
+      await loginAction(undefined, fd({ email: "real@example.com", password: "right" })),
+    ).toEqual({ ok: true });
 
     // ...so the next fresh account is refused by the ceiling.
     signIn.mockRejectedValue(new AuthError("CredentialsSignin"));

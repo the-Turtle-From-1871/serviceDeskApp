@@ -3,7 +3,7 @@
 A living inventory of every security control in this app — what it does, where
 it lives, and why. **Maintained over time**; see [Keeping this current](#keeping-this-current).
 
-**Last reviewed: 2026-08-07**
+**Last reviewed: 2026-08-08**
 
 Related: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`../CLAUDE.md`](../CLAUDE.md) · [`password-reset-hardening.md`](./password-reset-hardening.md)
 
@@ -262,6 +262,29 @@ complexity or rotation rule (above) only makes sense alongside this.
 > still runs the same Turnstile check, per-account bucket and velocity counter
 > ([§12](#12-rate-limiting), [§13](#13-captcha--cloudflare-turnstile)), and an
 > autofilled password is verified exactly like a typed one.
+
+**A successful sign-in leaves `/login` by a full document navigation, and that is
+load-bearing for the above.** `loginAction` returns `{ ok: true }` rather than
+calling `redirect()`; `LoginForm` then performs the navigation itself
+(`window.location.assign`), with a hoisted `<meta http-equiv="refresh">` covering
+the no-JS path. The reason is that a Server Action `redirect()` is executed by
+the React router as a *client-side* navigation, and WebKit only offers to **save**
+a password after a form submission followed by a real document navigation — so
+with the router version nothing was ever written to the iOS keychain and the
+autocomplete attributes above had no stored credential to offer back. Correct
+attributes and no save prompt look identical from the outside.
+
+> Two properties to preserve if this is ever revisited. The destination is the
+> shared `LOGIN_DESTINATION` constant (`src/lib/login-destination.ts`), the same
+> value handed to `signIn()` as `redirectTo`; the action deliberately does **not**
+> return the URL `signIn()` produced, because feeding a server-supplied URL into a
+> client-side `location.assign` is an open redirect the moment anything upstream
+> can influence it. And the `<meta>` fallback is what keeps the form working with
+> no client bundle — without it a scriptless browser signs in successfully and
+> then sits on the login page with nothing to say so. Pinned by
+> `LoginForm.test.tsx` (DOM contract) and `tests/e2e/auth.spec.ts` (that the JS
+> context does not survive, which is the only way to observe a real navigation —
+> jsdom can neither navigate nor stub `location.assign`).
 
 ---
 
