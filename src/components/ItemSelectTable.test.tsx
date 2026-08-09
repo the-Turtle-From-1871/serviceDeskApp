@@ -344,6 +344,21 @@ describe("ItemSelectTable — mobile card structure", () => {
     expect(dd!.querySelector("span")!.style.getPropertyValue("--w")).toBe("");
   });
 
+  // The structure the one-line layout rests on. jsdom cannot lay the row out,
+  // but it can pin that the label and value share a `.card-more__row` parent
+  // instead of sitting in the panel's shared grid columns — which is what gives
+  // the value the width to fit beside its label rather than under it.
+  it("keeps the home unit's label and value in one row of their own", () => {
+    const { container } = renderRows();
+    const row = container.querySelector("td.cell-more .card-more__row");
+    expect(row).not.toBeNull();
+    expect(row!.querySelector(":scope > dt.card-more__fit-label")!.textContent).toBe("Home unit");
+    expect(row!.querySelector(":scope > dd.card-more__fit")).not.toBeNull();
+    // Every other pair stays a direct child of the <dl>, so only this one row
+    // leaves the grid.
+    expect(container.querySelectorAll("td.cell-more .card-more__row")).toHaveLength(2);
+  });
+
   // The fit sizing is CSS (`clamp` over a container query), so jsdom — which has
   // no layout engine and does not resolve `cqi` — cannot show the rendered size.
   // What it CAN pin is the one input React owns: the estimated width reaching

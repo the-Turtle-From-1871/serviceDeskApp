@@ -21,10 +21,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 - **The home unit in an item card's *More* panel wrapped onto a second line on smaller phones.** It is meant to shrink just enough to sit on one line, and it did on a 390px screen — but on a narrower one, or on any phone where Safari's page zoom or a larger text setting leaves less room, the longest unit names ran onto two lines anyway. The sizing was estimating the text from its character count, which charges a space and a comma as if they were capital letters; unit names are full of both, so it ran out of room early and stopped shrinking while there was still space on screen.
 
-  It now estimates the real width of the text, so the unit fits on one line **and renders larger than before at every screen size** — measured across every home unit in the property book at 320, 360, 375, 390 and 430px, in both Chrome and Safari. A name longer than anything currently in the book still wraps rather than shrinking to nothing.
+  It now estimates the real width of the text, so the unit fits on one line — measured across every home unit in the property book at 320, 360, 375, 390 and 430px, in both Chrome and Safari. **The label and the value stay on the same line, like every other row in the panel.** A name longer than anything currently in the book still wraps rather than shrinking to nothing.
 
   #### Notes
   - No database, environment or deployment change.
+  - **On the narrowest phones (320px wide, e.g. an iPhone SE — or any phone where Safari's page zoom or a larger text setting leaves less room) the longest few unit names still wrap.** Fitting those beside the label would mean text too small to read; they are the exception, not the rule.
 
 ### Added
 - **You can create your own account.** The sign-in page now offers *Create one*, and there is a sign-up form at `/register`. You confirm your email address by clicking a link we send you — until you do, signing in is refused and tells you so, with a button to resend the link. A brand-new account is **read-only**: it can look up equipment and see the hand receipts you are named on, and nothing else. Issuing hand receipts, editing items and processing returns are separate permissions an administrator grants.

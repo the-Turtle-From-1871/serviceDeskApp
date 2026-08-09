@@ -356,27 +356,33 @@ export function ItemSelectTable({
                 an untrimmed check does the same for whitespace. */}
             <dt>Holder</dt>
             <dd>{orDash(it.holderName)}</dd>
-            {/* Sized to stay on ONE line however long the unit is, and given
-                the panel's full width to make that possible — real unit names
-                run to 53 characters. The length is handed to CSS as `--len` and
-                the width comes from the dd's own container query, so nothing is
-                measured in JS and it is right whether the panel is open, closed
-                or never opened — a measure-then-shrink effect could do none of
-                those, because a closed <details> has no layout to measure. See
-                `.card-more__fit` in globals.css for the arithmetic.
+            {/* Home unit reads like every other row — label and value on ONE
+                line — but it is wrapped in its own flex row rather than sitting
+                in the shared grid columns, and that is what buys the space to
+                keep the value on one line too. The grid's label track is as wide
+                as "LAST LOGON DATE" (114px at 390px), leaving 198px for a value
+                that can run to 53 characters; on its own row the label costs
+                only its own width, so the value gets ~270px instead. `<div>`
+                between `<dl>` and `<dt>`/`<dd>` is valid HTML and keeps the
+                name/value semantics a screen reader announces.
 
+                The value's font is then sized to fit that width on one line.
                 `--w` is the string's estimated width in em, from measured Geist
                 glyph widths — NOT its character count. A count charges a comma
                 and a W alike, and unit names are full of spaces, which is what
                 pushed the font onto its floor and wrapped the line on a narrow
                 phone. Estimated from the TRIMMED string, which is also what
-                renders. */}
-            <dt className="card-more__fit-label">Home unit</dt>
-            <dd className="card-more__fit">
-              {homeUnit
-                ? <span style={{ ["--w" as string]: estimateTextEm(homeUnit) }}>{homeUnit}</span>
-                : orDash(null)}
-            </dd>
+                renders. Nothing is measured in JS: the panel lives in a closed
+                <details> until tapped, so there is no layout to measure, on 50
+                rows. See `.card-more__fit` in globals.css for the arithmetic. */}
+            <div className="card-more__row">
+              <dt className="card-more__fit-label">Home unit</dt>
+              <dd className="card-more__fit">
+                {homeUnit
+                  ? <span style={{ ["--w" as string]: estimateTextEm(homeUnit) }}>{homeUnit}</span>
+                  : orDash(null)}
+              </dd>
+            </div>
             {/* SLOC is the ONE row that disappears when it is empty, rather
                 than showing a dash. Most of the catalogue has no storage
                 location — a dash on nearly every card is a row of noise between
