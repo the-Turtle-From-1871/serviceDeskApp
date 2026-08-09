@@ -29,6 +29,36 @@ test("admin can sign in", async ({ page }) => {
   await signIn(page);
 });
 
+test("signing in leaves /login with a full DOCUMENT navigation", async ({ page }) => {
+  // This is the whole reason `loginAction` returns `{ ok: true }` instead of
+  // calling `redirect()`. A Server Action redirect is performed by the React
+  // router, and WebKit only offers to save a password after a form submission
+  // followed by a real document navigation — so with the router version nothing
+  // was ever written to the iOS keychain, and Password AutoFill had nothing to
+  // offer on the next visit no matter how correct the form's `autocomplete`
+  // attributes were. It looked exactly like "autofill is broken".
+  //
+  // Only a browser can answer this: jsdom cannot navigate and cannot even stub
+  // `location.assign`, so `LoginForm.test.tsx` pins the DOM contract and this
+  // pins the navigation. Detected by whether the JS context survived — a
+  // client-side navigation keeps it (and the marker with it), a document
+  // navigation throws it away.
+  await page.goto("/login");
+  await page.evaluate(() => {
+    (window as unknown as Record<string, unknown>).__preSignInMarker = true;
+  });
+
+  await page.fill('input[name="email"]', "admin@example.com");
+  await page.fill('input[name="password"]', "ChangeMe123!");
+  await page.click('button[type="submit"]');
+  await expect(page).toHaveURL(/\/items/);
+
+  const survived = await page.evaluate(
+    () => (window as unknown as Record<string, unknown>).__preSignInMarker,
+  );
+  expect(survived, "the pre-sign-in JS context must NOT survive").toBeUndefined();
+});
+
 test("the session cookie is re-issued on every request", async ({ page, context }) => {
   // This is the mechanism the idle timeout rides on, and nothing else
   // can see it. The unit tests drive the `jwt` callback directly, so they prove

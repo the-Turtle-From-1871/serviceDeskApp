@@ -2,9 +2,9 @@
 import { AuthError } from "next-auth";
 import { after } from "next/server";
 import { headers } from "next/headers";
-import { redirect } from "next/navigation";
 import { signIn, signOut } from "@/auth";
 import { EMAIL_NOT_VERIFIED } from "@/modules/auth/credentials";
+import { LOGIN_DESTINATION } from "@/lib/login-destination";
 import prisma from "@/lib/prisma";
 import { emailField, passwordField, registerSchema } from "@/modules/users/users.schema";
 import { createSelfRegisteredUser } from "@/modules/users/users.service";
@@ -239,7 +239,7 @@ export async function loginAction(_prev: unknown, formData: FormData) {
       email,
       password: formData.get("password"),
       redirect: false,
-      redirectTo: "/items",
+      redirectTo: LOGIN_DESTINATION,
     });
   } catch (error) {
     if (error instanceof AuthError) {
@@ -287,7 +287,25 @@ export async function loginAction(_prev: unknown, formData: FormData) {
   // refunding that would let anyone holding one valid credential wipe
   // everybody's counter between guesses.
   await resetRateLimit(AUTH_POLICY, keys.narrow);
-  redirect(destination);
+
+  // Deliberately NOT `redirect(destination)`, and that is an iOS fix rather than
+  // a style preference. A Server Action redirect is performed by the React
+  // router as a CLIENT-side navigation, and WebKit only offers to save a
+  // password after a form submission followed by a REAL document navigation. So
+  // on an iPhone the credential was never written to the keychain, and Password
+  // AutoFill had nothing to offer back on the next visit however correct the
+  // form's `autocomplete` attributes were — which is exactly how this looked
+  // from the outside: "autofill does not work", with the markup already right.
+  // `LoginForm` performs the navigation itself, and renders a
+  // `<meta http-equiv="refresh">` so the no-JS path still leaves this page.
+  //
+  // `destination` is deliberately NOT returned to the client. It is only ever
+  // read above to detect the returned-error-URL shape of failure; handing it
+  // back would put a server-supplied URL into a client-side `location.assign`,
+  // which is an open redirect the moment anything upstream can influence it.
+  // The client navigates to the shared LOGIN_DESTINATION constant instead —
+  // the same one `signIn` was given, so the two cannot drift.
+  return { ok: true as const };
 }
 
 export async function logoutAction() {

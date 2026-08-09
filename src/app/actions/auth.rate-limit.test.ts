@@ -39,14 +39,11 @@ vi.mock("next/headers", () => ({
   headers: async () => new Headers({ "x-forwarded-for": TEST_IP, ...extraHeaders.current }),
 }));
 
-// `loginAction` issues its own redirect now that it decides success from a
-// RETURN value rather than a thrown marker. Throwing here keeps the assertions
-// able to see that it happened.
-vi.mock("next/navigation", () => ({
-  redirect: (url: string) => {
-    throw Object.assign(new Error(`NEXT_REDIRECT:${url}`), { digest: "NEXT_REDIRECT" });
-  },
-}));
+// `loginAction` no longer calls `redirect()` at all: a Server Action redirect is
+// a client-side router navigation, and WebKit only offers to save a password
+// after a real document navigation, so the action returns `{ ok: true }` and
+// `LoginForm` navigates itself. Success is therefore a RETURN VALUE here too —
+// there is no `next/navigation` mock left to install.
 
 import { loginAction, requestPasswordResetAction, resetPasswordAction } from "./auth";
 import {
@@ -65,6 +62,16 @@ const fd = (entries: Record<string, string>) => {
 };
 
 const creds = () => fd({ email: "tech@example.com", password: "hunter2hunter2" });
+
+/** The refusal message, or undefined if the action did not refuse.
+ *
+ *  `loginAction` returns one of three shapes now — `{error}`, `{unverified,
+ *  email}` and `{ok: true}` — so a bare `res?.error` does not type-check
+ *  against the union. Narrowing once here keeps the assertions readable AND
+ *  makes a test that expected a lockout but got a SUCCESS fail on the message
+ *  rather than on a property that silently reads `undefined`. */
+const errorOf = (res: Awaited<ReturnType<typeof loginAction>>) =>
+  res && "error" in res ? res.error : undefined;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -87,8 +94,8 @@ describe("loginAction rate limiting", () => {
     }
 
     const blocked = await loginAction(undefined, creds());
-    expect(blocked?.error).toMatch(/Too many attempts from this network/);
-    expect(blocked?.error).toMatch(/minutes/);
+    expect(errorOf(blocked)).toMatch(/Too many attempts from this network/);
+    expect(errorOf(blocked)).toMatch(/minutes/);
   });
 
   it("refuses BEFORE calling signIn, so a locked-out attacker costs no bcrypt", async () => {
@@ -124,19 +131,19 @@ describe("loginAction rate limiting", () => {
     // The budget is already gone, even though not one attempt has completed.
     signIn.mockRejectedValue(new AuthError("CredentialsSignin"));
     const blocked = await loginAction(undefined, creds());
-    expect(blocked?.error).toMatch(/Too many attempts from this network/);
+    expect(errorOf(blocked)).toMatch(/Too many attempts from this network/);
     expect(inFlight).toHaveLength(AUTH_POLICY.limit);
   });
 
   it("REFUNDS the token when the sign-in succeeds", async () => {
     // The load-bearing property: the service desk shares one NAT egress IP, so
     // charging successes would take the whole desk offline after five logins.
-    // With `redirect: false`, success is a RETURNED destination and the action
-    // redirects to it itself.
+    // With `redirect: false`, success is a RETURNED destination, which the
+    // action turns into its own `{ ok: true }` for the client to navigate on.
     signIn.mockResolvedValue("http://localhost/items");
 
     for (let i = 0; i < AUTH_POLICY.limit * 4; i++) {
-      await expect(loginAction(undefined, creds())).rejects.toThrow("NEXT_REDIRECT");
+      expect(await loginAction(undefined, creds()), `try ${i + 1}`).toEqual({ ok: true });
     }
 
     // The budget is back, so a genuine typo still gets its full five tries.
@@ -159,7 +166,7 @@ describe("loginAction rate limiting", () => {
       });
     }
     const blocked = await loginAction(undefined, creds());
-    expect(blocked?.error).toMatch(/Too many attempts/);
+    expect(errorOf(blocked)).toMatch(/Too many attempts/);
   });
 
   it("does NOT refund on an unexpected server error", async () => {
@@ -177,7 +184,7 @@ describe("loginAction rate limiting", () => {
     }
     signIn.mockRejectedValue(new AuthError("CredentialsSignin"));
     const blocked = await loginAction(undefined, creds());
-    expect(blocked?.error).toMatch(/Too many attempts from this network/);
+    expect(errorOf(blocked)).toMatch(/Too many attempts from this network/);
   });
 
   it("keeps the generic failure message — the limiter must not leak account state", async () => {
@@ -234,7 +241,7 @@ describe("loginAction rate limiting", () => {
 
     // Now ceiling-refused. The victim's count must not be reset by it.
     const blocked = await loginAction(undefined, fd({ email: victim, password: "wrong" }));
-    expect(blocked?.error).toMatch(/Too many attempts/);
+    expect(errorOf(blocked)).toMatch(/Too many attempts/);
     expect(__memoryHitCountForTests(victimKey)).toBeGreaterThanOrEqual(2);
   });
 
@@ -247,7 +254,7 @@ describe("loginAction rate limiting", () => {
       await loginAction(undefined, fd({ email: "alice@example.com", password: "wrong" }));
     }
     expect(
-      (await loginAction(undefined, fd({ email: "alice@example.com", password: "wrong" })))?.error,
+      errorOf(await loginAction(undefined, fd({ email: "alice@example.com", password: "wrong" }))),
     ).toMatch(/Too many attempts/);
 
     const bob = await loginAction(undefined, fd({ email: "bob@example.com", password: "wrong" }));
@@ -263,7 +270,7 @@ describe("loginAction rate limiting", () => {
       undefined,
       fd({ email: "  ALICE@Example.COM ", password: "wrong" }),
     );
-    expect(shouted?.error).toMatch(/Too many attempts/);
+    expect(errorOf(shouted)).toMatch(/Too many attempts/);
   });
 
   it("does NOT let one hammered account drain the whole network's ceiling", async () => {
@@ -292,14 +299,14 @@ describe("loginAction rate limiting", () => {
     }
     // ...then sign in correctly, which must NOT hand the ceiling back...
     signIn.mockResolvedValue("http://localhost/items");
-    await expect(
-      loginAction(undefined, fd({ email: "real@example.com", password: "right" })),
-    ).rejects.toThrow("NEXT_REDIRECT");
+    expect(
+      await loginAction(undefined, fd({ email: "real@example.com", password: "right" })),
+    ).toEqual({ ok: true });
 
     // ...so the next fresh account is refused by the ceiling.
     signIn.mockRejectedValue(new AuthError("CredentialsSignin"));
     const blocked = await loginAction(undefined, fd({ email: "next@example.com", password: "x" }));
-    expect(blocked?.error).toMatch(/Too many attempts/);
+    expect(errorOf(blocked)).toMatch(/Too many attempts/);
   });
 
   it("stops a spray across many accounts from one network", async () => {
@@ -318,7 +325,7 @@ describe("loginAction rate limiting", () => {
       undefined,
       fd({ email: "victim-last@example.com", password: "wrong" }),
     );
-    expect(blocked?.error).toMatch(/Too many attempts/);
+    expect(errorOf(blocked)).toMatch(/Too many attempts/);
   });
 });
 

@@ -1,7 +1,8 @@
 "use client";
 import Link from "next/link";
-import { useActionState, useState, useSyncExternalStore } from "react";
+import { useActionState, useEffect, useState, useSyncExternalStore } from "react";
 import { loginAction } from "@/app/actions/auth";
+import { LOGIN_DESTINATION } from "@/lib/login-destination";
 import { TurnstileWidget, type TurnstileStatus } from "@/components/TurnstileWidget";
 import { ResendVerificationForm } from "@/components/ResendVerificationForm";
 
@@ -49,6 +50,21 @@ export function LoginForm({ turnstileSiteKey }: { turnstileSiteKey: string | nul
   );
   const waiting = hydrated && challenge === "pending";
 
+  // The sign-in succeeded and this page is on its way out.
+  //
+  // `loginAction` returns success instead of redirecting, so that the departure
+  // is a FULL-PAGE navigation rather than a React router one. WebKit's "save
+  // this password?" prompt only fires on a real document navigation after a
+  // form submission, and without that prompt nothing is ever written to the
+  // iOS keychain — so Password AutoFill has nothing to offer on the next visit,
+  // which is indistinguishable from the autofill attributes being wrong. See
+  // the matching comment on the action's success path.
+  const signedIn = Boolean(state && "ok" in state && state.ok);
+
+  useEffect(() => {
+    if (signedIn) window.location.assign(LOGIN_DESTINATION);
+  }, [signedIn]);
+
   return (
     <form action={action} className="stack">
       <div className="field">
@@ -89,8 +105,27 @@ export function LoginForm({ turnstileSiteKey }: { turnstileSiteKey: string | nul
       {state && "error" in state && state.error && (
         <p role="alert" className="alert-error">{state.error}</p>
       )}
-      <button disabled={pending || waiting} type="submit" className="btn btn-primary btn-block">
-        {pending ? "Signing in…" : waiting ? "Checking your browser…" : "Sign in"}
+      {/* The no-JS half of the navigation above. React 19 hoists <meta> into
+          <head>, so this is an ordinary document-level refresh — which is also
+          what keeps progressive enhancement intact: without it a browser
+          running no client bundle would sign in successfully and then sit on
+          the login page with nothing to say so. The plain <a> (not <Link>) is
+          the last resort if a refresh is blocked, and is a full navigation for
+          the same reason the rest of this is. */}
+      {signedIn && (
+        <>
+          <meta httpEquiv="refresh" content={`0;url=${LOGIN_DESTINATION}`} />
+          <p role="status" className="subtle">
+            Signed in — <a href={LOGIN_DESTINATION}>continue to your items</a>.
+          </p>
+        </>
+      )}
+      <button
+        disabled={pending || waiting || signedIn}
+        type="submit"
+        className="btn btn-primary btn-block"
+      >
+        {pending || signedIn ? "Signing in…" : waiting ? "Checking your browser…" : "Sign in"}
       </button>
       <p className="subtle" style={{ textAlign: "center", margin: 0 }}>
         Don&rsquo;t have an account? <Link href="/register">Create one</Link>

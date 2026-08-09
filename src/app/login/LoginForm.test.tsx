@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { LoginForm } from "./LoginForm";
+import { loginAction } from "@/app/actions/auth";
 
 vi.mock("@/app/actions/auth", () => ({ loginAction: vi.fn() }));
 
@@ -172,5 +173,92 @@ describe("LoginForm password-manager autofill", () => {
     expect(field("email").form).toBe(field("password").form);
     expect(submit().type).toBe("submit");
     expect(submit().form).toBe(field("email").form);
+  });
+});
+
+// Both fields are `required`, and jsdom runs real constraint validation on
+// submit — an empty form never dispatches the event at all, so filling them is
+// what makes the action run rather than test decoration.
+const fillAndSubmit = () => {
+  fireEvent.change(document.getElementById("email")!, {
+    target: { value: "admin@example.com" },
+  });
+  fireEvent.change(document.getElementById("password")!, {
+    target: { value: "ChangeMe123!" },
+  });
+  fireEvent.click(submit());
+};
+
+describe("LoginForm post-sign-in navigation", () => {
+  // The other half of the autofill contract, and the one correct attributes
+  // cannot supply on their own. WebKit offers to SAVE a password only after a
+  // form submission followed by a real DOCUMENT navigation; a Server Action
+  // `redirect()` is a React router navigation, so nothing was ever written to
+  // the iOS keychain and Password AutoFill had nothing to offer back on the
+  // next visit. `loginAction` therefore returns `{ ok: true }` and the leaving
+  // is done here. Restoring `redirect()` in the action would silently remove
+  // autofill on a phone again, with every attribute above still correct.
+
+  // NOTE ON COVERAGE: the `window.location.assign` call itself is NOT asserted
+  // here, and cannot be. jsdom's `location.assign` is a non-configurable own
+  // property (`vi.spyOn` fails with "Cannot redefine property"), and jsdom has
+  // no navigation to observe even if it could be stubbed — the very reason this
+  // repo treats jsdom as no evidence for browser behaviour. What IS pinned here
+  // is the DOM contract the navigation rides on; that a real DOCUMENT
+  // navigation follows is pinned in `tests/e2e/auth.spec.ts`, where a browser
+  // can actually be asked.
+
+  it("leaves the page with NO JS too, via a hoisted meta refresh", async () => {
+    // Progressive enhancement: the action's own `redirect()` used to move a
+    // scriptless browser off the login page. Returning a value instead means a
+    // successful sign-in would otherwise re-render /login with no indication
+    // anything happened — signed in, and stranded. React 19 hoists the <meta>
+    // into <head>, so it is an ordinary document-level refresh.
+    vi.mocked(loginAction).mockResolvedValue({ ok: true });
+
+    render(<LoginForm turnstileSiteKey={null} />);
+    fillAndSubmit();
+
+    await waitFor(() => {
+      const meta = document.querySelector('meta[http-equiv="refresh"]');
+      expect(meta?.getAttribute("content")).toBe("0;url=/items");
+    });
+    // Last resort if the refresh itself is blocked. A plain <a>, not a <Link>:
+    // it has to be a full navigation for the same reason all of this does.
+    const link = screen.getByRole("link", { name: /continue to your items/i });
+    expect(link.getAttribute("href")).toBe("/items");
+  });
+
+  it("keeps the button held while the navigation is in flight", async () => {
+    // `pending` goes false the moment the action returns, so without this the
+    // form would flash back to an armed "Sign in" underneath a page that is
+    // already leaving — and a second tap would spend another rate-limit token.
+    vi.mocked(loginAction).mockResolvedValue({ ok: true });
+
+    render(<LoginForm turnstileSiteKey={null} />);
+    fillAndSubmit();
+
+    // Queried without a name filter on purpose: the shared `submit()` helper
+    // matches /sign in/, which "Signing in…" does NOT contain, so using it here
+    // would fail on the very state this test exists to observe. It is the only
+    // button in the form when Turnstile is unconfigured.
+    const button = () => screen.getByRole("button") as HTMLButtonElement;
+    await waitFor(() => expect(button().disabled).toBe(true));
+    expect(button().textContent).toMatch(/signing in/i);
+  });
+
+  it("shows a rejected sign-in as an error and leaves the form armed", async () => {
+    // The union the action now returns has two arms, and the error arm must not
+    // regress: no meta refresh, no held button, and the message still rendered.
+    vi.mocked(loginAction).mockResolvedValue({ error: "Invalid email or password." });
+
+    render(<LoginForm turnstileSiteKey={null} />);
+    fillAndSubmit();
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toMatch(/invalid email or password/i),
+    );
+    expect(document.querySelector('meta[http-equiv="refresh"]')).toBeNull();
+    expect(submit().disabled).toBe(false);
   });
 });
