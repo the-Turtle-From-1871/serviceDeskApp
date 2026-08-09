@@ -1746,14 +1746,24 @@ input[type="file"].input {
      CLOSED <details> until someone opens it, so there is nothing to measure on
      mount, and it renders per row on a list of 50.
 
-     0.64 is the average glyph width in em, measured in the browser across those
-     18 real strings in this font (0.52-0.63, so 0.64 clears every one of them).
-     It is deliberately the CEILING rather than the mean: erring high makes the
-     font a touch small, erring low makes it overflow — and only one of those is
-     visible as a bug. `clamp` floors it at 9px, so a hypothetical value longer
-     than anything in the catalogue wraps instead of shrinking into nothing: the
-     dd keeps `overflow-wrap: anywhere` and nothing is set to `nowrap`, so the
-     fallback is an honest two-line value, never a clipped one.
+     --w is the string's estimated width in EM, not its character count times a
+     flat ceiling. That earlier form is what made this wrap on a narrow phone:
+     unit names are full of spaces (0.25em) and commas (0.20em), so charging
+     every character as if it were a capital over-estimated the line by up to
+     17%, and the font hit its floor with room to spare on screen. The estimate
+     now comes from measured Geist glyph widths in `estimateTextEm`
+     (items-view.ts), which lands within a couple of percent of the real width.
+
+     THE FLOOR IS THE THING THAT ACTUALLY WRAPS. Measured on the catalogue's
+     47 home units: at a 390px viewport nothing wrapped, but at 320px — an
+     iPhone SE, or any phone whose effective CSS width is narrowed by Safari's
+     page zoom or a larger text setting — 25 of 47 hit the old 9px floor and
+     went to two lines. 7px is low enough that the longest unit in the book
+     still fits on one line at 320px. Below that the text stops being readable
+     at all, so a value longer than anything in the catalogue is still allowed
+     to wrap rather than shrink into nothing: the dd keeps `overflow-wrap:
+     anywhere` and nothing is set to `nowrap`, so the last resort is an honest
+     two-line value, never a clipped one.
 
      `container-type` sits on the dd and the sized text is the SPAN inside it:
      container units resolve against the nearest ANCESTOR container, so an
@@ -1769,7 +1779,7 @@ input[type="file"].input {
   }
   .table--cards .card-more__list dd.card-more__fit > span {
     display: block;
-    font-size: clamp(9px, calc(100cqi / (var(--len, 12) * 0.64)), 13px);
+    font-size: clamp(7px, calc(100cqi / var(--w, 20)), 13px);
   }
 
   /* ---- Selection mode: checkboxes appear in the header band ----

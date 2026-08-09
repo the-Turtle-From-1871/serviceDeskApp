@@ -18,6 +18,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-08-09
 
+### Fixed
+- **The home unit in an item card's *More* panel wrapped onto a second line on smaller phones.** It is meant to shrink just enough to sit on one line, and it did on a 390px screen — but on a narrower one, or on any phone where Safari's page zoom or a larger text setting leaves less room, the longest unit names ran onto two lines anyway. The sizing was estimating the text from its character count, which charges a space and a comma as if they were capital letters; unit names are full of both, so it ran out of room early and stopped shrinking while there was still space on screen.
+
+  It now estimates the real width of the text, so the unit fits on one line **and renders larger than before at every screen size** — measured across every home unit in the property book at 320, 360, 375, 390 and 430px, in both Chrome and Safari. A name longer than anything currently in the book still wraps rather than shrinking to nothing.
+
+  #### Notes
+  - No database, environment or deployment change.
+
 ### Added
 - **You can create your own account.** The sign-in page now offers *Create one*, and there is a sign-up form at `/register`. You confirm your email address by clicking a link we send you — until you do, signing in is refused and tells you so, with a button to resend the link. A brand-new account is **read-only**: it can look up equipment and see the hand receipts you are named on, and nothing else. Issuing hand receipts, editing items and processing returns are separate permissions an administrator grants.
 - **A hand receipt list at `/receipts`.** There has never been one — receipts could only be reached by number, by an emailed link, or from an item's history. Signed-in staff who can see all receipts get every receipt, newest first; everyone else sees only the receipts they are named on, so the page says which of the two you are looking at rather than leaving an empty list ambiguous. Non-administrators get a **Receipts** tab; administrators reach it from the Dashboard, because a sixth tab starts truncating labels on a phone.
