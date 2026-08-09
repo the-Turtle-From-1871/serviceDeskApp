@@ -13,13 +13,14 @@ import { MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW } from "@/modules/transfers/receipt
 import {
   READINESS_LABEL,
   ITEM_COLUMNS,
-  SORTABLE_COLUMNS,
   parseHiddenCols,
   selectableIds,
   selectAllState,
   type ColumnKey,
   type ItemRow,
+  type SortDir,
 } from "@/components/items-view";
+import { SortFilterMenu } from "@/components/SortFilterMenu";
 import { makeStore, usePersistedPref } from "@/components/persisted-pref";
 import { useRowGestures } from "@/components/useRowGestures";
 import { isCardLayout } from "@/components/swipe-row";
@@ -411,64 +412,36 @@ export function ItemSelectTable({
     const primary = sortKeys[0];
     navigate({ keys: key ? [primary, { key, dir: "asc" }] : [primary], page: 1 });
   };
-  const flipPrimaryDir = () => {
-    if (sortKeys.length === 0) return;
+  /** Set the primary key's direction outright rather than flipping it: the menu
+   *  offers Ascending and Descending as two radios, so it asks for a specific
+   *  direction and re-picking the current one must be a no-op, not a reversal. */
+  const setPrimaryDir = (next: SortDir) => {
+    if (sortKeys.length === 0 || next === sortKeys[0].dir) return;
     const [first, ...rest] = sortKeys;
-    navigate({ keys: [{ ...first, dir: first.dir === "asc" ? "desc" : "asc" }, ...rest], page: 1 });
+    navigate({ keys: [{ ...first, dir: next }, ...rest], page: 1 });
   };
+  const setUic = (next: string | null) => navigate({ uic: next, page: 1 });
 
   return (
     <>
       <div className="toolbar" style={{ gap: 8, alignItems: "flex-end" }}>
-        <label className="stack" style={{ gap: 4 }}>
-          <span className="subtle" style={{ fontSize: 12 }}>Sort by</span>
-          <select
-            className="select toolbar__control"
-            value={sort ?? ""}
-            onChange={(e) => setPrimary(e.target.value || null)}
-          >
-            <option value="">Default (newest)</option>
-            {SORTABLE_COLUMNS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-          </select>
-        </label>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          disabled={!sort}
-          onClick={flipPrimaryDir}
-          aria-label={dir === "asc" ? "Ascending" : "Descending"}
-        >
-          {dir === "asc" ? "Asc ▲" : "Desc ▼"}
-        </button>
-        {/* Compound sort: "Manufacturer, then Serial Number". Only offered once
-            a primary key is chosen — a tie-breaker with nothing to break is
-            meaningless, and the default (newest) sort has no ties worth
-            resolving. The primary column is excluded from the options. */}
-        <label className="stack" style={{ gap: 4 }}>
-          <span className="subtle" style={{ fontSize: 12 }}>Then by</span>
-          <select
-            className="select toolbar__control"
-            value={secondarySort?.key ?? ""}
-            disabled={!sort}
-            onChange={(e) => setSecondary(e.target.value || null)}
-          >
-            <option value="">—</option>
-            {SORTABLE_COLUMNS.filter((c) => c.key !== sort).map((c) => (
-              <option key={c.key} value={c.key}>{c.label}</option>
-            ))}
-          </select>
-        </label>
-        <label className="stack" style={{ gap: 4 }}>
-          <span className="subtle" style={{ fontSize: 12 }}>Unit (UIC)</span>
-          <select
-            className="select toolbar__control"
-            value={uic ?? ""}
-            onChange={(e) => navigate({ uic: e.target.value || null, page: 1 })}
-          >
-            <option value="">All units</option>
-            {uics.map((u) => <option key={u} value={u}>{u}</option>)}
-          </select>
-        </label>
+        {/* Sort by / Direction / Then by / Unit were four separate controls
+            here. On a phone they wrapped into three rows of chrome above the
+            first result, so they are one button and one panel now — see
+            SortFilterMenu. The URL-building stays on THIS side: `sort` and
+            `dir` travel as positionally-paired comma lists, and hrefFor is the
+            only thing that writes them. */}
+        <SortFilterMenu
+          sort={sort}
+          dir={dir}
+          secondary={secondarySort?.key ?? null}
+          uic={uic}
+          uics={uics}
+          onPrimary={setPrimary}
+          onDir={setPrimaryDir}
+          onSecondary={setSecondary}
+          onUic={setUic}
+        />
         {isAdmin && (
           <button
             type="button"

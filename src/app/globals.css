@@ -688,6 +688,200 @@ input[type="file"].input {
   cursor: not-allowed;
 }
 
+/* ---------- Popup menu — the /items "Sort & filter" panel ----------
+   A native popover: the Popover API supplies the top layer, Escape (with focus
+   returned to the invoker), click-outside dismissal and the implicit
+   aria-expanded/aria-details pair, none of which the <details> Columns menu
+   above has.
+
+   READ THIS BEFORE ADDING A SELECTOR HERE. The UA hides a closed popover with
+   `[popover]:not(:popover-open) { display: none }`, and ANY author `display`
+   rule beats it — the exact trap that shipped 50 rendered closed <dialog>s on
+   this page, each one swallowing the taps meant for a row's Delete button. So
+   the popover element carries NO class and is styled by id, and NOTHING here
+   may set `display` on it. Everything visible lives on `.popup-menu__panel`,
+   one level in, the same split DeleteItemButton uses for its dialog.
+
+   Layout is MOBILE-FIRST BY NECESSITY, not by house style: the phone gets a
+   bottom sheet, which needs no anchoring at all. CSS anchor positioning is
+   Safari 26+ (vs the Popover API's Safari 17+), and this app is installed to
+   the iOS home screen — so the anchored dropdown is gated behind BOTH a
+   min-width and an @supports, and anything that fails either gate keeps the
+   sheet. That is the whole fallback; there is no second code path. */
+
+/* The trigger. `.btn` is already inline-flex — this only lays out its parts and
+   lets the state text, not the label, be the thing that shrinks. */
+.menu-trigger {
+  gap: 6px;
+  min-width: 0;
+}
+.menu-trigger__label {
+  flex: none;
+}
+.menu-trigger__value {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.menu-trigger__value::before {
+  content: "· ";
+}
+.menu-trigger__chevron {
+  /* Preflight is absent, so an <svg> is still inline and sits on the text
+     baseline. Same reason the card's More chevron sets this. */
+  display: block;
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+/* `popovertarget`'s aria-expanded is IMPLICIT — it lives in the accessibility
+   tree, not as a DOM attribute — so `[aria-expanded="true"]` would never match.
+   The open state is readable only from the popover itself, which is the
+   trigger's next sibling. */
+.menu-trigger:has(+ [popover]:popover-open) .menu-trigger__chevron {
+  transform: rotate(180deg);
+}
+
+/* The [popover] element. NO class, no `display`, see above. */
+#items-sortfilter {
+  /* Undo the UA popover box: `border: solid; padding: 0.25em; overflow: auto;
+     inset: 0; margin: auto` — that last pair is what centres an unstyled
+     popover in the viewport. */
+  margin: 0;
+  border: none;
+  padding: 0;
+  background: transparent;
+  overflow: visible;
+  /* Bottom sheet. Deliberately no max-height here: with `overflow: visible` a
+     capped popover would spill rather than scroll, so the cap and the scrolling
+     both belong to the panel. */
+  position: fixed;
+  inset: auto 0 0 0;
+  width: 100%;
+}
+#items-sortfilter::backdrop {
+  background: rgb(25 28 24 / 0.4);
+}
+
+.popup-menu__panel {
+  max-height: 80svh;
+  overflow-y: auto;
+  /* Rounded at the top only — the sheet is flush to the bottom edge. */
+  border: none;
+  border-top: 1px solid var(--border-strong);
+  border-radius: 12px 12px 0 0;
+  background: var(--surface);
+  box-shadow: var(--ledger-shadow-md);
+  padding: 10px 8px 0;
+}
+.popup-menu__group {
+  padding: 2px 0;
+}
+.popup-menu__group + .popup-menu__group {
+  margin-top: 6px;
+  padding-top: 8px;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+.popup-menu__legend {
+  margin: 0 0 2px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  /* --text-muted, NOT --muted: the latter is a surface tint and renders at
+     1.08:1 on this surface. */
+  color: var(--text-muted);
+}
+.popup-menu__option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* The documented touch floor. A radio's own box is ~18px, so the row is the
+     real tap target — same reasoning as `.col-menu-panel label`. */
+  min-height: var(--tap);
+  padding: 6px 10px;
+  border-radius: var(--ledger-radius-sm);
+  font-size: 15px;
+  cursor: pointer;
+}
+/* Guarded, because hover STICKS on touch: an unguarded rule leaves the last
+   option you tapped tinted as though it were still selected — next to a
+   checked-state tint that means something. */
+@media (hover: hover) {
+  .popup-menu__option:hover {
+    background: var(--surface-2);
+  }
+}
+.popup-menu__option:has(input:checked) {
+  background: var(--primary-soft);
+  font-weight: 600;
+}
+.popup-menu__option:has(input:disabled) {
+  color: var(--text-subtle);
+  cursor: not-allowed;
+}
+.popup-menu__option input[type="radio"] {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--primary);
+}
+/* Sticky, so "Done" is reachable without scrolling a long unit list to its end. */
+.popup-menu__footer {
+  position: sticky;
+  bottom: 0;
+  margin-top: 8px;
+  padding: 8px 0 max(10px, env(safe-area-inset-bottom));
+  border: none;
+  border-top: 1px solid var(--border);
+  /* Opaque, or the options scroll visibly underneath it. */
+  background: var(--surface);
+}
+.popup-menu__footer > .btn {
+  width: 100%;
+  height: var(--tap);
+}
+
+@media (min-width: 721px) {
+  @supports (anchor-name: --probe) {
+    /* Anchored dropdown. If either gate fails the sheet rules above stand
+       untouched — which is what Safari below 26 gets, and it is fine. */
+    .menu-trigger {
+      anchor-name: --items-sortfilter;
+    }
+    #items-sortfilter {
+      position-anchor: --items-sortfilter;
+      /* Below the trigger, left edge aligned with it. */
+      position-area: block-end span-inline-end;
+      /* Flip above when the toolbar is near the viewport bottom. */
+      position-try-fallbacks: flip-block;
+      /* The base rule's `inset: auto 0 0 0` would fight the computed position. */
+      inset: auto;
+      margin: 4px 0 0;
+      width: max-content;
+      min-width: 240px;
+      max-width: 320px;
+    }
+    /* A dropdown is not modal; dimming the page behind it would be. */
+    #items-sortfilter::backdrop {
+      background: transparent;
+    }
+    .popup-menu__panel {
+      max-height: min(70vh, 520px);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--ledger-radius-sm);
+      padding: 6px;
+    }
+    /* Escape and click-outside are in plain sight with a mouse and a keyboard;
+       the sheet keeps Done because a thumb has neither. */
+    .popup-menu__footer {
+      display: none;
+    }
+  }
+}
+
 /* ---------- Home search (mode select + query box) ----------
    `.select` and `.input` are both width:100%, so inside a wrapping `.row` each
    one claimed a whole line and the pair stacked at EVERY width — this row has

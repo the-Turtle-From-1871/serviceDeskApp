@@ -79,6 +79,30 @@ export const SORTABLE_COLUMNS: { key: SortField; label: string }[] = ITEM_COLUMN
   (c): c is { key: SortField; label: string } => c.key !== "holder",
 );
 
+const SORT_LABEL = new Map<string, string>(SORTABLE_COLUMNS.map((c) => [c.key, c.label]));
+
+/** The text the "Sort & filter" trigger reads back, so the current sort and unit
+ *  filter stay legible with the menu closed.
+ *
+ *  Takes the primary key, its direction and the unit as plain values rather than
+ *  a `SortKey[]`: that type is owned by `listItems` in the `server-only`,
+ *  Prisma-importing items.service, and this module deliberately imports nothing.
+ *
+ *  The SECONDARY key is deliberately absent. It only breaks ties, and appending
+ *  it pushes the trigger past its share of a 390px toolbar row — the same
+ *  resizing problem that made the Print QR label constant.
+ *
+ *  An unrecognised key reads as "Newest", matching what the server actually
+ *  does with one: parseSortKeys drops a key outside ITEM_SORT_COLUMNS, so the
+ *  list comes back in the default order. Claiming a sort that is not applied
+ *  would be a confident wrong answer about the property book. */
+export function sortFilterSummary(sort: string | null, dir: SortDir, uic: string | null): string {
+  const label = sort ? SORT_LABEL.get(sort) : undefined;
+  const sortPart = label ? `${label} ${dir === "asc" ? "▲" : "▼"}` : "Newest";
+  const unit = uic?.trim();
+  return unit ? `${sortPart} · ${unit}` : sortPart;
+}
+
 const SORT_FIELDS = new Set<string>(SORTABLE_COLUMNS.map((c) => c.key));
 // Visibility and sortability are separate CONCEPTS on purpose: hiding a column
 // must never imply you cannot sort by it. They also now differ in MEMBERSHIP —
