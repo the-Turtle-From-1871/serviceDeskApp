@@ -19,6 +19,8 @@ import {
   selectableIds,
   selectAllState,
   type ColumnKey,
+  SORTABLE_COLUMNS,
+  sortFilterSummary,
   type ItemRow,
   type SortDir,
 } from "@/components/items-view";
@@ -513,15 +515,27 @@ export function ItemSelectTable({
             `dir` travel as positionally-paired comma lists, and hrefFor is the
             only thing that writes them. */}
         <SortFilterMenu
+          idPrefix="items"
+          columns={SORTABLE_COLUMNS}
+          summary={sortFilterSummary(sort, dir, uic)}
           sort={sort}
           dir={dir}
           secondary={secondarySort?.key ?? null}
-          uic={uic}
-          uics={uics}
+          filter={
+            uics.length > 0
+              ? {
+                  label: "Unit",
+                  // The page passes "" for "no filter"; the select's neutral
+                  // option carries the same "" so they round-trip.
+                  value: uic?.trim() ? uic : "",
+                  options: [{ value: "", label: "All units" }, ...uics.map((u) => ({ value: u, label: u }))],
+                  onChange: (v) => setUic(v || null),
+                }
+              : undefined
+          }
           onPrimary={setPrimary}
           onDir={setPrimaryDir}
           onSecondary={setSecondary}
-          onUic={setUic}
         />
         {isAdmin && (
           <button

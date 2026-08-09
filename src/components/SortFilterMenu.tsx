@@ -2,19 +2,30 @@
 
 import { useEffect, useRef } from "react";
 import { ChevronDown } from "lucide-react";
-import { SORTABLE_COLUMNS, sortFilterSummary, type SortDir } from "@/components/items-view";
+import type { SortDir } from "@/components/column-view";
 
 /**
- * The /items toolbar's "Sort & filter" popup menu.
+ * The "Sort & filter" popup menu, shared by /items and the service queue.
  *
- * Replaces four separate toolbar controls — the Sort by select, the Asc/Desc
- * button, the Then by select and the Unit (UIC) select — with one button that
- * reads its own state back and opens a panel holding all four.
+ * Replaces several separate toolbar controls — a Sort by select, an Asc/Desc
+ * button, and each page's own filter select — with one button that reads its own
+ * state back and opens a panel holding them all.
  *
- * PRESENTATIONAL. It never builds a URL: `sort` and `dir` travel to the server
- * as parallel comma lists paired positionally, and ItemSelectTable's `hrefFor`
- * owns that contract. A second writer is exactly how the two lists drift out of
- * step, so this component only calls back.
+ * PRESENTATIONAL, and deliberately knows nothing about either page's data. It
+ * takes its column list, its filter and its own summary TEXT as props, so it
+ * never imports `items-view` or `service-queue-view` — one page's vocabulary
+ * cannot leak into the other, and neither list can drift from the sort its own
+ * page actually applies. It never builds a URL either: on /items, `sort` and
+ * `dir` travel to the server as parallel comma lists paired positionally and
+ * ItemSelectTable's `hrefFor` owns that contract; the queue sorts client-side
+ * and holds its state in a persisted pref. A second writer is exactly how those
+ * drift, so this component only calls back.
+ *
+ * The two pages differ in what they hand it, not in how it behaves:
+ *   /items — 9 sortable columns, a Unit (UIC) filter, and a "Then by" tie-break.
+ *   /queue — 5 sortable columns and a Service type filter. NO "Then by":
+ *            `sortQueueRows` takes a single key, so offering a tie-breaker would
+ *            be a control that silently does nothing.
  *
  * ── The trap this is built around ──────────────────────────────────────────
  * The UA hides a closed popover with `[popover]:not(:popover-open) { display:
@@ -35,11 +46,15 @@ import { SORTABLE_COLUMNS, sortFilterSummary, type SortDir } from "@/components/
  * with focus returned to the invoker, and light dismiss.
  */
 
-/** Rendered once per page, so plain constants rather than `useId` — these have
- *  to be exact `popovertarget` / `aria-labelledby` references, and useId's
- *  generated ids carry delimiters that are awkward in a selector. */
-const MENU_ID = "items-sortfilter";
-const TRIGGER_ID = "items-sortfilter-trigger";
+/** Rendered once per page, so a plain prefix rather than `useId` — these have to
+ *  be exact `popovertarget` references AND exact CSS selectors, and useId's
+ *  generated ids carry delimiters that are awkward in a selector.
+ *
+ *  The id is what globals.css styles the popover BY — `#items-sortfilter,
+ *  #queue-sortfilter` — precisely so no shared class can grow a `display` later
+ *  and re-create the closed-popover trap described above. So a new caller must
+ *  add its id to those rule groups; there is no class to inherit them from. */
+export type MenuIdPrefix = "items" | "queue";
 
 /**
  * Spend the first tap OUTSIDE the open panel on closing it, and nothing else.
@@ -101,70 +116,90 @@ function useDismissSwallowsTap(menuId: string, triggerId: string) {
   }, [menuId, triggerId]);
 }
 
+/** One optional filter select, above the sort fields. `/items` passes the unit
+ *  (UIC) list; the queue passes its service types. The NEUTRAL option is part of
+ *  `options`, not synthesised here — the two pages spell it differently ("" for
+ *  all units, "ALL" for all types) and inventing one would mean this component
+ *  deciding what "no filter" means for a page it knows nothing about. */
+export type MenuFilter = {
+  label: string;
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (value: string) => void;
+};
+
 export function SortFilterMenu({
+  idPrefix,
+  columns,
+  summary,
   sort,
   dir,
   secondary,
-  uic,
-  uics,
+  filter,
   onPrimary,
   onDir,
   onSecondary,
-  onUic,
 }: {
-  /** The PRIMARY sort key, or null for the server's default (newest) order. */
+  idPrefix: MenuIdPrefix;
+  /** The sortable columns to offer. Each page passes the list its OWN sort
+   *  actually accepts, so a column offered here can never be one that gets
+   *  silently dropped. */
+  columns: readonly { key: string; label: string }[];
+  /** The trigger's read-back text, computed by the caller from its own labels. */
+  summary: string;
+  /** The PRIMARY sort key, or null for the default (newest) order. */
   sort: string | null;
   dir: SortDir;
-  /** The tie-breaker key, or null. */
-  secondary: string | null;
-  uic: string | null;
-  uics: string[];
+  /** The tie-breaker key, or null. OMIT `onSecondary` to hide "Then by"
+   *  entirely — a page whose sort takes one key must not offer a second. */
+  secondary?: string | null;
+  filter?: MenuFilter;
   onPrimary: (key: string | null) => void;
   onDir: (dir: SortDir) => void;
-  onSecondary: (key: string | null) => void;
-  onUic: (uic: string | null) => void;
+  onSecondary?: (key: string | null) => void;
 }) {
-  useDismissSwallowsTap(MENU_ID, TRIGGER_ID);
+  const menuId = `${idPrefix}-sortfilter`;
+  const triggerId = `${idPrefix}-sortfilter-trigger`;
+  useDismissSwallowsTap(menuId, triggerId);
 
   // A tie-breaker with nothing to break is meaningless, and the default
   // (newest) order has no ties worth resolving — so Direction and Then by are
   // inert until a primary key is chosen. This is the same rule the old toolbar
   // enforced with `disabled={!sort}` on both controls.
   const noPrimary = !sort;
-  const activeUic = uic?.trim() ? uic : null;
 
   return (
     <>
       <button
         type="button"
-        id={TRIGGER_ID}
+        id={triggerId}
         className="btn btn-secondary menu-trigger"
-        popoverTarget={MENU_ID}
+        popoverTarget={menuId}
       >
         <span className="menu-trigger__label">Sort &amp; filter</span>
         {/* The state, read back with the menu CLOSED. Without it the toolbar
-            stops answering "what order am I looking at?" — which the four
+            stops answering "what order am I looking at?" — which the separate
             selects used to answer just by being on screen. */}
-        <span className="menu-trigger__value truncate-inline">{sortFilterSummary(sort, dir, uic)}</span>
+        <span className="menu-trigger__value truncate-inline">{summary}</span>
         {/* An SVG, not a "⌄" glyph: a text chevron is placed by font metrics and
             sits high in its em box. Same reasoning as the card's More arrow. */}
         <ChevronDown className="menu-trigger__chevron" aria-hidden="true" />
       </button>
 
       {/* NO className on this element. See the trap note above. */}
-      <div id={MENU_ID} popover="auto">
+      <div id={menuId} popover="auto">
         <div className="popup-menu__panel">
-          {/* Only offered when there is something to filter by. A lone "All
-              units" option is a control that cannot change anything. */}
-          {uics.length > 0 && (
-            <Field label="Unit">
+          {/* Only offered when there is something to filter BY — /items passes
+              no filter at all when the page has no units, and a lone "All units"
+              option is a control that cannot change anything. */}
+          {filter && filter.options.length > 1 && (
+            <Field label={filter.label}>
               <select
                 className="select"
-                value={activeUic ?? ""}
-                onChange={(e) => onUic(e.target.value || null)}
+                value={filter.value}
+                onChange={(e) => filter.onChange(e.target.value)}
               >
-                <option value="">All units</option>
-                {uics.map((u) => <option key={u} value={u}>{u}</option>)}
+                {filter.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </Field>
           )}
@@ -176,7 +211,7 @@ export function SortFilterMenu({
               onChange={(e) => onPrimary(e.target.value || null)}
             >
               <option value="">Default (newest)</option>
-              {SORTABLE_COLUMNS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+              {columns.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
             </select>
           </Field>
 
@@ -194,20 +229,25 @@ export function SortFilterMenu({
 
           {/* Compound sort: "Make, then Serial". The primary key is excluded —
               ordering within itself resolves nothing, and parseSortKeys
-              collapses a duplicate to its first occurrence anyway. */}
-          <Field label="Then by">
-            <select
-              className="select"
-              value={secondary ?? ""}
-              disabled={noPrimary}
-              onChange={(e) => onSecondary(e.target.value || null)}
-            >
-              <option value="">—</option>
-              {SORTABLE_COLUMNS.filter((c) => c.key !== sort).map((c) => (
-                <option key={c.key} value={c.key}>{c.label}</option>
-              ))}
-            </select>
-          </Field>
+              collapses a duplicate to its first occurrence anyway.
+              Rendered only when the caller supplies a handler: the queue's
+              sortQueueRows takes ONE key, so a tie-breaker there would be a
+              control that changes nothing. */}
+          {onSecondary && (
+            <Field label="Then by">
+              <select
+                className="select"
+                value={secondary ?? ""}
+                disabled={noPrimary}
+                onChange={(e) => onSecondary(e.target.value || null)}
+              >
+                <option value="">—</option>
+                {columns.filter((c) => c.key !== sort).map((c) => (
+                  <option key={c.key} value={c.key}>{c.label}</option>
+                ))}
+              </select>
+            </Field>
+          )}
 
           {/* Sheet-only (hidden above 720px by globals.css). A bottom sheet
               needs a close affordance a thumb can reach; the desktop dropdown
@@ -217,7 +257,7 @@ export function SortFilterMenu({
             <button
               type="button"
               className="btn btn-secondary"
-              popoverTarget={MENU_ID}
+              popoverTarget={menuId}
               popoverTargetAction="hide"
             >
               Done

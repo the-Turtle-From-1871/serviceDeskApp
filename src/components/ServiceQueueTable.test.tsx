@@ -1,15 +1,22 @@
 // @vitest-environment jsdom
-import { afterEach, describe, it, expect, vi } from "vitest";
-import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ServiceQueueTable } from "./ServiceQueueTable";
 import { DRAWER_WIDTH } from "./swipe-row";
-import type { QueueRowVM } from "./service-queue-view";
+import { QUEUE_COLUMNS, type QueueRowVM } from "./service-queue-view";
 
 vi.mock("@/app/admin/actions/queue", () => ({ completeServiceAction: vi.fn() }));
 
 // This suite runs without vitest `globals: true`, so @testing-library/react's
 // auto-cleanup never registers. Mirrors ItemSelectTable.test.tsx.
 afterEach(cleanup);
+
+// The sort and hidden-column prefs are localStorage-backed (`makeStore` in
+// persisted-pref.ts) and jsdom keeps one storage per FILE, so without this a
+// test that picks a sort leaks it into every test after it — which is exactly
+// how the summary assertion below first read "Due ▲" before anything had been
+// chosen. The store re-reads the key on every get(), so clearing is enough.
+beforeEach(() => localStorage.clear());
 
 const ROW: QueueRowVM = {
   id: "sq-1",
@@ -21,6 +28,111 @@ const ROW: QueueRowVM = {
   serviceTypeRaw: "REPAIR",
   dueAt: null,
 };
+
+/**
+ * The "Sort & filter" menu, shared with /items via SortFilterMenu.
+ *
+ * jsdom implements NO Popover API — `showPopover` is undefined and
+ * `:popover-open` never matches — while it DOES apply the UA's
+ * `[popover]:not(:popover-open) { display: none }`. So the panel is permanently
+ * closed here: every query needs `hidden: true`, and nothing below exercises
+ * opening, dismissing or focus. `useDismissSwallowsTap` is inert for the same
+ * reason. The sheet/dropdown layout and the outside-tap fix are browser-verified
+ * only — see the matching note in ItemSelectTable.test.tsx.
+ */
+describe("ServiceQueueTable — Sort & filter menu", () => {
+  const MENU_ID = "queue-sortfilter";
+  const renderTable = () => render(<ServiceQueueTable rows={[ROW]} />);
+  const fieldNamed = (name: string) =>
+    screen.getByRole("combobox", { name, hidden: true }) as HTMLSelectElement;
+  const optionsOf = (sel: HTMLSelectElement) => [...sel.options].map((o) => o.textContent);
+
+  // The trap the whole component is built around, pinned here as it is for
+  // /items: an author `display` on the [popover] element beats the UA rule that
+  // hides it, so a closed panel would render and swallow taps meant for the
+  // toolbar behind it. jsdom cannot see the overlay; it CAN see the structure.
+  it("puts the panel's styling classes on an inner wrapper, never on the [popover] element", () => {
+    const { container } = renderTable();
+    const popover = container.querySelector(`#${MENU_ID}`)!;
+    expect(popover).not.toBeNull();
+    expect(popover.getAttribute("popover")).toBe("auto");
+    expect(popover.getAttribute("class")).toBeNull();
+    expect(popover.querySelector(".popup-menu__panel")).not.toBeNull();
+  });
+
+  // The id is the CSS hook — globals.css styles this popover by id precisely so
+  // no shared class can grow a `display`. A renamed id silently loses every
+  // rule, and the panel would render unstyled in the middle of the viewport.
+  it("uses its own id, and the trigger points at it", () => {
+    const { container } = renderTable();
+    const trigger = container.querySelector("button.menu-trigger")!;
+    expect(trigger.getAttribute("popovertarget")).toBe(MENU_ID);
+    // Must stay the popover's immediate previous sibling: the chevron's open
+    // state is read with `.menu-trigger:has(+ [popover]:popover-open)`.
+    expect(trigger.nextElementSibling?.id).toBe(MENU_ID);
+  });
+
+  it("offers every queue column as a sort option, plus the default", () => {
+    renderTable();
+    expect(optionsOf(fieldNamed("Sort by"))).toEqual([
+      "Default (newest)",
+      ...QUEUE_COLUMNS.map((c) => c.label),
+    ]);
+  });
+
+  // The queue's sortQueueRows takes ONE key, so a tie-breaker would be a control
+  // that changes nothing. This is the deliberate difference from /items.
+  it("offers no 'Then by' — the queue sorts on a single key", () => {
+    renderTable();
+    expect(screen.queryByRole("combobox", { name: "Then by", hidden: true })).toBeNull();
+  });
+
+  it("folds the service-type filter into the menu", () => {
+    renderTable();
+    expect(optionsOf(fieldNamed("Service type"))).toEqual([
+      "All types", "Reimage", "Repair", "Other",
+    ]);
+  });
+
+  // Direction is inert until something is being sorted — the same rule the old
+  // toolbar enforced with `disabled={!sort.field}` on its Asc/Desc button.
+  it("disables Direction until a sort key is chosen", () => {
+    renderTable();
+    expect(fieldNamed("Direction").disabled).toBe(true);
+    fireEvent.change(fieldNamed("Sort by"), { target: { value: "due" } });
+    expect(fieldNamed("Direction").disabled).toBe(false);
+  });
+
+  // The trigger is the only thing that reports the current order while the panel
+  // is shut, which is most of the time.
+  it("reads the current sort and filter back on the trigger", () => {
+    const { container } = renderTable();
+    const value = () => container.querySelector(".menu-trigger__value")!.textContent;
+    expect(value()).toBe("Newest");
+
+    fireEvent.change(fieldNamed("Sort by"), { target: { value: "due" } });
+    expect(value()).toBe("Due ▲");
+
+    fireEvent.change(fieldNamed("Direction"), { target: { value: "desc" } });
+    expect(value()).toBe("Due ▼");
+
+    fireEvent.change(fieldNamed("Service type"), { target: { value: "REPAIR" } });
+    expect(value()).toBe("Due ▼ · Repair");
+  });
+
+  // The controls must actually drive the table, not just the summary.
+  it("filters the rows by the service type chosen in the menu", () => {
+    render(
+      <ServiceQueueTable
+        rows={[ROW, { ...ROW, id: "sq-2", itemId: "item-2", serialNumber: "SN2", serviceType: "Reimage", serviceTypeRaw: "REIMAGE" }]}
+      />,
+    );
+    expect(screen.getAllByText(/^SN[12]$/).length).toBeGreaterThan(0);
+    fireEvent.change(fieldNamed("Service type"), { target: { value: "REIMAGE" } });
+    expect(screen.queryByText("SN1")).toBeNull();
+    expect(screen.getAllByText("SN2").length).toBeGreaterThan(0);
+  });
+});
 
 /**
  * The mobile card. As with /items, jsdom has no layout engine and no touch
