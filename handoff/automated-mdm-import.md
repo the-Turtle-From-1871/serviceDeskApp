@@ -14,10 +14,15 @@ This document is self-contained and safe to share. It contains no secrets.
 
 If you read one section, read this one. Everything below is detail.
 
-**Use the script in this folder: `Send-MdmImport.ps1`.** It checks for the mistakes
-people actually make — missing secret, wrong file type, too many rows, whitespace
-copied along with the secret — *before* sending anything, and prints a plain-English
-result. Don't hand-write the request unless you have a reason to.
+**Send the file with `curl.exe`.** It ships with Windows 10 1803 and later, needs no
+execution policy, and works on a machine locked down with WDAC or AppLocker — which
+is why it is the recommended route here.
+
+> **There used to be a wrapper script, `Send-MdmImport.ps1`, and it was removed on
+> 2026-08-08.** It pre-checked the common mistakes and refused an HTML response. Doing
+> this by hand means **those checks are now yours to make** — §4 says exactly what a
+> good response looks like, and the warning below covers the one failure that can
+> masquerade as success. Read both before scheduling anything.
 
 **Step 1 — put the secret in the environment.** Open PowerShell and run this,
 pasting the value you were given between the quotes:
@@ -26,47 +31,34 @@ pasting the value you were given between the quotes:
 $env:MDM_IMPORT_SECRET = "paste-the-secret-here"
 ```
 
-**Step 2 — send the file.** From the folder holding `Send-MdmImport.ps1`:
+Paste carefully: a trailing space or newline copied along with the secret produces a
+`401`, and nothing on screen shows the difference.
+
+**Step 2 — send the file.**
 
 ```powershell
-.\Send-MdmImport.ps1 -CsvPath C:\path\to\fleet.csv -Uri "https://www.dcsim.us/api/items/import"
+curl.exe -sSL -X POST "https://www.dcsim.us/api/items/import" `
+  -H "Authorization: Bearer $env:MDM_IMPORT_SECRET" `
+  -F "file=@C:\path\to\fleet.csv" `
+  -w "`nHTTP %{http_code}`n"
 ```
 
-> ⚠️ **Pass `-Uri` unless your copy of the script is dated 2026-08-04 or later.**
-> The app's address is now `https://www.dcsim.us`, and the script in the
-> repository defaults to it as of 2026-08-04 — but a copy taken before that
-> defaults to `https://servicedeskapp.vercel.app`, which the government network
-> **blocks** — so on a `.mil`-managed machine the run fails to connect rather than
-> importing anything. The Vercel address still works from an unfiltered network,
-> which is exactly why this is worth checking rather than assuming: it can look
-> fine when you test it from home and fail on the machine that runs the schedule.
-> Check yours with `Select-String -Path .\Send-MdmImport.ps1 -Pattern 'vercel\.app'`
-> — any output means pass `-Uri`.
+Two flags are load-bearing. **`-L`** follows redirects: the apex `dcsim.us` answers a
+permanent `308` to `www.dcsim.us`, and without `-L` the run dies on that `308` having
+sent nothing. **`-w "HTTP %{http_code}"`** prints the status code, which is the only
+way to tell a real result from the failure below.
 
-**Step 3 — read what it prints.** Green "Import succeeded" with counts means it
-worked. Red "FAILED" tells you what to fix, and nothing was imported.
+**Step 3 — check what came back.** You want `HTTP 200` and a line of JSON starting
+`{"added":`. See §4 for how to read the counts.
+
+> ⚠️ **If the response body is HTML — anything starting `<!DOCTYPE` or `<html` — the
+> import did NOT happen, even if the status is 200.** That means the request was
+> redirected to the login page, i.e. the endpoint has lost its exemption from the
+> login gate. It is the one failure that looks like success: no error, no red text,
+> and nothing imported. Report it to the app owner rather than re-running it.
 
 That's it. Do this **by hand at least twice** (see §6) before putting it on a
 schedule.
-
-> **If PowerShell refuses to run the script** — "running scripts is disabled on this
-> system" — run this once in the same window and try again:
-> ```powershell
-> Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-> ```
-> That allows scripts for this window only and changes nothing permanently.
-
-> **Constrained Language Mode is supported.** On a machine locked down with WDAC or
-> AppLocker, PowerShell blocks .NET method calls and prints *"Method invocation is
-> supported only on core types in this language mode."* `Send-MdmImport.ps1` contains
-> **no .NET method calls at all**, so it runs under that restriction — it prints the
-> mode it detected on its second line, so paste that line in if you report a problem.
-> If you see that error anyway, check your copy is current:
-> ```powershell
-> Select-String -Path .\Send-MdmImport.ps1 -Pattern '::','\.\w+\('
-> ```
-> No output means the copy is current, and the error is coming from something other
-> than this script — send the whole run output, which now names the file and line.
 
 **When you're ready to schedule it**, set the secret as a *machine* environment
 variable so it survives reboots and isn't visible in the task definition:
@@ -77,20 +69,32 @@ setx MDM_IMPORT_SECRET "paste-the-secret-here" /M
 ```
 
 `setx` is used rather than `[Environment]::SetEnvironmentVariable(...)` because the
-latter is a .NET method call, which a locked-down machine refuses — see the
-Constrained Language Mode note below. Open a **new** window afterwards; `setx` does
-not affect the window you ran it in.
+latter is a .NET method call, which a machine under Constrained Language Mode
+refuses. Open a **new** window afterwards; `setx` does not affect the window you ran
+it in.
 
-Then point a Task Scheduler action at:
+Then point a Task Scheduler action at a one-line wrapper of the Step 2 command, e.g.
+a `.cmd` file:
 
 ```
-Program:    powershell.exe
-Arguments:  -NoProfile -ExecutionPolicy Bypass -File "C:\path\to\Send-MdmImport.ps1" -CsvPath "C:\path\to\fleet.csv" -LogPath "C:\path\to\import.log" -Uri "https://www.dcsim.us/api/items/import"
+Program:    C:\Windows\System32\cmd.exe
+Arguments:  /c C:\path\to\send-fleet.cmd >> C:\path\to\import.log 2>&1
 ```
 
-The script exits non-zero on any failure, so Task Scheduler shows a red "Last Run
-Result" rather than reporting success on a broken run. **Check that column
-occasionally** — it is how you find out the job quietly stopped working.
+```bat
+@echo off
+curl.exe -sSL -X POST "https://www.dcsim.us/api/items/import" ^
+  -H "Authorization: Bearer %MDM_IMPORT_SECRET%" ^
+  -F "file=@C:\path\to\fleet.csv" ^
+  -w "\nHTTP %%{http_code}\n"
+```
+
+> **Task Scheduler's "Last Run Result" will read success even when the import
+> failed.** `curl -sS` exits 0 for any HTTP response it received, including a `401`
+> or a redirect to the login page — the old script exited non-zero on those, and
+> nothing does that now. **The log file is the only record**, so check it rather than
+> the Last Run Result column. Add `--fail-with-body` to the curl line if you want a
+> non-zero exit on a 4xx/5xx; note it still exits 0 on the HTML-page-with-200 case.
 
 ---
 
@@ -135,8 +139,8 @@ Content-Type: multipart/form-data
 > ⚠️ **`Invoke-RestMethod -Form` does not exist in Windows PowerShell 5.1**, which is
 > what a stock Windows machine still runs — check yours with
 > `$PSVersionTable.PSVersion`. On 5.1 the example below fails with *"A parameter
-> cannot be found that matches parameter name 'Form'"*. Use `Send-MdmImport.ps1`
-> from §0, which handles both versions, or the `curl` example underneath.
+> cannot be found that matches parameter name 'Form'"*. Use the `curl` example
+> underneath, which works on either version — it is also what §0 recommends.
 
 ### PowerShell 7+ (what a scheduled task should run)
 
@@ -157,10 +161,14 @@ rather than the file's contents.
 ### curl
 
 ```bash
-curl -X POST "https://www.dcsim.us/api/items/import" \
+curl -sSL -X POST "https://www.dcsim.us/api/items/import" \
   -H "Authorization: Bearer $MDM_IMPORT_SECRET" \
-  -F "file=@fleet.csv"
+  -F "file=@fleet.csv" \
+  -w "\nHTTP %{http_code}\n"
 ```
+
+`-L` is not optional: the apex `dcsim.us` permanently redirects to `www.dcsim.us`, and
+curl does not follow unless told to, so without it the run fails on a bare `308`.
 
 ---
 
@@ -298,12 +306,13 @@ re-importing unchanged rows does nothing.
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| Cannot connect / times out, but the same command works from home | The request is going to `servicedeskapp.vercel.app`, which the government network blocks | Send to `https://www.dcsim.us/api/items/import` — pass `-Uri` if your script still defaults to the old address (§0, §2) |
+| Cannot connect / times out, but the same command works from home | The request is going to `servicedeskapp.vercel.app`, which the government network blocks | Send to `https://www.dcsim.us/api/items/import` — check the address in your scheduled command (§0, §2) |
+| `308` and nothing imported | The address is the apex `dcsim.us`, and curl was not told to follow redirects | Use `https://www.dcsim.us` (with `www`) and keep `-L` on the curl command (§0) |
 | `401` every time | Secret mismatch, or a trailing newline on the value in Vercel | Re-copy the value; confirm the header is `Bearer <secret>` |
 | `200` but the body is **HTML**, not JSON | The request was redirected to the login page | Tell the app owner — the endpoint's exemption from the login gate has been lost. **This one is dangerous: the job looks successful while importing nothing.** |
 | `500` on every request | The service account is missing from the database | Apply the migration named in section 6 |
 | `404` | Not deployed yet | Wait for the release |
-| "Method invocation is supported only on core types in this language mode" | The machine enforces Constrained Language Mode, and something is calling a .NET method | The current script and the commands in this document avoid those calls — take a fresh copy of `Send-MdmImport.ps1`. If it is your own wrapper, replace `[Environment]::…`, `[Math]::…` and `[System.IO.…]::…` with cmdlets |
+| "Method invocation is supported only on core types in this language mode" | The machine enforces Constrained Language Mode, and something is calling a .NET method | The `curl.exe` commands in this document make no .NET calls, so prefer them. If it is your own PowerShell wrapper, replace `[Environment]::…`, `[Math]::…` and `[System.IO.…]::…` with cmdlets |
 | Counts are all `unchanged` | Nothing in the export differs from what's on file | Working as intended |
 | A device's hand-corrected details keep reverting | The export is the source of truth for those fields (section 5) | Correct it in the MDM export, not in the app |
 

@@ -5,6 +5,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-08-08
 
+### Removed
+- **The `Send-MdmImport.ps1` wrapper script is gone; the scheduled fleet import now uses `curl.exe` directly.** The script existed to pre-check the mistakes people actually make and to refuse a response that was a web page rather than data, but it needed repeated repair to survive the locked-down machine it runs on — .NET calls refused under Constrained Language Mode, then redirects, then the guard being on the wrong side of a status check. `handoff/automated-mdm-import.md` now documents a plain `curl.exe` command instead, which needs no execution policy, works on Windows PowerShell 5.1 and 7 alike, and makes no .NET calls at all. **The import endpoint itself is unchanged** — same address, same secret, same behaviour.
+
+  Two checks the script used to make are now the operator's, and the document says so in both places they matter. A response body that is **HTML rather than JSON means nothing was imported even when the status is 200** — the request was redirected to the login page, and it is the one failure that looks like success. And Task Scheduler's "Last Run Result" will now read success on a failed import, because `curl` exits 0 for any HTTP response it receives; the log file is the record to check, not that column.
+
+  #### Notes
+  - Anyone running the old script should switch to the command in §0 of the hand-off document. The script will keep working where it already sits — it is only unmaintained now — but a fresh copy is no longer available from the repository.
+
 ### Fixed
 - **The nightly import script follows redirects, and now refuses an HTML page even when the server says 200.** Two faults in `handoff/Send-MdmImport.ps1`, both of which stop the fleet import silently. It called `curl` without `-L`, so it never followed a redirect — pointing it at the bare `dcsim.us` (which permanently redirects to `www.dcsim.us`) killed the run with an unexplained `308` before anything was sent. And its guard against being handed a web page instead of data only ran when the server returned an error code. That is the wrong way round: following a redirect can land on the **login page, which answers 200 with HTML**, so the one case the guard exists to catch was the one case it could not see — the job would have reported a clean success while importing nothing. The guard now runs on every response.
 
