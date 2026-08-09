@@ -277,8 +277,8 @@ describe("ItemSelectTable — mobile card structure", () => {
       "Home unit",
       "SLOC",
       "Compliance",
-      "Last logon user",
-      "Last logon date",
+      "Logon user",
+      "Logon date",
     ]);
     // UIC and Category were moved out; they stay desktop columns only.
     expect(terms).not.toContain("UIC");
@@ -307,8 +307,8 @@ describe("ItemSelectTable — mobile card structure", () => {
         "Holder",
         "Home unit",
         "Compliance",
-        "Last logon user",
-        "Last logon date",
+        "Logon user",
+        "Logon date",
       ]);
     }
   });
@@ -344,19 +344,17 @@ describe("ItemSelectTable — mobile card structure", () => {
     expect(dd!.querySelector("span")!.style.getPropertyValue("--w")).toBe("");
   });
 
-  // The structure the one-line layout rests on. jsdom cannot lay the row out,
-  // but it can pin that the label and value share a `.card-more__row` parent
-  // instead of sitting in the panel's shared grid columns — which is what gives
-  // the value the width to fit beside its label rather than under it.
-  it("keeps the home unit's label and value in one row of their own", () => {
+  // Every pair is a direct child of the <dl>, home unit included, so all six
+  // values line up in the grid's one value column. jsdom cannot measure that
+  // alignment (it was measured in a browser), but it CAN pin the structure that
+  // produces it: the moment one pair is wrapped in anything, that row leaves the
+  // shared columns and its value starts somewhere of its own.
+  it("keeps every label/value pair in the panel's shared grid columns", () => {
     const { container } = renderRows();
-    const row = container.querySelector("td.cell-more .card-more__row");
-    expect(row).not.toBeNull();
-    expect(row!.querySelector(":scope > dt.card-more__fit-label")!.textContent).toBe("Home unit");
-    expect(row!.querySelector(":scope > dd.card-more__fit")).not.toBeNull();
-    // Every other pair stays a direct child of the <dl>, so only this one row
-    // leaves the grid.
-    expect(container.querySelectorAll("td.cell-more .card-more__row")).toHaveLength(2);
+    const dl = container.querySelector("td.cell-more dl.card-more__list")!;
+    const kids = [...dl.children].map((el) => el.tagName);
+    expect(new Set(kids)).toEqual(new Set(["DT", "DD"]));
+    expect(dl.querySelector(":scope > dd.card-more__fit")).not.toBeNull();
   });
 
   // The fit sizing is CSS (`clamp` over a container query), so jsdom — which has
@@ -392,8 +390,8 @@ describe("ItemSelectTable — mobile card structure", () => {
       "Home unit",
       "SLOC",
       "Compliance",
-      "Last logon user",
-      "Last logon date",
+      "Logon user",
+      "Logon date",
     ]);
     window.localStorage.clear();
   });

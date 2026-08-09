@@ -311,7 +311,7 @@ export function ItemSelectTable({
       </td>
 
       {/* The custody and telemetry facts the compact card drops — Holder, Home
-          unit, SLOC, Compliance, Last logon user, Last logon date — behind a
+          unit, SLOC, Compliance, Logon user, Logon date — behind a
           chevron at the card's bottom edge.
 
           UIC and Category used to sit here in place of Home unit and the three
@@ -356,17 +356,16 @@ export function ItemSelectTable({
                 an untrimmed check does the same for whitespace. */}
             <dt>Holder</dt>
             <dd>{orDash(it.holderName)}</dd>
-            {/* Home unit reads like every other row — label and value on ONE
-                line — but it is wrapped in its own flex row rather than sitting
-                in the shared grid columns, and that is what buys the space to
-                keep the value on one line too. The grid's label track is as wide
-                as "LAST LOGON DATE" (114px at 390px), leaving 198px for a value
-                that can run to 53 characters; on its own row the label costs
-                only its own width, so the value gets ~270px instead. `<div>`
-                between `<dl>` and `<dt>`/`<dd>` is valid HTML and keeps the
-                name/value semantics a screen reader announces.
+            {/* Home unit is an ordinary row in the shared grid columns, so its
+                value starts exactly where every other value does. It briefly
+                had a flex row of its own (a wider value, but a value column
+                that began somewhere different from the five around it) and
+                before that the label stacked above it. The width it needs came
+                from the LABELS instead — see the 11px, letter-spacing-free `dt`
+                rule in globals.css and the shortened "Logon user"/"Logon date"
+                below, which together handed ~15px back to every value.
 
-                The value's font is then sized to fit that width on one line.
+                The value's font is then sized to fit that column on one line.
                 `--w` is the string's estimated width in em, from measured Geist
                 glyph widths — NOT its character count. A count charges a comma
                 and a W alike, and unit names are full of spaces, which is what
@@ -375,14 +374,12 @@ export function ItemSelectTable({
                 renders. Nothing is measured in JS: the panel lives in a closed
                 <details> until tapped, so there is no layout to measure, on 50
                 rows. See `.card-more__fit` in globals.css for the arithmetic. */}
-            <div className="card-more__row">
-              <dt className="card-more__fit-label">Home unit</dt>
-              <dd className="card-more__fit">
-                {homeUnit
-                  ? <span style={{ ["--w" as string]: estimateTextEm(homeUnit) }}>{homeUnit}</span>
-                  : orDash(null)}
-              </dd>
-            </div>
+            <dt>Home unit</dt>
+            <dd className="card-more__fit">
+              {homeUnit
+                ? <span style={{ ["--w" as string]: estimateTextEm(homeUnit) }}>{homeUnit}</span>
+                : orDash(null)}
+            </dd>
             {/* SLOC is the ONE row that disappears when it is empty, rather
                 than showing a dash. Most of the catalogue has no storage
                 location — a dash on nearly every card is a row of noise between
@@ -398,9 +395,17 @@ export function ItemSelectTable({
             ) : null}
             <dt>Compliance</dt>
             <dd>{orDash(it.compliance)}</dd>
-            <dt>Last logon user</dt>
+            {/* "Logon user"/"Logon date", not "Last logon …". The grid's label
+                track is as wide as its widest label and every value lines up
+                against it, so those two 15-character labels were spending ~35px
+                of every row's value column — including the home unit's, which
+                needs the room to stay on one line. Nothing else on this card
+                shows a logon, so there is no earlier one to distinguish these
+                from; `/i/<id>` keeps the fuller wording, where the column is
+                not shared. */}
+            <dt>Logon user</dt>
             <dd className="mono">{orDash(it.lastLogonUserPrincipalName)}</dd>
-            <dt>Last logon date</dt>
+            <dt>Logon date</dt>
             <dd>{orDash(it.lastLogonDate)}</dd>
           </dl>
         </details>
