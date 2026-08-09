@@ -51,6 +51,23 @@ export type ItemRow = {
    *  whole page in one query — never per row. See
    *  modules/transfers/holders.query.ts. */
   holderName: string | null;
+  /** The owning unit, shown in the phone card's More panel. Free text and often
+   *  long ("HHC, 1-506 IN, 1BCT"), which is why the panel sizes it to fit — see
+   *  `.card-more__fit` in globals.css. There is no Home unit COLUMN: the desktop
+   *  table shows the UIC instead, which is the same fact in six characters. */
+  homeUnit: string | null;
+  /** Where the device physically sits when nobody holds it. Free text. */
+  storageLocation: string | null;
+  /* MDM telemetry, shown in the phone card's More panel. All three are stored
+     VERBATIM as text by the importer (`lastLogonDate` is a raw string like
+     "7/25/2026 1:40:21 AM", never a Date) — so they are rendered as-is, exactly
+     as the item detail card does. `Item.lastLogonAt` is the parsed twin and is
+     deliberately NOT here: it exists for readiness/SQL comparisons, and
+     displaying a reformatted date beside the MDM export people cross-check
+     against would invent a value the source never gave. */
+  lastLogonUserPrincipalName: string | null;
+  lastLogonDate: string | null;
+  compliance: string | null;
 };
 
 export type SortPref = GenericSortPref<SortField>;

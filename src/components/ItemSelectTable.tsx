@@ -294,16 +294,26 @@ export function ItemSelectTable({
         )}
       </td>
 
-      {/* The three fields the compact card drops — Holder, UIC and Category —
-          behind a chevron at the card's bottom edge.
+      {/* The custody and telemetry facts the compact card drops — Holder, Home
+          unit, SLOC, Compliance, Last logon user, Last logon date — behind a
+          chevron at the card's bottom edge.
+
+          UIC and Category used to sit here in place of Home unit and the three
+          MDM fields. Both were dropped deliberately: Category is a coarse device
+          class the make/model on the card's face already implies, and the UIC is
+          the same fact as Home unit in six characters that nobody reads aloud.
+          Both remain desktop columns in the Columns menu for anyone who works by
+          them. What replaced them is otherwise reachable only by opening the
+          item, and it is what a technician checks when deciding whether a device
+          is actually in use and where it should be.
 
           A native <details>, not a useState toggle: it opens before hydration,
           Enter/Space work on the <summary> for free, and the open state is the
           element's own so nothing has to be tracked per row in a component that
           re-renders on every selection change. It is deliberately NOT driven by
           the Columns menu — the card is built from cells the menu cannot reach
-          (see cell-serial above), so this shows the same three fields for
-          everyone rather than a set that changes with a desktop preference.
+          (see cell-serial above), so this shows the same fields for everyone
+          rather than a set that changes with a desktop preference.
 
           `summary` is in useRowGestures' pointerdown guard, so pressing the
           chevron cannot start a swipe or a long press, and globals.css lifts it
@@ -322,10 +332,44 @@ export function ItemSelectTable({
           <dl className="card-more__list">
             <dt>Holder</dt>
             <dd>{it.holderName ?? <span className="subtle">—</span>}</dd>
-            <dt>UIC</dt>
-            <dd className="mono">{it.deviceUIC ?? <span className="subtle">—</span>}</dd>
-            <dt>Category</dt>
-            <dd>{it.deviceCategory ?? <span className="subtle">—</span>}</dd>
+            {/* Sized to stay on ONE line however long the unit is, and given
+                the panel's full width to make that possible — real unit names
+                run to 53 characters. The length is handed to CSS as `--len` and
+                the width comes from the dd's own container query, so nothing is
+                measured in JS and it is right whether the panel is open, closed
+                or never opened — a measure-then-shrink effect could do none of
+                those, because a closed <details> has no layout to measure. See
+                `.card-more__fit` in globals.css for the arithmetic. */}
+            <dt className="card-more__fit-label">Home unit</dt>
+            <dd className="card-more__fit">
+              {it.homeUnit
+                ? <span style={{ ["--len" as string]: it.homeUnit.length }}>{it.homeUnit}</span>
+                : <span className="subtle">—</span>}
+            </dd>
+            {/* SLOC is the ONE row that disappears when it is empty, rather
+                than showing a dash. Most of the catalogue has no storage
+                location — a dash on nearly every card is a row of noise between
+                the two facts either side of it. The others stay put even when
+                blank: a missing holder, home unit or logon is itself worth
+                seeing, and a row that comes and going would make two cards
+                impossible to compare at a glance.
+                Trimmed, because the importer writes whitespace verbatim. */}
+            {it.storageLocation?.trim() ? (
+              <>
+                <dt>SLOC</dt>
+                <dd>{it.storageLocation}</dd>
+              </>
+            ) : null}
+            {/* `||`, not `??`: the CSV importer writes these verbatim, so an
+                absent value arrives as "" from some exports and as null from
+                others. `??` would render the empty string as a blank row that
+                reads like a missing label. Same test the item detail card uses. */}
+            <dt>Compliance</dt>
+            <dd>{it.compliance || <span className="subtle">—</span>}</dd>
+            <dt>Last logon user</dt>
+            <dd className="mono">{it.lastLogonUserPrincipalName || <span className="subtle">—</span>}</dd>
+            <dt>Last logon date</dt>
+            <dd>{it.lastLogonDate || <span className="subtle">—</span>}</dd>
           </dl>
         </details>
       </td>

@@ -27,6 +27,11 @@ const row = (over: Partial<ItemRow>): ItemRow => ({
   deviceCategory: over.deviceCategory ?? null,
   readiness: over.readiness ?? "UNTRIAGED",
   holderName: over.holderName ?? null,
+  homeUnit: over.homeUnit ?? null,
+  storageLocation: over.storageLocation ?? null,
+  lastLogonUserPrincipalName: over.lastLogonUserPrincipalName ?? null,
+  lastLogonDate: over.lastLogonDate ?? null,
+  compliance: over.compliance ?? null,
 });
 
 describe("sortItemRows", () => {
