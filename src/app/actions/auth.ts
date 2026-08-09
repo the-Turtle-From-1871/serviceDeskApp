@@ -5,7 +5,10 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { signIn, signOut } from "@/auth";
 import prisma from "@/lib/prisma";
-import { emailField, passwordField } from "@/modules/users/users.schema";
+import { emailField, passwordField, registerSchema } from "@/modules/users/users.schema";
+import { createSelfRegisteredUser } from "@/modules/users/users.service";
+import { createEmailVerificationToken } from "@/lib/email-verification";
+import { sendVerificationEmail } from "@/modules/auth/send-verification-email";
 import { createPasswordResetToken, resetPasswordWithToken } from "@/lib/password-reset";
 import { sendPasswordResetEmail } from "@/modules/auth/send-password-reset-email";
 import { defaultBaseUrl } from "@/lib/base-url";
@@ -396,5 +399,73 @@ export async function resetPasswordAction(_prev: unknown, formData: FormData) {
     console.error("[resetPasswordAction] error:", e);
     return { error: "Something went wrong. Please try again." };
   }
+  return { ok: true as const };
+}
+
+
+// PUBLIC BY DESIGN: registration is an unauthenticated entry point, like login
+// and the reset request (a reviewed exception to "auth-first").
+//
+// Modelled on requestPasswordResetAction, NOT on loginAction, and the difference
+// is the point: there is no "failed attempt" to charge here and nothing is ever
+// refunded, because with registration the abuse IS volume. Copying login's
+// refund would make the budget effectively unlimited for anyone willing to
+// succeed once.
+export async function registerAction(_prev: unknown, formData: FormData) {
+  // Shape-check BEFORE spending anything — the same ordering rule as
+  // loginAction. Junk must not reach the budget, or 60 malformed POSTs drain
+  // the shared per-network ceiling and lock out every colleague behind that
+  // egress.
+  const parsed = registerSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Check the form and try again." };
+  }
+  const input = parsed.data;
+
+  // Free to detect, and charging for it would double-punish the one population
+  // that can never succeed: a visitor whose network blocks Cloudflare produces
+  // no token on every attempt.
+  if (missingTurnstileToken(formData)) return CHALLENGE_FAILED();
+
+  const keys = await identityRateLimitKeys("register", input.email);
+  const throttled = await spendAuthBudget(keys);
+  if (throttled) return throttled;
+
+  const refused = await challenge(formData, keys.ip);
+  if (refused) return refused;
+
+  // Everything that could reveal whether this address is already registered runs
+  // AFTER the response, so the action returns in ~constant time either way and
+  // the value below is identical for every outcome. Same construction, and same
+  // reason, as requestPasswordResetAction.
+  after(async () => {
+    try {
+      const base = defaultBaseUrl().replace(/\/$/, "");
+      if (!base) {
+        console.error("[registerAction] no base URL configured (set APP_URL); skipping verification email");
+        return;
+      }
+
+      const existing = await prisma.user.findUnique({ where: { email: input.email } });
+      if (existing) {
+        // Deliberately NOT a second account, and deliberately not an error the
+        // submitter can see: telling them the address is taken is precisely the
+        // enumeration oracle the deferral above exists to close.
+        console.info("[registerAction] registration attempted for an address that already exists");
+        return;
+      }
+
+      const user = await createSelfRegisteredUser(input);
+      const raw = await createEmailVerificationToken(user.id);
+      await sendVerificationEmail({
+        to: user.email,
+        name: user.name,
+        verifyUrl: `${base}/verify-email?token=${raw}`,
+      });
+    } catch (e) {
+      console.error("[registerAction] deferred work failed:", e);
+    }
+  });
+
   return { ok: true as const };
 }

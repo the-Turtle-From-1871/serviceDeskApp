@@ -1,7 +1,7 @@
 import type { Role, User } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { hashPassword, verifyPassword } from "@/lib/password";
-import { newUserSchema, type NewUserInput } from "./users.schema";
+import { newUserSchema, registerSchema, type NewUserInput, type RegisterInput } from "./users.schema";
 import { PasswordChangeError } from "./users.errors";
 
 export async function createUser(input: NewUserInput): Promise<User> {
@@ -14,6 +14,31 @@ export async function createUser(input: NewUserInput): Promise<User> {
       unit: data.unit,
       contactNumber: data.contactNumber,
       role: data.role,
+      passwordHash: await hashPassword(data.password),
+    },
+  });
+}
+
+// Self-service registration.
+//
+// Deliberately its OWN function rather than createUser with a role argument:
+// there must be exactly one code path that can mint an account from an
+// UNAUTHENTICATED request, and it must not be able to choose a role. VIEWER is
+// hard-coded here, and `registerSchema` (newUserSchema minus `role`) means a
+// crafted POST carrying role=ADMIN is stripped by z.object() before it arrives.
+//
+// `emailVerifiedAt` is left NULL: the address is an unproved claim until the
+// emailed link is clicked, and src/auth.ts refuses sign-in until then.
+export async function createSelfRegisteredUser(input: RegisterInput): Promise<User> {
+  const data = registerSchema.parse(input);
+  return prisma.user.create({
+    data: {
+      rank: data.rank,
+      name: data.name,
+      email: data.email,
+      unit: data.unit,
+      contactNumber: data.contactNumber,
+      role: "VIEWER",
       passwordHash: await hashPassword(data.password),
     },
   });
