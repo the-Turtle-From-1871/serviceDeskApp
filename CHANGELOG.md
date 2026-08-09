@@ -31,6 +31,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   - Confirmation email goes through the existing sender. **If the `GMAIL_*` variables are not live in Vercel production, the mail is silently logged instead of sent** and nobody can finish signing up — check them before announcing this.
   - Registration is Turnstile-challenged, so the Turnstile variables must be present in production too, and the app must be **redeployed** after setting them (the site key is inlined at build time).
 
+### Fixed
+- **Swiping an item card open no longer springs shut when the list is scrolling.** On a phone, dragging a card leftward to reveal its actions worked from a standstill but failed whenever the list was moving or the finger drifted downward as it went: the card followed the finger part of the way and then snapped back to closed on its own, as though the swipe had been refused after the fact. The cause was that the browser and the app were both laying claim to the same touch — the card is allowed to scroll vertically, so once the finger showed any downward travel the browser took the gesture over for scrolling and withdrew it from the app mid-swipe, and a withdrawn gesture is returned to where it started. The app now holds on to a touch it has already committed to as a sideways swipe, so the card stays where the finger puts it. The service queue's cards get the same fix — both lists share the gesture.
+
+  Scrolling and zooming are deliberately untouched. A drag that is mostly vertical still scrolls the list exactly as before — the app only claims a gesture it has already decided is a swipe — and a second finger arriving mid-swipe is still a pinch, so a serial number can be magnified while a card is part-way open.
+
 ## 2026-08-08
 
 ### Added
