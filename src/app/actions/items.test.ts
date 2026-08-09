@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { roleBaseline } from "@/modules/users/capabilities";
 
 const requireUser = vi.fn();
 const requireCapability = vi.fn();
@@ -13,7 +14,7 @@ const revalidatePath = vi.fn();
 // server actually strips admin-only fields from a USER's submission.
 vi.mock("@/lib/authz", () => ({
   requireUser: () => requireUser(),
-  requireCapability: () => requireCapability(),
+  requireCapability: (c: string) => requireCapability(c),
 }));
 // Only updateItemFields is exercised here; the rest are declared because the
 // admin actions module (imported below for the identity tests) names them.
@@ -59,8 +60,8 @@ import { updateItemDetailsAction } from "./items";
 import { updateItemIdentityAction, createItemAction, deleteItemAction } from "@/app/admin/actions/items";
 import { Prisma } from "@prisma/client";
 
-const ADMIN = { id: "a1", role: "ADMIN" as const, name: "Admin" };
-const USER = { id: "u1", role: "USER" as const, name: "User" };
+const ADMIN = { id: "a1", role: "ADMIN" as const, name: "Admin", capabilities: roleBaseline("ADMIN") };
+const USER = { id: "u1", role: "USER" as const, name: "User", capabilities: roleBaseline("USER") };
 
 function fd(entries: Record<string, string>) {
   const f = new FormData();
@@ -89,9 +90,19 @@ beforeEach(() => {
   deleteItem.mockResolvedValue(undefined);
 });
 
-describe("updateItemDetailsAction — role-gated fields", () => {
+describe("updateItemDetailsAction — capability-gated fields", () => {
+  // Pins WHICH capability the gate demands. Asserting only that some gate ran
+  // would still pass if this action were widened to any signed-in session,
+  // which is exactly what must not happen — a VIEWER can read the property book
+  // and must not be able to write to it.
+  it("demands EDIT_ITEM_HOLDER, so read access alone cannot write", async () => {
+    requireCapability.mockResolvedValue(USER);
+    await updateItemDetailsAction(undefined, fd({ id: "item-1", currentPosition: "Supply" }));
+    expect(requireCapability).toHaveBeenCalledWith("EDIT_ITEM_HOLDER");
+  });
+
   it("USER may change ONLY currentUserEmail + currentPosition; forged admin-only fields are stripped server-side", async () => {
-    requireUser.mockResolvedValue(USER);
+    requireCapability.mockResolvedValue(USER);
     const res = await updateItemDetailsAction(
       undefined,
       fd({
@@ -117,7 +128,7 @@ describe("updateItemDetailsAction — role-gated fields", () => {
   });
 
   it("ADMIN may change all eight editable fields", async () => {
-    requireUser.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     const res = await updateItemDetailsAction(undefined, fd({ id: "item-1", ...ADMIN_FIELDS }));
     expect(res).toEqual({ ok: true });
     const [, data] = updateItemFields.mock.calls[0];
@@ -125,7 +136,7 @@ describe("updateItemDetailsAction — role-gated fields", () => {
   });
 
   it("ADMIN cannot rewrite item identity — make/model/serialNumber are stripped", async () => {
-    requireUser.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     await updateItemDetailsAction(
       undefined,
       fd({ id: "item-1", ...ADMIN_FIELDS, make: "Dell", model: "5420", serialNumber: "SN-HACK" }),
@@ -135,7 +146,7 @@ describe("updateItemDetailsAction — role-gated fields", () => {
   });
 
   it("ADMIN blanks CLEAR the nullable fields instead of no-opping", async () => {
-    requireUser.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     await updateItemDetailsAction(
       undefined,
       fd({ id: "item-1", ...ADMIN_FIELDS, homeUnit: "", deviceUIC: "  ", notes: "", deviceCategory: "  ", currentUserEmail: "", currentPosition: "", storageLocation: "  " }),
@@ -155,7 +166,7 @@ describe("updateItemDetailsAction — role-gated fields", () => {
   });
 
   it("normalizes an ADMIN's category and teaches it to the managed vocabulary", async () => {
-    requireUser.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     await updateItemDetailsAction(undefined, fd({ id: "item-1", ...ADMIN_FIELDS, deviceCategory: "  Tough   Book " }));
     const [, data] = updateItemFields.mock.calls[0];
     expect(data.deviceCategory).toBe("Tough Book");
@@ -163,14 +174,14 @@ describe("updateItemDetailsAction — role-gated fields", () => {
   });
 
   it("rejects a blank device name from an ADMIN (NOT NULL column)", async () => {
-    requireUser.mockResolvedValue(ADMIN);
+    requireCapability.mockResolvedValue(ADMIN);
     const res = await updateItemDetailsAction(undefined, fd({ id: "item-1", ...ADMIN_FIELDS, deviceName: "  " }));
     expect(res).toEqual({ error: "Device name is required" });
     expect(updateItemFields).not.toHaveBeenCalled();
   });
 
   it("rejects a missing item id before touching the DB", async () => {
-    requireUser.mockResolvedValue(USER);
+    requireCapability.mockResolvedValue(USER);
     const res = await updateItemDetailsAction(undefined, fd({ currentUserEmail: "jane@u.mil", currentPosition: "Supply" }));
     expect(res).toEqual({ error: "Missing item." });
     expect(updateItemFields).not.toHaveBeenCalled();

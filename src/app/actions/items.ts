@@ -1,6 +1,6 @@
 "use server";
 import { revalidatePath } from "next/cache";
-import { requireUser } from "@/lib/authz";
+import { requireCapability } from "@/lib/authz";
 import { updateItemFields } from "@/modules/items/items.service";
 import { itemDetailsSchema, userItemDetailsSchema } from "@/modules/items/items.schema";
 import { learnCategories, normalizeCategoryName } from "@/modules/items/categories.service";
@@ -8,18 +8,24 @@ import { ItemError } from "@/modules/items/items.errors";
 import type { ItemLoggedFields } from "@/modules/items/item-diff";
 
 // Inventory is shared org-wide, so there is deliberately no per-user ownership
-// filter — access is gated on ROLE. An ADMIN may edit all eight editable item
-// fields; a standard USER may change only the current holder email and current
-// position. The role picks the schema, and z.object() strips the rest, so a
-// USER's crafted POST cannot alter deviceName/homeUnit/deviceUIC/notes/
-// deviceCategory/storageLocation even though the form hides those inputs.
-// Every change is recorded as an ItemEdit by updateItemFields.
+// filter — access is gated on CAPABILITY. MANAGE_ITEMS may edit all eight
+// editable item fields; EDIT_ITEM_HOLDER may change only the current holder
+// email and current position. The capability picks the schema, and z.object()
+// strips the rest, so a holder-only caller's crafted POST cannot alter
+// deviceName/homeUnit/deviceUIC/notes/deviceCategory/storageLocation even
+// though the form hides those inputs.
+//
+// Requiring EDIT_ITEM_HOLDER rather than merely a session is what keeps a
+// VIEWER out: read access to the property book does not carry write access to
+// it. Every change is recorded as an ItemEdit by updateItemFields.
 export async function updateItemDetailsAction(_prev: unknown, formData: FormData) {
-  const user = await requireUser();
+  const user = await requireCapability("EDIT_ITEM_HOLDER");
   const id = String(formData.get("id") ?? "").trim();
   if (!id) return { error: "Missing item." };
 
-  const schema = user.role === "ADMIN" ? itemDetailsSchema : userItemDetailsSchema;
+  const schema = user.capabilities.includes("MANAGE_ITEMS")
+    ? itemDetailsSchema
+    : userItemDetailsSchema;
   const parsed = schema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
