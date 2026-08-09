@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const requireAdmin = vi.fn();
+const requireCapability = vi.fn();
 const upsertServiceRequest = vi.fn();
 const reopenServiceItem = vi.fn();
 const setServiceDeadline = vi.fn();
 const getCurrentOpenTransferId = vi.fn();
 const revalidatePath = vi.fn();
 
-vi.mock("@/lib/authz", () => ({ requireAdmin: () => requireAdmin() }));
+vi.mock("@/lib/authz", () => ({ requireCapability: () => requireCapability() }));
 vi.mock("@/modules/service-queue/service-queue.service", () => ({
   upsertServiceRequest: (i: unknown) => upsertServiceRequest(i),
   clearServiceRequest: vi.fn(),
@@ -33,7 +33,7 @@ function fd(entries: Record<string, string>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  requireAdmin.mockResolvedValue(ADMIN);
+  requireCapability.mockResolvedValue(ADMIN);
   getCurrentOpenTransferId.mockResolvedValue(null);
   upsertServiceRequest.mockResolvedValue({ id: "sq1" });
   reopenServiceItem.mockResolvedValue({ id: "sq1", status: "PENDING" });

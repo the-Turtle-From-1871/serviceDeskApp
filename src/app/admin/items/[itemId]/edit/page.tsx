@@ -2,14 +2,14 @@ import { notFound, redirect } from "next/navigation";
 import { getItem, listItemFieldSuggestions } from "@/modules/items/items.service";
 import { listCategoryNames } from "@/modules/items/categories.service";
 import { listUnits } from "@/modules/items/units.service";
-import { requireAdmin, AuthError } from "@/lib/authz";
+import { requireCapability, AuthError } from "@/lib/authz";
 import { StatusBadge } from "@/components/StatusBadge";
 import { EditItemForm } from "./EditItemForm";
 import { EditItemIdentityForm } from "./EditItemIdentityForm";
 
 export default async function EditItemPage({ params }: { params: Promise<{ itemId: string }> }) {
   try {
-    await requireAdmin();
+    await requireCapability("MANAGE_ITEMS");
   } catch (e) {
     if (e instanceof AuthError) redirect(e.code === "FORBIDDEN" ? "/" : "/login");
     throw e;

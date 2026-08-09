@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { requireAdmin, AuthError } from "@/lib/authz";
+import { requireCapability, AuthError } from "@/lib/authz";
 import {
   listUnitsWithCounts,
   listUnassignedHomeUnits,
@@ -18,7 +18,7 @@ export const metadata = { title: "Units" };
  *  route rather than depending on its parent. */
 export default async function UnitsPage() {
   try {
-    await requireAdmin();
+    await requireCapability("MANAGE_ITEMS");
   } catch (e) {
     if (e instanceof AuthError) redirect(e.code === "FORBIDDEN" ? "/" : "/login");
     throw e;

@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const requireAdmin = vi.fn();
+const requireCapability = vi.fn();
 const learnUnits = vi.fn();
 const renameUnit = vi.fn();
 const deleteUnit = vi.fn();
 const revalidatePath = vi.fn();
 
 vi.mock("@/lib/authz", () => ({
-  requireAdmin: () => requireAdmin(),
+  requireCapability: () => requireCapability(),
   AuthError: class extends Error {},
 }));
 // The real units.service pulls in the Prisma client (module-level
@@ -51,7 +51,7 @@ function fd(entries: Record<string, string>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  requireAdmin.mockResolvedValue(ADMIN);
+  requireCapability.mockResolvedValue(ADMIN);
 });
 
 describe("createUnitAction", () => {
@@ -79,8 +79,8 @@ describe("createUnitAction", () => {
     spy.mockRestore();
   });
 
-  it("calls requireAdmin before any write", async () => {
-    requireAdmin.mockRejectedValue(new Error("FORBIDDEN"));
+  it("calls requireCapability before any write", async () => {
+    requireCapability.mockRejectedValue(new Error("FORBIDDEN"));
     await expect(createUnitAction(undefined, fd({ abbreviation: "WABC01", fullName: "HHC 1-8" }))).rejects.toThrow(
       "FORBIDDEN",
     );
@@ -125,13 +125,13 @@ describe("renameUnitAction", () => {
     spy.mockRestore();
   });
 
-  it("calls requireAdmin before any write, and writes nothing when it rejects", async () => {
-    requireAdmin.mockRejectedValue(new Error("FORBIDDEN"));
+  it("calls requireCapability before any write, and writes nothing when it rejects", async () => {
+    requireCapability.mockRejectedValue(new Error("FORBIDDEN"));
     await expect(
       renameUnitAction(undefined, fd({ id: "unit-1", fullName: "New Name" })),
     ).rejects.toThrow("FORBIDDEN");
     // Not just that the call threw — the underlying write must never have
-    // happened. If a call site dropped requireAdmin() (or moved it after the
+    // happened. If a call site dropped requireCapability() (or moved it after the
     // write), renameUnit would still have fired here.
     expect(renameUnit).not.toHaveBeenCalled();
     expect(revalidatePath).not.toHaveBeenCalled();
@@ -159,11 +159,11 @@ describe("deleteUnitAction", () => {
     expect(res).toEqual({ error: '"HHC 1-8" is still the home unit of 2 items.' });
   });
 
-  it("calls requireAdmin before any write, and writes nothing when it rejects", async () => {
-    requireAdmin.mockRejectedValue(new Error("FORBIDDEN"));
+  it("calls requireCapability before any write, and writes nothing when it rejects", async () => {
+    requireCapability.mockRejectedValue(new Error("FORBIDDEN"));
     await expect(deleteUnitAction(fd({ id: "unit-1" }))).rejects.toThrow("FORBIDDEN");
     // Not just that the call threw — the unit row must never have been
-    // touched. If requireAdmin() were dropped (or moved after the write),
+    // touched. If requireCapability() were dropped (or moved after the write),
     // deleteUnit would still have fired here.
     expect(deleteUnit).not.toHaveBeenCalled();
     expect(revalidatePath).not.toHaveBeenCalled();
@@ -207,13 +207,13 @@ describe("bulkLearnUnitsAction", () => {
     spy.mockRestore();
   });
 
-  it("calls requireAdmin before any write, and writes nothing when it rejects", async () => {
-    requireAdmin.mockRejectedValue(new Error("FORBIDDEN"));
+  it("calls requireCapability before any write, and writes nothing when it rejects", async () => {
+    requireCapability.mockRejectedValue(new Error("FORBIDDEN"));
     await expect(
       bulkLearnUnitsAction(undefined, fd({ block: "WABC01,HHC 1-8" })),
     ).rejects.toThrow("FORBIDDEN");
     // Not just that the call threw — the batch must never have reached
-    // learnUnits. If requireAdmin() were dropped (or moved after the write),
+    // learnUnits. If requireCapability() were dropped (or moved after the write),
     // learnUnits would still have fired here.
     expect(learnUnits).not.toHaveBeenCalled();
     expect(revalidatePath).not.toHaveBeenCalled();

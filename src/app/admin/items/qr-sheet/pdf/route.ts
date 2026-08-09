@@ -1,4 +1,4 @@
-import { requireAdmin, AuthError } from "@/lib/authz";
+import { requireCapability, AuthError } from "@/lib/authz";
 import { getItemsByIds } from "@/modules/items/items.service";
 import { buildItemsQrSheetPdf } from "@/modules/items/qr-sheet";
 
@@ -6,7 +6,7 @@ import { buildItemsQrSheetPdf } from "@/modules/items/qr-sheet";
 // GET /admin/items/qr-sheet/pdf?items=id,id,id[&preview]
 export async function GET(req: Request) {
   try {
-    await requireAdmin();
+    await requireCapability("MANAGE_ITEMS");
   } catch (e) {
     if (e instanceof AuthError) return new Response(e.code, { status: e.code === "FORBIDDEN" ? 403 : 401 });
     throw e;

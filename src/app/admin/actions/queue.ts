@@ -1,7 +1,7 @@
 "use server";
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { requireAdmin } from "@/lib/authz";
+import { requireCapability } from "@/lib/authz";
 import {
   upsertServiceRequest,
   clearServiceRequest,
@@ -35,7 +35,7 @@ function revalidateItem(itemId: string) {
 // nothing about the deadline and therefore cannot move it. Returns a generic
 // error string to the UI.
 export async function setServiceAction(_prev: unknown, formData: FormData): Promise<{ error?: string; ok?: true }> {
-  await requireAdmin();
+  await requireCapability("MANAGE_QUEUE");
   const parsed = setSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
   try {
@@ -65,7 +65,7 @@ export async function setServiceAction(_prev: unknown, formData: FormData): Prom
 // is distinguished before calling it, and the non-destructive surfaces (receipt
 // builder, flag, reopen) keep its never-throw/never-block behavior untouched.
 export async function setServiceDeadlineAction(_prev: unknown, formData: FormData): Promise<{ error?: string; ok?: true }> {
-  await requireAdmin();
+  await requireCapability("MANAGE_QUEUE");
   const itemId = String(formData.get("itemId") ?? "");
   if (!itemId) return { error: "Invalid input." };
   const raw = String(formData.get("overrideDays") ?? "").trim();
@@ -90,7 +90,7 @@ export async function setServiceDeadlineAction(_prev: unknown, formData: FormDat
 
 // Unflag an item (remove its service request).
 export async function clearServiceAction(formData: FormData): Promise<void> {
-  await requireAdmin();
+  await requireCapability("MANAGE_QUEUE");
   const itemId = String(formData.get("itemId") ?? "");
   if (!itemId) return;
   try {
@@ -103,7 +103,7 @@ export async function clearServiceAction(formData: FormData): Promise<void> {
 
 // Mark a queue item completed (from the queue or the item page).
 export async function completeServiceAction(formData: FormData): Promise<void> {
-  await requireAdmin();
+  await requireCapability("MANAGE_QUEUE");
   const parsed = idSchema.safeParse({ id: String(formData.get("id") ?? "") });
   if (!parsed.success) return;
   const itemId = String(formData.get("itemId") ?? "");
@@ -125,7 +125,7 @@ export async function completeServiceAction(formData: FormData): Promise<void> {
 // had already alerted. Either way the reopen always proceeds — it never silently
 // no-ops on a bad days value.
 export async function reopenServiceAction(formData: FormData): Promise<void> {
-  await requireAdmin();
+  await requireCapability("MANAGE_QUEUE");
   const parsed = idSchema.safeParse({ id: String(formData.get("id") ?? "") });
   if (!parsed.success) return;
   const itemId = String(formData.get("itemId") ?? "");

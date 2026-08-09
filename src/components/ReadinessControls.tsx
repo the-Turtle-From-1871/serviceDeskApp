@@ -20,8 +20,8 @@ import { READINESS_LABEL } from "@/components/items-view";
  * standalone MarkReadyButton, which stays on the page as the one-click fast
  * path. Two entry points, one implementation.
  *
- * Rendered only for admins, but that is presentation — both actions re-check
- * with requireAdmin(), which is the actual boundary.
+ * Rendered only for those holding MANAGE_QUEUE, but that is presentation —
+ * both actions re-check with requireCapability, which is the actual boundary.
  *
  * NOT plain <form action={...}>: the actions return a result object so the
  * caller can report "0 changed", which React's form-action signature (void)

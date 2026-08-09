@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { requireAdmin, AuthError } from "@/lib/authz";
+import { requireCapability, AuthError } from "@/lib/authz";
 import { listCategoryNames } from "@/modules/items/categories.service";
 import { listUnits } from "@/modules/items/units.service";
 import { listItemFieldSuggestions } from "@/modules/items/items.service";
@@ -15,7 +15,7 @@ export default async function NewItemPage({
   searchParams: Promise<{ serialNumber?: string | string[]; uic?: string | string[] }>;
 }) {
   try {
-    await requireAdmin();
+    await requireCapability("MANAGE_ITEMS");
   } catch (e) {
     if (e instanceof AuthError) redirect(e.code === "FORBIDDEN" ? "/" : "/login");
     throw e;

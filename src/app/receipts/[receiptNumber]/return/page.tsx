@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import { requireAdmin, AuthError } from "@/lib/authz";
+import { requireCapability, AuthError } from "@/lib/authz";
 import { getTransferByReceiptNumber } from "@/modules/transfers/transfers.service";
 import { listSignatures } from "@/modules/signatures/signatures.service";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -8,7 +8,7 @@ import { ReturnForm } from "./ReturnForm";
 export default async function ReturnPage({ params }: { params: Promise<{ receiptNumber: string }> }) {
   let admin;
   try {
-    admin = await requireAdmin();
+    admin = await requireCapability("PROCESS_RETURNS");
   } catch (e) {
     if (e instanceof AuthError) redirect(e.code === "FORBIDDEN" ? "/" : "/login");
     throw e;
