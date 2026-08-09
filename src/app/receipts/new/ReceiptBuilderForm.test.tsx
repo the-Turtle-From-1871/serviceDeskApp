@@ -62,8 +62,10 @@ vi.mock("@/components/TechnicianSignatureField", () => ({
 }));
 
 const lookupScannedItem = vi.fn();
+const lookupScannedSerial = vi.fn();
 vi.mock("@/app/actions/scan", () => ({
   lookupScannedItem: (id: string) => lookupScannedItem(id),
+  lookupScannedSerial: (sn: string, alt?: string) => lookupScannedSerial(sn, alt),
 }));
 // The camera is not what these tests are about. This stands in for it: a button
 // per fixture that emits one decoded string. `notice` IS rendered here — the
@@ -71,12 +73,23 @@ vi.mock("@/app/actions/scan", () => ({
 // video sheet, and the refusal tests below assert their error text while the
 // sheet is open, so the mock must surface it the same way the real one does.
 vi.mock("@/components/QrScanner", () => ({
+  // The real module exports this alongside the component, and the form imports
+  // both — a mock missing it fails every test in this file at import time.
+  SCAN_FORMATS: ["qr_code"],
   QrScanner: ({ onDecode, onClose, notice }: { onDecode: (t: string) => void; onClose: () => void; notice?: { kind: "ok" | "err"; text: string } | null }) => (
     <div>
       <button type="button" onClick={() => onDecode("https://x.example/i/i2")}>emit-i2</button>
       <button type="button" onClick={() => onDecode("https://x.example/i/i3")}>emit-i3</button>
       <button type="button" onClick={() => onDecode("https://x.example/i/i1")}>emit-i1</button>
       <button type="button" onClick={() => onDecode("WIFI:S:Guest;;")}>emit-junk</button>
+      {/* Manufacturer labels: an HP serial, a Dell Express Service Code (which
+          converts to service tag 7X2K9L3), the serial of the item already on
+          the form, and a Dell PPID — which carries dashes and must be refused
+          client-side exactly like emit-junk. */}
+      <button type="button" onClick={() => onDecode("5CD1234ABC")}>emit-serial</button>
+      <button type="button" onClick={() => onDecode("17237164935")}>emit-express</button>
+      <button type="button" onClick={() => onDecode("5CD0001AAA")}>emit-serial-dup</button>
+      <button type="button" onClick={() => onDecode("CN-0ABCDE-12345-ABC-1234-A00")}>emit-ppid</button>
       <button type="button" onClick={onClose}>emit-close</button>
       {notice && <p data-testid="scan-notice">{notice.text}</p>}
     </div>
@@ -475,7 +488,92 @@ describe("ReceiptBuilderForm — scanning adds items", () => {
   const openScanner = async (user: ReturnType<typeof userEvent.setup>) =>
     user.click(screen.getByRole("button", { name: /Scan to add/i }));
 
-  beforeEach(() => lookupScannedItem.mockResolvedValue(HP));
+  beforeEach(() => {
+    lookupScannedItem.mockResolvedValue(HP);
+    lookupScannedSerial.mockResolvedValue(HP);
+  });
+
+  it("adds an item scanned from a manufacturer serial", async () => {
+    const user = userEvent.setup();
+    renderForm();
+    await openScanner(user);
+    await user.click(screen.getByRole("button", { name: "emit-serial" }));
+
+    expect(await screen.findByText("SN2")).toBeDefined();
+    expect(lookupScannedSerial).toHaveBeenCalledWith("5CD1234ABC", undefined);
+    expect(lookupScannedItem).not.toHaveBeenCalled();
+  });
+
+  // Dell prints the Service Tag and the Express Service Code as two barcodes on
+  // one label. The raw value goes first and the conversion rides along as the
+  // fallback, so hitting the wrong barcode still finds the machine.
+  it("passes the converted express service code as the alternate", async () => {
+    const user = userEvent.setup();
+    renderForm();
+    await openScanner(user);
+    await user.click(screen.getByRole("button", { name: "emit-express" }));
+
+    await screen.findByText("SN2");
+    expect(lookupScannedSerial).toHaveBeenCalledWith("17237164935", "7X2K9L3");
+  });
+
+  // NOT_FOUND means something different on this path: our own sticker names an
+  // item that existed when it was printed, a factory label may never have been
+  // in the book at all.
+  it("names the serial when nothing in the book matches it", async () => {
+    lookupScannedSerial.mockResolvedValue({ ok: false, code: "NOT_FOUND" });
+    const user = userEvent.setup();
+    renderForm();
+    await openScanner(user);
+    await user.click(screen.getByRole("button", { name: "emit-serial" }));
+
+    expect(await screen.findByText(/No item in the book with serial 5CD1234ABC/i)).toBeDefined();
+    expect(screen.queryByText("SN2")).toBeNull();
+  });
+
+  // The duplicate check has no id to compare on a serial scan, so it matches on
+  // the serial instead — case-insensitively, since serialNumber is citext and
+  // the label may be printed in either case. The item on the form carries a
+  // REALISTIC serial here rather than the file's short "SN1" fixture: a decode
+  // must clear the 4-character shape floor in scan-code.ts to be treated as a
+  // serial at all, and production's shortest real serial is 4.
+  it("names a duplicate found by serial rather than adding it twice", async () => {
+    const user = userEvent.setup();
+    renderForm(undefined, [
+      { itemId: "i1", make: "Dell", model: "L5420", serialNumber: "5cd0001aaa", holderName: null },
+    ]);
+    await openScanner(user);
+    await user.click(screen.getByRole("button", { name: "emit-serial-dup" }));
+
+    expect(await screen.findByText(/Already added — Dell L5420 · SN 5cd0001aaa/i)).toBeDefined();
+    expect(lookupScannedSerial).not.toHaveBeenCalled();
+  });
+
+  // The 1.5s window keys on the INTENT, not an item id — a linear barcode
+  // re-decodes every frame exactly as a QR does, and a serial has no id yet.
+  // The added item's serial is SN2 (what the server returned), not the scanned
+  // 5CD1234ABC, so the duplicate check above cannot be what catches this.
+  it("ignores the same serial decoded twice in quick succession", async () => {
+    const user = userEvent.setup();
+    renderForm();
+    await openScanner(user);
+    await user.click(screen.getByRole("button", { name: "emit-serial" }));
+    await screen.findByText("SN2");
+    await user.click(screen.getByRole("button", { name: "emit-serial" }));
+
+    expect(lookupScannedSerial).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a Dell PPID without calling the server", async () => {
+    const user = userEvent.setup();
+    renderForm();
+    await openScanner(user);
+    await user.click(screen.getByRole("button", { name: "emit-ppid" }));
+
+    expect(await screen.findByText(/Not an item code/i)).toBeDefined();
+    expect(lookupScannedSerial).not.toHaveBeenCalled();
+    expect(lookupScannedItem).not.toHaveBeenCalled();
+  });
 
   it("adds a scanned item to the list", async () => {
     const user = userEvent.setup();

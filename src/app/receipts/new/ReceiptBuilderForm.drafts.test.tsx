@@ -23,6 +23,7 @@ vi.mock("@/app/actions/scan", () => ({
 // ReceiptBuilderForm.test.tsx's — one button that emits one decoded item URL.
 // jsdom has no camera; the real component would just report "unavailable".
 vi.mock("@/components/QrScanner", () => ({
+  SCAN_FORMATS: ["qr_code"],
   QrScanner: ({ onDecode }: { onDecode: (t: string) => void }) => (
     <div>
       <button type="button" onClick={() => onDecode("https://x.example/i/i2")}>emit-i2</button>

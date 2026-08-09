@@ -10,9 +10,9 @@ import { SERVICE_TYPE_OPTIONS } from "@/modules/service-queue/service-form";
 
 type Prefill = { isDcsim?: boolean; name?: string; rank?: string; unit?: string; contact?: string; email?: string };
 import { groupItemsIntoLines, MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW, type LineItem } from "@/modules/transfers/receipt-lines";
-import { parseItemScan } from "@/modules/items/scan-url";
-import { lookupScannedItem } from "@/app/actions/scan";
-import { QrScanner } from "@/components/QrScanner";
+import { parseScan } from "@/modules/items/scan-code";
+import { lookupScannedItem, lookupScannedSerial } from "@/app/actions/scan";
+import { QrScanner, SCAN_FORMATS } from "@/components/QrScanner";
 import { beep } from "@/lib/beep";
 import { saveDraftAction } from "@/app/actions/drafts";
 import type { ReceiptDraftPayload } from "@/modules/receipts/drafts.schema";
@@ -375,9 +375,11 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, dr
 
   const [scanning, setScanning] = useState(false);
   const [toast, setToast] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
-  // A QR sitting in frame decodes many times a second, so the same id inside
-  // this window is the camera repeating itself, not a second laptop.
-  const lastDecode = useRef<{ id: string; at: number }>({ id: "", at: 0 });
+  // A code sitting in frame decodes many times a second, so the same intent
+  // inside this window is the camera repeating itself, not a second laptop.
+  // Keyed on the INTENT ("id:x" / "sn:y"), not an item id: a linear barcode
+  // re-decodes every frame exactly as a QR does, and a serial has no id yet.
+  const lastDecode = useRef<{ key: string; at: number }>({ key: "", at: 0 });
   // Serializes lookups. The decode loop fires onDecode without awaiting, so
   // without this two different ids interleave their read-modify-write of the
   // item list and the second drops the first. One in flight at a time.
@@ -400,30 +402,48 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, dr
   // Every refusal KEEPS the camera open: rapid-fire only works if a bad scan is
   // a blip, not a dead end.
   const onDecode = async (text: string) => {
-    const id = parseItemScan(text);
+    const intent = parseScan(text);
     // Rejected client-side, so a stray barcode never costs a round trip.
-    if (!id) return say("err", "Not an item code");
+    if (!intent) return say("err", "Not an item code");
 
     if (looking.current) return; // a lookup is already in flight; drop this frame
 
-    // Time-window dedupe: the same id within 1.5s of the last PROCESSED decode is
-    // the camera repeating a QR still in frame. Checked AFTER the in-flight guard
-    // and recorded only when we actually proceed — otherwise a decode dropped for
-    // concurrency would arm the window against its own retry and suppress a
-    // legitimate item for up to 1.5s.
+    // Time-window dedupe: the same intent within 1.5s of the last PROCESSED
+    // decode is the camera repeating a code still in frame. Checked AFTER the
+    // in-flight guard and recorded only when we actually proceed — otherwise a
+    // decode dropped for concurrency would arm the window against its own retry
+    // and suppress a legitimate item for up to 1.5s.
+    const key = intent.kind === "item" ? `id:${intent.id}` : `sn:${intent.serial}`;
     const now = Date.now();
-    if (lastDecode.current.id === id && now - lastDecode.current.at < 1500) return;
-    lastDecode.current = { id, at: now };
+    if (lastDecode.current.key === key && now - lastDecode.current.at < 1500) return;
+    lastDecode.current = { key, at: now };
 
     looking.current = true;
     try {
-      const dup = itemsRef.current.find((i) => i.itemId === id);
+      // An item scan knows the id; a serial scan does not, so it matches on the
+      // serial instead — case-insensitively, since serialNumber is citext and
+      // the label may be printed in either case.
+      const dup =
+        intent.kind === "item"
+          ? itemsRef.current.find((i) => i.itemId === intent.id)
+          : itemsRef.current.find((i) => i.serialNumber.toLowerCase() === intent.serial.toLowerCase());
       if (dup) return say("err", `Already added — ${dup.make} ${dup.model} · SN ${dup.serialNumber}`);
 
-      const res = await lookupScannedItem(id);
+      const res =
+        intent.kind === "item"
+          ? await lookupScannedItem(intent.id)
+          : await lookupScannedSerial(intent.serial, intent.altSerial);
+
       if (!res.ok) {
+        // NOT_FOUND means different things on the two paths: our own sticker
+        // names an item that existed when it was printed, while a factory label
+        // may simply never have been in the book.
+        const notFound =
+          intent.kind === "item"
+            ? "That item no longer exists"
+            : `No item in the book with serial ${intent.serial}`;
         const msg: Record<typeof res.code, string> = {
-          NOT_FOUND: "That item no longer exists",
+          NOT_FOUND: notFound,
           RETIRED: "That item is retired and can't be transferred",
           UNAUTHORIZED: "Your session expired — sign in again",
           FAILED: "Couldn't look up that item — try again",
@@ -786,7 +806,7 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, dr
         <button className="btn btn-primary" disabled={pending} type="submit">{pending ? "Creating…" : "Create hand receipt"}</button>
         {state && "error" in state && state.error && <span role="alert" className="alert-error">{state.error}</span>}
       </div>
-      {scanning && <QrScanner onDecode={onDecode} onClose={() => setScanning(false)} notice={toast} />}
+      {scanning && <QrScanner formats={SCAN_FORMATS} onDecode={onDecode} onClose={() => setScanning(false)} notice={toast} />}
     </form>
   );
 }
