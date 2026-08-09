@@ -295,7 +295,13 @@ describe("ItemSelectTable — mobile card structure", () => {
       { ...ROW, id: "item-3", serialNumber: "SN3", storageLocation: "   " },
     ];
     const { container } = renderRows({ items: blank });
-    for (const tr of container.querySelectorAll("tbody tr")) {
+    const rows = [...container.querySelectorAll("tbody tr")];
+    // Assert the fixture actually rendered before looping over it: a bare
+    // `for…of` over an empty NodeList runs zero assertions and reports green,
+    // which would leave this branch — the only coverage of the conditional
+    // row — silently unguarded if the table ever stopped rendering rows.
+    expect(rows).toHaveLength(blank.length);
+    for (const tr of rows) {
       const terms = [...tr.querySelectorAll("td.cell-more dt")].map((d) => d.textContent);
       expect(terms).toEqual([
         "Holder",
@@ -305,6 +311,37 @@ describe("ItemSelectTable — mobile card structure", () => {
         "Last logon date",
       ]);
     }
+  });
+
+  // The blank rule these fields share: null, "" and "   " must all read as
+  // missing and render the dash. `""` in particular had NO fixture anywhere —
+  // it is the exact case that makes `??` wrong here, so without it a later
+  // "consistency" pass to `??` would go green while every MDM-blank device
+  // showed three labelled but empty rows on a phone.
+  it("renders a dash for null, empty and whitespace-only values alike", () => {
+    const shapes = [
+      { ...ROW, id: "b1", serialNumber: "B1", holderName: null, homeUnit: null, storageLocation: null, compliance: null, lastLogonUserPrincipalName: null, lastLogonDate: null },
+      { ...ROW, id: "b2", serialNumber: "B2", holderName: "", homeUnit: "", storageLocation: "", compliance: "", lastLogonUserPrincipalName: "", lastLogonDate: "" },
+      { ...ROW, id: "b3", serialNumber: "B3", holderName: "  ", homeUnit: "   ", storageLocation: "  ", compliance: " ", lastLogonUserPrincipalName: "  ", lastLogonDate: " " },
+    ];
+    const { container } = renderRows({ items: shapes });
+    const rows = [...container.querySelectorAll("tbody tr")];
+    expect(rows).toHaveLength(shapes.length);
+    for (const tr of rows) {
+      const values = [...tr.querySelectorAll("td.cell-more dd")].map((d) => d.textContent);
+      // Five, not six: a blank SLOC drops its row entirely, in all three shapes.
+      expect(values).toEqual(["—", "—", "—", "—", "—"]);
+    }
+  });
+
+  // A whitespace-only unit must not reach the fit sizing: it would render a
+  // blank value under a label AND charge the font clamp for characters nobody
+  // can see, shrinking the one row that spans the panel's full width.
+  it("treats a whitespace-only home unit as missing rather than sizing it", () => {
+    const { container } = renderRows({ items: [{ ...ROW, homeUnit: "     " }] });
+    const dd = container.querySelector("td.cell-more dd.card-more__fit");
+    expect(dd!.textContent).toBe("—");
+    expect(dd!.querySelector("span")!.style.getPropertyValue("--len")).toBe("");
   });
 
   // The fit sizing is CSS (`clamp` over a container query), so jsdom — which has

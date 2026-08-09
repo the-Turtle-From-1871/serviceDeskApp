@@ -158,6 +158,22 @@ export function selectAllState(items: ItemRow[], selected: ReadonlySet<string>):
   return hits === ids.length ? "all" : "some";
 }
 
+/** A displayable value, or null when there is nothing to show.
+ *
+ *  ONE definition of "missing" for the card's More panel, because this data is
+ *  messy in three different ways at once: the CSV importer copies MDM columns
+ *  verbatim, so the same absent fact arrives as `null` from one export, `""`
+ *  from another and `"   "` from a third. Testing them separately is how a
+ *  panel ends up with a labelled blank row that reads like a rendering bug —
+ *  and it is why the whitespace case is trimmed away rather than rendered.
+ *
+ *  Returns the TRIMMED string, so callers render exactly what they measured:
+ *  the Home unit row sizes its font by this string's length. */
+export function present(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
 export function parseHiddenCols(raw: string | null): ColumnKey[] {
   return parseHiddenColsGeneric<ColumnKey>(raw, COLUMN_KEYS, ITEM_COLUMNS.length);
 }

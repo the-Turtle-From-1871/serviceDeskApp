@@ -3,6 +3,7 @@ import {
   sortItemRows,
   parseSortPref,
   parseHiddenCols,
+  present,
   selectableIds,
   selectAllState,
   ITEM_COLUMNS,
@@ -235,5 +236,31 @@ describe("sortFilterSummary", () => {
     for (const c of SORTABLE_COLUMNS) {
       expect(sortFilterSummary(c.key, "asc", null)).toBe(`${c.label} ▲`);
     }
+  });
+});
+
+// The card More panel's one rule for "is this value missing". The MDM columns
+// reach the DB verbatim from the CSV importer, so the same absent fact arrives
+// three different ways and all three must read the same.
+describe("present", () => {
+  it("treats null, undefined, empty and whitespace-only as missing", () => {
+    expect(present(null)).toBeNull();
+    expect(present(undefined)).toBeNull();
+    expect(present("")).toBeNull();
+    expect(present("   ")).toBeNull();
+    expect(present("\n\t ")).toBeNull();
+  });
+
+  // Trimmed, not merely tested: the Home unit row sizes its font from this
+  // string's length, so returning the padded original would charge the clamp
+  // for characters that never render.
+  it("returns the trimmed value when there is one", () => {
+    expect(present("  HHC, 1-506 IN  ")).toBe("HHC, 1-506 IN");
+    expect(present("Bldg 4")).toBe("Bldg 4");
+  });
+
+  // "0" is falsy as a string in JS but is a real value here.
+  it("keeps a value that is falsy only by coincidence", () => {
+    expect(present("0")).toBe("0");
   });
 });
