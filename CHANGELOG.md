@@ -21,7 +21,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 - **The home unit in an item card's *More* panel wrapped onto a second line on smaller phones.** It is meant to shrink just enough to sit on one line, and it did on a 390px screen — but on a narrower one, or on any phone where Safari's page zoom or a larger text setting leaves less room, the longest unit names ran onto two lines anyway. The sizing was estimating the text from its character count, which charges a space and a comma as if they were capital letters; unit names are full of both, so it ran out of room early and stopped shrinking while there was still space on screen.
 
-  It now estimates the real width of the text, so the unit fits on one line — measured across every home unit in the property book at 320, 360, 375, 390 and 430px, in both Chrome and Safari. **The label and the value stay on the same line, like every other row in the panel.** A name longer than anything currently in the book still wraps rather than shrinking to nothing.
+  It now estimates the real width of the text, so the unit fits on one line — measured across every home unit in the property book at 320, 360, 375, 390 and 430px, in both Chrome and Safari. **The label and the value stay on the same line, and every value in the panel starts in the same place**, so the rows read as a column rather than as separate facts. A name longer than anything currently in the book still wraps rather than shrinking to nothing.
+
+  The room for that came from the labels: they are a touch smaller and tighter, and the two logon rows now read **Logon user** and **Logon date** rather than *Last logon user* / *Last logon date* — the item page still spells them out in full.
 
   #### Notes
   - No database, environment or deployment change.

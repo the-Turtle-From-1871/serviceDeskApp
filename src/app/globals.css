@@ -1712,11 +1712,18 @@ input[type="file"].input {
     padding: 2px 16px 12px;
     font-size: 13px;
   }
+  /* The label track is `auto`, so the WIDEST label sets where every value on the
+     card starts — the labels are effectively spending the home unit's width.
+     Hence 11px and no letter-spacing here (12px + 0.04em elsewhere in the
+     panel): uppercase 12px is already emphatic at this size, and the two
+     changes hand ~20px back to the value column, which is the difference
+     between the longest unit names fitting on one line and not. */
   .table--cards .card-more__list dt {
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: 11px;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0;
+    white-space: nowrap;
   }
   .table--cards .card-more__list dd {
     min-width: 0;
@@ -1771,29 +1778,12 @@ input[type="file"].input {
      element cannot size its own font from its own `cqi`. Inline-size
      containment is safe here because the dd's width comes from the grid track,
      not from its contents. */
-  /* Label and value share ONE line, like every other row in the panel — but in
-     a flex row of their own rather than the shared grid columns. The grid's
-     label track is sized by the widest label in the panel ("LAST LOGON DATE",
-     114px at a 390px viewport), which would leave 198px for a value that runs
-     to 53 characters; here the label costs only its own width, so the value
-     gets ~270px. `flex-basis: 0` (not `auto`) is what makes the value's width
-     come from the free space rather than from its own text — which is both
-     what keeps the label from being squeezed and what makes `container-type`
-     legal on it, since inline-size containment requires a width that does not
-     depend on the contents. */
-  .table--cards .card-more__list .card-more__row {
-    grid-column: 1 / -1;
-    display: flex;
-    align-items: baseline;
-    gap: 12px;
-    min-width: 0;
-  }
-  .table--cards .card-more__list .card-more__row dt.card-more__fit-label {
-    flex: 0 0 auto;
-  }
+  /* The home unit sits in the SHARED grid columns like every other row, so all
+     six values start at the same x — a value that begins in its own place reads
+     as a different kind of thing, which is what a mis-aligned row looked like.
+     `container-type` is legal on it because the `1fr` track, not the text,
+     decides its width. */
   .table--cards .card-more__list dd.card-more__fit {
-    flex: 1 1 0;
-    min-width: 0;
     container-type: inline-size;
   }
   .table--cards .card-more__list dd.card-more__fit > span {
