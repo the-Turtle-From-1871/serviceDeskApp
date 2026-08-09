@@ -3,6 +3,19 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-08-10
+
+### Added
+- **You can ask for permissions, and say why.** Your account page now lists what you can do today, and lets you request anything you do not have — tick what you need, write one explanation covering the lot, and send it. Asking for full administrative control is possible but marked in red, with a line saying what it actually hands over.
+- **Administrators decide a request by unticking what they are not granting.** A new *Permission requests* page under the Dashboard shows who asked, when, and their reason, with everything pre-ticked except full administrative control — which always starts unticked, so granting it is a deliberate act. Untick anything you are withholding and the page asks you for a reason, which the requester sees. The button says what you are about to do: *Approve 2 of 3*, or *Deny all*.
+- **You are told what happened, line by line.** Your account page and the emailed outcome both show each permission with a green tick or a red cross and the word Approved or Denied beside it, so a partly-granted request reads correctly instead of as a flat \decided\. If anything was withheld, the reason appears once underneath.
+
+  #### Notes
+  - Migration `20260810120000_permission_requests` adds the `PermissionRequest` and `PermissionRequestItem` tables. No backfill — there is nothing to migrate.
+  - Apply the migration to Supabase **before** merging, per migrate-before-push.
+  - **An administrator cannot decide their own request** — another administrator has to. If you are the only administrator, grant yourself capabilities by changing a role from the Users page instead.
+  - The outcome email goes through the existing sender; if `GMAIL_*` is not live in production it is logged rather than sent, and requesters will only see the outcome on their account page.
+
 ## 2026-08-09
 
 ### Added

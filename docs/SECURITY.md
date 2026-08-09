@@ -295,6 +295,34 @@ their own capability: `MANAGE_ITEMS` (items, categories, units, import, QR
 sheets), `MANAGE_QUEUE` (service queue, readiness, deadlines),
 `PROCESS_RETURNS`, `VIEW_ANALYTICS`.
 
+**Capabilities are granted through a reviewed request, not by hand.** A user
+files one `PermissionRequest` carrying several capability lines and one
+justification; an administrator decides each line by unchecking what they are
+not granting. Requesting needs only a session (a `VIEWER` asking for more is the
+point); deciding requires `ADMINISTER`. Every grant therefore resolves to a
+justification, a decision, and a named approver.
+`src/modules/users/permissions.service.ts`
+
+**An administrator may never decide their own request.**
+`decidePermissionRequest` refuses when the requester is the decider. This is the
+self-grant hole on `ADMINISTER`: without it, an administrator — or anyone who
+obtained `ADMINISTER` once — could mint further permissions for themselves with
+an audit trail that reads as legitimate. The requester and decider are both
+taken from the session, never from the submitted form, which is what makes the
+guard meaningful; a form-supplied decider id would defeat it outright. The UI
+also disables the controls on your own request, but that is a courtesy, not the
+control.
+
+**Deciding is transactional and idempotent.** Grant rows and line decisions
+commit together or not at all, so the audit trail can never show a decision
+without its grant. Grants are written with `skipDuplicates` against the
+`(userId, capability)` unique constraint, so two administrators deciding
+overlapping requests cannot collide, and re-deciding cannot duplicate a grant.
+
+**A denial requires a reason**, stored once on the request and shown to the
+requester. Re-requesting a denied capability is permitted — denial decides one
+ask rather than imposing a permanent bar — and the admin queue is the throttle.
+
 **Role, `isActive` AND the capability grants are re-read from the DB on every
 protected request.** The JWT carries none of them — it only holds the identity
 captured at login — so a demotion, a deactivation **or a revoked grant** takes
