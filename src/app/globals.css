@@ -749,8 +749,14 @@ input[type="file"].input {
   transform: rotate(180deg);
 }
 
-/* The [popover] element. NO class, no `display`, see above. */
-#items-sortfilter {
+/* The [popover] element. NO class, no `display`, see above.
+   Selected BY ID — one selector per page that mounts a SortFilterMenu — so that
+   no shared class exists which could later grow a `display` and re-create the
+   closed-popover trap. The cost is deliberate: a new caller must add its id to
+   all four groups below (base, ::backdrop, and the two inside the anchored
+   block), and there is no class for it to inherit them from instead. */
+#items-sortfilter,
+#queue-sortfilter {
   /* Undo the UA popover box: `border: solid; padding: 0.25em; overflow: auto;
      inset: 0; margin: auto` — that last pair is what centres an unstyled
      popover in the viewport. */
@@ -766,7 +772,8 @@ input[type="file"].input {
   inset: auto 0 0 0;
   width: 100%;
 }
-#items-sortfilter::backdrop {
+#items-sortfilter::backdrop,
+#queue-sortfilter::backdrop {
   background: rgb(25 28 24 / 0.4);
 }
 
@@ -827,11 +834,16 @@ input[type="file"].input {
   @supports (anchor-name: --probe) {
     /* Anchored dropdown. If either gate fails the sheet rules above stand
        untouched — which is what Safari below 26 gets, and it is fine. */
+    /* One anchor name for whichever menu this page mounts. It sits on the
+       shared .menu-trigger class, and only one SortFilterMenu exists per page,
+       so a page-specific name would buy nothing and mislead — it was
+       --items-sortfilter while /items was the only caller. */
     .menu-trigger {
-      anchor-name: --items-sortfilter;
+      anchor-name: --sortfilter-trigger;
     }
-    #items-sortfilter {
-      position-anchor: --items-sortfilter;
+    #items-sortfilter,
+    #queue-sortfilter {
+      position-anchor: --sortfilter-trigger;
       /* Below the trigger, left edge aligned with it. */
       position-area: block-end span-inline-end;
       /* Flip above when the toolbar is near the viewport bottom. */
@@ -844,7 +856,8 @@ input[type="file"].input {
       max-width: 320px;
     }
     /* A dropdown is not modal; dimming the page behind it would be. */
-    #items-sortfilter::backdrop {
+    #items-sortfilter::backdrop,
+    #queue-sortfilter::backdrop {
       background: transparent;
     }
     .popup-menu__panel {

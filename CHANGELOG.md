@@ -5,6 +5,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-08-10
 
+### Changed
+- **The service queue's sorting now works exactly like the items list.** The queue's toolbar carried a *Service type* dropdown, a *Sort by* dropdown and a separate Asc/Desc button side by side; on a phone those wrapped into rows of controls above the first device. They are now behind a single **Sort & filter** button, the same one `/items` already uses, which shows what is currently applied — "Sort & filter · Due ▲ · Repair" — so you can still read the order and the active filter without opening anything.
+
+  Tapping it opens a panel holding **Service type**, **Sort by** and **Direction**. On a phone the panel slides up from the bottom of the screen with a **Done** button, and each dropdown opens the usual iPhone picker wheel; on a computer it drops down under the button. Picking something applies it immediately and the panel stays open, so you can set the filter and the order in one visit. It closes on tapping outside, Escape, or Done.
+
+  Nothing about the sorting itself changed — the same five columns are sortable, the same "no timer sorts last" rule applies to Due, and your choice is still remembered between visits. The queue offers no "Then by" second sort, unlike the items list, because it sorts on one column.
+
 ### Added
 - **You can ask for permissions, and say why.** Your account page now lists what you can do today, and lets you request anything you do not have — tick what you need, write one explanation covering the lot, and send it. Asking for full administrative control is possible but marked in red, with a line saying what it actually hands over.
 - **Administrators decide a request by unticking what they are not granting.** A new *Permission requests* page under the Dashboard shows who asked, when, and their reason, with everything pre-ticked except full administrative control — which always starts unticked, so granting it is a deliberate act. Untick anything you are withholding and the page asks you for a reason, which the requester sees. The button says what you are about to do: *Approve 2 of 3*, or *Deny all*.

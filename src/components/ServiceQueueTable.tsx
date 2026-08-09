@@ -5,8 +5,11 @@ import { completeServiceAction } from "@/app/admin/actions/queue";
 import { makeStore, usePersistedPref } from "@/components/persisted-pref";
 import { DueBadge } from "@/components/DueBadge";
 import { useRowGestures } from "@/components/useRowGestures";
+import { SortFilterMenu } from "@/components/SortFilterMenu";
 import {
   QUEUE_COLUMNS,
+  QUEUE_TYPE_FILTERS,
+  queueSortFilterSummary,
   sortQueueRows,
   filterQueueRows,
   parseQueueSort,
@@ -24,13 +27,6 @@ const DEFAULT_HIDDEN: QueueSortField[] = [];
 
 const sortStore = makeStore(SORT_KEY, parseQueueSort);
 const hiddenStore = makeStore(HIDDEN_KEY, parseQueueHidden);
-
-const TYPE_FILTERS: { value: QueueTypeFilter; label: string }[] = [
-  { value: "ALL", label: "All types" },
-  { value: "REIMAGE", label: "Reimage" },
-  { value: "REPAIR", label: "Repair" },
-  { value: "OTHER", label: "Other" },
-];
 
 export function ServiceQueueTable({ rows }: { rows: QueueRowVM[] }) {
   const [search, setSearch] = useState("");
@@ -79,32 +75,29 @@ export function ServiceQueueTable({ rows }: { rows: QueueRowVM[] }) {
           placeholder="Search SN, device name, or unit"
           aria-label="Search the service queue"
         />
-        <label className="stack" style={{ gap: 4 }}>
-          <span className="subtle" style={{ fontSize: 12 }}>Service type</span>
-          <select className="select toolbar__control" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as QueueTypeFilter)}>
-            {TYPE_FILTERS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
-          </select>
-        </label>
-        <label className="stack" style={{ gap: 4 }}>
-          <span className="subtle" style={{ fontSize: 12 }}>Sort by</span>
-          <select
-            className="select toolbar__control"
-            value={sort.field ?? ""}
-            onChange={(e) => setSort({ ...sort, field: (e.target.value || null) as QueueSortField | null })}
-          >
-            <option value="">Default (newest)</option>
-            {QUEUE_COLUMNS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-          </select>
-        </label>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          disabled={!sort.field}
-          onClick={() => setSort({ ...sort, dir: sort.dir === "asc" ? "desc" : "asc" })}
-          aria-label={sort.dir === "asc" ? "Ascending" : "Descending"}
-        >
-          {sort.dir === "asc" ? "Asc ▲" : "Desc ▼"}
-        </button>
+        {/* Service type / Sort by / Asc-Desc were three separate controls here.
+            With the search box and Columns that made five, which wrapped into
+            rows of chrome above the first result on a phone — the same problem
+            /items solved, so this is the same menu, given this page's columns
+            and its own filter. No "Then by": sortQueueRows takes ONE key.
+            Sorting stays CLIENT-side and in a persisted pref; the queue is
+            capped at 200 rows and deliberately unpaginated, so unlike /items
+            there is no URL to write. */}
+        <SortFilterMenu
+          idPrefix="queue"
+          columns={QUEUE_COLUMNS}
+          summary={queueSortFilterSummary(sort.field, sort.dir, typeFilter)}
+          sort={sort.field}
+          dir={sort.dir}
+          filter={{
+            label: "Service type",
+            value: typeFilter,
+            options: QUEUE_TYPE_FILTERS,
+            onChange: (v) => setTypeFilter(v as QueueTypeFilter),
+          }}
+          onPrimary={(key) => setSort({ ...sort, field: key as QueueSortField | null })}
+          onDir={(dir) => setSort({ ...sort, dir })}
+        />
         <details className="col-menu spacer">
           <summary className="btn btn-secondary">Columns</summary>
           <div className="col-menu-panel">
