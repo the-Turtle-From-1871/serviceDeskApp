@@ -42,6 +42,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - **Signing in is no longer labelled staff-only.** The navigation said *Staff sign in* and the home page said *Staff log in*; both now just say sign in and log in, and the home page's description of who the app is for no longer claims accounts come only from an administrator.
+- **The *Columns* button is gone on phones.** On a phone the items list and the service queue are cards, not a table, and the card shows a fixed set of details — so the ten checkboxes behind *Columns* changed nothing you could see. It was a full-width button at the top of both lists doing nothing; the space now goes to the list. On a laptop or desktop it is unchanged and still hides and shows columns.
+- **The home page no longer offers *Create account* as its own button.** Creating an account is a step inside signing in — the sign-in page still ends with *Don't have an account? Create one*, and the explanation further down the home page still links to it. The home page's row of buttons is now the two things you actually choose between: enter the access PIN, or log in.
+
+  #### Notes
+  - No database, environment or deployment change. `/register` itself is untouched and still reachable.
 
   #### Notes
   - Migration `20260809120000_email_verification` adds `User.emailVerifiedAt` and the `EmailVerificationToken` table. **Every existing account is backfilled as already confirmed** — without that, everyone would be refused sign-in on deploy, waiting for a confirmation email they never received.

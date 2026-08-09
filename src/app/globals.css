@@ -687,6 +687,19 @@ input[type="file"].input {
 .col-menu-panel input:disabled {
   cursor: not-allowed;
 }
+/* DESKTOP ONLY. Below 720px a `.table--cards` row is a card built from three
+   cells of its own (.cell-serial/.cell-primary/.cell-meta), and every column
+   this menu can reach is `.cell-desktop`, i.e. already hidden — so the menu's
+   checkboxes change nothing a phone can see. `display: none` rather than
+   visually hiding it, because a control with no reachable effect should not be
+   in the accessibility tree either. Both tables that carry a Columns menu
+   (/items and the service queue) are card-layout tables, so this is the whole
+   rule; nothing renders it conditionally in JS. */
+@media (max-width: 720px) {
+  .col-menu {
+    display: none;
+  }
+}
 
 /* ---------- Popup menu — the /items "Sort & filter" panel ----------
    A native popover: the Popover API supplies the top layer, Escape (with focus
@@ -939,8 +952,7 @@ input[type="file"].input {
     flex: 1 1 150px;
     min-width: 0;
   }
-  .toolbar > .btn,
-  .toolbar > .col-menu {
+  .toolbar > .btn {
     flex: 1 1 auto;
   }
   /* A nested control just fills its label; it must not flex in that column. */
@@ -950,8 +962,6 @@ input[type="file"].input {
     min-width: 0;
   }
   .toolbar__search { max-width: none; }
-  .toolbar .col-menu > summary { width: 100%; }
-  .toolbar .col-menu-panel { left: 0; right: 0; }
 }
 
 /* Inputs are tap targets as much as buttons are, and this app is mostly forms.
@@ -1399,18 +1409,25 @@ input[type="file"].input {
      "Retire" is expensive, a mis-tapped "View" is not. */
   .btn-primary,
   .btn-danger { height: var(--tap-lg); }
-  /* The /items toolbar's action row pairs "Print QR codes" (btn-primary, so
-     --tap-lg) with the Columns menu (btn-secondary, --tap). The row is
-     bottom-aligned, so those 4px showed as the primary sticking up above its
-     neighbour — the only uneven row in the toolbar (every other control is
-     44px here and the whole row is 40px on desktop, both measured).
-     Raise the secondary to match rather than shrinking the primary: --tap-lg
-     is deliberate for primary and destructive actions (see the touch floor
-     above), and trimming a tap target to tidy a row is the wrong trade. */
-  .toolbar .col-menu > summary.btn { height: var(--tap-lg); }
+  /* The /items toolbar pairs "Print QR codes" (btn-primary, so --tap-lg) with
+     the "Sort & filter" trigger (btn-secondary, --tap). The row is
+     bottom-aligned, so those 4px show as the primary sticking up above its
+     neighbour. Raise the secondary to match rather than shrinking the primary:
+     --tap-lg is deliberate for primary and destructive actions (see the touch
+     floor above), and trimming a tap target to tidy a row is the wrong trade.
+     This rule used to name the Columns menu, which was that neighbour until it
+     became desktop-only; the trade it records is unchanged.
+
+     THE `:has()` IS LOAD-BEARING, and a bare `.toolbar .menu-trigger` is the
+     bug it prevents. SortFilterMenu is shared, so the same trigger renders in
+     the service queue's toolbar — where the neighbour is the 44px search input
+     and there is no primary button at all. Sizing every trigger to 48px fixes
+     one row by breaking the other; measured at 390px, the queue's trigger stood
+     4px proud of its search box. Match the row: take --tap-lg only where a
+     --tap-lg control is actually present. */
+  .toolbar:has(.btn-primary) .menu-trigger { height: var(--tap-lg); }
   /* Checkboxes are tap targets too, not decorations. 13px is the UA default. */
   .table input[type="checkbox"],
-  .col-menu-panel input[type="checkbox"],
   label > input[type="checkbox"] {
     width: 20px;
     height: 20px;
@@ -1418,7 +1435,6 @@ input[type="file"].input {
   }
   /* A checkbox's real tap target is the label wrapping it — the box itself is
      20px. Give any such row a full-height hit area rather than a bullseye. */
-  .col-menu-panel label,
   label.row:has(> input[type="checkbox"]) {
     min-height: var(--tap);
   }
@@ -2083,3 +2099,4 @@ input[type="file"].input {
   font-size: 13px;
   color: var(--text-muted);
 }
+
