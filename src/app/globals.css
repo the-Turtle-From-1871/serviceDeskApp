@@ -409,6 +409,34 @@ h3 {
   color: var(--text-muted);
   font-size: 14px;
 }
+/* A section heading that sits INSIDE a `<details><summary class="btn">`, so a
+   collapsible section keeps a real <h2> in the document outline instead of
+   trading it for a nameless disclosure control. Preflight is absent, so the
+   UA's h2 (1.5em / bold / 0.83em margins) is what actually applies here and all
+   three have to be overridden — inheriting from the button is what keeps the
+   40px control 40px, and the zeroed margin is what keeps its label centred. */
+.disclosure-title {
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  margin: 0;
+}
+/* The affordance: without it the summary is a button that gives no sign it
+   opens onto anything. A lucide icon with `display: block`, not a "⌄" glyph —
+   a text chevron is placed by font metrics and sits visibly off-centre once
+   rotated (the same reason `.card-more__chevron` uses one). */
+.disclosure-chevron {
+  display: block;
+  transition: transform 120ms ease;
+}
+details[open] > summary .disclosure-chevron {
+  transform: rotate(180deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .disclosure-chevron {
+    transition: none;
+  }
+}
 .section-title {
   font-size: 13px;
   font-weight: 600;

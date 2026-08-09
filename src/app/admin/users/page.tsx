@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { ChevronDown } from "lucide-react";
 import { listUsers } from "@/modules/users/users.service";
 import { toggleUserActiveAction, setUserRoleAction } from "@/app/admin/actions/users";
 import { requireAdmin, AuthError } from "@/lib/authz";
@@ -84,21 +85,46 @@ export default async function UsersPage() {
         </table>
       </div>
 
-      <div>
-        <h2 className="page-title">Contact book</h2>
+      {/* Collapsed by default: this page is about users, and the contact book
+          is the half nobody comes here for — receipts file their non-DCSIM
+          parties into it automatically (upsertContactFromParty), so hand-adding
+          a contact is the exception.
+
+          A native <details>, mirroring UnitManager's "Devices with no home
+          unit" block: it opens before hydration, takes Enter/Space on the
+          <summary> for free, and needs no state. It also needs no
+          marker-suppression rule — preflight is absent so <summary> keeps the
+          UA's `display: list-item`, but `.btn` sets `display: inline-flex`,
+          which overrides it and takes the triangle with it.
+
+          `stack-sm`, not `card stack-sm` as UnitManager uses: ContactBookSection
+          renders its own .card around the add-form, and an outer one would nest
+          a card inside a card.
+
+          The <h2> is INSIDE the summary so the page keeps its outline; see
+          `.disclosure-title` in globals.css for why it needs its own rule.
+
+          Note this collapses the section VISUALLY only — a closed <details>
+          still renders its contents, so the whole book ships to the client on
+          every load exactly as before. */}
+      <details className="stack-sm">
+        <summary className="btn btn-secondary">
+          <h2 className="disclosure-title">Contact book ({contacts.length})</h2>
+          <ChevronDown className="disclosure-chevron" size={16} aria-hidden="true" />
+        </summary>
         <p className="subtle">Saved recipients, ordered by last name.</p>
-      </div>
-      <ContactBookSection
-        contacts={contacts.map((c) => ({
-          id: c.id,
-          rank: c.rank,
-          firstName: c.firstName,
-          lastName: c.lastName,
-          unit: c.unit,
-          contactNumber: c.contactNumber,
-          email: c.email,
-        }))}
-      />
+        <ContactBookSection
+          contacts={contacts.map((c) => ({
+            id: c.id,
+            rank: c.rank,
+            firstName: c.firstName,
+            lastName: c.lastName,
+            unit: c.unit,
+            contactNumber: c.contactNumber,
+            email: c.email,
+          }))}
+        />
+      </details>
     </div>
   );
 }
