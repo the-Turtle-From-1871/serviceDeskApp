@@ -74,6 +74,53 @@ model User {
   capabilities        UserCapability[]      @relation("UserCapabilities")
   capabilitiesGranted UserCapability[]      @relation("GrantedCapabilities")
   emailVerifications  EmailVerificationToken[] @relation("EmailVerifications")
+  permissionRequests  PermissionRequest[]      @relation("PermissionRequests")
+  permissionDecisions PermissionRequest[]      @relation("PermissionDecisions")
+}
+
+enum RequestStatus {
+  OPEN
+  CLOSED
+}
+
+enum Decision {
+  PENDING
+  APPROVED
+  DENIED
+}
+
+// One ask, one justification, many capability lines decided individually.
+//
+// The denial reason lives on the REQUEST rather than the item: an admin denies
+// by unchecking lines and gives one reason covering everything withheld, which
+// mirrors the single justification on the request side. Denied items read it
+// through their request.
+model PermissionRequest {
+  id            String                  @id @default(cuid())
+  user          User                    @relation("PermissionRequests", fields: [userId], references: [id], onDelete: Cascade)
+  userId        String
+  justification String
+  status        RequestStatus           @default(OPEN)
+  denialReason  String?
+  createdAt     DateTime                @default(now())
+  decidedAt     DateTime?
+  decidedBy     User?                   @relation("PermissionDecisions", fields: [decidedById], references: [id], onDelete: SetNull)
+  decidedById   String?
+  items         PermissionRequestItem[]
+
+  @@index([status, createdAt])
+  @@index([userId])
+}
+
+model PermissionRequestItem {
+  id         String            @id @default(cuid())
+  request    PermissionRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  requestId  String
+  capability Capability
+  decision   Decision          @default(PENDING)
+
+  @@unique([requestId, capability])
+  @@index([requestId])
 }
 
 // Proves control of an email address at sign-up. Only the SHA-256 hash of the
