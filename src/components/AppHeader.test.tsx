@@ -36,8 +36,8 @@ const currentRailTabs = () =>
 describe("AppHeader bottom rail", () => {
   it("renders one tab per nav item, for each role", () => {
     for (const [flags, expected] of [
-      [{ loggedIn: false, isAdmin: false }, ["Search", "Staff sign in"]],
-      [{ loggedIn: true, isAdmin: false }, ["Search", "Items"]],
+      [{ loggedIn: false, isAdmin: false }, ["Search", "Sign in"]],
+      [{ loggedIn: true, isAdmin: false }, ["Search", "Items", "Receipts"]],
       [
         { loggedIn: true, isAdmin: true },
         ["Search", "Items", "Queue", "Users", "Dashboard"],

@@ -2,7 +2,7 @@
 // unit-tested (nav.test.ts), and importing lucide-react here would drag a React
 // dependency into it. AppHeader maps the key to the actual icon — one nav
 // definition, resolved at the only place that renders it.
-export type NavIcon = "search" | "items" | "queue" | "users" | "dashboard" | "signin";
+export type NavIcon = "search" | "items" | "receipts" | "queue" | "users" | "dashboard" | "signin";
 
 export type NavItem = { label: string; href: string; icon: NavIcon };
 
@@ -23,8 +23,16 @@ export type NavItem = { label: string; href: string; icon: NavIcon };
  */
 export function navItemsFor({ loggedIn, isAdmin }: { loggedIn: boolean; isAdmin: boolean }): NavItem[] {
   const search: NavItem = { label: "Search", href: "/", icon: "search" };
-  if (!loggedIn) return [search, { label: "Staff sign in", href: "/login", icon: "signin" }];
+  if (!loggedIn) return [search, { label: "Sign in", href: "/login", icon: "signin" }];
   const items: NavItem[] = [search, { label: "Items", href: "/items", icon: "items" }];
+  // Receipts is a rail tab for NON-admins only, and that is a budget decision,
+  // not an access one: /receipts is open to every signed-in account (scoped to
+  // their own receipts without VIEW_ALL_RECEIPTS). An admin already spends four
+  // slots on Items/Queue/Users/Dashboard, and a sixth tab truncates labels at
+  // 375px — so admins reach it from the Dashboard hub, which exists for exactly
+  // "everything without its own tab". For a VIEWER it is one of only two
+  // destinations they have, so it earns the slot outright.
+  if (!isAdmin) items.push({ label: "Receipts", href: "/receipts", icon: "receipts" });
   if (isAdmin) {
     items.push(
       { label: "Queue", href: "/admin/queue", icon: "queue" },

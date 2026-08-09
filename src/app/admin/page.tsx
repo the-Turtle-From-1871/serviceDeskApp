@@ -118,6 +118,9 @@ export default async function AdminHome() {
           <Link className="btn btn-secondary" href="/admin/queue">Service queue</Link>
           <Link className="btn btn-secondary" href="/admin/users">Users</Link>
           <Link className="btn btn-secondary" href="/admin/audit">Audit</Link>
+          {/* An admin has no Receipts rail tab — a sixth truncates labels at
+              375px — so the hub is how they reach the list. See navItemsFor. */}
+          <Link className="btn btn-secondary" href="/receipts">Hand receipts</Link>
           <Link className="btn btn-primary" href="/admin/items/new">+ New item</Link>
         </div>
       </section>

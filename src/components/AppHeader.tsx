@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import {
   Search,
   ClipboardList,
+  FileText,
   Wrench,
   Users,
   LayoutDashboard,
@@ -18,6 +19,7 @@ import { activeHref, type NavIcon, type NavItem } from "@/components/nav";
 const ICONS: Record<NavIcon, LucideIcon> = {
   search: Search,
   items: ClipboardList,
+  receipts: FileText,
   queue: Wrench,
   users: Users,
   dashboard: LayoutDashboard,
