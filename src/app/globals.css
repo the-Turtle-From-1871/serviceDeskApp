@@ -1730,18 +1730,18 @@ input[type="file"].input {
      13px they wrap to two or three lines, and the panel stops reading as facts
      you can scan.
 
-     THIS ROW TAKES THE PANEL'S FULL WIDTH — label above value, both spanning the
-     grid — and that is what makes fitting possible at all. In the shared
-     label/value pair the value column is **198px**, where 53 characters need a
-     ~6px font: unreadable, i.e. not a fit in any useful sense. Spanning gives it
-     the panel's 324px, where the same string lands at ~9.5px and the common
-     27-44 character units at 11-13px. It is the only row that spans, because it
-     is the only one whose values run this long.
+     THIS ROW LEAVES THE SHARED GRID COLUMNS (see `.card-more__row` below) so
+     that label and value sit on one line while the value still gets room. In
+     the shared pair the value track is **198px** at 390px, because the label
+     track is sized by "LAST LOGON DATE"; on its own flex row the label costs
+     only its own width and the value gets ~243px. It briefly stacked the label
+     above the value for the full 324px, which fits more but reads unlike every
+     other row in the panel.
 
      The size itself has two inputs and NEITHER is a measurement:
-       --len  the character count, set inline by ItemSelectTable.
-       100cqi the dd's own inline size, from the grid, so the arithmetic follows
-              the real width at any viewport.
+       --w    the string's estimated width in em, set inline by ItemSelectTable.
+       100cqi the dd's own inline size, from the flex row, so the arithmetic
+              follows the real width at any viewport.
      A JS measure-then-shrink cannot work here at all: the panel lives in a
      CLOSED <details> until someone opens it, so there is nothing to measure on
      mount, and it renders per row on a list of 50.
@@ -1754,27 +1754,46 @@ input[type="file"].input {
      now comes from measured Geist glyph widths in `estimateTextEm`
      (items-view.ts), which lands within a couple of percent of the real width.
 
-     THE FLOOR IS THE THING THAT ACTUALLY WRAPS. Measured on the catalogue's
-     47 home units: at a 390px viewport nothing wrapped, but at 320px — an
-     iPhone SE, or any phone whose effective CSS width is narrowed by Safari's
-     page zoom or a larger text setting — 25 of 47 hit the old 9px floor and
-     went to two lines. 7px is low enough that the longest unit in the book
-     still fits on one line at 320px. Below that the text stops being readable
-     at all, so a value longer than anything in the catalogue is still allowed
-     to wrap rather than shrink into nothing: the dd keeps `overflow-wrap:
-     anywhere` and nothing is set to `nowrap`, so the last resort is an honest
-     two-line value, never a clipped one.
+     THE FLOOR IS WHAT ACTUALLY WRAPS, and 7px is a deliberate stopping point
+     rather than a fit for every case. Measured across the catalogue's 47 home
+     units in Chromium AND WebKit, with the label inline: **nothing wraps at
+     360px and above** (390px runs 7.98-13px). At **320px** — an iPhone SE, or
+     any phone whose effective CSS width is narrowed by Safari page zoom or a
+     larger text setting — the value track is 173px, where the longest names
+     would need ~6px, so they hit the floor and wrap. Getting those onto one
+     line as well means either text nobody can read or stacking the label above
+     the value again (which fits at 8.6px but reads unlike every other row).
+     Nothing is set to `nowrap`, so that last resort is an honest two-line
+     value, never a clipped one.
 
      `container-type` sits on the dd and the sized text is the SPAN inside it:
      container units resolve against the nearest ANCESTOR container, so an
      element cannot size its own font from its own `cqi`. Inline-size
      containment is safe here because the dd's width comes from the grid track,
      not from its contents. */
-  .table--cards .card-more__list dt.card-more__fit-label,
-  .table--cards .card-more__list dd.card-more__fit {
+  /* Label and value share ONE line, like every other row in the panel — but in
+     a flex row of their own rather than the shared grid columns. The grid's
+     label track is sized by the widest label in the panel ("LAST LOGON DATE",
+     114px at a 390px viewport), which would leave 198px for a value that runs
+     to 53 characters; here the label costs only its own width, so the value
+     gets ~270px. `flex-basis: 0` (not `auto`) is what makes the value's width
+     come from the free space rather than from its own text — which is both
+     what keeps the label from being squeezed and what makes `container-type`
+     legal on it, since inline-size containment requires a width that does not
+     depend on the contents. */
+  .table--cards .card-more__list .card-more__row {
     grid-column: 1 / -1;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    min-width: 0;
+  }
+  .table--cards .card-more__list .card-more__row dt.card-more__fit-label {
+    flex: 0 0 auto;
   }
   .table--cards .card-more__list dd.card-more__fit {
+    flex: 1 1 0;
+    min-width: 0;
     container-type: inline-size;
   }
   .table--cards .card-more__list dd.card-more__fit > span {
