@@ -47,6 +47,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   #### Notes
   - Migration `20260808120000_capability_foundation` adds the `Capability` enum, the `VIEWER` role value and the `UserCapability` table. **No data backfill is needed** — existing accounts draw their access from their role's baseline.
   - Apply the migration to Supabase **before** merging, per migrate-before-push: `next build` never runs `migrate deploy`, so deployed code selecting `UserCapability` against a database without that table is a 500.
+- **The "More" panel on each item card now shows Home unit, SLOC and the device's MDM status instead of UIC and Category.** On a phone, tapping **More** at the bottom of an item card used to open onto Holder, UIC and Category. It now opens onto **Holder**, **Home unit**, **SLOC**, **Compliance**, **Last logon user** and **Last logon date** — the last three come straight from the fleet import, so you can tell whether a device is actually being used, and by whom, without opening the item.
+
+  UIC and Category were dropped from that panel because the card already implies the category through the make and model, and Home unit is the same fact as the UIC in words. **Both are still columns on the full table** on a computer, and both are still in the Columns menu, sortable and filterable exactly as before. Nothing changed on the item page itself, which continues to show every field.
+
+  A long home unit is shrunk just enough to sit on one line rather than wrapping, so the panel stays scannable; a very long one still wraps rather than being cut off.
+
+  #### Notes
+  - No database, environment or deployment change — every field shown was already stored and is already visible on the item page.
+  - The three imported fields are shown exactly as the fleet export wrote them, dates included; a device that has never reported one shows a dash.
+  - **SLOC appears only on devices that have one.** Most do not, so it is left out entirely rather than showing a dash on nearly every card. The other rows always appear, because a missing holder or logon is worth seeing.
 - **Sorting and unit filtering on the items list are now one "Sort & filter" button instead of four separate controls.** The list's toolbar used to carry a Sort by dropdown, an Asc/Desc button, a Then by dropdown and a Unit (UIC) dropdown side by side. On a phone they wrapped into three rows of controls before the first device appeared. They are now behind a single button, which shows what is currently applied — "Sort & filter · Make ▲ · 2/6 IN" — so you can still read the order and the active unit filter without opening anything.
 
   Tapping the button opens a panel holding all four as dropdowns: **Unit**, **Sort by**, **Direction** and **Then by**. On a phone the panel slides up from the bottom of the screen and has a **Done** button — and each dropdown opens the usual iPhone picker wheel, which is far quicker than scrolling a long list of units. On a computer the panel drops down under the button. Either way, picking something applies it immediately and the panel stays open, so you can set the unit and the order in one visit. It closes when you tap outside it, press Escape, or press Done.

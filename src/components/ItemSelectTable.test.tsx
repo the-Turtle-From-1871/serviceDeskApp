@@ -100,6 +100,11 @@ describe("ItemSelectTable — delete dialog structure (closed-dialog layout regr
     deviceCategory: null,
     readiness: "UNTRIAGED" as const,
     holderName: null,
+    homeUnit: null,
+    storageLocation: null,
+    lastLogonUserPrincipalName: null,
+    lastLogonDate: null,
+    compliance: null,
   };
 
   function renderRow() {
@@ -170,6 +175,14 @@ describe("ItemSelectTable — mobile card structure", () => {
     deviceCategory: null,
     readiness: "UNTRIAGED" as const,
     holderName: null,
+    // Real values here, unlike the other fixtures: the More panel below is what
+    // renders them, and the Home unit string is deliberately long enough to
+    // wrap in a ~230px column — that is the case the fit sizing exists for.
+    homeUnit: "HHC, 1-506 IN, 1BCT, 101ABN",
+    storageLocation: "Bldg 4 cage 2",
+    lastLogonUserPrincipalName: "jane.doe@army.mil",
+    lastLogonDate: "7/25/2026 1:40:21 AM",
+    compliance: "Compliant",
   };
   const RETIRED = { ...ROW, id: "item-2", serialNumber: "SN2", status: "RETIRED" as const };
 
@@ -246,12 +259,12 @@ describe("ItemSelectTable — mobile card structure", () => {
     window.localStorage.clear();
   });
 
-  // The three fields the compact card drops live behind the bottom chevron.
+  // The fields the compact card drops live behind the bottom chevron.
   // jsdom cannot measure the 44px strip or prove the tap beats the stretched
   // link — both were measured in a browser — but it can pin that the panel is a
   // native <details> (so it works without JS and takes Enter/Space for free)
   // and that it carries exactly the fields the card gave up.
-  it("puts Holder, UIC and Category behind a native details toggle", () => {
+  it("puts the dropped custody and telemetry fields behind a native details toggle", () => {
     const { container } = renderRows();
     const details = container.querySelector("td.cell-more details.card-more");
     expect(details).not.toBeNull();
@@ -259,18 +272,110 @@ describe("ItemSelectTable — mobile card structure", () => {
     // A <summary> is what makes it keyboard-operable without a single handler.
     expect(details!.querySelector(":scope > summary")).not.toBeNull();
     const terms = [...details!.querySelectorAll("dt")].map((d) => d.textContent);
-    expect(terms).toEqual(["Holder", "UIC", "Category"]);
+    expect(terms).toEqual([
+      "Holder",
+      "Home unit",
+      "SLOC",
+      "Compliance",
+      "Last logon user",
+      "Last logon date",
+    ]);
+    // UIC and Category were moved out; they stay desktop columns only.
+    expect(terms).not.toContain("UIC");
+    expect(terms).not.toContain("Category");
+  });
+
+  // SLOC is the one row that goes away rather than showing a dash — most of the
+  // catalogue has no storage location, and a dash on nearly every card is noise
+  // between the facts either side of it. Every OTHER row stays, dash and all, so
+  // two cards can still be read against each other.
+  it("drops the SLOC row when there is no storage location, and keeps every other row", () => {
+    const blank = [
+      { ...ROW, storageLocation: null },
+      { ...ROW, id: "item-3", serialNumber: "SN3", storageLocation: "   " },
+    ];
+    const { container } = renderRows({ items: blank });
+    const rows = [...container.querySelectorAll("tbody tr")];
+    // Assert the fixture actually rendered before looping over it: a bare
+    // `for…of` over an empty NodeList runs zero assertions and reports green,
+    // which would leave this branch — the only coverage of the conditional
+    // row — silently unguarded if the table ever stopped rendering rows.
+    expect(rows).toHaveLength(blank.length);
+    for (const tr of rows) {
+      const terms = [...tr.querySelectorAll("td.cell-more dt")].map((d) => d.textContent);
+      expect(terms).toEqual([
+        "Holder",
+        "Home unit",
+        "Compliance",
+        "Last logon user",
+        "Last logon date",
+      ]);
+    }
+  });
+
+  // The blank rule these fields share: null, "" and "   " must all read as
+  // missing and render the dash. `""` in particular had NO fixture anywhere —
+  // it is the exact case that makes `??` wrong here, so without it a later
+  // "consistency" pass to `??` would go green while every MDM-blank device
+  // showed three labelled but empty rows on a phone.
+  it("renders a dash for null, empty and whitespace-only values alike", () => {
+    const shapes = [
+      { ...ROW, id: "b1", serialNumber: "B1", holderName: null, homeUnit: null, storageLocation: null, compliance: null, lastLogonUserPrincipalName: null, lastLogonDate: null },
+      { ...ROW, id: "b2", serialNumber: "B2", holderName: "", homeUnit: "", storageLocation: "", compliance: "", lastLogonUserPrincipalName: "", lastLogonDate: "" },
+      { ...ROW, id: "b3", serialNumber: "B3", holderName: "  ", homeUnit: "   ", storageLocation: "  ", compliance: " ", lastLogonUserPrincipalName: "  ", lastLogonDate: " " },
+    ];
+    const { container } = renderRows({ items: shapes });
+    const rows = [...container.querySelectorAll("tbody tr")];
+    expect(rows).toHaveLength(shapes.length);
+    for (const tr of rows) {
+      const values = [...tr.querySelectorAll("td.cell-more dd")].map((d) => d.textContent);
+      // Five, not six: a blank SLOC drops its row entirely, in all three shapes.
+      expect(values).toEqual(["—", "—", "—", "—", "—"]);
+    }
+  });
+
+  // A whitespace-only unit must not reach the fit sizing: it would render a
+  // blank value under a label AND charge the font clamp for characters nobody
+  // can see, shrinking the one row that spans the panel's full width.
+  it("treats a whitespace-only home unit as missing rather than sizing it", () => {
+    const { container } = renderRows({ items: [{ ...ROW, homeUnit: "     " }] });
+    const dd = container.querySelector("td.cell-more dd.card-more__fit");
+    expect(dd!.textContent).toBe("—");
+    expect(dd!.querySelector("span")!.style.getPropertyValue("--len")).toBe("");
+  });
+
+  // The fit sizing is CSS (`clamp` over a container query), so jsdom — which has
+  // no layout engine and does not resolve `cqi` — cannot show the rendered size.
+  // What it CAN pin is the one input React owns: the character count reaching
+  // CSS as `--len` on the span, not on the dd. Drop it and the clamp silently
+  // falls back to its 12-character default for every unit, which looks fine on
+  // short strings and long ones alike until someone measures.
+  it("hands the home unit's length to CSS as --len", () => {
+    const { container } = renderRows();
+    const dd = container.querySelector("td.cell-more dd.card-more__fit");
+    expect(dd).not.toBeNull();
+    const span = dd!.querySelector("span");
+    expect(span!.textContent).toBe(ROW.homeUnit);
+    expect(span!.style.getPropertyValue("--len")).toBe(String(ROW.homeUnit.length));
   });
 
   // Not driven by the Columns menu, exactly like the card cells above: the panel
   // exists to show what the CARD dropped, which is a fixed set, not what a
   // desktop preference happens to have hidden.
-  it("shows the same three fields regardless of the Columns preference", () => {
+  it("shows the same fields regardless of the Columns preference", () => {
     window.localStorage.setItem("items:hiddenCols", JSON.stringify(["holder", "deviceUIC", "deviceCategory"]));
     const { container } = renderRows();
-    // First row only — renderRows() draws two, so an unscoped query returns six.
+    // First row only — renderRows() draws two, so an unscoped query returns
+    // both cards' worth.
     const terms = [...container.querySelectorAll("tbody tr:first-child td.cell-more dt")].map((d) => d.textContent);
-    expect(terms).toEqual(["Holder", "UIC", "Category"]);
+    expect(terms).toEqual([
+      "Holder",
+      "Home unit",
+      "SLOC",
+      "Compliance",
+      "Last logon user",
+      "Last logon date",
+    ]);
     window.localStorage.clear();
   });
 
@@ -354,6 +459,11 @@ describe("ItemSelectTable — long-press selection", () => {
     deviceCategory: null,
     readiness: "UNTRIAGED" as const,
     holderName: null,
+    homeUnit: null,
+    storageLocation: null,
+    lastLogonUserPrincipalName: null,
+    lastLogonDate: null,
+    compliance: null,
   };
   const RETIRED = { ...ROW, id: "item-2", serialNumber: "SN2", status: "RETIRED" as const };
   let realSetPointerCapture: HTMLElement["setPointerCapture"];

@@ -106,6 +106,12 @@ export default async function ItemsListPage({
               auditState: it.status === "RETIRED" ? null : auditState(it.lastAuditedAt, now),
               deviceUIC: it.deviceUIC,
               deviceCategory: it.deviceCategory,
+              homeUnit: it.homeUnit,
+              storageLocation: it.storageLocation,
+              // Raw MDM text, passed straight through — see ItemRow.
+              lastLogonUserPrincipalName: it.lastLogonUserPrincipalName,
+              lastLogonDate: it.lastLogonDate,
+              compliance: it.compliance,
               // A row that vanished between the two queries falls back to
               // "we know nothing about it" rather than dropping the row.
               readiness: readiness.get(it.id) ?? "UNTRIAGED",

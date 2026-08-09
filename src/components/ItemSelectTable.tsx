@@ -14,6 +14,7 @@ import {
   READINESS_LABEL,
   ITEM_COLUMNS,
   parseHiddenCols,
+  present,
   selectableIds,
   selectAllState,
   type ColumnKey,
@@ -35,6 +36,15 @@ const HIDDEN_KEY = "items:hiddenCols";
 // existing stored preference wins over this default.)
 const DEFAULT_HIDDEN: ColumnKey[] = ["deviceCategory"];
 const hiddenStore = makeStore(HIDDEN_KEY, parseHiddenCols);
+
+/** A value for the card's More panel, or the em-dash placeholder. `present`
+ *  owns the "is this missing" rule (see items-view.ts); this only picks the
+ *  mark. `/i/<id>`'s detail card keeps its own `dash` constant — the two
+ *  surfaces render different components and share no styling, so they are
+ *  deliberately not coupled through a shared node. */
+function orDash(value: string | null | undefined) {
+  return present(value) ?? <span className="subtle">—</span>;
+}
 
 // Re-export rather than redeclare: the shape is owned by listItems, which is
 // what parses and consumes it.
@@ -167,6 +177,11 @@ export function ItemSelectTable({
 
   const renderRow = (it: ItemRow) => {
     const offset = gestures.offsetFor(it.id);
+    // Trimmed once here rather than at each use: the More panel needs the
+    // home unit's length for the fit sizing and the same string to render, and
+    // SLOC needs the identical test for whether the row exists at all.
+    const homeUnit = present(it.homeUnit);
+    const storageLocation = present(it.storageLocation);
     return (
     <tr
       key={it.id}
@@ -294,16 +309,26 @@ export function ItemSelectTable({
         )}
       </td>
 
-      {/* The three fields the compact card drops — Holder, UIC and Category —
-          behind a chevron at the card's bottom edge.
+      {/* The custody and telemetry facts the compact card drops — Holder, Home
+          unit, SLOC, Compliance, Last logon user, Last logon date — behind a
+          chevron at the card's bottom edge.
+
+          UIC and Category used to sit here in place of Home unit and the three
+          MDM fields. Both were dropped deliberately: Category is a coarse device
+          class the make/model on the card's face already implies, and the UIC is
+          the same fact as Home unit in six characters that nobody reads aloud.
+          Both remain desktop columns in the Columns menu for anyone who works by
+          them. What replaced them is otherwise reachable only by opening the
+          item, and it is what a technician checks when deciding whether a device
+          is actually in use and where it should be.
 
           A native <details>, not a useState toggle: it opens before hydration,
           Enter/Space work on the <summary> for free, and the open state is the
           element's own so nothing has to be tracked per row in a component that
           re-renders on every selection change. It is deliberately NOT driven by
           the Columns menu — the card is built from cells the menu cannot reach
-          (see cell-serial above), so this shows the same three fields for
-          everyone rather than a set that changes with a desktop preference.
+          (see cell-serial above), so this shows the same fields for everyone
+          rather than a set that changes with a desktop preference.
 
           `summary` is in useRowGestures' pointerdown guard, so pressing the
           chevron cannot start a swipe or a long press, and globals.css lifts it
@@ -320,12 +345,53 @@ export function ItemSelectTable({
             <ChevronDown className="card-more__chevron" aria-hidden="true" />
           </summary>
           <dl className="card-more__list">
+            {/* Every value in this panel goes through `present`/`orDash`, so ONE
+                rule decides what counts as missing. It used to be four idioms in
+                forty lines — `??` here, `||` there, `.trim()` on one row — which
+                disagree precisely where this data is messy: the CSV importer
+                writes MDM columns verbatim, so an absent value arrives as null
+                from some exports, "" from others and "   " from a few. `??`
+                renders "" as a labelled blank that reads like a broken row, and
+                an untrimmed check does the same for whitespace. */}
             <dt>Holder</dt>
-            <dd>{it.holderName ?? <span className="subtle">—</span>}</dd>
-            <dt>UIC</dt>
-            <dd className="mono">{it.deviceUIC ?? <span className="subtle">—</span>}</dd>
-            <dt>Category</dt>
-            <dd>{it.deviceCategory ?? <span className="subtle">—</span>}</dd>
+            <dd>{orDash(it.holderName)}</dd>
+            {/* Sized to stay on ONE line however long the unit is, and given
+                the panel's full width to make that possible — real unit names
+                run to 53 characters. The length is handed to CSS as `--len` and
+                the width comes from the dd's own container query, so nothing is
+                measured in JS and it is right whether the panel is open, closed
+                or never opened — a measure-then-shrink effect could do none of
+                those, because a closed <details> has no layout to measure. See
+                `.card-more__fit` in globals.css for the arithmetic.
+
+                `--len` counts the TRIMMED string, which is also what renders —
+                charging CSS for whitespace the value does not show would shrink
+                the font for nothing. */}
+            <dt className="card-more__fit-label">Home unit</dt>
+            <dd className="card-more__fit">
+              {homeUnit
+                ? <span style={{ ["--len" as string]: homeUnit.length }}>{homeUnit}</span>
+                : orDash(null)}
+            </dd>
+            {/* SLOC is the ONE row that disappears when it is empty, rather
+                than showing a dash. Most of the catalogue has no storage
+                location — a dash on nearly every card is a row of noise between
+                the two facts either side of it. The others stay put even when
+                blank: a missing holder, home unit or logon is itself worth
+                seeing, and a row that came and went would make two cards
+                impossible to compare at a glance. */}
+            {storageLocation ? (
+              <>
+                <dt>SLOC</dt>
+                <dd>{storageLocation}</dd>
+              </>
+            ) : null}
+            <dt>Compliance</dt>
+            <dd>{orDash(it.compliance)}</dd>
+            <dt>Last logon user</dt>
+            <dd className="mono">{orDash(it.lastLogonUserPrincipalName)}</dd>
+            <dt>Last logon date</dt>
+            <dd>{orDash(it.lastLogonDate)}</dd>
           </dl>
         </details>
       </td>

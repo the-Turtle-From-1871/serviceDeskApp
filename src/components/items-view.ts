@@ -51,6 +51,23 @@ export type ItemRow = {
    *  whole page in one query — never per row. See
    *  modules/transfers/holders.query.ts. */
   holderName: string | null;
+  /** The owning unit, shown in the phone card's More panel. Free text and often
+   *  long ("HHC, 1-506 IN, 1BCT"), which is why the panel sizes it to fit — see
+   *  `.card-more__fit` in globals.css. There is no Home unit COLUMN: the desktop
+   *  table shows the UIC instead, which is the same fact in six characters. */
+  homeUnit: string | null;
+  /** Where the device physically sits when nobody holds it. Free text. */
+  storageLocation: string | null;
+  /* MDM telemetry, shown in the phone card's More panel. All three are stored
+     VERBATIM as text by the importer (`lastLogonDate` is a raw string like
+     "7/25/2026 1:40:21 AM", never a Date) — so they are rendered as-is, exactly
+     as the item detail card does. `Item.lastLogonAt` is the parsed twin and is
+     deliberately NOT here: it exists for readiness/SQL comparisons, and
+     displaying a reformatted date beside the MDM export people cross-check
+     against would invent a value the source never gave. */
+  lastLogonUserPrincipalName: string | null;
+  lastLogonDate: string | null;
+  compliance: string | null;
 };
 
 export type SortPref = GenericSortPref<SortField>;
@@ -139,6 +156,22 @@ export function selectAllState(items: ItemRow[], selected: ReadonlySet<string>):
   const hits = ids.filter((id) => selected.has(id)).length;
   if (hits === 0) return "none";
   return hits === ids.length ? "all" : "some";
+}
+
+/** A displayable value, or null when there is nothing to show.
+ *
+ *  ONE definition of "missing" for the card's More panel, because this data is
+ *  messy in three different ways at once: the CSV importer copies MDM columns
+ *  verbatim, so the same absent fact arrives as `null` from one export, `""`
+ *  from another and `"   "` from a third. Testing them separately is how a
+ *  panel ends up with a labelled blank row that reads like a rendering bug —
+ *  and it is why the whitespace case is trimmed away rather than rendered.
+ *
+ *  Returns the TRIMMED string, so callers render exactly what they measured:
+ *  the Home unit row sizes its font by this string's length. */
+export function present(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
 }
 
 export function parseHiddenCols(raw: string | null): ColumnKey[] {

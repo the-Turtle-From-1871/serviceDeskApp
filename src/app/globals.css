@@ -1722,6 +1722,55 @@ input[type="file"].input {
     min-width: 0;
     overflow-wrap: anywhere;
   }
+  /* Home unit: sized so the whole string sits on ONE line at any length.
+
+     Unit names are free text and REALLY long — measured over the catalogue's 18
+     distinct values at a 390px viewport: 13 to 53 characters, most of them past
+     27 ("DET 3, COMPANY C 2D BATTALION 641ST AVIATION REGIMENT"). At the panel's
+     13px they wrap to two or three lines, and the panel stops reading as facts
+     you can scan.
+
+     THIS ROW TAKES THE PANEL'S FULL WIDTH — label above value, both spanning the
+     grid — and that is what makes fitting possible at all. In the shared
+     label/value pair the value column is **198px**, where 53 characters need a
+     ~6px font: unreadable, i.e. not a fit in any useful sense. Spanning gives it
+     the panel's 324px, where the same string lands at ~9.5px and the common
+     27-44 character units at 11-13px. It is the only row that spans, because it
+     is the only one whose values run this long.
+
+     The size itself has two inputs and NEITHER is a measurement:
+       --len  the character count, set inline by ItemSelectTable.
+       100cqi the dd's own inline size, from the grid, so the arithmetic follows
+              the real width at any viewport.
+     A JS measure-then-shrink cannot work here at all: the panel lives in a
+     CLOSED <details> until someone opens it, so there is nothing to measure on
+     mount, and it renders per row on a list of 50.
+
+     0.64 is the average glyph width in em, measured in the browser across those
+     18 real strings in this font (0.52-0.63, so 0.64 clears every one of them).
+     It is deliberately the CEILING rather than the mean: erring high makes the
+     font a touch small, erring low makes it overflow — and only one of those is
+     visible as a bug. `clamp` floors it at 9px, so a hypothetical value longer
+     than anything in the catalogue wraps instead of shrinking into nothing: the
+     dd keeps `overflow-wrap: anywhere` and nothing is set to `nowrap`, so the
+     fallback is an honest two-line value, never a clipped one.
+
+     `container-type` sits on the dd and the sized text is the SPAN inside it:
+     container units resolve against the nearest ANCESTOR container, so an
+     element cannot size its own font from its own `cqi`. Inline-size
+     containment is safe here because the dd's width comes from the grid track,
+     not from its contents. */
+  .table--cards .card-more__list dt.card-more__fit-label,
+  .table--cards .card-more__list dd.card-more__fit {
+    grid-column: 1 / -1;
+  }
+  .table--cards .card-more__list dd.card-more__fit {
+    container-type: inline-size;
+  }
+  .table--cards .card-more__list dd.card-more__fit > span {
+    display: block;
+    font-size: clamp(9px, calc(100cqi / (var(--len, 12) * 0.64)), 13px);
+  }
 
   /* ---- Selection mode: checkboxes appear in the header band ----
      Absolutely positioned so entering the mode costs the card no height —
