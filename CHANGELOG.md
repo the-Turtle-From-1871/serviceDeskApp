@@ -5,6 +5,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-08-08
 
+### Fixed
+- **The nightly import script follows redirects, and now refuses an HTML page even when the server says 200.** Two faults in `handoff/Send-MdmImport.ps1`, both of which stop the fleet import silently. It called `curl` without `-L`, so it never followed a redirect — pointing it at the bare `dcsim.us` (which permanently redirects to `www.dcsim.us`) killed the run with an unexplained `308` before anything was sent. And its guard against being handed a web page instead of data only ran when the server returned an error code. That is the wrong way round: following a redirect can land on the **login page, which answers 200 with HTML**, so the one case the guard exists to catch was the one case it could not see — the job would have reported a clean success while importing nothing. The guard now runs on every response.
+
+  #### Notes
+  - No app change, no deploy, no environment variable. This is the PowerShell script handed to whoever runs the scheduled export, so **a copy already sitting on that machine is still affected** — replace it from `handoff/Send-MdmImport.ps1`.
+
 ### Added
 - **You can now scan the manufacturer's own barcode on a laptop instead of the QR sticker this app prints.** Until now the camera only read our stickers, so a device whose sticker was never applied, has peeled off or has worn illegible could only be added to a hand receipt by finding it in the items list by hand. The scanner now also reads the factory label — a Dell service tag, an HP serial, and the Code 39, Code 128 and DataMatrix barcodes those labels use. It works in two places: on the hand-receipt builder, where a scanned device is added to the receipt exactly as scanning a sticker does; and on the items list, where a new **Scan** button beside the search box opens whatever device you point it at. Our own stickers keep working exactly as before — this is an additional way in, not a replacement.
 
