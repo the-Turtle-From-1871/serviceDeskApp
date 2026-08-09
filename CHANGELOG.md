@@ -3,6 +3,21 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-08-09
+
+### Added
+- **You can create your own account.** The sign-in page now offers *Create one*, and there is a sign-up form at `/register`. You confirm your email address by clicking a link we send you — until you do, signing in is refused and tells you so, with a button to resend the link. A brand-new account is **read-only**: it can look up equipment and see the hand receipts you are named on, and nothing else. Issuing hand receipts, editing items and processing returns are separate permissions an administrator grants.
+- **A hand receipt list at `/receipts`.** There has never been one — receipts could only be reached by number, by an emailed link, or from an item's history. Signed-in staff who can see all receipts get every receipt, newest first; everyone else sees only the receipts they are named on, so the page says which of the two you are looking at rather than leaving an empty list ambiguous. Non-administrators get a **Receipts** tab; administrators reach it from the Dashboard, because a sixth tab starts truncating labels on a phone.
+
+### Changed
+- **Signing in is no longer labelled staff-only.** The navigation said *Staff sign in* and the home page said *Staff log in*; both now just say sign in and log in, and the home page's description of who the app is for no longer claims accounts come only from an administrator.
+
+  #### Notes
+  - Migration `20260809120000_email_verification` adds `User.emailVerifiedAt` and the `EmailVerificationToken` table. **Every existing account is backfilled as already confirmed** — without that, everyone would be refused sign-in on deploy, waiting for a confirmation email they never received.
+  - Apply the migration to Supabase **before** merging, per migrate-before-push.
+  - Confirmation email goes through the existing sender. **If the `GMAIL_*` variables are not live in Vercel production, the mail is silently logged instead of sent** and nobody can finish signing up — check them before announcing this.
+  - Registration is Turnstile-challenged, so the Turnstile variables must be present in production too, and the app must be **redeployed** after setting them (the site key is inlined at build time).
+
 ## 2026-08-08
 
 ### Added
