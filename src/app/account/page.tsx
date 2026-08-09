@@ -9,6 +9,8 @@ import { listSignatureNames } from "@/modules/signatures/signatures.service";
 import { SignatureManager } from "./SignatureManager";
 import { listDrafts } from "@/modules/receipts/drafts.service";
 import { DraftList } from "./DraftList";
+import { PermissionsCard } from "./PermissionsCard";
+import { listRequestsForUser } from "@/modules/users/permissions.service";
 
 export default async function AccountPage() {
   let user;
@@ -20,10 +22,11 @@ export default async function AccountPage() {
   }
   const isAdmin = user.role === "ADMIN";
   // Admins use named signatures; everyone else keeps the single saved signature.
-  const [me, signatures, drafts] = await Promise.all([
+  const [me, signatures, drafts, permissionRequests] = await Promise.all([
     isAdmin ? Promise.resolve(null) : prisma.user.findUnique({ where: { id: user.id }, select: { signatureImage: true } }),
     isAdmin ? listSignatureNames(user.id) : Promise.resolve([]),
     listDrafts(user.id),
+    listRequestsForUser(user.id),
   ]);
 
   return (
@@ -60,6 +63,10 @@ export default async function AccountPage() {
           </p>
           <DraftList drafts={drafts} />
         </div>
+        {/*  is the RESOLVED effective set from requireUser,
+            so what this lists and what the server admits cannot drift. */}
+        <PermissionsCard held={user.capabilities} requests={permissionRequests} />
+
         <div className="card stack">
           <div className="card__title">Change password</div>
           <ChangePasswordForm />

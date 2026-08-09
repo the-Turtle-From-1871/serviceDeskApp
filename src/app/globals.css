@@ -1926,3 +1926,79 @@ input[type="file"].input {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ── Permission decisions ─────────────────────────────────────────────────────
+   The per-capability outcome rows shared by /account and /admin/permissions.
+
+   Colour is DECORATIVE here. Every row also carries the word "Approved" or
+   "Denied" and the icon is aria-hidden, because red/green alone fails
+   colour-blind users and tells a screen reader nothing. Do not "simplify" this
+   by dropping the word and keeping the colour. */
+.decision-outcome {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.decision-outcome li {
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+.decision-outcome__icon {
+  width: 18px;
+  height: 18px;
+}
+.decision-outcome li.is-approved .decision-outcome__icon,
+.decision-outcome li.is-approved .decision-outcome__word {
+  color: var(--success);
+}
+.decision-outcome li.is-denied .decision-outcome__icon,
+.decision-outcome li.is-denied .decision-outcome__word {
+  color: var(--danger);
+}
+.decision-outcome__word {
+  font-size: 13px;
+  font-weight: 600;
+}
+.decision-outcome__reason {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--danger-soft);
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+/* An elevated capability (ADMINISTER) wherever it is offered or listed. The
+   danger treatment is driven by isElevated() in capabilities.ts, never
+   hardcoded per surface, so the request form and the approval queue cannot
+   disagree about what counts as elevated. */
+.capability-option {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  /* Single-side border: the other three are zeroed explicitly because preflight
+     is deliberately not imported here and would otherwise paint a full box. */
+  border: 0;
+  border-bottom: 1px solid var(--border);
+}
+.capability-option:last-child {
+  border-bottom: 0;
+}
+.capability-option--elevated {
+  background: var(--danger-soft);
+  border-radius: 8px;
+}
+.capability-option--elevated .capability-option__name {
+  color: var(--danger);
+  font-weight: 600;
+}
+.capability-option__hint {
+  display: block;
+  font-size: 13px;
+  color: var(--text-muted);
+}

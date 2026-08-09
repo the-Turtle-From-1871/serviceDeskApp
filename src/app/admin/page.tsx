@@ -10,6 +10,7 @@ import {
 } from "./dashboard/dashboard.service";
 import { DueBadge } from "@/components/DueBadge";
 import { getPinMeta } from "@/lib/public-access";
+import { countOpenRequests } from "@/modules/users/permissions.service";
 import { PublicAccessPinForm } from "./PublicAccessPinForm";
 
 type TimerRow = { key: string; href: string; label: string; note: string; dueAt: string };
@@ -70,10 +71,11 @@ export default async function AdminHome() {
     throw e;
   }
 
-  const [timers, recentReceipts, pinMeta] = await Promise.all([
+  const [timers, recentReceipts, pinMeta, openRequests] = await Promise.all([
     getTimerDashboard(),
     getRecentReceipts(),
     getPinMeta(),
+    countOpenRequests(),
   ]);
   const { overdueTransfers, soonTransfers, overdueService, soonService, nowMs } = timers;
 
@@ -118,6 +120,13 @@ export default async function AdminHome() {
           <Link className="btn btn-secondary" href="/admin/queue">Service queue</Link>
           <Link className="btn btn-secondary" href="/admin/users">Users</Link>
           <Link className="btn btn-secondary" href="/admin/audit">Audit</Link>
+          {/* Carries the pending count so a waiting request is visible without
+              opening the page. Not a nav-rail tab — admins are already at the
+              five-tab budget (see navItemsFor). */}
+          <Link className="btn btn-secondary" href="/admin/permissions">
+            Permission requests{openRequests > 0 ? ` (${openRequests})` : ""}
+          </Link>
+          <Link className="btn btn-secondary" href="/receipts">Hand receipts</Link>
           {/* An admin has no Receipts rail tab — a sixth truncates labels at
               375px — so the hub is how they reach the list. See navItemsFor. */}
           <Link className="btn btn-secondary" href="/receipts">Hand receipts</Link>
