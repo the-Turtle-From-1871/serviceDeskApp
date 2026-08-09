@@ -2,6 +2,21 @@ import prisma from "@/lib/prisma";
 import { planReturn, type HeldItem, type ReturnPlan } from "./plan";
 import { ReturnError } from "./returns.errors";
 import { computePurgeAfter, isTransferClosed } from "@/modules/transfers/lifecycle";
+import { putSignatureAsset } from "@/modules/signatures/signature-asset.service";
+
+// The processing technician's signature is deduplicated into SignatureAsset (see
+// prisma/schema.prisma) rather than stored inline on every ReturnTransaction. That
+// is a STORAGE detail and is not allowed to leak outward: the two read functions
+// below rehydrate it into `processedBySignature`, exactly the string field callers
+// had before, so the receipt page and the DA 2062 renderer are untouched.
+const withSignatureAsset = { processedBySignatureAsset: { select: { image: true } } } as const;
+
+function rehydrateSignature<T extends { processedBySignatureAsset: { image: string } | null }>(
+  row: T,
+): Omit<T, "processedBySignatureAsset"> & { processedBySignature: string | null } {
+  const { processedBySignatureAsset, ...rest } = row;
+  return { ...rest, processedBySignature: processedBySignatureAsset?.image ?? null };
+}
 
 export type ProcessReturnInput = {
   receiptNumber: string;
@@ -69,6 +84,10 @@ export async function processReturn(input: ProcessReturnInput): Promise<ProcessR
         });
       }
 
+      // Deduplicated inside this transaction so the FK sees the asset and a
+      // rolled-back return leaves nothing behind (mirrors recordAudit).
+      const processedBySignatureSha = await putSignatureAsset(tx, signature);
+
       await tx.returnTransaction.create({
         data: {
           transferId: receipt.id,
@@ -77,7 +96,7 @@ export async function processReturn(input: ProcessReturnInput): Promise<ProcessR
           processedByUserId: processedBy.id,
           processedByName: processedBy.name,
           processedByEmail: processedBy.email,
-          processedBySignature: signature,
+          processedBySignatureSha,
           returned: plan.returned.map((r) => ({ serialNumber: r.serialNumber, make: r.make, model: r.model })),
           returnedCount: plan.returned.length,
           remainingCount: plan.remaining.length,
@@ -98,18 +117,22 @@ export async function processReturn(input: ProcessReturnInput): Promise<ProcessR
 
 // The single FULL return that closed a receipt (its technician's name/signature/
 // date is the closed-out attestation shown on the receipt page and PDF).
-export function getClosingReturn(transferId: string) {
-  return prisma.returnTransaction.findFirst({
+export async function getClosingReturn(transferId: string) {
+  const row = await prisma.returnTransaction.findFirst({
     where: { transferId, kind: "FULL" },
     orderBy: { createdAt: "desc" },
+    include: withSignatureAsset,
   });
+  return row ? rehydrateSignature(row) : null;
 }
 
 // All return transactions for a receipt, oldest first — used to reconstruct the
 // per-line quantity history across the DA 2062 A–F columns.
-export function listReturnsForReceipt(transferId: string) {
-  return prisma.returnTransaction.findMany({
+export async function listReturnsForReceipt(transferId: string) {
+  const rows = await prisma.returnTransaction.findMany({
     where: { transferId },
     orderBy: { createdAt: "asc" },
+    include: withSignatureAsset,
   });
+  return rows.map(rehydrateSignature);
 }

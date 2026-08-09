@@ -1166,6 +1166,34 @@ edited, or modified.
 `deviceUIC`, `deviceCategory`, …), `ItemAudit`, and `ReturnTransaction` — each
 written in the same transaction as the change it describes.
 
+**Audit and return signatures are stored by content address, and the history row
+can never lose its ink.** `ItemAudit.signatureImage` and
+`ReturnTransaction.processedBySignature` held the PNG data URL inline; both now
+reference `SignatureAsset` (`prisma/schema.prisma`), whose primary key **is** the
+SHA-256 of the image bytes. This preserves the two properties the inline columns
+existed for and does not re-couple history to `Signature`:
+
+- **Immutable.** The key is the hash of the content, so the bytes behind a given
+  reference cannot be changed — an admin editing or deleting their saved
+  `Signature` still cannot alter what a past audit or return attests to.
+- **Undeletable.** Both foreign keys are `ON DELETE RESTRICT` and nothing deletes
+  from `SignatureAsset` — there is deliberately no delete path and no GC sweep, so
+  a signed history row can never be orphaned. Do not add one: reclaiming ~12 KB is
+  not worth a mechanism that can unlink a signed record. (Consequence, accepted:
+  an asset outlives the last row referencing it — e.g. after a receipt is purged
+  at 90 days. The row count is bounded by the number of distinct signatures ever
+  used, so this does not grow with usage.)
+
+Access is **unchanged** — `getAuditSignature` rehydrates through the same
+`requireUser()`-gated `revealAuditSignatureAction`, and the returns path renders
+the same image on the same pages. No gate widened, no retention window moved, and
+the asset table is never read by an unauthenticated path except through the
+already-public receipt page/PDF that rendered the same bytes before. The new table
+inherits **RLS enabled, no policy** from the `rls_auto_enable` event trigger like
+any other ([§10](#10-database-posture)). Written in the same transaction as the
+row that references it, so a rolled-back audit or return leaves nothing behind.
+*Last reviewed: 2026-08-08.*
+
 ---
 
 ## 10. Database posture
@@ -1970,6 +1998,10 @@ listed here now because a human list has no reason to leave them out:
   binds**, i.e. what "unaltered" means in §7.
 - `src/lib/signature.ts` — the shared signature validator (PNG prefix + 250 KB
   cap) behind three of the four signature entry points.
+- `src/modules/signatures/signature-asset.service.ts` + `src/lib/signature-hash.ts`
+  — the content-addressed signature store and the hash that addresses it. The
+  encoding is what keeps a past audit's ink immutable and reachable; a change to
+  either is a change to §9's integrity claim.
 - `prisma/schema.prisma` — carries the RLS posture comments and the
   uniqueness/nullability constraints several controls rest on.
 

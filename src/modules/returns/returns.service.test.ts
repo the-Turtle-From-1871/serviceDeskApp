@@ -3,7 +3,7 @@ import prisma from "@/lib/prisma";
 import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
 import { createTransfer, getTransferByReceiptNumber } from "@/modules/transfers/transfers.service";
 import { createItem } from "@/modules/items/items.service";
-import { processReturn } from "./returns.service";
+import { processReturn, listReturnsForReceipt } from "./returns.service";
 
 const SIG = "data:image/png;base64,iVBORw0KGgo=";
 
@@ -48,7 +48,11 @@ test("partial return stamps returnedAt, writes a PARTIAL ledger row, keeps the r
   const ledger = await prisma.returnTransaction.findMany();
   expect(ledger).toHaveLength(1);
   expect(ledger[0]).toMatchObject({ kind: "PARTIAL", returnedCount: 1, remainingCount: 1, receiptNumber });
-  expect(ledger[0].processedBySignature).toBe(SIG);
+
+  // The signature is stored by reference (SignatureAsset) and rehydrated by the
+  // service read, which is the shape the receipt page and DA 2062 renderer use.
+  const [row] = await listReturnsForReceipt(after.id);
+  expect(row.processedBySignature).toBe(SIG);
 });
 
 test("returning the last held item closes the receipt as FULL", async () => {

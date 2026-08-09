@@ -49,6 +49,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **A read-only account type.** A "viewer" can read the property book and nothing else — it cannot create a hand receipt or change an item. Nothing creates a viewer account yet; this release only makes the level exist.
 
 ### Changed
+- **Signatures on audits and returns are now stored once instead of once per record.** Every time an item was marked as audited, the app saved a fresh copy of the auditor's signature image alongside it — about 12 KB each, and identical every time, because it is the same saved signature being reused. The same happened for the technician's signature on each return. Auditing the whole property book once would have written roughly 16 MB to record one signature 1,204 times, against a 500 MB database limit.
+
+  The image is now kept once and referenced by the records that use it. Measured on a 1,204-item audit cycle, that is **16 MB before and 336 kB after — 49 times smaller**. **Nothing changes on screen:** signatures appear exactly as before on the item page, the receipt page and the DA 2062, existing audits and returns keep the exact image they were signed with, and who may view a signature is unchanged. A past audit's signature still cannot be altered or removed by editing or deleting the saved signature it came from.
+
+  Recipient signatures on hand receipts are deliberately untouched — each of those is genuinely different, so there is nothing to save, and they are covered by the receipt seal.
+
+  #### Notes
+  - Migration `20260808150000_signature_asset_dedup` adds the `SignatureAsset` table, moves existing images into it, and removes the two inline columns. The move is verified before anything is dropped: if any row's image does not round-trip byte-for-byte, the migration aborts and changes nothing.
+  - Apply it to Supabase **before** merging, per migrate-before-push — `next build` never runs `migrate deploy`, and the deployed code selects a column that will not exist yet.
+  - Dropping a column unlinks the data but does not return the disk. Run `VACUUM FULL "ItemAudit";` and `VACUUM FULL "ReturnTransaction";` after deploying to actually reclaim it. Both briefly lock the table, so they cannot run inside the migration.
 - **Each administrative screen now asks for the specific permission it needs**, rather than for administrator access in general. Managing items, categories and units asks for item management; the service queue and readiness ask for queue management; processing a return asks for returns; the analytics dashboard asks for analytics. User management, audits, the contact book, saved signatures, the access PIN, receipt timers and receipt seal verification continue to require full administrative access.
 - **Editing an item now requires permission to do so.** Correcting a device's holder or position previously needed only a signed-in account of any kind; it now requires the holder-editing permission, so a read-only account is refused. Anyone who could edit before still can.
 - **Losing a permission takes effect immediately, on the next page you load** — the same as being demoted or deactivated already did. Permissions are re-read from the database on every protected request rather than being carried in your sign-in token.

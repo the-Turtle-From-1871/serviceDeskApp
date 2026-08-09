@@ -492,7 +492,12 @@ model ReturnTransaction {
   processedByUserId    String?
   processedByName      String
   processedByEmail     String
-  processedBySignature String?
+  // The ink, deduplicated. Nullable exactly as the old inline column was. The
+  // service layer rehydrates this into a `processedBySignature` data URL on read
+  // (returns.service.ts), so the receipt page and the DA 2062 renderer are
+  // unchanged — the dedup is a storage detail, not a change of shape.
+  processedBySignatureSha   String?
+  processedBySignatureAsset SignatureAsset? @relation("ReturnSignature", fields: [processedBySignatureSha], references: [sha256], onDelete: Restrict)
   returned             Json
   returnedCount        Int
   remainingCount       Int
@@ -570,6 +575,46 @@ model ItemEdit {
   @@index([createdAt])
 }
 
+// One signature image, stored ONCE and addressed by the SHA-256 of its bytes.
+//
+// Why this table exists: `ItemAudit` and `ReturnTransaction` each need a snapshot
+// of the ink that was used, and both used to store the full PNG data URL inline.
+// Those blobs are ~12 KB each and are byte-identical across every row a given
+// admin signs — production held 31 audit rows carrying 1 distinct image, so
+// `ItemAudit` was the third-largest table in the database on 31 rows. Auditing
+// the whole fleet once would have written ~15 MB to say one 12 KB thing 1,204
+// times, against a 500 MB ceiling. TOAST cannot absorb it: base64-of-PNG is
+// already-compressed bytes, so pglz gets nothing.
+//
+// Why it does NOT undo the denormalization it replaces: those columns were
+// inline so history survives deletion of the source `Signature` row (see the
+// ItemAudit / ReturnTransaction comments). A row here is CONTENT-ADDRESSED —
+// the key IS the hash of the bytes, so the image behind a given sha can never
+// change — and nothing ever deletes from this table (both FKs are RESTRICT).
+// A snapshot is therefore still immutable and still independent of `Signature`.
+// Do NOT add a delete path or a GC sweep: the row count is bounded by the number
+// of distinct signatures ever used (one per admin per signature name), and a
+// reachability sweep over audit history to reclaim 12 KB is a bad trade against
+// the risk of unlinking a signed record.
+//
+// Deliberately NOT indexed on the referencing side. `ItemAudit.signatureSha` and
+// `ReturnTransaction.processedBySignatureSha` carry no index because the only
+// query that would use one is the RESTRICT check on deleting an asset, which
+// never happens — and a 64-char hex B-tree over every audit row would give back
+// a chunk of the space this table exists to save.
+model SignatureAsset {
+  // Lowercase hex SHA-256 of the image string's UTF-8 bytes. Computed by
+  // `signatureSha256` (src/lib/signature-hash.ts); the backfill migration
+  // computes the same value as `encode(sha256(convert_to(col,'UTF8')),'hex')`.
+  sha256    String   @id
+  image     String // PNG data URL
+  byteLen   Int
+  createdAt DateTime @default(now())
+
+  itemAudits ItemAudit[]         @relation("AuditSignature")
+  returns    ReturnTransaction[] @relation("ReturnSignature")
+}
+
 // A named signature belonging to an ADMIN account. `name` is the technician the
 // signature belongs to — it is printed on the DA 2062 as the signer when this
 // signature is chosen on a return, so it is an identity, not a label.
@@ -627,9 +672,14 @@ model Contact {
 
 // History of possession audits for an item. One row per audit event; an item's
 // audit status is derived from the newest row (see modules/audit/audit.status.ts).
-// Nullable auditor + denormalized name/signature snapshots so history survives
-// deletion of the acting account or the source Signature (mirrors ItemEdit /
+// Nullable auditor + denormalized name snapshot so history survives deletion of
+// the acting account or the source Signature (mirrors ItemEdit /
 // ReturnTransaction).
+//
+// The signature itself is NOT denormalized inline any more — it is a RESTRICT
+// reference into the content-addressed `SignatureAsset`, which preserves the same
+// two guarantees (immutable bytes, independent of `Signature`) at ~65 bytes per
+// row instead of ~12,000. See the SignatureAsset comment for why.
 model ItemAudit {
   id             String   @id @default(cuid())
   item           Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
@@ -638,7 +688,8 @@ model ItemAudit {
   auditedById    String?
   auditedByName  String
   signerName     String
-  signatureImage String
+  signatureSha   String
+  signatureAsset SignatureAsset @relation("AuditSignature", fields: [signatureSha], references: [sha256], onDelete: Restrict)
   createdAt      DateTime @default(now())
 
   @@index([itemId, createdAt])
