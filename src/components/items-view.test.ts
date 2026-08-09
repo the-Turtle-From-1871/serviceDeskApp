@@ -7,6 +7,7 @@ import {
   selectAllState,
   ITEM_COLUMNS,
   SORTABLE_COLUMNS,
+  sortFilterSummary,
   type ItemRow,
 } from "./items-view";
 // From the LEAF module, not items.service: that file is `server-only` and boots
@@ -182,5 +183,52 @@ describe("selectAllState", () => {
   it("ignores selected ids that are not in the list", () => {
     expect(selectAllState(rows, new Set(["a", "c", "ghost"]))).toBe("all");
     expect(selectAllState(rows, new Set(["ghost"]))).toBe("none");
+  });
+});
+
+describe("sortFilterSummary", () => {
+  it("reads Newest when no sort key is set", () => {
+    expect(sortFilterSummary(null, "asc", null)).toBe("Newest");
+    expect(sortFilterSummary(null, "desc", null)).toBe("Newest");
+  });
+
+  it("names the column and its direction", () => {
+    expect(sortFilterSummary("make", "asc", null)).toBe("Make ▲");
+    expect(sortFilterSummary("make", "desc", null)).toBe("Make ▼");
+    // The label comes from SORTABLE_COLUMNS, not the raw key.
+    expect(sortFilterSummary("serialNumber", "asc", null)).toBe("Serial ▲");
+    expect(sortFilterSummary("auditState", "desc", null)).toBe("Audit ▼");
+  });
+
+  it("appends an active unit filter", () => {
+    expect(sortFilterSummary("make", "asc", "2/6 IN")).toBe("Make ▲ · 2/6 IN");
+  });
+
+  it("shows the unit on its own when nothing is sorted", () => {
+    expect(sortFilterSummary(null, "asc", "2/6 IN")).toBe("Newest · 2/6 IN");
+  });
+
+  // ItemSelectTable's `uic` prop is `string | null` but the page passes "" for
+  // "no filter", so a blank must not render a dangling separator.
+  it("treats a blank or whitespace unit as no filter", () => {
+    expect(sortFilterSummary("make", "asc", "")).toBe("Make ▲");
+    expect(sortFilterSummary("make", "asc", "   ")).toBe("Make ▲");
+  });
+
+  // parseSortKeys drops a key outside ITEM_SORT_COLUMNS, so the server returns
+  // the DEFAULT order for one. The trigger has to say that, not name a sort
+  // that was never applied. `holder` is the live example: it is a real column
+  // the table renders, but it is not server-sortable.
+  it("reads Newest for a key the server would drop", () => {
+    expect(sortFilterSummary("holder", "asc", null)).toBe("Newest");
+    expect(sortFilterSummary("nonsense", "asc", "2/6 IN")).toBe("Newest · 2/6 IN");
+  });
+
+  // Every offered option must produce a label — a missing entry would silently
+  // read as "Newest" while the list really was sorted.
+  it("labels every sortable column", () => {
+    for (const c of SORTABLE_COLUMNS) {
+      expect(sortFilterSummary(c.key, "asc", null)).toBe(`${c.label} ▲`);
+    }
   });
 });

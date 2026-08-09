@@ -5,6 +5,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-08-08
 
+### Changed
+- **Sorting and unit filtering on the items list are now one "Sort & filter" button instead of four separate controls.** The list's toolbar used to carry a Sort by dropdown, an Asc/Desc button, a Then by dropdown and a Unit (UIC) dropdown side by side. On a phone they wrapped into three rows of controls before the first device appeared. They are now behind a single button, which shows what is currently applied — "Sort & filter · Make ▲ · 2/6 IN" — so you can still read the order and the active unit filter without opening anything.
+
+  Tapping the button opens a panel with all four choices in it: **Unit**, **Sort by**, **Direction** and **Then by**. On a phone the panel slides up from the bottom of the screen and has a **Done** button; on a computer it drops down under the button. Either way, picking something applies it immediately and the panel stays open, so you can set the unit and the order in one visit. It closes when you tap outside it, press Escape, or press Done.
+
+  Nothing about the sorting itself changed — the same columns are sortable, "Then by" is still only offered once you have picked something to sort by, and changing the order or the unit still takes you back to page 1. The arrow marking the sorted column in the table header is unchanged, and any bookmarked or shared `/items` link keeps working exactly as before.
+
+  #### Notes
+  - No database, environment or deployment change.
+  - On Safari older than version 26 the panel appears as the bottom sheet at every window size rather than as a dropdown. It behaves identically; only the position differs.
 ### Removed
 - **The `Send-MdmImport.ps1` wrapper script is gone; the scheduled fleet import now uses `curl.exe` directly.** The script existed to pre-check the mistakes people actually make and to refuse a response that was a web page rather than data, but it needed repeated repair to survive the locked-down machine it runs on — .NET calls refused under Constrained Language Mode, then redirects, then the guard being on the wrong side of a status check. `handoff/automated-mdm-import.md` now documents a plain `curl.exe` command instead, which needs no execution policy, works on Windows PowerShell 5.1 and 7 alike, and makes no .NET calls at all. **The import endpoint itself is unchanged** — same address, same secret, same behaviour.
 

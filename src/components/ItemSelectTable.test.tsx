@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { ItemSelectTable } from "./ItemSelectTable";
+import { SORTABLE_COLUMNS } from "./items-view";
 import { LONG_PRESS_MS, LONG_PRESS_SLOP_PX, CARD_LAYOUT_QUERY, DRAWER_WIDTH, AXIS_LOCK_PX } from "./swipe-row";
 
+// One shared spy rather than a fresh vi.fn() per useRouter() call, so the
+// sort/filter suite can assert the URL a menu choice pushes. Hoisted because
+// vi.mock's factory is lifted above the imports.
+const push = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+  useRouter: () => ({ replace: vi.fn(), push }),
   usePathname: () => "/items",
   useSearchParams: () => new URLSearchParams(),
 }));
@@ -607,5 +612,203 @@ describe("ItemSelectTable — long-press selection", () => {
     const click = new MouseEvent("click", { bubbles: true, cancelable: true });
     act(() => { link.dispatchEvent(click); });
     expect(click.defaultPrevented).toBe(false);
+  });
+});
+
+/**
+ * The "Sort & filter" popup menu, which replaced four toolbar controls (Sort
+ * by, Asc/Desc, Then by, Unit).
+ *
+ * READ THIS BEFORE ADDING A TEST HERE. **jsdom implements no Popover API at
+ * all** — `showPopover` is undefined and `:popover-open` never matches — while
+ * it DOES apply the UA's `[popover]:not(:popover-open) { display: none }`. So
+ * the panel is permanently hidden in this environment and there is no way to
+ * open it: every query into it passes `hidden: true`, and none of these tests
+ * exercises opening, dismissing or focus at all.
+ *
+ * Which means NONE of this is evidence that the sheet clears the safe-area
+ * inset, that the dropdown anchors under its button, that Escape returns focus
+ * to the trigger, or that a tap outside closes it. All of that was measured in
+ * a real browser at 390x844 and at desktop width. What these pin is the
+ * structure the CSS and the platform depend on — the part a later edit breaks
+ * silently.
+ */
+describe("ItemSelectTable — Sort & filter menu", () => {
+  const MENU_ID = "items-sortfilter";
+
+  beforeEach(() => push.mockClear());
+
+  function renderMenu(props: Partial<Parameters<typeof ItemSelectTable>[0]> = {}) {
+    return render(
+      <ItemSelectTable
+        items={[]}
+        isAdmin
+        q=""
+        sort="make"
+        dir="asc"
+        page={1}
+        totalPages={1}
+        sortKeys={[{ key: "make", dir: "asc" }]}
+        uic=""
+        uics={["WABC01", "WXYZ99"]}
+        categories={[]}
+        {...props}
+      />,
+    );
+  }
+
+  // `hidden: true` throughout — see the note above; the panel can never be
+  // opened here, so the accessibility tree excludes all of it.
+  const groupNamed = (name: string) => screen.getByRole("radiogroup", { name, hidden: true });
+  const radioIn = (group: HTMLElement, name: string | RegExp) =>
+    within(group).getByRole("radio", { name, hidden: true }) as HTMLInputElement;
+  const radiosIn = (group: HTMLElement) =>
+    within(group).getAllByRole("radio", { hidden: true }) as HTMLInputElement[];
+
+  // The whole reason this component splits its markup the way it does. The UA
+  // hides a closed popover with `[popover]:not(:popover-open) { display: none }`
+  // and any author `display` rule beats it — identical to the closed-<dialog>
+  // bug pinned above, which put 50 invisible boxes over this page's Delete
+  // buttons. jsdom has no layout engine and cannot see the resulting overlay;
+  // the structural invariant that prevents it is what it CAN assert.
+  it("puts the panel's styling classes on an inner wrapper, never on the [popover] element", () => {
+    const { container } = renderMenu();
+    const popover = container.querySelector(`#${MENU_ID}`)!;
+    expect(popover).not.toBeNull();
+    expect(popover.getAttribute("popover")).toBe("auto");
+    expect(popover.getAttribute("class")).toBeNull();
+    const panel = popover.querySelector(":scope > .popup-menu__panel");
+    expect(panel).not.toBeNull();
+    // And the content lives inside that wrapper, not beside it.
+    expect(within(panel as HTMLElement).getByRole("radiogroup", { name: "Sort by", hidden: true })).toBeTruthy();
+  });
+
+  // popovertarget is what supplies the implicit aria-expanded/aria-details
+  // pair, focus-order insertion and Escape-with-focus-return. Break the id
+  // reference and all of that silently goes away while the button still looks
+  // fine — and nothing in this file could tell, because jsdom implements none
+  // of those behaviours to begin with.
+  it("wires the trigger to the panel by id, and the panel is its next sibling", () => {
+    const { container } = renderMenu();
+    const trigger = screen.getByRole("button", { name: /Sort & filter/ });
+    expect(trigger.getAttribute("popovertarget")).toBe(MENU_ID);
+    // The card lives in a <table> that contains the Retire <form>, and a bare
+    // button defaults to submit.
+    expect(trigger.getAttribute("type")).toBe("button");
+    // The chevron's open-state rotation selector is
+    // `.menu-trigger:has(+ [popover]:popover-open)`, which only works while the
+    // popover is the trigger's immediate next sibling.
+    expect(trigger.nextElementSibling).toBe(container.querySelector(`#${MENU_ID}`));
+  });
+
+  // With the panel closed, the trigger is the only thing saying what order the
+  // list is in — which the four selects used to answer just by being on screen.
+  it("reads the current sort and unit back on the closed trigger", () => {
+    renderMenu({ uic: "WABC01" });
+    expect(screen.getByRole("button", { name: /Sort & filter/ }).textContent).toContain("Make ▲ · WABC01");
+  });
+
+  it("checks the radio matching the current sort key", () => {
+    renderMenu();
+    const sortBy = groupNamed("Sort by");
+    expect(radioIn(sortBy, "Make").checked).toBe(true);
+    expect(radioIn(sortBy, "Default (newest)").checked).toBe(false);
+    expect(radioIn(groupNamed("Direction"), /Ascending/).checked).toBe(true);
+  });
+
+  it("falls back to Default (newest) when nothing is sorted", () => {
+    renderMenu({ sort: null, sortKeys: [] });
+    expect(radioIn(groupNamed("Sort by"), "Default (newest)").checked).toBe(true);
+    expect(screen.getByRole("button", { name: /Sort & filter/ }).textContent).toContain("Newest");
+  });
+
+  // A tie-breaker with nothing to break is meaningless, and the default
+  // (newest) order has no ties worth resolving. The old toolbar enforced this
+  // with `disabled={!sort}` on both selects.
+  it("leaves Direction and Then by inert until a primary key is chosen", () => {
+    renderMenu({ sort: null, sortKeys: [] });
+    for (const r of radiosIn(groupNamed("Direction"))) expect(r.disabled).toBe(true);
+    for (const r of radiosIn(groupNamed("Then by"))) expect(r.disabled).toBe(true);
+  });
+
+  it("enables them once a primary key is set", () => {
+    renderMenu();
+    for (const r of radiosIn(groupNamed("Direction"))) expect(r.disabled).toBe(false);
+    for (const r of radiosIn(groupNamed("Then by"))) expect(r.disabled).toBe(false);
+  });
+
+  // Ordering a column within itself resolves nothing, and parseSortKeys
+  // collapses a duplicate to its first occurrence anyway — so offering it would
+  // be a choice with no effect.
+  it("excludes the primary key from the Then by options", () => {
+    renderMenu();
+    const thenBy = groupNamed("Then by");
+    expect(within(thenBy).queryByRole("radio", { name: "Make", hidden: true })).toBeNull();
+    expect(radioIn(thenBy, "Model")).toBeTruthy();
+    // Every other sortable column is still offered, plus the "—" opt-out.
+    expect(radiosIn(thenBy)).toHaveLength(SORTABLE_COLUMNS.length);
+  });
+
+  it("pushes the chosen sort key, keeping the current direction", () => {
+    renderMenu();
+    act(() => { fireEvent.click(radioIn(groupNamed("Sort by"), "Model")); });
+    expect(push).toHaveBeenCalledWith("/items?sort=model&dir=asc");
+  });
+
+  // The menu offers Ascending and Descending as two radios, so it asks for a
+  // direction outright. A flip would make re-picking the current one reverse
+  // the list.
+  it("pushes a direction outright rather than flipping it", () => {
+    renderMenu();
+    act(() => { fireEvent.click(radioIn(groupNamed("Direction"), /Descending/)); });
+    expect(push).toHaveBeenCalledWith("/items?sort=make&dir=desc");
+  });
+
+  // Compound sort travels as two parallel comma lists the server pairs
+  // positionally, so they must always be written together and in the same
+  // order. ItemSelectTable's hrefFor is the only thing that writes them — the
+  // menu never builds a URL.
+  it("pushes a compound sort as paired comma lists", () => {
+    renderMenu();
+    act(() => { fireEvent.click(radioIn(groupNamed("Then by"), "Serial")); });
+    expect(push).toHaveBeenCalledWith("/items?sort=make%2CserialNumber&dir=asc%2Casc");
+  });
+
+  it("pushes a unit filter and drops back to page 1", () => {
+    renderMenu({ page: 3 });
+    act(() => { fireEvent.click(radioIn(groupNamed("Unit"), "WXYZ99")); });
+    expect(push).toHaveBeenCalledWith("/items?sort=make&dir=asc&uic=WXYZ99");
+  });
+
+  it("clears the unit filter from All units", () => {
+    renderMenu({ uic: "WXYZ99" });
+    act(() => { fireEvent.click(radioIn(groupNamed("Unit"), "All units")); });
+    expect(push).toHaveBeenCalledWith("/items?sort=make&dir=asc");
+  });
+
+  // A lone "All units" radio is a control that cannot change anything.
+  it("offers no Unit group when there are no units to filter by", () => {
+    renderMenu({ uics: [] });
+    expect(screen.queryByRole("radiogroup", { name: "Unit", hidden: true })).toBeNull();
+    expect(groupNamed("Sort by")).toBeTruthy();
+  });
+
+  // Sheet-only, and hidden above 720px by globals.css. It closes the panel
+  // through the platform, so it needs no handler and no state — but that only
+  // holds while both attributes are present.
+  it("closes the sheet through the platform, with no handler", () => {
+    const { container } = renderMenu();
+    const done = within(container.querySelector(".popup-menu__footer") as HTMLElement)
+      .getByRole("button", { name: "Done", hidden: true });
+    expect(done.getAttribute("popovertarget")).toBe(MENU_ID);
+    expect(done.getAttribute("popovertargetaction")).toBe("hide");
+  });
+
+  // The four controls this replaced. Leaving one behind would mean two
+  // surfaces writing the same querystring.
+  it("leaves no duplicate sort or unit control in the toolbar", () => {
+    const { container } = renderMenu();
+    expect(container.querySelector(".toolbar select")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^(Asc|Desc)/, hidden: true })).toBeNull();
   });
 });
