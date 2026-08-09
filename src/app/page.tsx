@@ -58,7 +58,10 @@ export default async function HomePage() {
                 Enter access PIN
               </Link>
               <Link className="btn btn-secondary" href="/login">
-                Staff log in
+                Log in
+              </Link>
+              <Link className="btn btn-ghost" href="/register">
+                Create account
               </Link>
             </div>
           </div>
@@ -102,8 +105,11 @@ export default async function HomePage() {
           <h2>Who it is for</h2>
           <p>
             The service desk technicians who issue and recover equipment, and the people who receive
-            it. Technicians sign in with an account provisioned by an administrator; recipients need
-            only the access PIN to read a receipt or an item record.
+            it. Anyone can <Link href="/register">create an account</Link>: you confirm your email
+            address, and the account can then look up equipment and see the hand receipts you are
+            named on. Issuing receipts, editing items and processing returns are separate
+            permissions, granted by an administrator. Recipients who just need to read a receipt or
+            an item record need only the access PIN, with no account at all.
           </p>
 
           <h2>Your information</h2>

@@ -355,7 +355,7 @@ h3 {
     flex: 0 0 auto;
   }
   .nav-rail__label {
-    /* A long label ("Staff sign in") must not widen its tab past its share. */
+    /* A long label ("Receipts", "Dashboard") must not widen its tab past its share. */
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;

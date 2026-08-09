@@ -729,3 +729,40 @@ describe("proxy — scoped receipt link", () => {
   });
 });
 
+
+describe("proxy — config.matcher exclusion for the sign-up routes", () => {
+  // Same harness and same reason as the blocks above: this pins the matcher
+  // STRING, not the gate logic.
+  //
+  // Both routes are reached by definition WITHOUT a session. The coarse login
+  // gate redirects any matched path to /login, so leaving either one in the
+  // matcher makes registration impossible — you would click "Create account"
+  // and land back on the sign-in page, and clicking a confirmation link would
+  // do the same, with nothing logged anywhere. There is no error to notice.
+  const matcher = new RegExp(`^${config.matcher[0]}$`);
+  const runsProxy = (path: string) => matcher.test(path);
+
+  it.each(["/register", "/verify-email"])(
+    "excludes %s so a logged-out visitor can reach it",
+    (path) => {
+      expect(runsProxy(path)).toBe(false);
+    },
+  );
+
+  it("excludes /verify-email with its token query path segment form", () => {
+    expect(runsProxy("/verify-email/")).toBe(false);
+  });
+
+  it("keeps /login excluded", () => {
+    // Predates this change; listed so a rewrite of the alternation cannot drop
+    // it while the new entries pass.
+    expect(runsProxy("/login")).toBe(false);
+  });
+
+  it.each(["/registers", "/registration", "/verify-emails"])(
+    "does NOT exclude %s, proving these exclusions are segment-anchored",
+    (path) => {
+      expect(runsProxy(path)).toBe(true);
+    },
+  );
+});

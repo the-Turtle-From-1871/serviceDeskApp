@@ -53,6 +53,11 @@ model User {
   // purge worker can hard-delete accounts deactivated for 3+ months. Existing
   // already-deactivated users have null here and are treated as not-yet-eligible.
   deactivatedAt     DateTime?
+  // Set when the address is proved by clicking the emailed link. NULL means
+  // unproved: sign-in is refused (src/auth.ts) and the address is never used to
+  // scope the hand-receipt list, because an unproved address is a claim about
+  // someone else's mailbox, not evidence.
+  emailVerifiedAt   DateTime?
 
   createdItems        Item[]                @relation("CreatedItems")
   createdTransfers    Transfer[]            @relation("CreatedTransfers")
@@ -68,6 +73,22 @@ model User {
   receiptDrafts       ReceiptDraft[]        @relation("ReceiptDrafts")
   capabilities        UserCapability[]      @relation("UserCapabilities")
   capabilitiesGranted UserCapability[]      @relation("GrantedCapabilities")
+  emailVerifications  EmailVerificationToken[] @relation("EmailVerifications")
+}
+
+// Proves control of an email address at sign-up. Only the SHA-256 hash of the
+// emailed token is stored, so a DB leak cannot be used to verify someone else's
+// address. Single-use (usedAt) + expiry, exactly like PasswordResetToken.
+model EmailVerificationToken {
+  id        String    @id @default(cuid())
+  user      User      @relation("EmailVerifications", fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
 }
 
 // One additive grant of one capability to one user. `grantedById` is the admin

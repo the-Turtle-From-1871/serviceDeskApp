@@ -479,6 +479,6 @@ export const config = {
   // fix had been applied only in code. The last three keep their trailing-slash
   // prefix form on purpose: they are directories, not routes.
   matcher: [
-    "/((?!(?:api/cron|api/items/import|login|forgot-password|reset-password|privacy|terms|unlock|favicon\\.ico|manifest\\.webmanifest|icon|apple-icon)(?:/|$)|_next/static|_next/image|wasm/).*)",
+    "/((?!(?:api/cron|api/items/import|login|register|verify-email|forgot-password|reset-password|privacy|terms|unlock|favicon\\.ico|manifest\\.webmanifest|icon|apple-icon)(?:/|$)|_next/static|_next/image|wasm/).*)",
   ],
 };

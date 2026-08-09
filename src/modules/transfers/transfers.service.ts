@@ -186,3 +186,70 @@ export async function getCurrentOpenTransferId(itemId: string): Promise<string |
 export async function setTransferDueAt(id: string, dueAt: Date | null): Promise<void> {
   await prisma.transfer.update({ where: { id }, data: { dueAt, overdueAlertedAt: null } });
 }
+
+const RECEIPTS_PAGE_SIZE = 25;
+
+/**
+ * The hand-receipt list. Bounded and keyset-paginated — receipts grow with the
+ * fleet, so this must never become an unbounded findMany.
+ *
+ * `all` comes from the VIEW_ALL_RECEIPTS capability, resolved by the caller.
+ * Without it the list is filtered to receipts the viewer is a party to, matched
+ * on their VERIFIED address — an unverified one is an unproved claim about
+ * someone else's mailbox and is never passed in.
+ *
+ * A null viewerEmail with `all: false` returns an EMPTY list, never an
+ * unfiltered one. Falling through to "no filter" there would hand the whole
+ * property book to precisely the accounts this scoping exists to restrict, and
+ * it would do it silently.
+ *
+ * NOTE this is a list filter, not a confidentiality boundary: /receipts/<number>
+ * remains public behind the PIN gate, by accepted requirement. See
+ * docs/SECURITY.md.
+ */
+export async function listReceipts({
+  viewerEmail,
+  all,
+  cursor,
+  take = RECEIPTS_PAGE_SIZE,
+}: {
+  viewerEmail: string | null;
+  all: boolean;
+  cursor?: string;
+  take?: number;
+}) {
+  if (!all && !viewerEmail) return { rows: [], nextCursor: null };
+
+  const rows = await prisma.transfer.findMany({
+    where: all
+      ? {}
+      : {
+          OR: [
+            { senderEmail: { equals: viewerEmail!, mode: "insensitive" } },
+            { receiverEmail: { equals: viewerEmail!, mode: "insensitive" } },
+          ],
+        },
+    // Only what the list renders. Never receiverSignature, and never the party
+    // emails or contact numbers — this view needs names, not PII.
+    select: {
+      id: true,
+      receiptNumber: true,
+      itemSummary: true,
+      createdAt: true,
+      status: true,
+      senderName: true,
+      receiverName: true,
+    },
+    // Two keys: createdAt alone is not unique, and a keyset cursor over a
+    // non-unique order can skip or repeat rows at a page boundary.
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: take + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+  });
+
+  const hasMore = rows.length > take;
+  return {
+    rows: hasMore ? rows.slice(0, take) : rows,
+    nextCursor: hasMore ? rows[take - 1]!.id : null,
+  };
+}

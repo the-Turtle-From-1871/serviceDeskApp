@@ -2,16 +2,17 @@ import { describe, it, expect } from "vitest";
 import { navItemsFor, isActive, activeHref } from "./nav";
 
 describe("navItemsFor", () => {
-  it("logged out: Search + Staff sign in", () => {
+  it("logged out: Search + Sign in", () => {
     expect(navItemsFor({ loggedIn: false, isAdmin: false })).toEqual([
       { label: "Search", href: "/", icon: "search" },
-      { label: "Staff sign in", href: "/login", icon: "signin" },
+      { label: "Sign in", href: "/login", icon: "signin" },
     ]);
   });
   it("user: Search, Items", () => {
     expect(navItemsFor({ loggedIn: true, isAdmin: false })).toEqual([
       { label: "Search", href: "/", icon: "search" },
       { label: "Items", href: "/items", icon: "items" },
+      { label: "Receipts", href: "/receipts", icon: "receipts" },
     ]);
   });
   // Queue and Users returned as top-level entries (they had been folded into
@@ -56,6 +57,19 @@ describe("navItemsFor", () => {
   });
 
   // Five tabs is the practical ceiling at 375px before labels truncate.
+  it("gives a non-admin a Receipts tab — it is one of their only destinations", () => {
+    const labels = navItemsFor({ loggedIn: true, isAdmin: false }).map((i) => i.label);
+    expect(labels).toContain("Receipts");
+  });
+
+  // A budget decision, NOT an access one: /receipts is open to every signed-in
+  // account. An admin already spends four slots, and a sixth truncates labels
+  // at 375px, so they reach it from the Dashboard hub instead.
+  it("withholds the Receipts TAB from an admin to stay inside the rail budget", () => {
+    const labels = navItemsFor({ loggedIn: true, isAdmin: true }).map((i) => i.label);
+    expect(labels).not.toContain("Receipts");
+  });
+
   it("is at most five items, the rail's tab budget", () => {
     expect(navItemsFor({ loggedIn: true, isAdmin: true }).length).toBeLessThanOrEqual(5);
   });

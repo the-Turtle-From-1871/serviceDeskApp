@@ -34,6 +34,10 @@ vi.mock("next-auth", () => ({
     captured.config = config;
     return { handlers: {}, auth: vi.fn(), signIn: vi.fn(), signOut: vi.fn() };
   },
+  // auth.ts subclasses this to carry the email_not_verified code, so the mock
+  // has to supply a real class — an undefined export makes  throw at
+  // module load, which surfaces as the whole FILE failing with no failing test.
+  CredentialsSignin: class CredentialsSignin extends Error {},
 }));
 vi.mock("next-auth/providers/credentials", () => ({ default: (opts: unknown) => opts }));
 vi.mock("@/lib/prisma", () => ({ default: { user: { findUnique } } }));

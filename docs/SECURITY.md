@@ -40,6 +40,51 @@ Jump to: [1 Authentication](#1-authentication) · [2 Authorization](#2-authoriza
 session table). The token carries `id` + `role`, signed with `AUTH_SECRET`.
 `src/auth.ts`
 
+**Public self-registration (re-added 2026-08-09).** `/register` →
+`registerAction` → `createSelfRegisteredUser`. This is the only path that mints
+an account without a session, and it **cannot choose a role**: `VIEWER` is
+hard-coded and `registerSchema` omits `role`, so `z.object()` strips a crafted
+`role=ADMIN`. Turnstile-challenged, and metered on its own `register` scope
+under the composite `(scope, IP, hashed email)` key. The token is spent before
+the work and **never refunded** — with registration the abuse is volume itself.
+
+**Anti-enumeration on registration.** The action returns one generic success for
+every outcome, with the account lookup, creation and mail send deferred through
+`after()` so response time does not reveal whether the address is already
+registered. An address that already exists produces no second account and no
+visible difference. Same construction, and same reason, as
+`requestPasswordResetAction`.
+
+**Email verification gates sign-in.** `User.emailVerifiedAt` is NULL until the
+emailed link is clicked. `EmailVerificationToken` stores only the SHA-256 hash
+of the token, is single-use (compare-and-set claim, so two clicks cannot both
+verify) and expires in 24 hours — mirroring `PasswordResetToken`.
+`src/lib/email-verification.ts`
+
+**The order inside `checkCredentials` is load-bearing.** The password is
+verified BEFORE the verification state is consulted, so "confirm your email" is
+only ever disclosed to a caller who already proved they hold the password.
+Checking verification first would make the login form an account-existence
+oracle answerable by anyone, for any address, with no credential at all. A wrong
+password on an unverified account is indistinguishable from any other wrong
+password. `src/modules/auth/credentials.ts`
+
+**The unverified outcome is NOT counted by the velocity detector.** It travels
+back as a `CredentialsSignin` code rather than a generic failure; the bcrypt
+compare succeeded, so counting it would let ordinary sign-up traffic drive the
+app-wide escalation that `auth-velocity.ts` exists to keep
+attacker-untriggerable. The rate-limit token still stays spent.
+
+**Verification resend** has its own `verify-resend` scope — sharing `register`
+would let a resend flood spend the budget that stops account-creation spam — and
+silently no-ops for unknown, inactive and already-verified addresses, so it
+cannot be used to mail-bomb a known user.
+
+**`/register` and `/verify-email` are excluded from the `src/proxy.ts`
+matcher**, necessarily: both are reached without a session, and the coarse login
+gate would otherwise redirect them to `/login` and make registration
+impossible. `proxy.test.ts` pins the exclusion.
+
 **Login is validated before anything expensive happens.** `credsSchema` (Zod)
 trims and lowercases the email and rejects malformed input before the DB is
 touched. `src/auth.ts`
@@ -1528,6 +1573,27 @@ challenge.
 ## Known gaps & accepted risks
 
 Tracked deliberately, so nobody re-discovers them as new findings.
+
+**0e. A self-registered, email-verified account bypasses the public PIN gate.**
+⚠️ *Accepted 2026-08-09, as a consequence of opening registration.*
+`src/proxy.ts` admits any logged-in user past the PIN, so anyone with a working
+mailbox can now reach `/i/*` and `/receipts/*` without knowing the shared PIN.
+The exposure is bounded by what those surfaces already show to any PIN holder —
+the PIN is shared and widely distributed, so this lowers a bar rather than
+removing a wall. Registration is Turnstile-challenged and rate-limited, and a
+new account is `VIEWER`: read-only, with no write capability anywhere. If this
+becomes unacceptable, the levers are an email-domain allowlist or restoring
+per-account admin activation before first sign-in.
+
+**0f. The own-receipts scoping is a list filter, not a confidentiality
+boundary.** ⚠️ *Accepted 2026-08-09.* Without `VIEW_ALL_RECEIPTS`, `/receipts`
+shows only receipts the viewer is a party to — but `/receipts/<number>` and its
+PDF remain public behind the PIN gate by accepted requirement, so any PIN holder
+who knows a receipt number can still open it. The scoping narrows what is
+ENUMERABLE to a signed-in account; it does not restrict what is reachable.
+Treating it as a boundary would be a mistake. Closing it means auth-gating
+`/receipts/*`, which is a deliberate feature change requiring an explicit
+decision.
 
 **0d. A stolen session cookie is replayable for up to 7 days of idleness, and up
 to 30 days in total.** ⚠️ *Accepted 2026-08-06; the faster lever is revocation,
