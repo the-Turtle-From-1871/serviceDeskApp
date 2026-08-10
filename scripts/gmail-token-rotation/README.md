@@ -126,10 +126,18 @@ Click the toast (or the Start Menu shortcut) to rotate. Rotation:
    attempt yields no refresh token. This is the path that asks you to click Allow.
 3. Writes the new token to Vercel production, fires the deploy hook, waits for the build.
 
-Which path was used is written to the log as `UsedSilentPath`. **Whether the silent path
-works is currently unknown** — Google's web-server and native-app docs contradict each
-other for Desktop clients. The first few rotations settle it; if the silent path holds, the
-click disappears and the spec gets corrected.
+Which path was used is written to the log as `UsedSilentPath`. **The silent path does not
+work — settled 2026-08-10, under both Testing and Published status.** It was refused with
+`interaction_required` even against a grant minted three minutes earlier with the browser
+signed in. And it could not have helped if granted: Google mints a refresh token only on a
+*fresh* grant, returning none at all for an already-authorized client, so a silent success
+yields nothing to rotate. The attempt is kept because it costs under a second.
+
+> **This tool may be obsolete.** The consent screen was **published on 2026-08-10**, which
+> removes the 7-day expiry the tool exists to service. If production is still sending mail
+> on **2026-08-18**, uninstall it (`setup.ps1 -Uninstall`). Until then **do not rotate** —
+> a rotation resets the clock and destroys the evidence. The 3-day toasts starting
+> 2026-08-13 can be ignored; `Check` never rotates on its own.
 
 Nothing in Vercel is touched until a valid token with the `gmail.send` scope is in hand, so
 a cancelled consent leaves production exactly as it was. It is recorded as a failed
