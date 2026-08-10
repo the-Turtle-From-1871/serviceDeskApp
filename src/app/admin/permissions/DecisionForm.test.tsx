@@ -30,7 +30,7 @@ describe("DecisionForm — the pre-checked checklist", () => {
   // deliberate untick.
   it("starts ADMINISTER UNCHECKED", () => {
     render(<DecisionForm requestId="r1" capabilities={[...CAPS]} selfRequest={false} />);
-    expect(box(/Administer the application/).checked).toBe(false);
+    expect(box(/Grant Administrator/).checked).toBe(false);
   });
 
   it("labels the button with what is actually being granted", () => {
@@ -48,7 +48,7 @@ describe("DecisionForm — the pre-checked checklist", () => {
 
   it("counts up when an elevated capability is deliberately ticked", () => {
     render(<DecisionForm requestId="r1" capabilities={[...CAPS]} selfRequest={false} />);
-    fireEvent.click(box(/Administer the application/));
+    fireEvent.click(box(/Grant Administrator/));
     expect(screen.getByRole("button", { name: /Approve 3 of 3/ })).toBeTruthy();
   });
 

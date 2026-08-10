@@ -25,8 +25,9 @@ export default async function PermissionsQueuePage() {
       <div>
         <h1 className="page-title">Permission requests</h1>
         <p className="subtle">
-          Everything starts ticked except full administrative control. Untick anything you are not
-          granting and say why — the requester sees your reason.
+          Everything starts ticked except <em>Grant Administrator</em>, which makes the person an
+          administrator outright. Untick anything you are not granting and say why — the requester
+          sees your reason.
         </p>
       </div>
 
@@ -43,7 +44,16 @@ export default async function PermissionsQueuePage() {
                 {r.user.email} · asked {r.createdAt.toLocaleDateString()}
               </p>
             </div>
-            <p style={{ margin: 0, fontStyle: "italic" }}>&ldquo;{r.justification}&rdquo;</p>
+            {/* The justification is optional, so this can be blank. Say so
+                explicitly rather than rendering empty quotes: the admin is
+                about to decide, and "they gave no reason" is information they
+                should be able to act on — including by denying and asking for
+                one. */}
+            {r.justification ? (
+              <p style={{ margin: 0, fontStyle: "italic" }}>&ldquo;{r.justification}&rdquo;</p>
+            ) : (
+              <p className="subtle" style={{ margin: 0 }}>No reason given.</p>
+            )}
             <DecisionForm
               requestId={r.id}
               capabilities={r.items.map((i) => i.capability)}

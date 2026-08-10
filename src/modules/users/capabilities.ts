@@ -34,7 +34,14 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   MANAGE_QUEUE: "Manage the service queue",
   PROCESS_RETURNS: "Process returns",
   VIEW_ANALYTICS: "View analytics",
-  ADMINISTER: "Administer the application",
+  // Named for what approving it DOES: it promotes the account to the ADMIN
+  // role rather than adding one capability to whatever role it already had.
+  // The old label ("Administer the application") described a permission
+  // alongside eight others, which is exactly how it was misread — an approved
+  // request left a VIEWER holding ADMINISTER and nothing else, so they could
+  // reach user management but not create a receipt, and the Users page still
+  // showed them as a plain user.
+  ADMINISTER: "Grant Administrator",
 };
 
 /** Capabilities that hand over administrative control and are shown in the
