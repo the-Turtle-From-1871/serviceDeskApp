@@ -32,22 +32,44 @@ expiry retires the *grant* as well as the *token* — if it does, consent re-ren
 Documentation cannot settle this; only a live rotation can. So `Get-GoogleRefreshToken`
 attempts the **silent path first** (§6) and records which path succeeded.
 
-### Observed so far (first rotation, 2026-08-04) — still inconclusive
+### SETTLED (2026-08-10): the silent path does not work, under either status
 
-The first successful rotation used the **consent path**. `prompt=none` returned
-`interaction_required` in under a second, twice.
+**`prompt=none` is refused, and it would not have helped even if it were granted.**
 
-**This does not answer the question.** At that point no grant existed at all — it was the
-account's first ever authorization of this client, so Google had nothing to approve
-silently and `interaction_required` is the only answer it could have given. What it does
-confirm is that the silent attempt is *cheap*: it failed in well under a second and cost
-nothing, exactly as the `prompt=none` design intended.
+Tested twice more on 2026-08-10 after the consent screen was **published** (§3, exit 1),
+the second time against a grant minted three minutes earlier with the browser signed in —
+the best conditions the silent path will ever get. Google returned `interaction_required`
+both times, exactly as under Testing status. Not `account_selection_required` or
+`login_required`, either of which would have implicated account ambiguity and been fixable
+with a `login_hint`.
 
-**The real test is the second rotation**, around 2026-08-07, when a live grant exists and
-the browser holds a Google session. If `UsedSilentPath` is `true` there, the consent click
-disappears for good and this section should be rewritten to say so. If it is `false`, the
-Testing-status 7-day expiry retires the grant itself rather than only the token, and the
-click is permanent.
+The deeper reason it was a dead end regardless: Google mints a refresh token only on a
+**fresh grant**. For an already-authorized client it returns an access token with no
+`refresh_token` at all — the case `Get-GoogleRefreshToken` throws on (§6, "NO refresh_token").
+So a silent attempt could only have succeeded into a response with nothing to rotate.
+**Keep the attempt anyway**: it costs under a second and it is the thing that would notice
+if Google ever changes this.
+
+This is now largely moot — publishing removes the 7-day expiry, so there is no rotation to
+make clickless. See §3.
+
+**Historical (Testing status).** The consent click was permanent while the screen stayed in
+Testing.
+
+The second rotation ran on 2026-08-10 with a live grant in place from 2026-08-04 and the
+browser holding a Google session — the exact conditions the silent path needed — and
+`prompt=none` still refused, in under a second, exactly as it had on the first attempt.
+`UsedSilentPath` is `false`. That means Testing status's 7-day expiry retires the **grant**,
+not merely the token, so there is never an already-granted client for Google to
+auto-approve. The native-app doc does not govern here; the answer is the same as the
+web-server doc's.
+
+The first rotation (2026-08-04) also used the consent path but proved nothing on its own —
+no grant existed yet, so `interaction_required` was the only answer Google could have
+given. It did confirm the silent attempt is *cheap*: sub-second, costing nothing, exactly
+as the `prompt=none` design intended. **Keep the silent attempt** for that reason — it
+costs a second per rotation and starts working by itself the day the consent screen is
+published (§3, exit 1), which is now the only thing that removes the click.
 
 What is settled either way: automating the click by driving a browser through Google
 sign-in is out of scope and will not be built (§2).
@@ -61,8 +83,9 @@ workstation.
 
 **Goals**
 
-- Reduce rotation to at most a single consent click, roughly every 3 days — and to no
-  click at all if the silent path in §1/§6 proves viable.
+- Reduce rotation to at most a single consent click, roughly every 3 days. (The silent
+  path in §1/§6 was the hoped-for route to no click at all; it is settled as unavailable
+  under Testing status, so the one click stands until the consent screen is published.)
 - Everything else automated: token exchange, Vercel env update, production redeploy.
 - Escalating, unmissable notification as expiry approaches.
 - No new npm or PowerShell dependencies — in-box .NET and `Invoke-RestMethod` only.
@@ -83,7 +106,13 @@ workstation.
 Recorded so the cost stays visible, per the sender design's §2 precedent:
 
 1. **Publish the consent screen.** Free, one click, removes the 7-day rule permanently.
-   Declined by the owner on 2026-07-31.
+   Declined by the owner on 2026-07-31 — **then TAKEN on 2026-08-10.** The screen is
+   published; production carries a refresh token minted after that change. If it is still
+   sending mail on **2026-08-18** the 7-day expiry is gone and this entire tool should be
+   uninstalled (`setup.ps1 -Uninstall`) rather than left running. Until that date, do not
+   rotate: rotating mints a fresh token and resets the clock, which destroys the only
+   evidence that settles it. `Check` mode never rotates by itself, so its 3-day toasts can
+   be ignored through 2026-08-17.
 2. **Google Workspace on `dcsim.us`.** A service account with domain-wide delegation needs
    no refresh token and no consent screen, ever — genuinely unattended — and produces
    `d=dcsim.us` DKIM alignment, the one lever the sender design §2 identifies as capable of
@@ -147,7 +176,9 @@ Authorization is attempted twice, silent first (§1):
 4. Exchange code + verifier at `https://oauth2.googleapis.com/token`.
 
 Which path succeeded is logged and returned as `UsedSilentPath`. That log line is the
-evidence that resolves §1.
+evidence that resolved §1 — it read `false` on both the first and the second rotation, so
+the silent step is now a cheap standing bet on the consent screen being published rather
+than an open question.
 
 **Identifying our own deployment — verified against the live API on 2026-08-04.** The
 deploy hook returns a *job* id that is not a deployment id and cannot be looked up, so
