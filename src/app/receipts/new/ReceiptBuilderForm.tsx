@@ -10,7 +10,7 @@ import { SERVICE_TYPE_OPTIONS } from "@/modules/service-queue/service-form";
 
 type Prefill = { isDcsim?: boolean; name?: string; rank?: string; unit?: string; contact?: string; email?: string };
 import { groupItemsIntoLines, MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW, type LineItem } from "@/modules/transfers/receipt-lines";
-import { parseScan } from "@/modules/items/scan-code";
+import { parseScans, describeScan } from "@/modules/items/scan-code";
 import { lookupScannedItem, lookupScannedSerial } from "@/app/actions/scan";
 import { QrScanner, SCAN_FORMATS } from "@/components/QrScanner";
 import { beep } from "@/lib/beep";
@@ -401,10 +401,12 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, dr
 
   // Every refusal KEEPS the camera open: rapid-fire only works if a bad scan is
   // a blip, not a dead end.
-  const onDecode = async (text: string) => {
-    const intent = parseScan(text);
-    // Rejected client-side, so a stray barcode never costs a round trip.
-    if (!intent) return say("err", "Not an item code");
+  const onDecode = async (texts: string[]) => {
+    const intent = parseScans(texts);
+    // Rejected client-side, so a stray barcode never costs a round trip. The
+    // notice names what was read: an unrecognised label is otherwise a dead
+    // end the operator cannot report.
+    if (!intent) return say("err", `Not an item code — read ${describeScan(texts)}`);
 
     if (looking.current) return; // a lookup is already in flight; drop this frame
 

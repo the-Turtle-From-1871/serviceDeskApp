@@ -34,9 +34,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   - The outcome email goes through the existing sender; if `GMAIL_*` is not live in production it is logged rather than sent, and requesters will only see the outcome on their account page.
 
 ### Fixed
-- **Scanning the QR code on an HP service label said "Not an item code".** The scanner reads our own printed stickers and a manufacturer's barcode, and it read HP's *barcode* fine — but HP's QR square is not a bare serial. It holds several labelled fields at once (the serial, the product number and more, written as `SN:2TK44202X4;PN:…`), and the scanner was checking the whole thing against the shape of a serial, which it never matches. Every HP QR was therefore rejected before it ever reached a lookup. It now reads the serial out of that field list, so the QR works the same as the barcode beside it.
+- **Scanning an HP service label said "Not an item code".** Two separate things were wrong, and both are fixed.
 
-  The serial is taken **only** from a field actually named as one — `SN`, `S/N`, `Serial` or `Serial Number` — and never by picking a serial-shaped fragment out of the payload. A product number is shared across thousands of machines, so guessing would have meant confidently opening the wrong device's page instead of saying it could not read the label. A label using some other name for the field still reports "Not an item code"; send us what it contains and the name can be added.
+  **The scanner only ever looked at one code per glance.** An HP label is not one code — the QR square sits within a centimetre of the serial barcode and the product-number barcode, so the camera sees several at once and the reader decides which order they come back in. The scanner took whichever came first and ignored the rest, so on a crowded label the code it needed was routinely thrown away before anything looked at it. It now considers **every** code in view and uses the first one it can actually resolve, which also makes scanning a busy label faster — you no longer have to frame the QR alone.
+
+  **HP's QR is not a bare serial.** It holds several labelled fields at once (`SN:2TK44202X4;PN:…`), and the whole thing was being checked against the shape of a serial, which it never matches. The serial is now read out of that field list — but **only** from a field actually named as one (`SN`, `S/N`, `Serial`, `Serial Number`), never by picking a serial-shaped fragment out of the payload. A product number is shared across thousands of machines, so guessing would mean confidently opening the wrong device's page rather than admitting it could not read the label.
+
+  **"Not an item code" now tells you what it read.** The notice quotes the codes the camera actually decoded, so a label we do not yet understand can be read off the screen and reported instead of being a dead end. If your label names its serial field something other than the four spellings above, this is what will show it.
 
   Nothing about the codes that already worked changed: our own stickers, Dell service tags and Dell Express Service Codes scan exactly as before.
 

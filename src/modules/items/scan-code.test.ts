@@ -1,5 +1,40 @@
 import { describe, it, expect } from "vitest";
-import { parseScan, expressServiceCodeToServiceTag } from "./scan-code";
+import { parseScan, parseScans, describeScan, expressServiceCodeToServiceTag } from "./scan-code";
+
+describe("parseScans", () => {
+  // A service label is several codes at once and the decoder returns all of
+  // them. Taking only the first hit meant a label whose usable code was not
+  // first never reached the parser.
+  it("takes the first value in the frame that parses, not the first value", () => {
+    expect(parseScans(["1AB23AV#ABA", "CN-0ABCDE-1", "SN:2TK44202X4"]))
+      .toEqual({ kind: "serial", serial: "2TK44202X4" });
+  });
+
+  it("prefers our own sticker when it shares the frame with a factory label", () => {
+    expect(parseScans(["/i/abc123", "5CD1234ABC"])).toEqual({ kind: "item", id: "abc123" });
+  });
+
+  it("is null when nothing in the frame parses", () => {
+    expect(parseScans([])).toBeNull();
+    expect(parseScans(["CN-0ABCDE-12345-ABC-1234-A00", "WIFI:S:g;;"])).toBeNull();
+  });
+});
+
+describe("describeScan", () => {
+  it("shows what was read so an unknown label can be reported", () => {
+    expect(describeScan(["SN:2TK44202X4"])).toBe("SN:2TK44202X4");
+    expect(describeScan(["A", "B"])).toBe("A · B");
+  });
+
+  it("flattens newlines and truncates a long payload", () => {
+    expect(describeScan(["AAA\n  BBB"])).toBe("AAA BBB");
+    expect(describeScan(["X".repeat(50)])).toBe(`${"X".repeat(40)}…`);
+  });
+
+  it("caps how many it lists and counts the rest", () => {
+    expect(describeScan(["A", "B", "C", "D"])).toBe("A · B (+2 more)");
+  });
+});
 
 describe("expressServiceCodeToServiceTag", () => {
   // A Dell service tag is 7 chars of base 36; the Express Service Code printed

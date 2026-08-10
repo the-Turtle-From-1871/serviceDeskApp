@@ -76,20 +76,20 @@ vi.mock("@/components/QrScanner", () => ({
   // The real module exports this alongside the component, and the form imports
   // both — a mock missing it fails every test in this file at import time.
   SCAN_FORMATS: ["qr_code"],
-  QrScanner: ({ onDecode, onClose, notice }: { onDecode: (t: string) => void; onClose: () => void; notice?: { kind: "ok" | "err"; text: string } | null }) => (
+  QrScanner: ({ onDecode, onClose, notice }: { onDecode: (t: string[]) => void; onClose: () => void; notice?: { kind: "ok" | "err"; text: string } | null }) => (
     <div>
-      <button type="button" onClick={() => onDecode("https://x.example/i/i2")}>emit-i2</button>
-      <button type="button" onClick={() => onDecode("https://x.example/i/i3")}>emit-i3</button>
-      <button type="button" onClick={() => onDecode("https://x.example/i/i1")}>emit-i1</button>
-      <button type="button" onClick={() => onDecode("WIFI:S:Guest;;")}>emit-junk</button>
+      <button type="button" onClick={() => onDecode(["https://x.example/i/i2"])}>emit-i2</button>
+      <button type="button" onClick={() => onDecode(["https://x.example/i/i3"])}>emit-i3</button>
+      <button type="button" onClick={() => onDecode(["https://x.example/i/i1"])}>emit-i1</button>
+      <button type="button" onClick={() => onDecode(["WIFI:S:Guest;;"])}>emit-junk</button>
       {/* Manufacturer labels: an HP serial, a Dell Express Service Code (which
           converts to service tag 7X2K9L3), the serial of the item already on
           the form, and a Dell PPID — which carries dashes and must be refused
           client-side exactly like emit-junk. */}
-      <button type="button" onClick={() => onDecode("5CD1234ABC")}>emit-serial</button>
-      <button type="button" onClick={() => onDecode("17237164935")}>emit-express</button>
-      <button type="button" onClick={() => onDecode("5CD0001AAA")}>emit-serial-dup</button>
-      <button type="button" onClick={() => onDecode("CN-0ABCDE-12345-ABC-1234-A00")}>emit-ppid</button>
+      <button type="button" onClick={() => onDecode(["5CD1234ABC"])}>emit-serial</button>
+      <button type="button" onClick={() => onDecode(["17237164935"])}>emit-express</button>
+      <button type="button" onClick={() => onDecode(["5CD0001AAA"])}>emit-serial-dup</button>
+      <button type="button" onClick={() => onDecode(["CN-0ABCDE-12345-ABC-1234-A00"])}>emit-ppid</button>
       <button type="button" onClick={onClose}>emit-close</button>
       {notice && <p data-testid="scan-notice">{notice.text}</p>}
     </div>

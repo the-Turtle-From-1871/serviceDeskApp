@@ -14,20 +14,24 @@ vi.mock("@/app/actions/scan", () => ({
 vi.mock("@/lib/beep", () => ({ beep: vi.fn() }));
 
 // The real component owns a camera and a wasm decoder, neither of which exists
-// here. This stand-in emits one decoded string per button, matching the idiom
-// ReceiptBuilderForm.test.tsx already uses for the same component.
+// here. This stand-in emits one decoded FRAME per button, matching the idiom
+// ReceiptBuilderForm.test.tsx already uses for the same component. A frame is
+// an array because a service label is several codes at once.
 vi.mock("@/components/QrScanner", () => ({
   SCAN_FORMATS: ["qr_code"],
   QrScanner: ({ onDecode, onClose, notice }: {
-    onDecode: (t: string) => void;
+    onDecode: (t: string[]) => void;
     onClose: () => void;
     notice?: { kind: "ok" | "err"; text: string } | null;
   }) => (
     <div data-testid="scanner">
-      <button type="button" onClick={() => onDecode("https://x.example/i/abc123")}>emit-sticker</button>
-      <button type="button" onClick={() => onDecode("5CD1234ABC")}>emit-serial</button>
-      <button type="button" onClick={() => onDecode("17237164935")}>emit-express</button>
-      <button type="button" onClick={() => onDecode("CN-0ABCDE-12345-ABC-1234-A00")}>emit-ppid</button>
+      <button type="button" onClick={() => onDecode(["https://x.example/i/abc123"])}>emit-sticker</button>
+      <button type="button" onClick={() => onDecode(["5CD1234ABC"])}>emit-serial</button>
+      <button type="button" onClick={() => onDecode(["17237164935"])}>emit-express</button>
+      <button type="button" onClick={() => onDecode(["CN-0ABCDE-12345-ABC-1234-A00"])}>emit-ppid</button>
+      {/* An HP service label as the camera actually sees it: the product-number
+          barcode decodes alongside the QR, and the decoder puts it first. */}
+      <button type="button" onClick={() => onDecode(["CN-0ABCDE-1", "SN:5CD1234ABC;PN:1AB23AV"])}>emit-hp-label</button>
       <button type="button" onClick={onClose}>emit-close</button>
       {notice && <p data-testid="scan-notice">{notice.text}</p>}
     </div>
@@ -88,6 +92,30 @@ describe("ItemsScanButton", () => {
     await user.click(screen.getByRole("button", { name: "emit-express" }));
 
     await waitFor(() => expect(resolveScannedSerial).toHaveBeenCalledWith("17237164935", "7X2K9L3"));
+  });
+
+  // The decoder returns every code in the frame and decides their order, so the
+  // one we can use is routinely not the first.
+  it("uses the usable code in a frame that also holds unusable ones", async () => {
+    const user = userEvent.setup();
+    render(<ItemsScanButton />);
+    await open(user);
+    await user.click(screen.getByRole("button", { name: "emit-hp-label" }));
+
+    await waitFor(() => expect(resolveScannedSerial).toHaveBeenCalledWith("5CD1234ABC", undefined));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/i/i9"));
+  });
+
+  // "Not an item code" alone is a dead end: the operator cannot report a label
+  // nobody can read. The notice names what the camera actually decoded.
+  it("names what it read when nothing in the frame parses", async () => {
+    const user = userEvent.setup();
+    render(<ItemsScanButton />);
+    await open(user);
+    await user.click(screen.getByRole("button", { name: "emit-ppid" }));
+
+    const notice = await screen.findByTestId("scan-notice");
+    expect(notice.textContent).toContain("CN-0ABCDE-12345-ABC-1234-A00");
   });
 
   it("keeps scanning after an unreadable code", async () => {

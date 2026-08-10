@@ -2,7 +2,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { QrScanner, SCAN_FORMATS } from "@/components/QrScanner";
-import { parseScan } from "@/modules/items/scan-code";
+import { parseScans, describeScan } from "@/modules/items/scan-code";
 import { resolveScannedSerial } from "@/app/actions/scan";
 import { beep } from "@/lib/beep";
 
@@ -25,12 +25,14 @@ export function ItemsScanButton() {
     beep(kind);
   };
 
-  const onDecode = async (text: string) => {
+  const onDecode = async (texts: string[]) => {
     if (done.current) return;
 
-    const intent = parseScan(text);
-    // Rejected client-side, so a stray barcode never costs a round trip.
-    if (!intent) return say("err", "Not an item code");
+    const intent = parseScans(texts);
+    // Rejected client-side, so a stray barcode never costs a round trip. The
+    // notice names what was read: an unrecognised label is otherwise a dead
+    // end the operator cannot report.
+    if (!intent) return say("err", `Not an item code — read ${describeScan(texts)}`);
 
     if (intent.kind === "item") {
       done.current = true;

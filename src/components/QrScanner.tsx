@@ -16,7 +16,10 @@ export const SCAN_FORMATS: readonly BarcodeFormat[] = ["qr_code", "code_39", "co
 
 type Notice = { kind: "ok" | "err"; text: string } | null;
 type Props = {
-  onDecode: (text: string) => void;
+  /** EVERY distinct code decoded from one frame, in the decoder's own order.
+   *  A manufacturer's service label carries several at once and the caller is
+   *  the only one that knows which of them it can use. */
+  onDecode: (texts: string[]) => void;
   onClose: () => void;
   notice?: Notice;
   /** Defaults to QR only, so an existing caller is unchanged. */
@@ -121,7 +124,14 @@ export function QrScanner({ onDecode, onClose, notice, formats = ["qr_code"] }: 
         if (stopped) return;
         try {
           const hits = await detector.detect(video);
-          if (hits[0]?.rawValue) onDecodeRef.current(hits[0].rawValue);
+          // ALL of them, not just hits[0]. An HP service label puts a QR, a
+          // Code 128 serial and a product-number barcode within a centimetre
+          // of each other, so the frame that finally holds the code you want
+          // usually holds two you don't — and the decoder decides the order,
+          // not the operator. Deduped because the same code re-decodes from
+          // frame to frame and the caller would otherwise see it twice.
+          const values = [...new Set(hits.map((h) => h.rawValue).filter(Boolean))];
+          if (values.length) onDecodeRef.current(values);
         } catch {
           // A frame that fails to decode is normal; the module already loaded.
         }
