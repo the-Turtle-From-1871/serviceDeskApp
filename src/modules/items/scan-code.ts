@@ -5,8 +5,10 @@
 // Three things can be under the camera:
 //   * the QR sticker this app prints, carrying an /i/<id> URL;
 //   * a manufacturer's factory barcode, carrying a bare serial;
-//   * a manufacturer's factory QR, carrying DELIMITED FIELDS one of which is
-//     the serial — what HP prints on its service label.
+//   * a manufacturer's factory QR, carrying SEVERAL FIELDS one of which is the
+//     serial. HP prints a comma-separated list with the bare serial first
+//     (`2TK94709FN, HP ProBook 650 G5, ProdID …`); a keyed `SN:` form is also
+//     handled, because it costs little and other vendors use it.
 import { parseItemScan } from "./scan-url";
 
 export type ScanIntent =
@@ -120,6 +122,28 @@ export function describeScan(texts: readonly string[]): string {
   return rest > 0 ? `${shown.join(" · ")} (+${rest} more)` : shown.join(" · ");
 }
 
+/**
+ * Pull the serial out of a comma-separated list like
+ * `2TK94709FN, HP ProBook 650 G5, ProdID 5PF3AB#ABA` — what HP actually prints
+ * in its service-label QR. The serial is the first field and carries no key,
+ * which is why the keyed parser above never matched it.
+ *
+ * The split is on COMMAS ALONE, and that narrowness is the safety property: a
+ * whole field has to BE a serial, so no fragment of a longer string can ever
+ * be mistaken for one. The Dell PPID `CN-0ABCDE-12345-ABC-1234-A00` contains
+ * no comma, so it stays one field, keeps its hyphens and is still refused —
+ * splitting on whitespace or hyphens too would have handed back `0ABCDE`.
+ *
+ * Requires an actual comma: a single-field payload that is a serial was
+ * already taken by the bare-serial path, so reaching here without one means
+ * the payload is something else entirely.
+ */
+function serialFromList(raw: string): string | null {
+  const fields = raw.split(/\s*,\s*/);
+  if (fields.length < 2) return null;
+  return fields.find((field) => SERIAL_SHAPE.test(field)) ?? null;
+}
+
 export function parseScan(text: string): ScanIntent | null {
   const raw = text.trim();
   if (!raw) return null;
@@ -128,10 +152,14 @@ export function parseScan(text: string): ScanIntent | null {
   const id = parseItemScan(raw);
   if (id) return { kind: "item", id };
 
-  // A bare serial stays the fast path and is unchanged. Only if the WHOLE
-  // payload is not itself a serial do we treat it as a field string — so a
-  // label that already scans keeps scanning exactly as it did.
-  const serial = SERIAL_SHAPE.test(raw) ? raw : serialFromFields(raw);
+  // A bare serial stays the fast path and is unchanged, so a label that already
+  // scans keeps scanning exactly as it did. Otherwise the payload is a list of
+  // fields: a KEYED serial is stronger evidence than a positional one, so it is
+  // tried first, and only then the "first field that is a serial" rule.
+  const serial =
+    (SERIAL_SHAPE.test(raw) ? raw : null) ??
+    serialFromFields(raw) ??
+    serialFromList(raw);
   if (!serial) return null;
 
   // The raw value is the PRIMARY candidate and the conversion only ever an

@@ -91,6 +91,20 @@ describe("parseScan", () => {
     expect(parseScan("SN:2TK44202X4;PN:1AB23AV#ABA")).toEqual({ kind: "serial", serial: "2TK44202X4" });
   });
 
+  // The real payload, read off an HP ProBook 650 G5's label (serial 2TK94709FN,
+  // a live item). Not a KEY:VALUE string at all — a comma-separated list whose
+  // first field is the bare serial.
+  it("reads the serial out of HP's comma-separated label QR", () => {
+    expect(parseScan("2TK94709FN, HP ProBook 650 G5, ProdID 5PF3AB#ABA"))
+      .toEqual({ kind: "serial", serial: "2TK94709FN" });
+  });
+
+  // Only a WHOLE comma-separated field can be the serial, so a descriptive
+  // field never contributes a fragment of itself.
+  it("skips descriptive fields and takes the first that is a serial", () => {
+    expect(parseScan("HP ProBook 650 G5, 2TK94709FN")).toEqual({ kind: "serial", serial: "2TK94709FN" });
+  });
+
   it("accepts the common serial key spellings and both separators", () => {
     expect(parseScan("PN:1AB23AV;S/N:5CG0384PW1")).toEqual({ kind: "serial", serial: "5CG0384PW1" });
     expect(parseScan("SERIAL=2MQ5470PWC,PN=1AB23AV")).toEqual({ kind: "serial", serial: "2MQ5470PWC" });
