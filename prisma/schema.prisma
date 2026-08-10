@@ -478,6 +478,14 @@ model ImportBatch {
   skippedCount Int
   skipped      Json
   createdAt    DateTime @default(now())
+  /// sha256 of the exact CSV text this batch was built from. Set only by the
+  /// scheduled Drive import, which compares it against the newest non-null
+  /// value to decide whether the linked export actually changed — NULL on every
+  /// hand upload and on the /api/items/import route, both of which import
+  /// whatever they are handed. Deliberately not unique: re-importing a
+  /// previously seen export (a deliberate rollback) is a real change from what
+  /// is current and must be allowed to run.
+  sourceHash   String?
 
   @@index([createdById])
 }

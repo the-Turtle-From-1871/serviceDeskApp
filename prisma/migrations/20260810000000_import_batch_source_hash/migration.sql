@@ -1,0 +1,13 @@
+-- Fingerprint of the CSV text an import batch was built from.
+--
+-- Written ONLY by the scheduled Drive import (/api/cron/import-drive), which
+-- compares a freshly fetched export against the newest non-null value to decide
+-- whether the linked file actually changed since last night. NULL on every hand
+-- upload (/admin/items/import) and on the machine POST route
+-- (/api/items/import), which import whatever they are handed without asking.
+--
+-- Nullable and NOT unique on purpose: every existing row predates the column,
+-- and re-importing a previously seen export is a legitimate rollback rather
+-- than a duplicate to reject.
+-- AlterTable
+ALTER TABLE "ImportBatch" ADD COLUMN     "sourceHash" TEXT;

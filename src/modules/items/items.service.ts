@@ -876,7 +876,13 @@ export async function commitImport(
   text: string,
   filename: string,
   resolutions: UnitResolution[],
-  editor: { id: string; name: string }
+  editor: { id: string; name: string },
+  /** sha256 of `text`, recorded on the ImportBatch so the scheduled Drive
+   *  import can tell a genuinely new export from last night's unchanged one.
+   *  OPTIONAL and left null by the two paths a human drives (the admin upload
+   *  page and the POST /api/items/import route): both import whatever they are
+   *  handed, so a fingerprint would have nothing to compare against. */
+  sourceHash?: string | null,
 ): Promise<{ added: number; updated: number; skipped: SkippedRow[]; unchanged: number; detected: number; mismatches: { serialNumber: string }[]; unresolved: UnresolvedRow[]; error?: string }> {
   const { rows, error } = parseItemsCsv(text);
   if (error) return { added: 0, updated: 0, skipped: [], unchanged: 0, detected: 0, mismatches: [], unresolved: [], error };
@@ -1039,6 +1045,7 @@ export async function commitImport(
         updatedCount,
         skippedCount: allSkipped.length,
         skipped: allSkipped as unknown as Prisma.InputJsonValue,
+        sourceHash: sourceHash ?? null,
       },
     });
     return { added: created.count, updated: updatedCount, skipped: allSkipped };
