@@ -33,6 +33,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   - **An administrator cannot decide their own request** — another administrator has to. If you are the only administrator, grant yourself capabilities by changing a role from the Users page instead.
   - The outcome email goes through the existing sender; if `GMAIL_*` is not live in production it is logged rather than sent, and requesters will only see the outcome on their account page.
 
+### Fixed
+- **Scanning the QR code on an HP service label said "Not an item code".** The scanner reads our own printed stickers and a manufacturer's barcode, and it read HP's *barcode* fine — but HP's QR square is not a bare serial. It holds several labelled fields at once (the serial, the product number and more, written as `SN:2TK44202X4;PN:…`), and the scanner was checking the whole thing against the shape of a serial, which it never matches. Every HP QR was therefore rejected before it ever reached a lookup. It now reads the serial out of that field list, so the QR works the same as the barcode beside it.
+
+  The serial is taken **only** from a field actually named as one — `SN`, `S/N`, `Serial` or `Serial Number` — and never by picking a serial-shaped fragment out of the payload. A product number is shared across thousands of machines, so guessing would have meant confidently opening the wrong device's page instead of saying it could not read the label. A label using some other name for the field still reports "Not an item code"; send us what it contains and the name can be added.
+
+  Nothing about the codes that already worked changed: our own stickers, Dell service tags and Dell Express Service Codes scan exactly as before.
+
 ## 2026-08-09
 
 ### Fixed
