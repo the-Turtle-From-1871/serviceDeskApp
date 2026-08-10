@@ -49,6 +49,29 @@ describe("parseScan", () => {
     });
   });
 
+  // HP's service-label QR carries delimited KEY:VALUE fields, never a bare
+  // serial — so testing the whole decoded string against SERIAL_SHAPE rejected
+  // every HP tag as "Not an item code".
+  it("reads the serial out of an HP field-string QR", () => {
+    expect(parseScan("SN:2TK44202X4;PN:1AB23AV#ABA")).toEqual({ kind: "serial", serial: "2TK44202X4" });
+  });
+
+  it("accepts the common serial key spellings and both separators", () => {
+    expect(parseScan("PN:1AB23AV;S/N:5CG0384PW1")).toEqual({ kind: "serial", serial: "5CG0384PW1" });
+    expect(parseScan("SERIAL=2MQ5470PWC,PN=1AB23AV")).toEqual({ kind: "serial", serial: "2MQ5470PWC" });
+    expect(parseScan("PN:1AB23AV SN:1H853859V0")).toEqual({ kind: "serial", serial: "1H853859V0" });
+    expect(parseScan("SerialNumber:2TK0510GCB\nPartNumber:1AB23AV")).toEqual({ kind: "serial", serial: "2TK0510GCB" });
+  });
+
+  // The field parser must not become a "find any serial-shaped token" scan: the
+  // Dell PPID below contains "0ABCDE", and a product number is shared across
+  // thousands of units, so a loose match resolves the WRONG device.
+  it("ignores fields that are not a serial", () => {
+    expect(parseScan("PN:1AB23AV;MAC:00119F1A2B3C")).toBeNull();
+    expect(parseScan("CN-0ABCDE-12345-ABC-1234-A00")).toBeNull();
+    expect(parseScan("WIFI:S:guest;T:WPA;P:hunter2;;")).toBeNull();
+  });
+
   it("does not lowercase or otherwise rewrite the value", () => {
     // serialNumber is citext, so matching is already case-insensitive; folding
     // case here would put a second casing rule in a second place.

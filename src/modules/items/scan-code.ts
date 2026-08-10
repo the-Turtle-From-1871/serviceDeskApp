@@ -2,9 +2,11 @@
 // no Prisma — same contract as scan-url.ts, which this WRAPS rather than
 // replaces (that file stays the authority on our own QR sticker).
 //
-// Two things can be under the camera:
+// Three things can be under the camera:
 //   * the QR sticker this app prints, carrying an /i/<id> URL;
-//   * a manufacturer's factory barcode, carrying a serial.
+//   * a manufacturer's factory barcode, carrying a bare serial;
+//   * a manufacturer's factory QR, carrying DELIMITED FIELDS one of which is
+//     the serial — what HP prints on its service label.
 import { parseItemScan } from "./scan-url";
 
 export type ScanIntent =
@@ -47,6 +49,40 @@ export function expressServiceCodeToServiceTag(code: string): string | null {
   return tag.padStart(7, "0");
 }
 
+// Fields are separated by punctuation or whitespace; the KEY:VALUE pair itself
+// is split on the first ":" or "=". Whitespace counts as a separator because HP
+// prints space-delimited pairs on some labels — a serial never contains one.
+const FIELD_SEPARATOR = /[\s;,|]+/;
+const FIELD_PAIR = /^([A-Za-z][A-Za-z0-9 /_-]*?)[:=](\S+)$/;
+
+// Only these keys name a serial. Compared with punctuation stripped and folded
+// to upper case, so "S/N", "Serial Number" and "sn" all land here.
+const SERIAL_KEYS = new Set(["SN", "SERIAL", "SERIALNO", "SERIALNUM", "SERIALNUMBER", "SERNO"]);
+
+/**
+ * Pull the serial out of a delimited field string like
+ * `SN:2TK44202X4;PN:1AB23AV#ABA`.
+ *
+ * Deliberately keyed on an explicit serial FIELD NAME rather than scanning for
+ * a serial-shaped token anywhere in the payload. A loose scan would read the
+ * Dell PPID `CN-0ABCDE-12345-ABC-1234-A00` as "0ABCDE", and would happily
+ * return a product number — which is shared across thousands of units, so it
+ * either matches nothing or names the wrong machine. An unrecognised key is a
+ * miss, not a guess: the operator gets "Not an item code" and the label can be
+ * typed in, which beats confidently opening some other device's page.
+ */
+function serialFromFields(raw: string): string | null {
+  for (const part of raw.split(FIELD_SEPARATOR)) {
+    const pair = FIELD_PAIR.exec(part);
+    if (!pair) continue;
+    const key = pair[1].replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+    // The value still has to look like a serial — that check is what keeps a
+    // "SN:" field carrying something unexpected from reaching the database.
+    if (SERIAL_KEYS.has(key) && SERIAL_SHAPE.test(pair[2])) return pair[2];
+  }
+  return null;
+}
+
 export function parseScan(text: string): ScanIntent | null {
   const raw = text.trim();
   if (!raw) return null;
@@ -55,13 +91,17 @@ export function parseScan(text: string): ScanIntent | null {
   const id = parseItemScan(raw);
   if (id) return { kind: "item", id };
 
-  if (!SERIAL_SHAPE.test(raw)) return null;
+  // A bare serial stays the fast path and is unchanged. Only if the WHOLE
+  // payload is not itself a serial do we treat it as a field string — so a
+  // label that already scans keeps scanning exactly as it did.
+  const serial = SERIAL_SHAPE.test(raw) ? raw : serialFromFields(raw);
+  if (!serial) return null;
 
   // The raw value is the PRIMARY candidate and the conversion only ever an
   // alternative. Preferring the conversion would rewrite a genuinely numeric
   // 10-digit serial into a 7-character tag that names a different machine —
   // trying raw first makes that unrepresentable, at the cost of one extra
   // query only when the raw value misses.
-  const altSerial = expressServiceCodeToServiceTag(raw);
-  return altSerial ? { kind: "serial", serial: raw, altSerial } : { kind: "serial", serial: raw };
+  const altSerial = expressServiceCodeToServiceTag(serial);
+  return altSerial ? { kind: "serial", serial, altSerial } : { kind: "serial", serial };
 }
