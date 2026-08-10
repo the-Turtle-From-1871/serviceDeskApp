@@ -97,7 +97,17 @@ describe("createTransfer (multi-item)", () => {
     ];
     await createTransfer({ itemIds: ["i1", "i1", "i3"], lines: dedupeLines, sender, receiver, receiverSignature: sig });
     const data = vi.mocked(__tx.transfer.create).mock.calls[0][0].data;
-    const created = data.lines.create;
+    // Prisma types a nested `create` as a UNION of array types (one shape per
+    // accepted input form). Indexing such a union is fine — which is why the
+    // assertions above need no help — but `.find` resolves no single call
+    // signature across it, so its callback parameter gets no contextual type.
+    // Naming the shape these assertions actually read restores it.
+    const created = data.lines.create as {
+      make: string;
+      qtyAuth: number;
+      qtyIssued: number;
+      items: { create: { itemId: string; serialNumber: string }[] };
+    }[];
     const m4Line = created.find((l) => l.make === "M4")!;
     expect(m4Line.items.create).toEqual([{ itemId: "i1", serialNumber: "A1" }]);
     expect(m4Line.qtyAuth).toBe(1);

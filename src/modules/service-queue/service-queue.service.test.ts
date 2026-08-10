@@ -338,6 +338,15 @@ describe("reopenServiceItem", () => {
   });
 });
 
+// Prisma types a relation inside `include` as `boolean | { select }` — you may
+// pass `true` for the whole relation instead of naming columns — so `.select`
+// is not reachable without narrowing. These tests exist precisely to pin that
+// the service passes the OBJECT form and names its columns (the "select only
+// what the view renders" rule), so narrowing to it here is the assertion, not a
+// convenience: `undefined` back from this helper fails the toMatchObject below.
+const selected = (relation: unknown) =>
+  (relation as { select?: Record<string, boolean> } | undefined)?.select;
+
 describe("listActiveQueue", () => {
   // listActiveQueue only counts and slices these, so a minimal row is enough —
   // cast past Prisma's full row type rather than fabricating ten unused fields.
@@ -347,10 +356,10 @@ describe("listActiveQueue", () => {
   it("queries PENDING rows with item + transfer includes", async () => {
     vi.mocked(prisma.serviceQueueItem.findMany).mockResolvedValueOnce(fakeRows(3));
     await listActiveQueue();
-    const arg = vi.mocked(prisma.serviceQueueItem.findMany).mock.calls[0][0];
+    const arg = vi.mocked(prisma.serviceQueueItem.findMany).mock.calls[0][0]!;
     expect(arg.where).toEqual({ status: "PENDING" });
-    expect(arg.include.item.select).toMatchObject({ serialNumber: true, deviceName: true, homeUnit: true });
-    expect(arg.include.transfer.select).toMatchObject({ receiptNumber: true });
+    expect(selected(arg.include?.item)).toMatchObject({ serialNumber: true, deviceName: true, homeUnit: true });
+    expect(selected(arg.include?.transfer)).toMatchObject({ receiptNumber: true });
   });
 
   // The whole result is serialized into a Client Component, so an uncapped
@@ -394,10 +403,15 @@ describe("listActiveQueue", () => {
 
 describe("getServiceRequestForItem", () => {
   it("finds the item's row by itemId with the transfer's receiptNumber included", async () => {
-    vi.mocked(prisma.serviceQueueItem.findUnique).mockResolvedValueOnce({ id: "sq1", itemId: "i1", status: "PENDING" });
+    // Same reasoning as `fakeRows` above: this test reads only the call args,
+    // so a minimal row is enough — cast past Prisma's full row type rather than
+    // fabricating seven unused columns.
+    vi.mocked(prisma.serviceQueueItem.findUnique).mockResolvedValueOnce({
+      id: "sq1", itemId: "i1", status: "PENDING",
+    } as never);
     await getServiceRequestForItem("i1");
     const arg = vi.mocked(prisma.serviceQueueItem.findUnique).mock.calls[0][0];
     expect(arg.where).toEqual({ itemId: "i1" });
-    expect(arg.include.transfer.select).toEqual({ receiptNumber: true });
+    expect(selected(arg.include?.transfer)).toEqual({ receiptNumber: true });
   });
 });
