@@ -62,7 +62,12 @@ export function PermissionsCard({
                 Asked on {r.createdAt.toLocaleDateString()} for{" "}
                 {r.items.map((i) => CAPABILITY_LABELS[i.capability]).join(", ")}.
               </p>
-              <p style={{ margin: 0, fontStyle: "italic" }}>&ldquo;{r.justification}&rdquo;</p>
+              {/* Omitted entirely when blank — the justification is optional,
+                  and a bare pair of quote marks reads as a rendering fault
+                  rather than as "you did not write one". */}
+              {r.justification && (
+                <p style={{ margin: 0, fontStyle: "italic" }}>&ldquo;{r.justification}&rdquo;</p>
+              )}
             </div>
           ))}
         </div>

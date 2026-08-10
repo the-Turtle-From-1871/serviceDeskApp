@@ -3,7 +3,7 @@
 A living inventory of every security control in this app — what it does, where
 it lives, and why. **Maintained over time**; see [Keeping this current](#keeping-this-current).
 
-**Last reviewed: 2026-08-08**
+**Last reviewed: 2026-08-10**
 
 Related: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`../CLAUDE.md`](../CLAUDE.md) · [`password-reset-hardening.md`](./password-reset-hardening.md)
 
@@ -323,8 +323,44 @@ files one `PermissionRequest` carrying several capability lines and one
 justification; an administrator decides each line by unchecking what they are
 not granting. Requesting needs only a session (a `VIEWER` asking for more is the
 point); deciding requires `ADMINISTER`. Every grant therefore resolves to a
-justification, a decision, and a named approver.
+decision by a named approver against a dated request.
 `src/modules/users/permissions.service.ts`
+
+**Approving `ADMINISTER` PROMOTES THE ACCOUNT TO THE `ADMIN` ROLE** (labelled
+*Grant Administrator*), rather than writing a `UserCapability` row. Changed
+2026-08-10. A grant is additive on top of a role baseline, so granting
+`ADMINISTER` to a `VIEWER` produced `{VIEW_INVENTORY, ADMINISTER}` — an account
+that passed every `requireAdmin()` gate (user management, audits, the access
+PIN, seal verification) while being refused `MANAGE_ITEMS`, `CREATE_RECEIPTS`,
+`VIEW_ANALYTICS` and the rest, and which `/admin/users` still displayed as a
+plain user because that page renders the role. The approver's intent and the
+resulting state were different things, and no surface showed the difference.
+
+**No capability grant rows are written on a promoting decision** — not for
+`ADMINISTER`, not for the other lines on the same request. The `ADMIN` baseline
+already confers all nine, so each row would be redundant on write, and a
+`UserCapability` row **outlives the role**: demoting the account later would
+leave it silently holding whatever had been granted, `ADMINISTER` included, so
+the demotion meant to remove admin would not. "To reduce an account below its
+baseline, change its role" only holds if nothing is left behind. The audit trail
+does not depend on those rows — the per-line decisions and `decidedById` on the
+request record who granted what.
+
+**The self-decision guard is unchanged and matters more now**, because the act
+it prevents is a role promotion rather than a single grant. Promotion happens
+inside the same transaction as the line decisions, so it can never commit
+without the record of who approved it, and it is idempotent on re-decision.
+`src/modules/users/permissions.service.ts`
+
+**The justification is optional and unbounded below** (`permissions.schema.ts`).
+It carried a 20-character minimum until 2026-08-10; the floor was removed
+because it refused short-but-real reasons and produced padded text rather than
+better ones — the first request filed in production read "DCSIM access. DCSIM
+access. DCSIM access." **It is not an access control and never was**: the
+control is that a second person decides, and that decision is what the audit
+trail rests on. A request carrying no reason renders as "No reason given" to
+the deciding administrator, who can deny it and ask for one. The denial reason
+on the decision side is still **required** — see below.
 
 **An administrator may never decide their own request.**
 `decidePermissionRequest` refuses when the requester is the decider. This is the

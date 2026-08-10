@@ -70,10 +70,19 @@ describe("requestPermissionsAction", () => {
     expect(createPermissionRequest.mock.calls[0][0]).toBe("u1");
   });
 
-  it("rejects a justification that is too short, without calling the service", async () => {
+  // The justification carried a 20-character floor, which refused exactly the
+  // short-but-real reasons people actually type. Any length now reaches the
+  // service; the admin weighs it and can still deny with a reason.
+  it("accepts a short justification", async () => {
     const res = await requestPermissionsAction(undefined, requestForm(["PROCESS_RETURNS"], "pls"));
-    expect(res).toMatchObject({ error: expect.any(String) });
-    expect(createPermissionRequest).not.toHaveBeenCalled();
+    expect(res).toMatchObject({ ok: true });
+    expect(createPermissionRequest.mock.calls[0][1]).toMatchObject({ justification: "pls" });
+  });
+
+  it("accepts a request with no justification at all", async () => {
+    const res = await requestPermissionsAction(undefined, requestForm(["PROCESS_RETURNS"], ""));
+    expect(res).toMatchObject({ ok: true });
+    expect(createPermissionRequest.mock.calls[0][1]).toMatchObject({ justification: "" });
   });
 
   it("rejects a request for a capability nobody may request", async () => {

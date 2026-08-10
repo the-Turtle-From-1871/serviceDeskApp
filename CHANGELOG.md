@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## 2026-08-10
 
 ### Changed
+- **Approving *Grant Administrator* now makes the person an administrator.** The permission was called *Administer the application* and behaved like the eight beside it: approving it added one permission to whatever the account already had. So approving it for a viewer produced someone who could manage users and change the access PIN but could **not** create a hand receipt, manage items or open analytics — and the Users page still listed them as a plain user, because that page shows the role. It now changes their role to Admin, which confers everything, and the Users page shows **Admin** straight away.
+
+  The permission is renamed **Grant Administrator** on both the request form and the approval page, and both now say plainly that it changes the person's role rather than granting one more permission. Nothing else about deciding changed: it still starts unticked so granting it is deliberate, an administrator still cannot decide their own request, and denying it leaves the account exactly as it was.
+
+  **If you approved one of these before today**, the person is in the half-granted state described above — their role is unchanged. Fix it from the Users page with *Make admin*.
+
+- **Explaining why you need a permission is now optional, and any length.** The request form refused anything under 20 characters, so a perfectly good reason — "taking over returns" — could not be submitted, and people padded text to get past it. Write as much or as little as you like, or nothing at all. The box is marked *(optional)* and says a line of context helps but to leave it blank if you have already spoken to the administrator.
+
+  For administrators, a request filed with no reason now reads **No reason given** on the *Permission requests* page rather than an empty pair of quote marks, so you can see the reason is absent and decide accordingly — including denying it and asking for one. Nothing else about deciding changed: withholding a permission still requires a reason, and that reason is still shown to the requester.
+
 - **The service queue's sorting now works exactly like the items list.** The queue's toolbar carried a *Service type* dropdown, a *Sort by* dropdown and a separate Asc/Desc button side by side; on a phone those wrapped into rows of controls above the first device. They are now behind a single **Sort & filter** button, the same one `/items` already uses, which shows what is currently applied — "Sort & filter · Due ▲ · Repair" — so you can still read the order and the active filter without opening anything.
 
   Tapping it opens a panel holding **Service type**, **Sort by** and **Direction**. On a phone the panel slides up from the bottom of the screen with a **Done** button, and each dropdown opens the usual iPhone picker wheel; on a computer it drops down under the button. Picking something applies it immediately and the panel stays open, so you can set the filter and the order in one visit. It closes on tapping outside, Escape, or Done.

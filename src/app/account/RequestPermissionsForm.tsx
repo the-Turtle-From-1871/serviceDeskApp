@@ -3,7 +3,6 @@ import { useActionState } from "react";
 import type { Capability } from "@prisma/client";
 import { requestPermissionsAction } from "@/app/actions/permissions";
 import { CAPABILITY_LABELS, isElevated } from "@/modules/users/capabilities";
-import { MIN_JUSTIFICATION } from "@/modules/users/permissions.schema";
 
 /**
  * The request form. `available` is everything the user does not already hold
@@ -47,9 +46,10 @@ export function RequestPermissionsForm({ available }: { available: Capability[] 
                 <span className="capability-option__name">{CAPABILITY_LABELS[c]}</span>
                 {elevated && (
                   <span className="capability-option__hint">
-                    Grants full administrative control — user management, the access PIN, audits
-                    and every other permission. Ask for this only if you are taking on
-                    administration of the system.
+                    Makes you an administrator. If this is approved your account becomes an
+                    admin outright — every permission in this list, plus user management, the
+                    access PIN and audits. Ask for it only if you are taking on administration
+                    of the system.
                   </span>
                 )}
               </span>
@@ -59,18 +59,23 @@ export function RequestPermissionsForm({ available }: { available: Capability[] 
       </fieldset>
 
       <div className="field">
-        <label className="label" htmlFor="justification">Why do you need it?</label>
+        <label className="label" htmlFor="justification">
+          Why do you need it? <span className="subtle">(optional)</span>
+        </label>
+        {/* No `required` and no `minLength`: any amount of text, including
+            none. A browser-side floor here would refuse to submit the form at
+            all, which is the failure this change exists to remove — and it
+            would disagree with the schema, which now accepts "". */}
         <textarea
           id="justification"
           className="textarea"
           name="justification"
-          required
-          minLength={MIN_JUSTIFICATION}
           rows={3}
           placeholder="e.g. I have taken over returns processing for the shop this quarter."
         />
         <p className="subtle" style={{ fontSize: 13, marginTop: 6 }}>
-          This is the only thing the administrator sees when deciding, so be specific.
+          This is the only thing the administrator sees when deciding, so a line of context
+          helps — but leave it blank if you have already spoken to them.
         </p>
       </div>
 

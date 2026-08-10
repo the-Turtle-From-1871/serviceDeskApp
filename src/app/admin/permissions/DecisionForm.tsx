@@ -75,7 +75,9 @@ export function DecisionForm({
                 <span className="capability-option__name">{CAPABILITY_LABELS[c]}</span>
                 {elevated && (
                   <span className="capability-option__hint">
-                    Full administrative control. Unchecked by default — tick it deliberately.
+                    Ticking this makes them an administrator — it changes their role, not just
+                    one permission, so they get everything on this list. Unchecked by default;
+                    tick it deliberately.
                   </span>
                 )}
               </span>

@@ -91,9 +91,12 @@ export function countOpenRequests(): Promise<number> {
  * Decides a request. `approve` is the CHECKED set; every other line on the
  * request is denied, because the admin decides by unchecking.
  *
+ * Approving `ADMINISTER` promotes the account to the `ADMIN` role instead of
+ * writing grant rows — see the note at the write below for why.
+ *
  * Everything commits in ONE transaction: a partial apply would leave grants
  * without decisions (or the reverse), and the audit trail is the whole point of
- * recording a justification in the first place.
+ * recording who decided what in the first place.
  */
 export async function decidePermissionRequest({
   requestId,
@@ -130,21 +133,51 @@ export async function decidePermissionRequest({
     throw new PermissionRequestError("REASON_REQUIRED");
   }
 
+  // Approving ADMINISTER PROMOTES THE ACCOUNT TO THE `ADMIN` ROLE. It does not
+  // add a ninth capability to whatever role the requester already had.
+  //
+  // A grant is additive on top of a role BASELINE, so granting ADMINISTER to a
+  // VIEWER produced {VIEW_INVENTORY, ADMINISTER} — an account that could manage
+  // users and set the access PIN but could not create a hand receipt, manage
+  // items or see analytics, while `/admin/users` still displayed it as a plain
+  // user because that page renders the ROLE. "Made them an admin" and what the
+  // app actually did were two different things, and the gap was invisible from
+  // every surface. Promotion is what an approver means, so it is what happens.
+  const promoting = approved.some((i) => i.capability === "ADMINISTER");
+
   const now = new Date();
   return prisma.$transaction(async (tx) => {
     if (approved.length > 0) {
-      // skipDuplicates rather than a read-then-write: two admins deciding
-      // overlapping requests at the same moment would otherwise race, and the
-      // unique constraint on (userId, capability) is the real arbiter anyway.
-      // This is what makes approval idempotent.
-      await tx.userCapability.createMany({
-        data: approved.map((i) => ({
-          userId: request.userId,
-          capability: i.capability,
-          grantedById: deciderId,
-        })),
-        skipDuplicates: true,
-      });
+      // NO grant rows are written when promoting — not for ADMINISTER, and not
+      // for anything else on the same request. The ADMIN baseline is all nine
+      // capabilities, so every row would be redundant the moment it was
+      // written; the damage is that a `UserCapability` row OUTLIVES the role.
+      // Demoting the account later would leave it silently holding whatever
+      // was granted here — ADMINISTER included, which is full admin surviving
+      // the act meant to remove it. "To reduce an account below its baseline,
+      // change its ROLE" only stays true if nothing else is left behind.
+      //
+      // The audit trail does not depend on these rows: the line decisions
+      // below, plus `decidedById` on the request, record who granted what.
+      if (!promoting) {
+        // skipDuplicates rather than a read-then-write: two admins deciding
+        // overlapping requests at the same moment would otherwise race, and the
+        // unique constraint on (userId, capability) is the real arbiter anyway.
+        // This is what makes approval idempotent.
+        await tx.userCapability.createMany({
+          data: approved.map((i) => ({
+            userId: request.userId,
+            capability: i.capability,
+            grantedById: deciderId,
+          })),
+          skipDuplicates: true,
+        });
+      } else {
+        // Idempotent on its own (a repeat decision writes ADMIN over ADMIN),
+        // and inside the same transaction as the decisions, so a promotion can
+        // never commit without the record of who approved it.
+        await tx.user.update({ where: { id: request.userId }, data: { role: "ADMIN" } });
+      }
       await tx.permissionRequestItem.updateMany({
         where: { id: { in: approved.map((i) => i.id) } },
         data: { decision: "APPROVED" },

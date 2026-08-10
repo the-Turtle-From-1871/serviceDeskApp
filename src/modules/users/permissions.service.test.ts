@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { db, prismaMock } = vi.hoisted(() => {
   const db = {
-    user: { findUnique: vi.fn() },
+    user: { findUnique: vi.fn(), update: vi.fn() },
     permissionRequest: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn(), findMany: vi.fn(), count: vi.fn() },
     permissionRequestItem: { findFirst: vi.fn(), updateMany: vi.fn() },
     userCapability: { createMany: vi.fn() },
@@ -42,7 +42,11 @@ beforeEach(() => {
   db.permissionRequest.update.mockResolvedValue({ id: "r1" });
   db.permissionRequestItem.updateMany.mockResolvedValue({ count: 1 });
   db.userCapability.createMany.mockResolvedValue({ count: 1 });
+  db.user.update.mockResolvedValue({ id: "u1", role: "ADMIN" });
 });
+
+const adminRequestRow = (over: Record<string, unknown> = {}) =>
+  requestRow({ items: [{ id: "i1", capability: "ADMINISTER", decision: "PENDING" }], ...over });
 
 describe("createPermissionRequest", () => {
   it("files a request with one line per capability", async () => {
@@ -208,5 +212,94 @@ describe("decidePermissionRequest", () => {
     await expect(
       decidePermissionRequest({ requestId: "r1", deciderId: "u1", approve: [] }),
     ).rejects.toBeInstanceOf(PermissionRequestError);
+  });
+});
+
+// Approving ADMINISTER means "make this person an administrator", so it moves
+// the ROLE. A grant row would have left a VIEWER holding ADMINISTER and nothing
+// else — able to manage users but not to file a receipt, and still displayed as
+// a plain user on /admin/users.
+describe("decidePermissionRequest — approving ADMINISTER promotes the role", () => {
+  beforeEach(() => {
+    db.permissionRequest.findUnique.mockResolvedValue(adminRequestRow());
+  });
+
+  it("sets the requester's role to ADMIN", async () => {
+    await decidePermissionRequest({
+      requestId: "r1", deciderId: "admin1", approve: ["ADMINISTER"],
+    });
+    expect(db.user.update).toHaveBeenCalledWith({
+      where: { id: "u1" },
+      data: { role: "ADMIN" },
+    });
+  });
+
+  // A UserCapability row outlives the role, so demoting the account later would
+  // silently leave it holding full admin — defeating the one documented way to
+  // reduce an account below its baseline.
+  it("writes NO capability grant rows when promoting", async () => {
+    await decidePermissionRequest({
+      requestId: "r1", deciderId: "admin1", approve: ["ADMINISTER"],
+    });
+    expect(db.userCapability.createMany).not.toHaveBeenCalled();
+  });
+
+  it("writes no grant rows for the OTHER approved lines either", async () => {
+    db.permissionRequest.findUnique.mockResolvedValue(
+      requestRow({
+        items: [
+          { id: "i1", capability: "ADMINISTER", decision: "PENDING" },
+          { id: "i2", capability: "MANAGE_QUEUE", decision: "PENDING" },
+        ],
+      }),
+    );
+    await decidePermissionRequest({
+      requestId: "r1", deciderId: "admin1", approve: ["ADMINISTER", "MANAGE_QUEUE"],
+    });
+    expect(db.userCapability.createMany).not.toHaveBeenCalled();
+    expect(db.user.update).toHaveBeenCalledTimes(1);
+  });
+
+  it("still records the line as APPROVED and closes the request", async () => {
+    await decidePermissionRequest({
+      requestId: "r1", deciderId: "admin1", approve: ["ADMINISTER"],
+    });
+    const decisions = db.permissionRequestItem.updateMany.mock.calls.map((c) => c[0].data.decision);
+    expect(decisions).toContain("APPROVED");
+    expect(db.permissionRequest.update.mock.calls[0][0].data.decidedById).toBe("admin1");
+  });
+
+  it("promotes inside the SAME transaction as the decisions", async () => {
+    await decidePermissionRequest({
+      requestId: "r1", deciderId: "admin1", approve: ["ADMINISTER"],
+    });
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  // Denying it must not touch the role — this is the whole point of the
+  // elevated line starting unchecked in the approval UI.
+  it("does NOT promote when ADMINISTER is denied", async () => {
+    await decidePermissionRequest({
+      requestId: "r1", deciderId: "admin1", approve: [], denialReason: "Not yet.",
+    });
+    expect(db.user.update).not.toHaveBeenCalled();
+  });
+
+  it("grants normally, without promoting, when ADMINISTER is not on the request", async () => {
+    db.permissionRequest.findUnique.mockResolvedValue(requestRow());
+    await decidePermissionRequest({
+      requestId: "r1", deciderId: "admin1", approve: ["MANAGE_QUEUE", "PROCESS_RETURNS"],
+    });
+    expect(db.user.update).not.toHaveBeenCalled();
+    expect(db.userCapability.createMany).toHaveBeenCalledTimes(1);
+  });
+
+  // THE privilege guard still comes first: promotion is a bigger act than a
+  // grant, so self-decision must remain impossible.
+  it("refuses to promote on a self-decision", async () => {
+    await expect(
+      decidePermissionRequest({ requestId: "r1", deciderId: "u1", approve: ["ADMINISTER"] }),
+    ).rejects.toMatchObject({ code: "SELF_DECISION" });
+    expect(db.user.update).not.toHaveBeenCalled();
   });
 });

@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  MIN_JUSTIFICATION,
-  permissionDecisionSchema,
-  permissionRequestSchema,
-} from "./permissions.schema";
+import { permissionDecisionSchema, permissionRequestSchema } from "./permissions.schema";
 
 const REASON = "I have taken over returns processing for the shop this quarter.";
 
@@ -16,21 +12,49 @@ describe("permissionRequestSchema", () => {
     expect(parsed.capabilities).toEqual(["PROCESS_RETURNS"]);
   });
 
-  it("rejects a justification too short to be a reason", () => {
-    const res = permissionRequestSchema.safeParse({
+  // There is no minimum. The 20-character floor refused the short-but-real
+  // reasons people actually type ("taking over returns"), and a request never
+  // filed is worse for the admin than a thin one they can weigh.
+  it("accepts a justification of any length", () => {
+    const parsed = permissionRequestSchema.parse({
       justification: "pls",
       capabilities: ["PROCESS_RETURNS"],
     });
-    expect(res.success).toBe(false);
-    expect(String(res.error)).toContain(String(MIN_JUSTIFICATION));
+    expect(parsed.justification).toBe("pls");
   });
 
-  it("rejects a whitespace-only justification", () => {
-    const res = permissionRequestSchema.safeParse({
-      justification: " ".repeat(50),
-      capabilities: ["PROCESS_RETURNS"],
-    });
-    expect(res.success).toBe(false);
+  it("accepts an empty justification", () => {
+    expect(
+      permissionRequestSchema.parse({ justification: "", capabilities: ["PROCESS_RETURNS"] })
+        .justification,
+    ).toBe("");
+  });
+
+  // Trimmed to "" rather than kept as spaces, so the two surfaces that render
+  // it can test for emptiness and show "No reason given" instead of a quoted
+  // blank.
+  it("collapses a whitespace-only justification to empty", () => {
+    expect(
+      permissionRequestSchema.parse({
+        justification: " ".repeat(50),
+        capabilities: ["PROCESS_RETURNS"],
+      }).justification,
+    ).toBe("");
+  });
+
+  it("defaults an omitted justification to empty rather than throwing", () => {
+    expect(
+      permissionRequestSchema.parse({ capabilities: ["PROCESS_RETURNS"] }).justification,
+    ).toBe("");
+  });
+
+  it("still rejects a justification past the length cap", () => {
+    expect(
+      permissionRequestSchema.safeParse({
+        justification: "x".repeat(2001),
+        capabilities: ["PROCESS_RETURNS"],
+      }).success,
+    ).toBe(false);
   });
 
   it("rejects an empty capability list", () => {
