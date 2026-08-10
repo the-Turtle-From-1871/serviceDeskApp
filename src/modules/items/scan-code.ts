@@ -83,6 +83,43 @@ function serialFromFields(raw: string): string | null {
   return null;
 }
 
+/**
+ * The first value in ONE camera frame that names something we can look up.
+ *
+ * A manufacturer's service label is not one code — HP's carries a QR beside a
+ * Code 128 serial and a product-number barcode, and the decoder returns every
+ * one it can see in the frame. Taking only the first hit meant a label whose
+ * QR was not first never reached the parser at all, whatever the QR contained.
+ */
+export function parseScans(texts: readonly string[]): ScanIntent | null {
+  for (const text of texts) {
+    const intent = parseScan(text);
+    if (intent) return intent;
+  }
+  return null;
+}
+
+const SAMPLE_MAX = 40;
+const SAMPLE_COUNT = 2;
+
+/**
+ * What the camera read, for the operator-facing notice when NOTHING in the
+ * frame parsed. Showing it turns "Not an item code" from a dead end into
+ * something the operator can read out — an unrecognised label is then a
+ * one-line change here rather than a support round trip.
+ *
+ * Flattened and truncated: a payload can carry newlines and run long, and the
+ * notice is a single line over the video sheet.
+ */
+export function describeScan(texts: readonly string[]): string {
+  const shown = texts.slice(0, SAMPLE_COUNT).map((text) => {
+    const flat = text.replace(/\s+/g, " ").trim();
+    return flat.length > SAMPLE_MAX ? `${flat.slice(0, SAMPLE_MAX)}…` : flat;
+  });
+  const rest = texts.length - shown.length;
+  return rest > 0 ? `${shown.join(" · ")} (+${rest} more)` : shown.join(" · ");
+}
+
 export function parseScan(text: string): ScanIntent | null {
   const raw = text.trim();
   if (!raw) return null;

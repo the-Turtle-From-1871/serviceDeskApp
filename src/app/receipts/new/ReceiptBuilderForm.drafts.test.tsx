@@ -24,9 +24,9 @@ vi.mock("@/app/actions/scan", () => ({
 // jsdom has no camera; the real component would just report "unavailable".
 vi.mock("@/components/QrScanner", () => ({
   SCAN_FORMATS: ["qr_code"],
-  QrScanner: ({ onDecode }: { onDecode: (t: string) => void }) => (
+  QrScanner: ({ onDecode }: { onDecode: (t: string[]) => void }) => (
     <div>
-      <button type="button" onClick={() => onDecode("https://x.example/i/i2")}>emit-i2</button>
+      <button type="button" onClick={() => onDecode(["https://x.example/i/i2"])}>emit-i2</button>
     </div>
   ),
 }));
