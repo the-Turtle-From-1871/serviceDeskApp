@@ -87,7 +87,10 @@ describe("recordAudit", () => {
 describe("getAuditsForItem", () => {
   it("queries the item's audits newest-first, WITHOUT the signature blob", async () => {
     await getAuditsForItem("i1");
-    const arg = vi.mocked(prisma.itemAudit.findMany).mock.calls[0][0];
+    // `findMany` takes its argument optionally, so Prisma types the captured
+    // call as `Args | undefined`. The await above is what guarantees the call
+    // happened, and every assertion below would fail loudly if it had not.
+    const arg = vi.mocked(prisma.itemAudit.findMany).mock.calls[0][0]!;
     expect(arg.where).toEqual({ itemId: "i1" });
     expect(arg.orderBy).toEqual({ createdAt: "desc" });
     // The detail-page history log renders only id/signer/date; the signature
