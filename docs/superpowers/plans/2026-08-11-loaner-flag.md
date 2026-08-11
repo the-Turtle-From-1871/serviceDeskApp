@@ -42,7 +42,8 @@ Every task's requirements implicitly include all of these.
 - `src/app/admin/actions/items.ts` — `setItemsLoanerAction`.
 - `src/app/admin/actions/items.test.ts` — its capability-refusal tests.
 - `src/modules/items/items.readiness-sort.parity.test.ts` — parity coverage for the new filter.
-- `src/components/items-view.ts` — `ItemRow.isLoaner`, the `loaner` column key, `UNSORTABLE_COLUMNS`.
+- `src/components/items-view.ts` — `ItemRow.isLoaner`, the `loaner` column key, `UNSORTABLE_COLUMNS`, `sortFilterSummary`.
+- `src/components/SortFilterMenu.tsx` — `toggle?: MenuToggle` becomes `toggles?: MenuToggle[]`, so `/items` can show a second checkbox (see Task 5 Step 6).
 - `src/components/items-view.test.ts` — the sortable/unsortable assertions that enumerate keys.
 - `src/components/BulkActionsMenu.tsx` — `canRename` → `canManageItems`, plus the loaner pair.
 - `src/components/BulkActionsMenu.test.tsx` — the renamed prop and the new controls.
@@ -726,7 +727,65 @@ In `src/components/ItemSelectTable.test.tsx`, extend the row factory with `isLoa
 Run: `npm run test:ui`
 Expected: PASS.
 
-- [ ] **Step 6: Update the changelog**
+- [ ] **Step 6: Let the Sort & filter menu carry more than one toggle**
+
+> **Added after Task 3 shipped.** The original plan assumed the *Loaners only* checkbox could just be passed to `SortFilterMenu`. It cannot: that component has a SINGLE optional `toggle?: MenuToggle` slot and `/items` already spends it on `needsRename` (`ItemSelectTable.tsx:584`). Without this step the `?loaner=1` filter built in Task 3 is reachable only by hand-editing the URL.
+
+In `src/components/SortFilterMenu.tsx`, change the single slot to a list:
+
+- Replace the `toggle?: MenuToggle` prop with `toggles?: MenuToggle[]`.
+- Render them with a `.map`, keying on the label, inside the same `.popup-menu__check` markup the single toggle uses today — do not restyle it.
+- Leave the `MenuToggle` TYPE exactly as it is, including its comment explaining why a one-way checkbox is not a two-option select.
+
+`SortFilterMenu` is shared with the service queue. `ServiceQueueTable` passes no toggle at all, so it needs no change — **confirm that** with `grep -n "toggle" src/components/ServiceQueueTable.tsx` before moving on, and say what you found in your report.
+
+- [ ] **Step 7: Wire the Loaners-only checkbox**
+
+In `src/components/ItemSelectTable.tsx`:
+
+- Add a `loaner: boolean` prop beside `needsRename`, in both the destructured params and the props type.
+- Add `setLoaner`, matching `setNeedsRename` (currently line 554):
+
+```tsx
+  const setLoaner = (next: boolean) => navigate({ loaner: next, page: 1 });
+```
+
+- **Add `loaner` to `navigate()`'s option type and its param builder** (around lines 507-524), exactly as `needsRename` is handled there:
+
+```tsx
+    const nextLoaner = over.loaner !== undefined ? over.loaner : loaner;
+    if (nextLoaner) params.set("loaner", "1");
+```
+
+  This is the same silent-drop trap as `ItemsSearchInput`: `navigate` rebuilds the URL for every sort, filter and page change, so a filter missing here vanishes the moment someone pages or re-sorts.
+
+- Pass both toggles to the menu:
+
+```tsx
+          toggles={[
+            { label: "Needs rename in Intune", checked: needsRename, onChange: setNeedsRename },
+            { label: "Loaners only", checked: loaner, onChange: setLoaner },
+          ]}
+```
+
+  Copy the existing `needsRename` toggle's label verbatim from the current `toggle={{ ... }}` block rather than retyping it from this plan.
+
+- Extend the empty-state message (currently around line 646) so a filtered-to-nothing list names the loaner filter alongside the unit and rename ones.
+
+In `src/app/items/page.tsx`, pass `loaner={result.loaner}` to `<ItemSelectTable>` — the line Task 3 correctly left out because the prop did not exist yet.
+
+- [ ] **Step 8: Make the closed menu read back the loaner state**
+
+`sortFilterSummary(sort, dir, uic, needsRename)` (`src/components/items-view.ts`) is the trigger's read-back text — what the toolbar says with the menu shut. Add the loaner filter to it, and update its tests in `src/components/items-view.test.ts`.
+
+Its signature is positional and already four arguments long. Prefer extending it rather than reordering, and update every call site (`grep -rn "sortFilterSummary" src/`). If you judge an options object to be clearly better, that is acceptable — say so in your report and update all call sites and tests.
+
+- [ ] **Step 9: Run the component tests**
+
+Run: `npm run test:ui`
+Expected: PASS, including `ItemSelectTable.test.tsx`, `ServiceQueueTable.test.tsx` (it shares the menu) and `items-view.test.ts`.
+
+- [ ] **Step 10: Update the changelog**
 
 Add to `CHANGELOG.md` under today's `## 2026-08-11` heading, in the `### Added` subsection (create it in Keep a Changelog order if absent):
 
@@ -739,20 +798,21 @@ Add to `CHANGELOG.md` under today's `## 2026-08-11` heading, in the `### Added` 
   - Migration `20260811210000_item_is_loaner` adds the `Item.isLoaner` column (NOT NULL, default false) and its index. **Apply it to Supabase before merging**, per migrate-before-push: Prisma enumerates every column in its SELECT, so until the column exists *every* item read fails, not just the new control.
 ```
 
-- [ ] **Step 7: Update the rule files**
+- [ ] **Step 11: Update the rule files**
 
 In `.claude/rules/backend-constraints.md`, add the flag beside the derived-readiness material: what it is, that it is **stored** rather than derived and the test for why (nothing in the data can infer loaner-ness, so there is nothing to derive from and no second derivation to drift against), that **the importer must never learn to write it**, and that the bulk setter follows the retired-excluded-and-reported rule.
 
 In `CLAUDE.md`, under *Backend Architecture & Feature Constraints*, add one line naming the flag and the distinction, and **add the caveat to the existing derived-readiness bullet** — as written, "Never reintroduce a hand-tickable flag" and this column read as a contradiction to anyone who has not opened the rule file.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 12: Commit**
 
 ```bash
 git add src/components/items-view.ts src/components/items-view.test.ts \
+        src/components/SortFilterMenu.tsx \
         src/components/ItemSelectTable.tsx src/components/ItemSelectTable.test.tsx \
         src/app/items/page.tsx src/app/i/[itemId]/page.tsx src/app/globals.css \
         CHANGELOG.md .claude/rules/backend-constraints.md CLAUDE.md
-git commit -m "feat(items): show the loaner mark on the item, the list and the card"
+git commit -m "feat(items): show and filter by the loaner mark"
 ```
 
 ---
