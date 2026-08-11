@@ -705,8 +705,10 @@ export function ItemSelectTable({
       )}
 
       {selected.size > 0 && (
-        // zIndex keeps this bar above the table rows it floats over.
-        <div className="card stack-sm" style={{ position: "sticky", bottom: 0, zIndex: 2 }}>
+        // Sticky offset + zIndex live in globals.css (.selection-bar) so the
+        // mobile breakpoint can lift the bar clear of the bottom nav rail —
+        // an inline style can't be media-queried.
+        <div className="card stack-sm selection-bar">
           <div className="row" style={{ justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
             <span>
               {selected.size} selected · {groupCount} row{groupCount === 1 ? "" : "s"}
