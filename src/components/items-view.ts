@@ -135,7 +135,7 @@ export const ITEM_COLUMNS: { key: ColumnKey; label: string }[] = [
 
 /** Columns the table renders but the server cannot order by — see ColumnKey for
  *  why each one is here. Named rather than inlined into the filter below so
- *  adding a third is one edit in one place, and so the reason lives with the
+ *  adding another is one edit in one place, and so the reason lives with the
  *  list rather than in a `!==` chain. */
 const UNSORTABLE_COLUMNS = new Set<string>(["holder", "lastSyncDateTime", "loaner"]);
 
@@ -197,7 +197,7 @@ export function sortFilterSummary(
 const SORT_FIELDS = new Set<string>(SORTABLE_COLUMNS.map((c) => c.key));
 // Visibility and sortability are separate CONCEPTS on purpose: hiding a column
 // must never imply you cannot sort by it. They also now differ in MEMBERSHIP —
-// COLUMN_KEYS has 11 keys (including "holder" and "loaner"), SORT_FIELDS has 9
+// COLUMN_KEYS has 12 keys (including "holder" and "loaner"), SORT_FIELDS has 9
 // — because `holder` and `loaner` are displayable but not server-sortable (see
 // SORTABLE_COLUMNS above).
 const COLUMN_KEYS = new Set<string>(ITEM_COLUMNS.map((c) => c.key));

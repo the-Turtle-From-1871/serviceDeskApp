@@ -762,6 +762,12 @@ boundary lives, and it must not widen again without a doc change.
 > search inventory and open item pages. Receipts are therefore enumerable
 > (`HR-000001…`), and the public pages expose party PII, signatures, and the
 > device catalog. This is intended. It can be hardened later *if the team asks*.
+>
+> The device catalog now includes the loaner mark: `/i/<id>` renders a
+> **Loaner** badge for any device marked as pool stock, alongside the other
+> catalog fields already public there (serial, home unit, current holder,
+> receipt history). This falls inside the accepted device-catalog exposure
+> above, not a new one.
 
 **An 8-digit shared PIN walls off `/i/*` and `/receipts/*`** when
 `PUBLIC_ACCESS_PIN_ENABLED` is on. Logged-in users bypass it. This is a

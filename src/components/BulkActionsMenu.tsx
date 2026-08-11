@@ -45,7 +45,7 @@ const plural = (n: number) => (n === 1 ? "" : "s");
 const COLLISIONS_SHOWN = 5;
 
 /** "Audited 47 items. Skipped 2 (retired or not applicable)." — the skip count
- *  is never silent: all three of these actions pass over rows they cannot act
+ *  is never silent: all four of these actions pass over rows they cannot act
  *  on (retired kit, or an item with no pending queue row), and an operator who
  *  scanned 49 devices must be told 2 did nothing. Reporting rather than
  *  refusing is the cross-cutting rule for bulk actions here, and it diverges
@@ -56,10 +56,12 @@ function outcome(verb: string, updated: number, skipped: number): string {
 }
 
 /**
- * The /items selection bar's overflow sheet: the three bulk actions that need
- * inputs of their own and cannot fit inline. The bar is sticky and overlays the
- * table, so every line of height hides another row of what you are selecting
- * from — stacked inline, these three covered a phone viewport entirely.
+ * The /items selection bar's overflow sheet: four bulk actions — audit, the
+ * service queue, rename and the loaner mark — that need inputs or dedicated
+ * buttons of their own and cannot fit inline. The bar is sticky and overlays
+ * the table, so every line of height hides another row of what you are
+ * selecting from — stacked inline, these four covered a phone viewport
+ * entirely.
  *
  * THIS COMPONENT honours `canAudit`, `canQueue` and `canManageItems` independently —
  * each group renders only when its flag is set, and none of them means no
