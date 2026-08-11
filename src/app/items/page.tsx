@@ -97,7 +97,9 @@ export default async function ItemsListPage({
             uic={result.uic}
             needsRename={result.needsRename}
           />
-          <ItemsScanButton />
+          {/* Gated on the CAPABILITY, not `isAdmin`: a USER granted MANAGE_ITEMS
+              individually may create scanned serials, a VIEWER may not. */}
+          <ItemsScanButton canCreate={user.capabilities.includes("MANAGE_ITEMS")} />
         </div>
 
         {/* ItemSelectTable renders even with zero rows, because it OWNS the
