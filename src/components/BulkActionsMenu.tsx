@@ -75,18 +75,21 @@ function outcome(verb: string, updated: number, skipped: number): string {
  *
  * Either way this is PRESENTATION, never a boundary: `recordAuditsAction` calls
  * `requireAdmin()` (= `requireCapability("ADMINISTER")`), both queue actions
- * call `requireCapability("MANAGE_QUEUE")`, and both rename actions call
- * `requireCapability("MANAGE_ITEMS")`, re-read from the DB per request. The
- * batch is client-supplied ids, so that server guard is the whole of it — the
- * `isAdmin` wrapper above is a VISIBILITY gap, not a security one, and nothing
- * is over-exposed by it.
+ * call `requireCapability("MANAGE_QUEUE")`, and both rename actions and
+ * `setItemsLoanerAction` call `requireCapability("MANAGE_ITEMS")`, re-read from
+ * the DB per request. The batch is client-supplied ids, so that server guard
+ * is the whole of it — the `isAdmin` wrapper above is a VISIBILITY gap, not a
+ * security one, and nothing is over-exposed by it.
  *
  * Only ids are posted. For the audit, the signer's name and image are re-read
  * server-side scoped to the acting admin — the browser is handed signature
  * NAMES only (`listSignatureNames`) and never any ink. For the rename, only a
  * prefix and a start number are posted: the server rebuilds the name list
  * itself, so this control can never be turned into "write any string to any
- * item".
+ * item". For the loaner mark, only one flag rides along — `isLoaner`, read
+ * server-side as exactly `"1"` = true and anything else = false — so this
+ * control can only ever set or clear a single boolean, never an arbitrary
+ * write.
  *
  * POPOVER RULES — all inherited from SortFilterMenu and all load-bearing:
  *  - The element carrying `popover` has NO className. An author `display` beats
