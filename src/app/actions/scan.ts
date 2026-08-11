@@ -1,7 +1,10 @@
 "use server";
 import { requireUser, AuthError } from "@/lib/authz";
-import { getItem, getItemBySerialForScan } from "@/modules/items/items.service";
+import { getItem, getItemBySerialForScan, getItemForScan } from "@/modules/items/items.service";
 import { getLastReceiver } from "@/modules/transfers/transfers.service";
+// Type-only: this action runs on the server, and a value import from a
+// component module would drag client code onto the server graph.
+import type { SelectedItem } from "@/components/items-view";
 
 export type ScanLookup =
   | { ok: true; item: { id: string; make: string; model: string; serialNumber: string }; holderName: string | null }
@@ -46,8 +49,8 @@ export async function lookupScannedItem(itemId: string): Promise<ScanLookup> {
   }
 }
 
-export type SerialResolution =
-  | { ok: true; itemId: string }
+export type ScanResolution =
+  | { ok: true; item: SelectedItem }
   | { ok: false; code: "NOT_FOUND" | "UNAUTHORIZED" | "FAILED" };
 
 /** Resolve a scanned serial, trying the raw value first and the alternate
@@ -99,16 +102,14 @@ export async function lookupScannedSerial(serial: string, altSerial?: string): P
 }
 
 /**
- * Resolves a scanned serial to an item id for the /items list.
+ * Resolve a scanned serial for the /items scan sheet.
  *
  * Deliberately does NOT apply the ACTIVE filter lookupScannedSerial does: that
- * rule exists because the builder is about to put the item on a hand receipt,
- * and this surface only opens a page. A retired device is exactly the kind of
- * thing someone scans to ask "what is this and why is it on the shelf".
- *
- * Returns an id and nothing else — the item page does its own gated fetch.
+ * rule exists because the builder is about to put the item on a signed
+ * document. This surface collects, and a retired device is exactly the kind of
+ * thing someone scans to ask "why is this on the shelf". The caller flags it.
  */
-export async function resolveScannedSerial(serial: string, altSerial?: string): Promise<SerialResolution> {
+export async function resolveScannedSerial(serial: string, altSerial?: string): Promise<ScanResolution> {
   try {
     await requireUser();
   } catch (e) {
@@ -122,9 +123,31 @@ export async function resolveScannedSerial(serial: string, altSerial?: string): 
 
   try {
     const item = await findBySerial(sn, altSerial);
-    return item ? { ok: true, itemId: item.id } : { ok: false, code: "NOT_FOUND" };
+    return item ? { ok: true, item } : { ok: false, code: "NOT_FOUND" };
   } catch (e) {
     console.error("[resolveScannedSerial] unexpected error:", e);
+    return { ok: false, code: "FAILED" };
+  }
+}
+
+/** The same, for our own QR sticker, which names an item id directly. */
+export async function resolveScannedItemId(itemId: string): Promise<ScanResolution> {
+  try {
+    await requireUser();
+  } catch (e) {
+    if (e instanceof AuthError) return { ok: false, code: "UNAUTHORIZED" };
+    console.error("[resolveScannedItemId] auth check failed:", e);
+    return { ok: false, code: "FAILED" };
+  }
+
+  const id = itemId.trim();
+  if (!id) return { ok: false, code: "NOT_FOUND" };
+
+  try {
+    const item = await getItemForScan(id);
+    return item ? { ok: true, item } : { ok: false, code: "NOT_FOUND" };
+  } catch (e) {
+    console.error("[resolveScannedItemId] unexpected error:", e);
     return { ok: false, code: "FAILED" };
   }
 }

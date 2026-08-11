@@ -56,6 +56,17 @@ export function getItemBySerialForScan(serialNumber: string) {
   });
 }
 
+/** The columns a scan needs, by id. Mirrors getItemBySerialForScan — identity
+ *  for display, status so the caller can flag a retired device without a second
+ *  query. Deliberately NOT the whole row: the result crosses to a client
+ *  component, and `notes` is admin-only. */
+export function getItemForScan(id: string) {
+  return prisma.item.findUnique({
+    where: { id },
+    select: { id: true, make: true, model: true, serialNumber: true, status: true },
+  });
+}
+
 // Just the fields needed to render a QR label — avoids pulling admin-only
 // columns (e.g. `notes`) on the logged-in QR-PDF route under the public /i path.
 export function getItemQrFields(id: string) {
