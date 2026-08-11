@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import prisma from "@/lib/prisma";
 import { recordAudits } from "./audit.service";
-import { ItemError } from "@/modules/items/items.errors";
 import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
 
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==";

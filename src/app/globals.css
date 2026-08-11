@@ -1518,8 +1518,12 @@ input[type="file"].input {
      in the bar used to end above the rail's band by luck, until "More
      actions" didn't. Copy body's expression VERBATIM (not a hardcoded 57px):
      --nav-rail-h already carries a comment that the rendered height must
-     equal it exactly, and a second hand-computed answer is how that drifts. */
-  .selection-bar {
+     equal it exactly, and a second hand-computed answer is how that drifts.
+     Scoped with the SAME `body:has(.nav-rail)` the clearance rule uses, so the
+     offset exists exactly where the rail it clears does: a page rendering the
+     bar without the rail (no AppHeader) would otherwise float it 57px above
+     nothing, and the two rules could disagree about whether a rail is there. */
+  body:has(.nav-rail) .selection-bar {
     bottom: calc(var(--nav-rail-h) + 1px + env(safe-area-inset-bottom));
   }
   /* Checkboxes are tap targets too, not decorations. 13px is the UA default. */

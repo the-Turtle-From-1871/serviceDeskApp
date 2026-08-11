@@ -2171,6 +2171,23 @@ everything else `requireUser()` gates. The owner scoping in
 user's drafts; it does not add a second factor on top of the session that
 already can.
 
+**14. The persisted `/items` selection outlives a sign-out, so a shared browser
+hands the next technician the previous one's batch.** ⚠️ *Accepted 2026-08-11,
+with the persistence it documents.* `items:selection:v1` in **localStorage**
+(`src/components/item-selection-store.ts`) holds the selected devices —
+id, make, model, serial and status — plus a `startedAt` stamp, and nothing
+clears it on sign-out: only `clear()`, or the browser's own site-data reset.
+On a shared desk machine the next person to sign in sees a populated selection
+bar reading "47 selected · started 4:12pm", which *implies the batch is theirs*
+and is one tap from a bulk action. Sensitivity is low — every field in it is
+already public-by-design behind the PIN gate ([§2](#2-authorization)), it is
+client-side only, and every bulk write re-checks item status and the caller's
+capability server-side — but it is **new client-side state crossing a session
+boundary**, which is why it is recorded here rather than left undocumented. The
+lever, if it stops being acceptable, is clearing the key on sign-out (and
+ideally on a change of `session.user.id`), which costs a batch that survives a
+re-login — the case the persistence was added for.
+
 ---
 
 ## Keeping this current
