@@ -31,6 +31,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
   A category typed while creating an unknown serial now joins the managed category list, exactly like every other place an item's category can be set.
 
+  **Scanning a Dell's Express Service Code barcode creates the item under its Service Tag.** The two barcodes sit a centimetre apart on the same label and hold the same value written two ways — the 11-digit express code, and the 7-character tag Dell actually calls the serial. The tag is what the fleet export carries, so an item created under the express code would match nothing on the next import, and that import would add a *second* entry for the same laptop. Whichever of the two barcodes you scan, the item is now created under the tag. Looking a device up is unchanged: both forms still find it.
+
   Looking up a single device now takes one extra tap: scan it, tap Done, tap the row. That is the trade for having one behaviour instead of a mode to get wrong.
 
 ### Changed

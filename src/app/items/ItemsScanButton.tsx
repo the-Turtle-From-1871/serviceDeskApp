@@ -117,8 +117,27 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
 
       if (res.code === "NOT_FOUND") {
         if (intent.kind === "item") return say("err", "That item no longer exists");
-        if (push({ key: preKey, kind: "new", serial: intent.serial, label: intent.label })) {
-          say("err", `${intent.serial} is not in the book`);
+        // CREATE under the service tag, not the raw scan.
+        //
+        // A Dell Express Service Code and its Service Tag are the SAME value in
+        // two bases, printed a centimetre apart on one label. The TAG is what
+        // Dell calls the serial and what the MDM export carries, so a row
+        // created under the 11-digit express code matches nothing an import
+        // will ever bring in — and the next import creates a SECOND row for the
+        // same laptop, neither obviously wrong.
+        //
+        // Safe to prefer it only HERE, on the create path: lookup already tried
+        // both (findBySerial) and neither named an item, so this is a free
+        // choice rather than a guess about which one identifies the device.
+        // The lookup order stays raw-first for exactly the reason scan-code.ts
+        // gives — there, preferring the conversion could rewrite a genuinely
+        // numeric serial into a tag naming a different machine.
+        //
+        // Grounded in the fleet: of 1,204 items, ZERO carry an all-digit
+        // serial, so a scan that converts at all is an express code.
+        const newSerial = intent.altSerial ?? intent.serial;
+        if (push({ key: preKey, kind: "new", serial: newSerial, label: intent.label })) {
+          say("err", `${newSerial} is not in the book`);
         } else if (noticeThrottled(preKey)) {
           say("err", "Already scanned");
         }

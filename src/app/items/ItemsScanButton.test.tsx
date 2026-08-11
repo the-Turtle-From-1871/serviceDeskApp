@@ -27,6 +27,10 @@ vi.mock("@/components/QrScanner", () => ({
       <button onClick={() => onDecode(["7X2K9L3"])}>emit-dell</button>
       <button onClick={() => onDecode(["NOSUCH123"])}>emit-unknown</button>
       <button onClick={() => onDecode(["https://x.example/i/i1"])}>emit-sticker</button>
+      {/* A Dell Express Service Code barcode. parseScan carries the raw
+          11-digit value as `serial` and the 7-char Service Tag it converts to
+          as `altSerial` — 17237164935 -> 7X2K9L3. Neither is in the book here. */}
+      <button onClick={() => onDecode(["17237164935"])}>emit-express-unknown</button>
       {/* Named literally "Done" to match the real QrScanner's footer button —
           this test asserts against /^Done/, which Task 7 later suffixes with
           a count. */}
@@ -123,6 +127,52 @@ describe("ItemsScanButton", () => {
     // Anchored for the same reason as above: the scan notice reads
     // "NOSUCH123 is not in the book", which an unanchored match also hits.
     expect(await screen.findByText(/^Not in the book$/i)).toBeDefined();
+  });
+
+  // A Dell label prints the Express Service Code and the Service Tag a
+  // centimetre apart — the same value in base 10 and base 36. The TAG is what
+  // Dell calls the serial and what the MDM export carries, so creating under
+  // the raw express code would produce a row no import can ever match, and the
+  // next import would create a SECOND row for the same laptop.
+  it("creates an unknown express service code under its 7-character service tag", async () => {
+    const user = userEvent.setup();
+    setup(true);
+    await open(user);
+    await user.click(screen.getByRole("button", { name: "emit-express-unknown" }));
+
+    // The list shows the tag, not the 11-digit code that was scanned.
+    expect(await screen.findByText("7X2K9L3")).toBeDefined();
+    expect(screen.queryByText("17237164935")).toBeNull();
+  });
+
+  it("sends the service tag, not the express code, to the create action", async () => {
+    const user = userEvent.setup();
+    setup(true);
+    await open(user);
+    await user.click(screen.getByRole("button", { name: "emit-express-unknown" }));
+    await screen.findByText("7X2K9L3");
+    await user.click(screen.getByRole("button", { name: /^Done/ }));
+
+    await user.type(await screen.findByLabelText(/Make for 7X2K9L3/i), "Dell");
+    await user.type(screen.getByLabelText(/Model for 7X2K9L3/i), "Latitude 5420");
+    await user.click(screen.getByRole("button", { name: /^Create 1/ }));
+
+    await waitFor(() => expect(createScannedItemsAction).toHaveBeenCalledWith([
+      { serialNumber: "7X2K9L3", make: "Dell", model: "Latitude 5420" },
+    ]));
+  });
+
+  // The lookup order is unchanged and must stay raw-first: preferring the
+  // conversion when RESOLVING could rewrite a genuinely numeric serial into a
+  // tag naming a different machine. Only the create path prefers the tag, and
+  // only because the lookup already tried both and neither named an item.
+  it("still looks up the raw value first, with the tag as the alternate", async () => {
+    const user = userEvent.setup();
+    setup(true);
+    await open(user);
+    await user.click(screen.getByRole("button", { name: "emit-express-unknown" }));
+
+    await waitFor(() => expect(resolveScannedSerial).toHaveBeenCalledWith("17237164935", "7X2K9L3"));
   });
 
   it("offers the create form on Done when a serial was unknown", async () => {
