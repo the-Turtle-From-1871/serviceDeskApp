@@ -536,7 +536,16 @@ from the sign-in column to the MDM sync column** (`lastLogonAt` → `lastSyncAt`
 and two date headers changed with it. That changes WHICH devices are listed, not
 what a row exposes: the same three PII fields, the same cap, the same gate, and
 the sheet still carries `lastLogonUserPrincipalName`. No posture change.
-*Last reviewed: 2026-08-11.*
+**2026-08-11 (later): the action now returns the finished .xlsx as base64 rather
+than rows**, and the sheet gained a `Compliance` column. The gate, the cap and
+the overflow probe are unchanged, and it is still a Server Action — deliberately
+not a download route, so a revoked grant is still answered with a sentence
+rather than a bare 403. One field is added to what leaves in bulk (a device's
+MDM compliance state, already shown on `/i/<id>` and `/items`); the three PII
+fields are the same. Note the CSV formula-injection guard does **not** apply to
+this export any more and does not need to: a string written to xlsx is a string
+cell, never a formula, which `stale-workbook.test.ts` pins by round-tripping a
+`=HYPERLINK(…)` value. *Last reviewed: 2026-08-11.*
 
 **Admin-only capabilities:** returns, user management, named signatures,
 service-queue mutations, receipt timers, **recording** an audit, analytics,

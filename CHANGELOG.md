@@ -27,6 +27,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Two confirmations before something irreversible.** *Record audit* now asks first, naming how many devices and which signature it will sign as — it writes an accountability record for every device and cannot be undone. *Clear selection* asks before discarding a batch of more than 20, which now takes a re-scan to rebuild rather than a moment.
 
 ### Changed
+- **The dormant-device export is now a colour-coded Excel file instead of a CSV.** Every row is shaded so the sheet can be worked down without reading a single date: **red** if the device is not compliant, otherwise **orange** at 60–90 days since its last MDM check-in and **yellow** at 30–59. Non-compliance wins, so a device out of policy is red however recently it synced — on the current fleet that is 82 of the 86 devices listed, which is rather the point: those are the ones to pick up first.
+
+  The sheet gains a **Compliance** column showing the value exactly as MDM reports it (`compliant`, `noncompliant`, `inGracePeriod`), so a red row says why it is red. A legend under the data names each colour, and the header row stays frozen while you scroll. A device **in a grace period is not red** — Intune means "out of policy but not yet enforced" by that, so it keeps its age colour; likewise a device the export says nothing about.
+
+  Everything else is unchanged: the same devices, the same 30–90 day window, the same exclusions, the same cap and the same warning when it binds — except that a capped sheet now says so **inside the file** as well as on screen, since the file is what gets mailed on. The button reads **Export Excel**; every other chart on the dashboard still exports CSV.
+
+  #### Notes
+  - Adds `write-excel-file` (MIT). The workbook is built on the server, so nothing new reaches the browser bundle.
+
 - **Marking devices on hand no longer clears the selection.** It used to empty the batch on success, which was harmless when the selection vanished on reload and is not now — a scanned sweep is worth keeping, and clearing it also took away the *"Marked 47 items on hand."* message before it could be read. Every control in the selection bar now keeps the batch; *Clear selection* is the one way out.
 
 - **The Import items page now documents the lastSync column, and says what happens without it.** The downloadable template has carried `lastSync` since the column shipped, but the on-page column list stopped at `compliance`, so nobody building an export had any reason to include it. It is now listed with its accepted spellings (`lastSync`, `Last Sync`, `lastSyncDate`, `lastSyncDateTime`), alongside a note that it is *when MDM last checked in* rather than *when a person last signed in*, that the two routinely disagree, and that the dashboard's "devices MDM has not seen recently" list stays empty until the file carries it.

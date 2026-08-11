@@ -531,6 +531,7 @@ type StaleDeviceQueryRow = {
   storageLocation: string | null;
   lastLogonUserPrincipalName: string | null;
   lastSyncAt: Date;
+  compliance: string | null;
   readiness: ReadinessState;
 };
 
@@ -580,6 +581,7 @@ export async function listStaleDevices(
            i."storageLocation",
            i."lastLogonUserPrincipalName",
            i."lastSyncAt",
+           i."compliance",
            ${READINESS_CASE} AS readiness
     FROM "Item" i
     ${READINESS_JOINS}
@@ -609,6 +611,12 @@ export async function listStaleDevices(
     "Last logon user": r.lastLogonUserPrincipalName ?? "",
     "Last sync date": isoDay(r.lastSyncAt),
     "Days since sync": Math.floor((now.getTime() - r.lastSyncAt.getTime()) / DAY_MS),
+    // Verbatim from the MDM export ("compliant", "noncompliant",
+    // "inGracePeriod"), NOT relabelled: the sheet is cross-checked against
+    // Intune, and `staleSeverity` reads this same raw value to pick the row's
+    // colour. Prettifying it here would leave the two describing one device
+    // differently.
+    Compliance: r.compliance ?? "",
     Readiness: READINESS_LABEL[r.readiness],
   }));
 
