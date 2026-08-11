@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
+import { MAX_TEST_WORKERS } from "./tests/helpers/test-db-name";
 
 const emptyModule = fileURLToPath(new URL("./tests/helpers/empty-module.ts", import.meta.url));
 
@@ -32,7 +33,15 @@ export default defineConfig({
     // was added for was retired); it stays so a new script test is picked up
     // without anyone having to remember this file.
     include: ["src/**/*.test.ts", "src/**/*.test.tsx", "tests/**/*.test.ts", "scripts/**/*.test.mjs"],
-    fileParallelism: false, // integration tests share one test DB
+    // Pinned rather than left to the default: this suite now depends on
+    // process-level isolation for its per-worker databases, and Prisma's native
+    // bindings do not belong in worker threads.
+    pool: "forks",
+    // MUST NOT exceed MAX_TEST_WORKERS. globalSetup provisions exactly that many
+    // databases, so a worker numbered beyond it would resolve to a database
+    // nobody created and fail to connect. Vitest's default is derived from the
+    // core count, so on a bigger machine it would silently overrun.
+    maxWorkers: MAX_TEST_WORKERS,
     setupFiles: ["tests/helpers/setup-env.ts"],
     // Provisions the per-worker databases once per run. See global-setup.ts.
     globalSetup: ["tests/helpers/global-setup.ts"],
