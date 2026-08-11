@@ -6,7 +6,13 @@ import prisma from "@/lib/prisma";
 // normalizeCategoryName comes from the PURE schema module, not categories.service
 // (which is `server-only`): every write path must apply the same canonical form
 // or an item's stored string and its vocabulary row drift apart.
-import { newItemSchema, normalizeCategoryName, type NewItemInput, type ScannedItemInput } from "./items.schema";
+import {
+  newItemSchema,
+  normalizeCategoryName,
+  MAX_BULK_ITEMS,
+  type NewItemInput,
+  type ScannedItemInput,
+} from "./items.schema";
 import type { SelectedItem } from "@/components/items-view";
 import { parseItemsCsv } from "./csv";
 import { planImport, type SkippedRow, type ExistingItem, type ItemUpdate } from "./import";
@@ -589,9 +595,10 @@ const castFor = (column: string) => COLUMN_CAST[column] ?? "text";
  *  round-trip count small. */
 const UPDATE_CHUNK_ROWS = 500;
 
-/** Hard cap on one bulk action. The UI selects at most a page at a time, but
- *  the action is reachable by POST, so the server bounds it too. */
-export const MAX_BULK_ITEMS = 500;
+// Re-exported, not redeclared: the definition lives in the pure schema module
+// so the /items selection (a Client Component) can import it without pulling
+// Prisma into the browser bundle. See items.schema.ts.
+export { MAX_BULK_ITEMS };
 
 /**
  * Create items from a scan session, in TWO queries for N rows.

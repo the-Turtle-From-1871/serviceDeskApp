@@ -240,3 +240,11 @@ export const userItemDetailsSchema = z.object({
 });
 
 export type UserItemDetailsInput = z.infer<typeof userItemDetailsSchema>;
+
+/** Hard cap on one bulk action. The UI selects at most this many, but every
+ *  bulk action is reachable by POST, so the server bounds it too.
+ *
+ *  Declared HERE rather than in items.service.ts because the /items selection
+ *  is a Client Component and must be able to import it — items.service.ts
+ *  imports Prisma, which must never reach the browser bundle. */
+export const MAX_BULK_ITEMS = 500;

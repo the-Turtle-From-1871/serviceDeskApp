@@ -30,6 +30,11 @@ vi.mock("@/app/admin/actions/items", () => ({ toggleItemStatusAction: vi.fn(), d
 // Without this, DOM nodes from each `renderEmpty()` pile up across tests in
 // this file and later assertions see duplicates. Mirrors ContactCombobox.test.tsx.
 afterEach(cleanup);
+// The selection is now persisted to localStorage (see item-selection-store.ts),
+// which — unlike the old useState — survives across tests in this file unless
+// cleared: without this, a later test's fresh ItemSelectionProvider would
+// rehydrate a previous test's selection instead of starting empty.
+afterEach(() => window.localStorage.clear());
 
 function renderEmpty(props: Partial<Parameters<typeof ItemSelectTable>[0]> = {}) {
   return renderTable(

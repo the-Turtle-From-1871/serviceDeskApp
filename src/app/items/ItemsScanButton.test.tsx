@@ -61,6 +61,11 @@ const open = async (user: ReturnType<typeof userEvent.setup>) => {
 };
 
 afterEach(cleanup);
+// The selection is now persisted to localStorage (see item-selection-store.ts),
+// which — unlike the old useState — survives across tests in this file unless
+// cleared: without this, a later test's fresh ItemSelectionProvider would
+// rehydrate the previous test's selection instead of starting empty.
+afterEach(() => window.localStorage.clear());
 beforeEach(() => {
   vi.clearAllMocks();
   resolveScannedSerial.mockImplementation(async (sn: string) =>

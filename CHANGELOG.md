@@ -5,6 +5,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-08-11
 
+### Added
+- The `/items` selection now survives a reload, a screen lock and a re-login. A batch scanned over several minutes is no longer lost, and the selection bar shows when it was started. Selections are capped at 500 items, matching the limit bulk actions already enforced.
+
 ### Removed
 - **Home units are no longer guessed from a device's name.** The import used to read a device name like `HI-DCSIM-LT-001`, look for a piece of it that matched a known unit, and fill in the home unit when the spreadsheet left that column blank. It no longer does. A device's home unit comes from the **homeUnit column** in the spreadsheet, or from editing the device in the app — and stays blank otherwise.
 
