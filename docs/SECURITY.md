@@ -3,7 +3,7 @@
 A living inventory of every security control in this app — what it does, where
 it lives, and why. **Maintained over time**; see [Keeping this current](#keeping-this-current).
 
-**Last reviewed: 2026-08-10**
+**Last reviewed: 2026-08-11**
 
 Related: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`../CLAUDE.md`](../CLAUDE.md) · [`password-reset-hardening.md`](./password-reset-hardening.md)
 
@@ -437,6 +437,21 @@ unreturned hand receipt / MDM logon and from a `PENDING` `ServiceQueueItem`
 respectively, and must stay unforgeable by hand. Widening that enum is a
 security change, not a feature toggle — so a change here needs an update to
 this document in the same commit.
+
+**`recordAuditsAction` is the batched twin of `markAuditedAction` and shares its
+guard.** `src/app/admin/actions/audit.ts`, gated on `requireAdmin()`
+(`ADMINISTER`) exactly like the single-item action beside it. The client posts
+only a comma-separated `itemIds` string and a `signatureId`; the signer name and
+image are re-read server-side via `getOwnedSignature(id, session.user.id)`, so a
+signature id belonging to another admin — or a bogus one — is refused with
+"Select a valid signature." rather than trusted from the form. Item ids are
+client-supplied and therefore bounded at `MAX_BULK_ITEMS` (500) both in the
+action's Zod schema (a readable message) and again in `recordAudits()`
+(`src/modules/audit/audit.service.ts`, the backstop for any other caller, which
+throws `ItemError("TOO_MANY")`). Retired items are excluded from the write and
+reported back as `skipped`, never refused — the batch equivalent of the
+single-item action's "Retired items cannot be audited" rejection, but a
+retired device in a 150-item sweep must not fail the other 149.
 
 **Permanent item deletion is `requireAdmin()`-gated and has no undo.**
 `deleteItemAction` (`src/app/admin/actions/items.ts`) is the sole caller of

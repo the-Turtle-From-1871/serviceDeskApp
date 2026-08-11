@@ -4,11 +4,16 @@ const requireAdmin = vi.fn();
 const getItem = vi.fn();
 const getOwnedSignature = vi.fn();
 const recordAudit = vi.fn();
+const recordAudits = vi.fn();
 const revalidatePath = vi.fn();
 
 vi.mock("@/lib/authz", () => ({
   requireAdmin: () => requireAdmin(),
-  AuthError: class AuthError extends Error {},
+  AuthError: class AuthError extends Error {
+    constructor(public code: string) {
+      super(code);
+    }
+  },
 }));
 vi.mock("@/modules/items/items.service", () => ({
   getItem: (id: string) => getItem(id),
@@ -18,12 +23,14 @@ vi.mock("@/modules/signatures/signatures.service", () => ({
 }));
 vi.mock("@/modules/audit/audit.service", () => ({
   recordAudit: (input: unknown) => recordAudit(input),
+  recordAudits: (input: unknown) => recordAudits(input),
 }));
 vi.mock("next/cache", () => ({
   revalidatePath: (path: string) => revalidatePath(path),
 }));
 
-import { markAuditedAction } from "./audit";
+import { AuthError } from "@/lib/authz";
+import { markAuditedAction, recordAuditsAction } from "./audit";
 
 const ADMIN = { id: "admin-1", role: "ADMIN" as const, name: "Sgt Admin", email: "admin@x.mil" };
 
@@ -38,6 +45,7 @@ beforeEach(() => {
   requireAdmin.mockResolvedValue(ADMIN);
   getItem.mockResolvedValue({ id: "i1", status: "ACTIVE" });
   getOwnedSignature.mockResolvedValue({ name: "SFC Tech", image: "data:image/png;base64,AAA" });
+  recordAudits.mockResolvedValue({ updated: 0, skipped: 0 });
 });
 
 describe("markAuditedAction", () => {
@@ -80,5 +88,28 @@ describe("markAuditedAction", () => {
     requireAdmin.mockRejectedValueOnce(new Error("FORBIDDEN"));
     await expect(markAuditedAction(undefined, fd({ itemId: "i1", signatureId: "sig-1" }))).rejects.toThrow();
     expect(recordAudit).not.toHaveBeenCalled();
+  });
+});
+
+describe("recordAuditsAction", () => {
+  it("refuses a caller without ADMINISTER", async () => {
+    requireAdmin.mockRejectedValueOnce(new AuthError("FORBIDDEN"));
+    await expect(
+      recordAuditsAction(fd({ itemIds: "a1,a2", signatureId: "s1" })),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(recordAudits).not.toHaveBeenCalled();
+  });
+
+  it("refuses a signature belonging to another admin", async () => {
+    getOwnedSignature.mockResolvedValueOnce(null);
+    const res = await recordAuditsAction(fd({ itemIds: "a1", signatureId: "someone-elses-id" }));
+    expect(res).toEqual({ error: "Select a valid signature." });
+    expect(recordAudits).not.toHaveBeenCalled();
+  });
+
+  it("refuses an empty selection", async () => {
+    const res = await recordAuditsAction(fd({ itemIds: "", signatureId: "s1" }));
+    expect(res).toEqual({ error: "Select at least one item." });
+    expect(recordAudits).not.toHaveBeenCalled();
   });
 });
