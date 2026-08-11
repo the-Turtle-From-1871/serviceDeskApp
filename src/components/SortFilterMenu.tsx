@@ -128,6 +128,16 @@ export type MenuFilter = {
   onChange: (value: string) => void;
 };
 
+/** One optional ONE-WAY filter, rendered as a checkbox. Unchecked means "no
+ *  filter", never "show me the complement" — which is why it is not a
+ *  two-option `MenuFilter`: a select implies both directions are meaningful,
+ *  and "devices that do NOT need renaming" is not a list anyone wants. */
+export type MenuToggle = {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+};
+
 export function SortFilterMenu({
   idPrefix,
   columns,
@@ -136,6 +146,7 @@ export function SortFilterMenu({
   dir,
   secondary,
   filter,
+  toggle,
   onPrimary,
   onDir,
   onSecondary,
@@ -154,6 +165,13 @@ export function SortFilterMenu({
    *  entirely — a page whose sort takes one key must not offer a second. */
   secondary?: string | null;
   filter?: MenuFilter;
+  /** An optional ONE-WAY filter, rendered as a checkbox rather than a select.
+   *  A select needs a vocabulary; this is a worklist narrowing ("only the rows
+   *  that need attention"), where unchecked means "no filter" and not "only the
+   *  rows that are fine" — so a two-option select would offer a third state the
+   *  data cannot express. Omit it entirely and nothing renders; the service
+   *  queue passes none. */
+  toggle?: MenuToggle;
   onPrimary: (key: string | null) => void;
   onDir: (dir: SortDir) => void;
   onSecondary?: (key: string | null) => void;
@@ -202,6 +220,20 @@ export function SortFilterMenu({
                 {filter.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </Field>
+          )}
+
+          {/* A checkbox, not a Field+select: the label belongs BESIDE the box,
+              and the 44px tap floor has to come from the row rather than the
+              input, which iOS sizes itself. */}
+          {toggle && (
+            <label className="popup-menu__check">
+              <input
+                type="checkbox"
+                checked={toggle.checked}
+                onChange={(e) => toggle.onChange(e.target.checked)}
+              />
+              <span>{toggle.label}</span>
+            </label>
           )}
 
           <Field label="Sort by">

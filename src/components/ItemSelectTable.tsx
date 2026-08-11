@@ -64,6 +64,7 @@ export function ItemSelectTable({
   sortKeys,
   uic,
   uics,
+  needsRename,
   categories = [],
 }: {
   items: ItemRow[];
@@ -76,6 +77,7 @@ export function ItemSelectTable({
   sortKeys: SortKey[];
   uic: string | null;
   uics: string[];
+  needsRename: boolean;
   /** The managed DeviceCategory vocabulary, fetched ONCE server-side by the page
    *  and passed down — never a per-row lookup. Only used by the admin bulk
    *  controls in the selection bar. */
@@ -479,6 +481,7 @@ export function ItemSelectTable({
     keys?: SortKey[];
     page?: number;
     uic?: string | null;
+    needsRename?: boolean;
   }) => {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
@@ -491,6 +494,11 @@ export function ItemSelectTable({
 
     const nextUic = over.uic !== undefined ? over.uic : uic;
     if (nextUic) params.set("uic", nextUic);
+
+    // Written only when ON, so an unfiltered URL stays clean — and read back as
+    // exactly "1" by the page, so there is one spelling of "on".
+    const nextNeedsRename = over.needsRename !== undefined ? over.needsRename : needsRename;
+    if (nextNeedsRename) params.set("needsRename", "1");
 
     const nextPage = over.page ?? page;
     if (nextPage > 1) params.set("page", String(nextPage));
@@ -520,6 +528,7 @@ export function ItemSelectTable({
     navigate({ keys: [{ ...first, dir: next }, ...rest], page: 1 });
   };
   const setUic = (next: string | null) => navigate({ uic: next, page: 1 });
+  const setNeedsRename = (next: boolean) => navigate({ needsRename: next, page: 1 });
 
   return (
     <>
@@ -533,7 +542,7 @@ export function ItemSelectTable({
         <SortFilterMenu
           idPrefix="items"
           columns={SORTABLE_COLUMNS}
-          summary={sortFilterSummary(sort, dir, uic)}
+          summary={sortFilterSummary(sort, dir, uic, needsRename)}
           sort={sort}
           dir={dir}
           secondary={secondarySort?.key ?? null}
@@ -549,6 +558,11 @@ export function ItemSelectTable({
                 }
               : undefined
           }
+          toggle={{
+            label: "Needs rename in Intune",
+            checked: needsRename,
+            onChange: setNeedsRename,
+          }}
           onPrimary={setPrimary}
           onDir={setPrimaryDir}
           onSecondary={setSecondary}

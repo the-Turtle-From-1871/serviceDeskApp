@@ -835,6 +835,30 @@ input[type="file"].input {
   display: block;
   padding: 6px 8px;
 }
+/* A one-way filter (a worklist narrowing), not a vocabulary — so a checkbox,
+   not a <select>. A real <label> wraps box and caption, so the whole row is the
+   target. The 44px floor comes from THIS row, deliberately: iOS sizes the
+   checkbox glyph itself and a height on the input would either be ignored or
+   distort it, so `min-height` on the label is what actually buys the tap area.
+   No `display` concerns here — this sits inside `.popup-menu__panel`, not on
+   the popover element. */
+.popup-menu__check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--tap, 44px);
+  padding: 6px 8px;
+  cursor: pointer;
+}
+.popup-menu__check input {
+  /* Preflight is absent here, so the UA checkbox survives and is what we want —
+     only the size needs asserting, since the browser default is ~13px and is
+     easy to miss beside 16px text. */
+  width: 18px;
+  height: 18px;
+  flex: none;
+  margin: 0;
+}
 .popup-menu__legend {
   display: block;
   margin: 0 0 4px;

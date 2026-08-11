@@ -22,6 +22,8 @@ export default async function ItemsListPage({
     dir?: string | string[];
     page?: string | string[];
     uic?: string | string[];
+    /** `?needsRename=1` — the rename worklist. Any other value is "off". */
+    needsRename?: string | string[];
   }>;
 }) {
   const user = await requireUser();
@@ -45,6 +47,9 @@ export default async function ItemsListPage({
       dir: firstParam(sp.dir) ?? null,
       page: pageParam ? Number.parseInt(pageParam, 10) : 1,
       uic: firstParam(sp.uic) ?? null,
+      // Exactly "1" is on. A permissive check (any non-empty value) would make
+      // `?needsRename=0` mean the opposite of what it says.
+      needsRename: firstParam(sp.needsRename) === "1",
     }),
     listItemUics(),
     isAdmin ? listCategoryNames() : Promise.resolve<string[]>([]),
@@ -84,6 +89,7 @@ export default async function ItemsListPage({
             q={q ?? ""}
             sortKeys={result.sortKeys}
             uic={result.uic}
+            needsRename={result.needsRename}
           />
           <ItemsScanButton />
         </div>
@@ -126,6 +132,7 @@ export default async function ItemsListPage({
             sortKeys={result.sortKeys}
             uic={result.uic}
             uics={uics}
+            needsRename={result.needsRename}
             categories={categoryNames.map((name) => ({ name }))}
           />
       </main>

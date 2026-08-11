@@ -13,12 +13,14 @@ export function ItemsSearchInput({
   q,
   sortKeys,
   uic,
+  needsRename,
 }: {
   q: string;
   /** The FULL compound sort, not just the first key — rebuilding the URL from
    *  a lone `sort`/`dir` silently collapsed a two-key sort down to one. */
   sortKeys: SortKey[];
   uic: string | null;
+  needsRename: boolean;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState(q);
@@ -34,9 +36,11 @@ export function ItemsSearchInput({
   // is still pending.
   const sortRef = useRef(sortKeys);
   const uicRef = useRef(uic);
+  const needsRenameRef = useRef(needsRename);
   useEffect(() => {
     sortRef.current = sortKeys;
     uicRef.current = uic;
+    needsRenameRef.current = needsRename;
   });
 
   useEffect(() => {
@@ -56,6 +60,7 @@ export function ItemsSearchInput({
         params.set("dir", sortRef.current.map((k) => k.dir).join(","));
       }
       if (uicRef.current) params.set("uic", uicRef.current);
+      if (needsRenameRef.current) params.set("needsRename", "1");
       // Changing the query resets to page 1 (omitted = page 1): a narrower
       // result set could otherwise strand the user on a now-empty page.
       const s = params.toString();
