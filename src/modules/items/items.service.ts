@@ -837,7 +837,15 @@ async function activeRenameTargets(
  *  Case-INSENSITIVE: `deviceName` is not citext (unlike `serialNumber`), so a
  *  plain IN would call "LAPTOP-005" and "laptop-005" different names, which
  *  nobody reading the property book would. Matches how units.service.ts
- *  compares unit names. Values are bound via Prisma.join, never interpolated. */
+ *  compares unit names. Values are bound via Prisma.join, never interpolated.
+ *
+ *  Only `excludeIds` is excluded — nothing else is. In particular a RETIRED
+ *  device holding a target name blocks the batch just as an active one does,
+ *  and it is the one collision an operator cannot resolve by looking at the
+ *  pile in front of them. That is deliberate: the property book still shows
+ *  that name, so handing it to a second device would make the two
+ *  indistinguishable in search and on a receipt. The refusal names the serial,
+ *  which is what makes it diagnosable. */
 async function findNameCollisions(
   client: Prisma.TransactionClient | typeof prisma,
   names: string[],
@@ -845,19 +853,32 @@ async function findNameCollisions(
 ): Promise<RenameCollision[]> {
   if (names.length === 0) return [];
   const lowered = names.map((n) => n.toLowerCase());
+  // `Prisma.join([])` emits `NOT IN ()`, a syntax error. An empty exclude set
+  // means "no item is exempt", so the clause is DROPPED rather than the query
+  // short-circuited to `[]` — returning no collisions there would report a
+  // taken name as free. Unreachable from both current callers (each passes the
+  // active ids it just read); this is the guard so a third cannot trip it.
+  const exclude =
+    excludeIds.length > 0 ? Prisma.sql`AND "id" NOT IN (${Prisma.join(excludeIds)})` : Prisma.empty;
   return client.$queryRaw<RenameCollision[]>(Prisma.sql`
     SELECT "deviceName" AS name, "serialNumber"::text AS "serialNumber"
     FROM "Item"
     WHERE lower("deviceName") IN (${Prisma.join(lowered)})
-      AND "id" NOT IN (${Prisma.join(excludeIds)})
+      ${exclude}
     ORDER BY "deviceName"
   `);
 }
 
 /**
  * What a bulk rename WOULD do. Read-only and advisory — `renameItems` re-checks
- * inside its own transaction, which is what closes the window where another
- * session takes one of these names between this call and the tap.
+ * inside its own transaction, which NARROWS the window where another session
+ * takes one of these names from "between this call and the tap" to the
+ * transaction's own duration. It does not close it: under Read Committed two
+ * concurrent renames sharing a prefix each check before either commits, each
+ * excludes only its own ids, and both commit — and `deviceName` carries no
+ * unique constraint to catch it. Accepted: it needs two admins renaming to the
+ * same prefix at the same moment, and the nightly MDM import overwrites both
+ * regardless. Do not write down a stronger guarantee than that here.
  *
  * Enforces NO permissions — the calling Server Action owns the guard.
  */
@@ -946,7 +967,13 @@ export async function renameItems(
     if (edits.length === 0) return { ok: true, renamed: 0, unchanged, skipped };
 
     await tx.$executeRaw(Prisma.sql`
-      UPDATE "Item" SET "deviceName" = v.name
+      UPDATE "Item" SET "deviceName" = v.name,
+          -- Raw SQL bypasses Prisma's @updatedAt, so it is set explicitly.
+          -- Without this, a renamed row would keep its old updatedAt and claim
+          -- it had not changed. Same reason the importer's batched UPDATE
+          -- carries it; this is the third deviceName writer and the only one
+          -- Prisma does not stamp for us.
+          "updatedAt" = NOW()
       FROM (VALUES ${Prisma.join(
         edits.map((e) => Prisma.sql`(${e.id}::text, ${e.name}::text)`),
       )}) AS v(id, name)

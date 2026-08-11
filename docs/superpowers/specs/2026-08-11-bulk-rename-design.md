@@ -148,8 +148,14 @@ gate, matching `setItemsCategoryAction` rather than the `MANAGE_QUEUE` readiness
 | `previewItemRenameAction(itemIds, prefix, start)` | `{ names, collisions }` | Advisory — drives the range line and the collision list |
 | `renameItemsAction(itemIds, prefix, start)` | `{ error } \| { ok, renamed, unchanged, skipped }` | Authoritative — re-checks collisions **inside the transaction** |
 
-Preview is a hint; the transaction is the boundary. That closes the window where another
-session takes one of the names between your preview and your tap.
+Preview is a hint; the transaction is the boundary. That **narrows** the window where another
+session takes one of the names — from "between your preview and your tap" down to the
+transaction's own duration. It does **not** close it: Prisma's default isolation is Read
+Committed, so two concurrent renames sharing a prefix each check collisions before either
+commits, each excludes only its own ids, and both land — and there is no unique constraint on
+`deviceName` to catch it. Accepted rather than fixed with `SERIALIZABLE`: it takes two admins
+renaming to the same prefix at the same moment, and the nightly MDM import overwrites both
+names anyway. Do not restate this as a guarantee.
 
 Result shape is annotated as a local `type`, not inferred — a `"use server"` module may only
 export async functions.

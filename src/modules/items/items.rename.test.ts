@@ -98,6 +98,30 @@ describe("renameItems", () => {
     expect(await prisma.itemEdit.count()).toBe(0);
   });
 
+  it("bumps updatedAt on every renamed row", async () => {
+    // `@updatedAt` is a Prisma CLIENT feature, not a DB default or trigger, so
+    // the batched $executeRaw has to set the column itself. Without that a
+    // renamed row keeps its old stamp and claims it never changed — silently,
+    // since nothing reads the column today.
+    const a = await mkItem("R17", "was-a");
+    const b = await mkItem("R18", "was-b");
+    const before = new Map(
+      (await prisma.item.findMany({ where: { id: { in: [a.id, b.id] } }, select: { id: true, updatedAt: true } }))
+        .map((r) => [r.id, r.updatedAt] as const),
+    );
+
+    await renameItems([a.id, b.id], "LAPTOP", "001", editor());
+
+    const after = await prisma.item.findMany({
+      where: { id: { in: [a.id, b.id] } },
+      select: { id: true, updatedAt: true },
+    });
+    expect(after).toHaveLength(2);
+    for (const row of after) {
+      expect(row.updatedAt.getTime()).toBeGreaterThan(before.get(row.id)!.getTime());
+    }
+  });
+
   it("throws TOO_MANY above the cap", async () => {
     const ids = Array.from({ length: 501 }, (_, i) => `id-${i}`);
     await expect(renameItems(ids, "X", "001", editor())).rejects.toMatchObject({ code: "TOO_MANY" });
