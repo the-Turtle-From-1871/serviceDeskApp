@@ -1,5 +1,6 @@
 "use client";
 import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import { QrScanner, SCAN_FORMATS } from "@/components/QrScanner";
 import { parseScans, describeScan } from "@/modules/items/scan-code";
@@ -17,7 +18,8 @@ import { beep } from "@/lib/beep";
  * dedupe window so a code still under the camera is not read twice.
  */
 export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
-  const { addMany } = useItemSelection();
+  const { addMany, selected } = useItemSelection();
+  const router = useRouter();
   const [scanning, setScanning] = useState(false);
   const [phase, setPhase] = useState<"scanning" | "creating">("scanning");
   const [scanned, setScanned] = useState<ScannedEntry[]>([]);
@@ -164,7 +166,37 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
   // Done commits the ACTIVE items and closes — unless there are unknown serials
   // and the operator may create them, in which case the sheet becomes the
   // create form. It ADDS to whatever is already selected rather than replacing.
+  // Scanning exactly ONE device is a lookup, not a selection — open it.
+  //
+  // Building a selection of one and making the operator hunt for the row is the
+  // slowest possible way to answer "what is this thing", which is the commonest
+  // reason anyone points the camera at a single label. The original flow
+  // navigated on the first hit; collecting a batch replaced that wholesale, and
+  // this restores it for the one case where it was strictly better — WITHOUT
+  // reintroducing a mode, because the rule is derived from what was scanned
+  // rather than from a switch someone has to set correctly beforehand.
+  //
+  // Retired counts. `resolveScannedSerial` deliberately returns retired items so
+  // the sheet can flag them, and "why is this on the shelf" is exactly the
+  // question a single scan of one asks — it just cannot join a selection.
+  //
+  // Two guards, both there to make Done never destroy work:
+  //   * only when NOTHING was already selected. Navigating unmounts the
+  //     provider, so a selection built by tapping would vanish silently.
+  //     Someone mid-selection who scans one more wants it added, not opened.
+  //   * only when the single entry RESOLVED. An unknown serial has no page to
+  //     open, and the create flow below matters more.
+  const soleItem =
+    scanned.length === 1 && scanned[0].kind !== "new" && selected.size === 0
+      ? scanned[0].item
+      : null;
+
   const finish = () => {
+    if (soleItem) {
+      setScanning(false);
+      router.push(`/i/${soleItem.id}`);
+      return;
+    }
     commitFound();
     if (canCreate && unknowns.length > 0) return setPhase("creating");
     setScanning(false);
@@ -221,7 +253,10 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
       onDecode={onDecode}
       onClose={finish}
       notice={notice}
-      doneLabel={`Done · ${foundCount} item${foundCount === 1 ? "" : "s"}`}
+      // The button says what pressing it will DO. A single scan opens that
+      // device, so promising a selection it is not going to make would be a
+      // small lie the operator only discovers afterwards.
+      doneLabel={soleItem ? `Open ${soleItem.serialNumber}` : `Done · ${foundCount} item${foundCount === 1 ? "" : "s"}`}
     >
       <div className="scan-list">
         {scanned.length === 0 ? (
@@ -260,7 +295,9 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
           </ul>
         )}
         <p className="scan-list__count subtle">
-          {foundCount} item{foundCount === 1 ? "" : "s"} will be selected
+          {soleItem
+            ? "Scan another to build a selection instead."
+            : `${foundCount} item${foundCount === 1 ? "" : "s"} will be selected`}
         </p>
       </div>
     </QrScanner>
