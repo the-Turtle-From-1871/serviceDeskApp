@@ -1209,6 +1209,15 @@ input[type="file"].input {
   background: var(--primary-soft);
   border-color: #c7d2fe;
 }
+/* Loaner is informational, not a status alarm — the pool-stock flag, never
+   IN_REPAIR/DEPLOYED/etc. It shares the admin badge's blue treatment rather
+   than inventing a sixth colour: every other slot in this palette
+   (green/amber/slate/red) already means something else on this table. */
+.badge-loaner {
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-color: #c7d2fe;
+}
 /* `badge-override` is the original, override-specific name; `badge-danger` is
    the same treatment under a generic name, used where the badge means "this is
    a problem" rather than "a rule was overridden" (e.g. an unaccounted-for item

@@ -153,7 +153,7 @@ export function SortFilterMenu({
   dir,
   secondary,
   filter,
-  toggle,
+  toggles,
   onPrimary,
   onDir,
   onSecondary,
@@ -172,13 +172,13 @@ export function SortFilterMenu({
    *  entirely — a page whose sort takes one key must not offer a second. */
   secondary?: string | null;
   filter?: MenuFilter;
-  /** An optional ONE-WAY filter, rendered as a checkbox rather than a select.
-   *  A select needs a vocabulary; this is a worklist narrowing ("only the rows
-   *  that need attention"), where unchecked means "no filter" and not "only the
-   *  rows that are fine" — so a two-option select would offer a third state the
-   *  data cannot express. Omit it entirely and nothing renders; the service
-   *  queue passes none. */
-  toggle?: MenuToggle;
+  /** Zero or more optional ONE-WAY filters, each rendered as a checkbox rather
+   *  than a select. A select needs a vocabulary; each of these is a worklist
+   *  narrowing ("only the rows that need attention"), where unchecked means "no
+   *  filter" and not "only the rows that are fine" — so a two-option select
+   *  would offer a third state the data cannot express. Omit it entirely (or
+   *  pass an empty array) and nothing renders; the service queue passes none. */
+  toggles?: MenuToggle[];
   onPrimary: (key: string | null) => void;
   onDir: (dir: SortDir) => void;
   onSecondary?: (key: string | null) => void;
@@ -229,19 +229,21 @@ export function SortFilterMenu({
             </Field>
           )}
 
-          {/* A checkbox, not a Field+select: the label belongs BESIDE the box,
-              and the 44px tap floor has to come from the row rather than the
-              input, which iOS sizes itself. */}
-          {toggle && (
-            <label className="popup-menu__check">
+          {/* A checkbox each, not a Field+select: the label belongs BESIDE the
+              box, and the 44px tap floor has to come from the row rather than
+              the input, which iOS sizes itself. Keyed on the label — these are
+              a fixed, caller-supplied list rather than something reordered at
+              runtime. */}
+          {toggles?.map((t) => (
+            <label key={t.label} className="popup-menu__check">
               <input
                 type="checkbox"
-                checked={toggle.checked}
-                onChange={(e) => toggle.onChange(e.target.checked)}
+                checked={t.checked}
+                onChange={(e) => t.onChange(e.target.checked)}
               />
-              <span>{toggle.label}</span>
+              <span>{t.label}</span>
             </label>
-          )}
+          ))}
 
           <Field label="Sort by">
             <select

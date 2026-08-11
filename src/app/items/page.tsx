@@ -26,6 +26,8 @@ export default async function ItemsListPage({
     uic?: string | string[];
     /** `?needsRename=1` — the rename worklist. Any other value is "off". */
     needsRename?: string | string[];
+    /** `?loaner=1` — the loaner-pool worklist. Any other value is "off". */
+    loaner?: string | string[];
   }>;
 }) {
   const user = await requireUser();
@@ -39,10 +41,10 @@ export default async function ItemsListPage({
   // actions re-check MANAGE_QUEUE, which is the real boundary.
   const canAudit = user.capabilities.includes("ADMINISTER");
   const canQueue = user.capabilities.includes("MANAGE_QUEUE");
-  // The bulk rename writes deviceName, which is admin-only item vocabulary —
-  // the same capability the scan button's create path takes. renameItemsAction
-  // re-checks it.
-  const canRename = user.capabilities.includes("MANAGE_ITEMS");
+  // The bulk rename writes deviceName, and the loaner mark, which are both
+  // admin-only item vocabulary — the same capability the scan button's create
+  // path takes. renameItemsAction / setItemsLoanerAction re-check it.
+  const canManageItems = user.capabilities.includes("MANAGE_ITEMS");
 
   // Server-side paginate + sort: only the current page is fetched and serialized to
   // the client (the list was previously unbounded). The audit-status badge and the
@@ -63,6 +65,9 @@ export default async function ItemsListPage({
       // Exactly "1" is on. A permissive check (any non-empty value) would make
       // `?needsRename=0` mean the opposite of what it says.
       needsRename: firstParam(sp.needsRename) === "1",
+      // Exactly "1" is on, matching needsRename. A permissive check would make
+      // `?loaner=0` mean the opposite of what it says.
+      loaner: firstParam(sp.loaner) === "1",
     }),
     listItemUics(),
     isAdmin ? listCategoryNames() : Promise.resolve<string[]>([]),
@@ -112,6 +117,7 @@ export default async function ItemsListPage({
             sortKeys={result.sortKeys}
             uic={result.uic}
             needsRename={result.needsRename}
+            loaner={result.loaner}
           />
           {/* Gated on the CAPABILITY, not `isAdmin`: a USER granted MANAGE_ITEMS
               individually may create scanned serials, a VIEWER may not. */}
@@ -138,6 +144,7 @@ export default async function ItemsListPage({
               deviceCategory: it.deviceCategory,
               homeUnit: it.homeUnit,
               storageLocation: it.storageLocation,
+              isLoaner: it.isLoaner,
               // Raw MDM text, passed straight through — see ItemRow.
               lastLogonUserPrincipalName: it.lastLogonUserPrincipalName,
               lastLogonDate: it.lastLogonDate,
@@ -157,11 +164,12 @@ export default async function ItemsListPage({
             uic={result.uic}
             uics={uics}
             needsRename={result.needsRename}
+            loaner={result.loaner}
             categories={categoryNames.map((name) => ({ name }))}
             signatures={signatures}
             canAudit={canAudit}
             canQueue={canQueue}
-            canRename={canRename}
+            canManageItems={canManageItems}
           />
         </ItemSelectionProvider>
       </main>

@@ -12,6 +12,7 @@ import {
   markItemsReady,
   previewRename,
   renameItems,
+  setItemsLoaner,
   type RenameCollision,
 } from "@/modules/items/items.service";
 import { ItemError } from "@/modules/items/items.errors";
@@ -246,6 +247,55 @@ export async function markItemsReadyAction(formData: FormData) {
       return { error: `Too many items selected. The limit is ${MAX_BULK_ITEMS} per action.` };
     }
     console.error("[markItemsReadyAction] unexpected error:", e);
+    return { error: "Something went wrong updating those items. Please try again." };
+  }
+}
+
+const setLoanerSchema = z.object({
+  itemIds: z.array(z.string().min(1)).min(1, "Select at least one item."),
+  isLoaner: z.boolean(),
+});
+
+/* Annotated, not inferred: a "use server" module may only export async
+   functions, so the union stays a local type — which is what lets the client
+   narrow with `"error" in res` and get a number rather than number | undefined. */
+type LoanerResult =
+  | { error: string }
+  | { ok: true; updated: number; skipped: number; isLoaner: boolean };
+
+/**
+ * Mark the selected items as loaner-pool stock, or take them out of it.
+ *
+ * MANAGE_ITEMS, not ADMINISTER: this is item vocabulary, the same capability
+ * the rename and category controls use. The batch is client-supplied ids, so
+ * this guard is the entire boundary — the sheet hiding the buttons is
+ * presentation, not security.
+ *
+ * Revalidates /items only. Not /admin/analytics: nothing on the dashboard reads
+ * this flag yet, and that entry must be added when the loaner bucket ships.
+ * Not the 500 individual /i/<id> paths either — setReadinessAction sets that
+ * precedent, and the item page picks the badge up on its next render.
+ */
+export async function setItemsLoanerAction(formData: FormData): Promise<LoanerResult> {
+  await requireCapability("MANAGE_ITEMS");
+
+  const parsed = setLoanerSchema.safeParse({
+    itemIds: String(formData.get("itemIds") ?? "").split(",").filter(Boolean),
+    // Exactly "1" is on. Anything else is off, so a malformed value cannot
+    // accidentally mark a batch.
+    isLoaner: String(formData.get("isLoaner") ?? "") === "1",
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+
+  try {
+    const { updated, skipped } = await setItemsLoaner(parsed.data.itemIds, parsed.data.isLoaner);
+    revalidatePath("/items");
+    return { ok: true, updated, skipped, isLoaner: parsed.data.isLoaner };
+  } catch (e) {
+    if (e instanceof ItemError && e.code === "TOO_MANY") {
+      return { error: `Too many items selected. The limit is ${MAX_BULK_ITEMS} per action.` };
+    }
+    console.error("[setItemsLoanerAction] unexpected error:", e);
     return { error: "Something went wrong updating those items. Please try again." };
   }
 }

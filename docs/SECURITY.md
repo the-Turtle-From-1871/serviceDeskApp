@@ -451,6 +451,22 @@ OTHER item) is reported as `{ conflict: true, collisions }` rather than a
 generic error string, so the UI can show which serials are blocking the
 rename.
 
+**`setItemsLoanerAction` marks or unmarks the selected items as loaner-pool
+stock, gated on `requireCapability("MANAGE_ITEMS")`**
+(`src/app/admin/actions/items.ts`), beside `markItemsReadyAction` above. Item
+ids are client-supplied and bounded at `MAX_BULK_ITEMS` (500); the bound is
+enforced by `setItemsLoaner` itself (`src/modules/items/items.service.ts`),
+which throws `ItemError("TOO_MANY")` above the limit, and the action catches
+that and returns a readable message — the schema deliberately has no `.max()`
+of its own, so there is one cap definition rather than a second one that
+could drift from it. `setItemsLoaner` otherwise enforces no permissions, so
+the Server Action is the whole authorization boundary. Retired items are excluded from the
+write and reported back as `skipped`, matching the other bulk item actions
+above. The only value this control can write is a single boolean
+(`isLoaner`), and only the literal string `"1"` reads as true — anything else
+is off — so a malformed or crafted POST cannot turn this into an arbitrary
+write; it can only flip the one flag it exists to flip.
+
 **Readiness is derived, so there is no stored state a POST could assert.** The
 readiness selector writes only the underlying signals — `markedReadyAt` (set or
 clear) and the `Item.status` lifecycle column. Its Zod target enum is an
@@ -746,6 +762,12 @@ boundary lives, and it must not widen again without a doc change.
 > search inventory and open item pages. Receipts are therefore enumerable
 > (`HR-000001…`), and the public pages expose party PII, signatures, and the
 > device catalog. This is intended. It can be hardened later *if the team asks*.
+>
+> The device catalog now includes the loaner mark: `/i/<id>` renders a
+> **Loaner** badge for any device marked as pool stock, alongside the other
+> catalog fields already public there (serial, home unit, current holder,
+> receipt history). This falls inside the accepted device-catalog exposure
+> above, not a new one.
 
 **An 8-digit shared PIN walls off `/i/*` and `/receipts/*`** when
 `PUBLIC_ACCESS_PIN_ENABLED` is on. Logged-in users bypass it. This is a

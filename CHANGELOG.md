@@ -32,6 +32,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   **The 500 limit is a hard stop while you scan, not a surprise at the end.** Once there is no room left the scanner refuses the next code with an error beep and says *"Selection is full (500) — not added"*, so nothing you hear "Added" for can go missing when you tap Done. Remove a row from the list, or apply an action and clear the batch, and scanning carries on.
 
 - **Two confirmations before something irreversible.** *Record audit* now asks first, naming how many devices and which signature it will sign as — it writes an accountability record for every device and cannot be undone. *Clear selection* asks before discarding a batch of more than 20, which now takes a re-scan to rebuild rather than a moment.
+- **Devices can be marked as loaners.** Scan or select a batch on the Items list, open **More actions**, and tap **Mark as loaner** — or **Remove loaner mark** to take them back out of the pool. Marked devices show a **Loaner** badge on their own page and in the list, and **Sort & filter** gains a *Loaners only* checkbox so the whole pool is one tap away.
+
+  **The mark survives the nightly import.** It is a field of its own rather than a category or a storage location, which is why: those columns come from the spreadsheet, so an import would have quietly undone the mark within a day.
+
+  #### Notes
+  - Migration `20260811210000_item_is_loaner` adds the `Item.isLoaner` column (NOT NULL, default false) and its index. **Apply it to Supabase before merging**, per migrate-before-push: Prisma enumerates every column in its SELECT, so until the column exists *every* item read fails, not just the new control.
 
 ### Changed
 - **The dormant-device export is now a colour-coded Excel file instead of a CSV.** Every row is shaded so the sheet can be worked down without reading a single date: **red** if the device is not compliant, otherwise **orange** at 60–90 days since its last MDM check-in and **yellow** at 30–59. Non-compliance wins, so a device out of policy is red however recently it synced — on the current fleet that is 82 of the 86 devices listed, which is rather the point: those are the ones to pick up first.
