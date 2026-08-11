@@ -569,7 +569,15 @@ MDM compliance state, already shown on `/i/<id>` and `/items`); the three PII
 fields are the same. Note the CSV formula-injection guard does **not** apply to
 this export any more and does not need to: a string written to xlsx is a string
 cell, never a formula, which `stale-workbook.test.ts` pins by round-tripping a
-`=HYPERLINK(…)` value. *Last reviewed: 2026-08-11.*
+`=HYPERLINK(…)` value. **2026-08-11 (later still): a SECOND export action of the same shape** —
+`exportDroppedDevicesAction`, listing devices with no MDM sync time at all. It
+is a deliberate copy of the gate above rather than a `kind` parameter on it:
+same `VIEW_ANALYTICS` re-check, same Zod-revalidated and bound scope, same
+`DEVICE_EXPORT_MAX` cap with an overflow probe, same base64 hand-off, same
+absence of an audit row. It exposes the same three PII fields over a
+**different population** — up to ~164 devices today rather than ~86 — and adds
+no field the first does not already carry. Both are counted by Known gaps #7.
+*Last reviewed: 2026-08-11.*
 
 **Admin-only capabilities:** returns, user management, named signatures,
 service-queue mutations, receipt timers, **recording** an audit, analytics,

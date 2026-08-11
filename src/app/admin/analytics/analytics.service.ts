@@ -41,13 +41,14 @@ import {
   AUDIT_STATE_ORDER,
   STALE_MIN_DAYS,
   STALE_MAX_DAYS,
-  STALE_EXPORT_MAX,
+  DEVICE_EXPORT_MAX,
   type AuditReadinessSlice,
   type CategoryKpi,
   type GroupByKey,
   type ItemScope,
   type RangeKey,
   type StaleDeviceRow,
+  type DroppedDeviceRow,
   type UnitAllocation,
   type VelocityPoint,
 } from "./analytics.types";
@@ -557,7 +558,7 @@ function isoDay(d: Date): string {
  * forbid. Ordered stalest-first, because that is the order someone works the
  * list in, with `id` as the tie-break so the sheet is stable between runs.
  *
- * Bounded by STALE_EXPORT_MAX, taking one extra row purely as an overflow
+ * Bounded by DEVICE_EXPORT_MAX, taking one extra row purely as an overflow
  * probe so "is there more?" costs no second COUNT. The probe is trimmed before
  * it reaches the file.
  *
@@ -587,11 +588,11 @@ export async function listStaleDevices(
     ${READINESS_JOINS}
     WHERE ${staleDeviceWhere(scope, now)}
     ORDER BY i."lastSyncAt" ASC, i."id" ASC
-    LIMIT ${STALE_EXPORT_MAX + 1}
+    LIMIT ${DEVICE_EXPORT_MAX + 1}
   `);
 
-  const truncated = found.length > STALE_EXPORT_MAX;
-  const rows = (truncated ? found.slice(0, STALE_EXPORT_MAX) : found).map((r) => ({
+  const truncated = found.length > DEVICE_EXPORT_MAX;
+  const rows = (truncated ? found.slice(0, DEVICE_EXPORT_MAX) : found).map((r) => ({
     Serial: r.serialNumber,
     "Device name": r.deviceName ?? "",
     Make: r.make,
@@ -623,6 +624,139 @@ export async function listStaleDevices(
   return { rows, truncated };
 }
 
+/* ------------------------------------------------------------
+   Dropped off the network — devices MDM cannot see at all.
+
+   THE SIBLING of the dormant list above, and deliberately a SEPARATE query
+   rather than a widening of it. The dormant window measures a device MDM has
+   seen; this one measures the absence of any sync time, which the window can
+   never express — `lastSyncAt IS NULL` is excluded there on purpose, as "we
+   cannot say when", and this is where those devices become visible.
+
+   TWO DELIBERATE DIFFERENCES from `staleDeviceWhere`, both load-bearing:
+
+   1. A DEVICE NAME IS REQUIRED. A row with no name and no MDM record is a
+      hand-created or scanned stub rather than a machine that fell off the
+      network. On the live fleet that excluded 5 rows, one of them a leftover
+      test item.
+
+   2. LIVE CUSTODY DOES NOT EXCLUDE A DEVICE HERE, where it does there. On the
+      dormant list a device out on an open receipt is accounted for BY that
+      receipt and MDM silence is expected. That reasoning does not transfer: a
+      hand receipt explains why nobody has signed in, but it does not explain
+      why MDM has no record of the device at all. One device is affected today;
+      the divergence is written down because it looks like an oversight and is
+      not.
+   ------------------------------------------------------------ */
+
+function droppedDeviceWhere(scope: ItemScope): Prisma.Sql {
+  return Prisma.sql`
+        i."status" = 'ACTIVE'
+    AND ${itemScopeSql(scope)}
+    AND i."lastSyncAt" IS NULL
+    AND i."deviceName" IS NOT NULL
+    AND btrim(i."deviceName") <> ''
+  `;
+}
+
+/** How many devices MDM cannot see. One aggregate; runs on every dashboard
+ *  load beside the dormant count. */
+export async function countDroppedDevices(scope: ItemScope): Promise<number> {
+  const rows = await prisma.$queryRaw<{ count: number }[]>(Prisma.sql`
+    SELECT COUNT(*)::int AS count
+    FROM "Item" i
+    WHERE ${droppedDeviceWhere(scope)}
+  `);
+  return Number(rows[0]?.count ?? 0);
+}
+
+type DroppedDeviceQueryRow = {
+  serialNumber: string;
+  deviceName: string;
+  make: string;
+  model: string;
+  deviceCategory: string | null;
+  homeUnit: string | null;
+  deviceUIC: string | null;
+  currentUserEmail: string | null;
+  currentPosition: string | null;
+  storageLocation: string | null;
+  everInMdm: boolean;
+  lastLogonUserPrincipalName: string | null;
+  lastLogonAt: Date | null;
+  compliance: string | null;
+  readiness: ReadinessState;
+};
+
+/**
+ * The rows behind the dropped-off-network export.
+ *
+ * Ordered so the ACTIONABLE half comes first: devices MDM used to report sit
+ * above devices it never did, and within each, most-recently-seen first. A
+ * plain alphabetical sort would bury the 12 that actually dropped out among the
+ * 152 that were never enrolled.
+ *
+ * `everInMdm` is derived from whether ANY MDM telemetry was ever stored, not
+ * from the sync column alone — a device that dropped out keeps the logon,
+ * enrolment and compliance an earlier import wrote, so those columns are the
+ * evidence that MDM once knew it.
+ */
+export async function listDroppedDevices(
+  scope: ItemScope,
+): Promise<{ rows: DroppedDeviceRow[]; truncated: boolean }> {
+  const found = await prisma.$queryRaw<DroppedDeviceQueryRow[]>(Prisma.sql`
+    SELECT i."serialNumber",
+           i."deviceName",
+           i."make",
+           i."model",
+           i."deviceCategory",
+           i."homeUnit",
+           i."deviceUIC",
+           i."currentUser" AS "currentUserEmail",
+           i."currentPosition",
+           i."storageLocation",
+           (i."enrollmentDate" IS NOT NULL
+             OR i."lastLogonDate" IS NOT NULL
+             OR i."compliance" IS NOT NULL) AS "everInMdm",
+           i."lastLogonUserPrincipalName",
+           i."lastLogonAt",
+           i."compliance",
+           ${READINESS_CASE} AS readiness
+    FROM "Item" i
+    ${READINESS_JOINS}
+    WHERE ${droppedDeviceWhere(scope)}
+    ORDER BY (i."enrollmentDate" IS NOT NULL
+               OR i."lastLogonDate" IS NOT NULL
+               OR i."compliance" IS NOT NULL) DESC,
+             i."lastLogonAt" DESC NULLS LAST,
+             i."id" ASC
+    LIMIT ${DEVICE_EXPORT_MAX + 1}
+  `);
+
+  const truncated = found.length > DEVICE_EXPORT_MAX;
+  const rows = (truncated ? found.slice(0, DEVICE_EXPORT_MAX) : found).map((r) => ({
+    Serial: r.serialNumber,
+    "Device name": r.deviceName,
+    Make: r.make,
+    Model: r.model,
+    Category: r.deviceCategory ?? "",
+    "Home unit": r.homeUnit ?? "",
+    UIC: r.deviceUIC ?? "",
+    Holder: r.currentUserEmail ?? "",
+    Position: r.currentPosition ?? "",
+    "Storage location": r.storageLocation ?? "",
+    "MDM record": r.everInMdm ? "Dropped out" : "Never enrolled",
+    "Last logon user": r.lastLogonUserPrincipalName ?? "",
+    // Blank rather than a dash for a device MDM never knew: the sheet is
+    // filtered and sorted, and a dash is a value that sorts.
+    "Last logon date": r.lastLogonAt ? isoDay(r.lastLogonAt) : "",
+    Compliance: r.compliance ?? "",
+    Readiness: READINESS_LABEL[r.readiness],
+  }));
+
+  return { rows, truncated };
+}
+
 export async function getDashboard(scope: ItemScope, range: RangeKey, groupBy: GroupByKey) {
   const [
     units,
@@ -632,6 +766,7 @@ export async function getDashboard(scope: ItemScope, range: RangeKey, groupBy: G
     allocations,
     fleetTotal,
     staleDeviceCount,
+    droppedDeviceCount,
     vocabulary,
   ] =
     await Promise.all([
@@ -644,6 +779,10 @@ export async function getDashboard(scope: ItemScope, range: RangeKey, groupBy: G
       // One aggregate, joining the same Promise.all — the stale-device card
       // costs the page a query, not a round trip.
       countStaleDevices(scope),
+      // Its sibling — devices MDM cannot see at all, which the window above
+      // can never surface. Same Promise.all, so the second card costs the page
+      // a query rather than a round trip.
+      countDroppedDevices(scope),
       // The full category vocabulary, in a stable order. Deliberately NOT
       // scoped by the UIC filter: it is the chart's COLOUR KEY, so it must be
       // identical whichever unit is selected, or series get repainted.
@@ -660,6 +799,7 @@ export async function getDashboard(scope: ItemScope, range: RangeKey, groupBy: G
     allocations,
     fleetTotal,
     staleDeviceCount,
+    droppedDeviceCount,
     vocabulary,
   };
 }
