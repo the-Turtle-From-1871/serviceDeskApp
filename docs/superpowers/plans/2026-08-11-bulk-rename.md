@@ -557,8 +557,28 @@ git commit -m "feat(items): batched rename service with a collision guard"
 
 **Files:**
 - Modify: `src/app/admin/actions/items.ts`
-- Modify: `src/app/admin/actions/items.test.ts`
+- **Create:** `src/app/admin/actions/items.test.ts` — it does NOT exist yet, despite nine of its siblings having one. Model it on **`src/app/admin/actions/readiness.test.ts`**, the closest sibling (same module under test, same bulk-action shape).
 - Modify: `docs/SECURITY.md`
+
+**Two traps in that sibling's idiom, both of which have already bitten this codebase:**
+
+1. Its `authz` mock exports **only** `requireCapability`:
+   `vi.mock("@/lib/authz", () => ({ requireCapability: () => requireCapability() }))`.
+   There is no `AuthError`, so add one **with a real constructor that preserves `.code`** —
+   `audit.test.ts` shipped a lossy `class AuthError extends Error {}` that silently dropped it:
+   ```ts
+   class AuthError extends Error {
+     constructor(public code: string) { super(code); this.name = "AuthError"; }
+   }
+   vi.mock("@/lib/authz", () => ({ requireCapability: () => requireCapability(), AuthError }));
+   ```
+2. Its `beforeEach` sets a **persistent** `requireCapability.mockResolvedValue(ADMIN)`. A
+   `.rejects` assertion therefore has nothing to catch unless that test calls
+   `requireCapability.mockRejectedValueOnce(...)` first — three capability tests shipped
+   vacuously passing on the previous branch for exactly this reason.
+
+Follow the sibling in what it does NOT mock, too: `items.schema` and `items.errors` stay real,
+so the Zod constraints and the `instanceof ItemError` branch are genuinely exercised.
 
 **Interfaces:**
 - Consumes: `previewRename`, `renameItems`, `RenameCollision`, `MAX_BULK_ITEMS` (Task 2); `MAX_RENAME_PREFIX` (Task 1); `requireCapability` from `@/lib/authz`.
@@ -569,7 +589,7 @@ git commit -m "feat(items): batched rename service with a collision guard"
 
 - [ ] **Step 1: Write the failing action tests**
 
-Append to `src/app/admin/actions/items.test.ts`. **Read the file's existing mocking idiom first** and follow it — in particular, whether its `beforeEach` sets a persistent `requireCapability.mockResolvedValue(...)`. If it does, a `.rejects` assertion needs its own `mockRejectedValueOnce` or it passes while asserting nothing (that shipped three times on the previous branch):
+Create `src/app/admin/actions/items.test.ts`, using `readiness.test.ts`'s header verbatim as the template (mock `@/lib/authz` — including the `AuthError` shown above — `@/modules/items/items.service`, and `next/cache`; leave `items.schema` and `items.errors` real). The service mock needs `previewRename`, `renameItems` and `MAX_BULK_ITEMS: 500`. Then the cases:
 
 ```ts
 import { previewItemRenameAction, renameItemsAction } from "./items";
