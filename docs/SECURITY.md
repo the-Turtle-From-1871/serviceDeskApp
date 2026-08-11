@@ -1411,6 +1411,18 @@ was removed on 2026-08-08. Keeping this document current is now a convention. Se
 **Dependencies are vetted before install** — `npm view <package>` first, to catch
 hallucinated or unhealthy packages.
 
+**`npm audit` is clean as of 2026-08-11** — production *and* dev, 0 vulnerabilities.
+It had not been: `next` sat on `16.2.9` carrying nine high-severity advisories, two
+of which named this app's own architecture — **middleware/proxy bypass in App Router**
+(and `src/proxy.ts` is the login + PIN gate) and **unauthenticated disclosure of
+internal Server Function endpoints** (Server Actions are the primary write path).
+That upgrade had been deferred as "breaking" on 2026-07-27 and stayed deferred for
+two weeks. `next` is now pinned exactly at `16.3.0`; the deferred `nodemailer` 7→9
+item closed itself when the dependency was deleted on 2026-08-04.
+**Note the pin is exact, like `react`** — a caret would let a minor land unreviewed,
+and this app's guide opens by warning that its Next is not the one you remember.
+Re-run `npm audit --omit=dev` when touching dependencies; there is no CI job for it.
+
 **Migrate before push** — `next build` never runs `migrate deploy`, so a prod
 migration must be applied *before* the merge deploys. See [`../DEPLOY.md`](../DEPLOY.md).
 
