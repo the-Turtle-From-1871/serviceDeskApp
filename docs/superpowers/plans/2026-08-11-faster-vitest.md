@@ -371,7 +371,7 @@ import { workerDbName } from "./test-db-name";
 // Without this, parallel files TRUNCATE each other through resetDb().
 if (process.env.SKIP_TEST_DB !== "1" && process.env.DATABASE_URL) {
   const url = new URL(process.env.DATABASE_URL);
-  url.pathname = `/${workerDbName(Number(process.env.VITEST_WORKER_ID ?? 1))}`;
+  url.pathname = `/${workerDbName(Number(process.env.VITEST_POOL_ID || 1))}`;
   // Prisma's default pool is physical_cpus*2+1 (~17 here). Eight workers would
   // open ~136 connections against Postgres's default max_connections of 100 and
   // the suite would die with errors that look nothing like their cause. Tests
@@ -390,7 +390,7 @@ it("the running worker is pointed at its own database", () => {
   // Cheap, and it fails loudly if the rewrite in setup-env.ts ever silently
   // stops happening — which would otherwise surface as inexplicable cross-talk
   // between files months from now.
-  const worker = Number(process.env.VITEST_WORKER_ID ?? 1);
+  const worker = Number(process.env.VITEST_POOL_ID || 1);
   expect(process.env.DATABASE_URL).toContain(workerDbName(worker));
   expect(process.env.DATABASE_URL).toContain("connection_limit=2");
 });

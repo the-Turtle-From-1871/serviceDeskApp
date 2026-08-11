@@ -102,7 +102,17 @@ build eight databases it never opens. Gate on an env var the script sets.
 ### 3. `tests/helpers/setup-env.ts` — per-worker URL
 
 One addition after the existing `dotenv` call: rewrite `DATABASE_URL` to this worker's
-database from `VITEST_WORKER_ID`, appending **`?connection_limit=2`**.
+database from `VITEST_POOL_ID`, appending **`?connection_limit=2`**.
+
+**It must be `VITEST_POOL_ID`, not `VITEST_WORKER_ID`** — this design originally specified
+the latter and that was wrong. Verified against Vitest 4.1.9's own source: `poolId` carries
+the comment *"Exposed to test runner as VITEST_POOL_ID. Value is between 1-maxWorkers"*, and
+the pool seeds slots `1..maxWorkers` and releases one only when its task resolves.
+`VITEST_WORKER_ID` is a **0-based, unbounded per-file counter** (`workerId++` once per test
+file), so with 164 files it reaches 163 — pointing workers at databases numbered `_17`,
+`_26`, … that were never provisioned. `VITEST_POOL_ID` is also set once at worker start and
+never rewritten, so it is stable for the worker's lifetime, which is what `setupFiles`
+needs.
 
 **The connection cap is not a nicety — without it this fails on day one.** Prisma's default
 pool is `physical_cpus × 2 + 1`, about **17 connections per client**. Eight workers is ~136
@@ -155,7 +165,7 @@ pass could be luck. The gate is **three consecutive full-suite greens**.
 **Prove the isolation rather than assume it:**
 - Pure tests on `test-db-name`: hash stable across calls; different paths produce different
   names; every generated name contains `handreceipt_test`.
-- One integration test asserts its own `DATABASE_URL` carries its `VITEST_WORKER_ID`. Cheap,
+- One integration test asserts its own `DATABASE_URL` carries its `VITEST_POOL_ID`. Cheap,
   and it fails loudly if the rewrite ever silently stops happening — which would otherwise
   surface as inexplicable cross-talk months later.
 
