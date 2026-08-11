@@ -22,7 +22,10 @@ config({ path: ".env.test", override: true, quiet: true });
 // makes this vary and is why the bound actually matters.
 if (process.env.SKIP_TEST_DB !== "1" && process.env.DATABASE_URL) {
   const url = new URL(process.env.DATABASE_URL);
-  url.pathname = `/${workerDbName(Number(process.env.VITEST_POOL_ID ?? 1))}`;
+  // `||`, not `??`: an empty-string VITEST_POOL_ID must also fall back to 1.
+  // `Number("") === 0`, which would silently point at "..._0" — a database
+  // global-setup.ts never provisions (it only creates 1..MAX_TEST_WORKERS).
+  url.pathname = `/${workerDbName(Number(process.env.VITEST_POOL_ID) || 1)}`;
   // Prisma's default pool is physical_cpus*2+1 (~17 here). Eight workers would
   // open ~136 connections against Postgres's default max_connections of 100 and
   // the suite would die with errors that look nothing like their cause. Tests

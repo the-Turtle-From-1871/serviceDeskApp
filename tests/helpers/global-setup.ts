@@ -57,8 +57,17 @@ export async function setup(): Promise<void> {
   });
 
   // Migrate ONCE, against the template only.
+  //
+  // Both DATABASE_URL and DIRECT_URL must be overridden: prisma.config.ts
+  // resolves the migration datasource as `DIRECT_URL ?? DATABASE_URL`, and
+  // CI's .env.test sets both. Overriding DATABASE_URL alone left DIRECT_URL
+  // still naming the plain `handreceipt_test` database, so `migrate deploy`
+  // silently migrated THAT instead of the template — the template and every
+  // clone stayed empty, and every worker connected to an empty database.
+  // Locally this was invisible because this worktree's .env.test sets no
+  // DIRECT_URL, so the `??` fallback landed on DATABASE_URL either way.
   execSync("npx prisma migrate deploy", {
-    env: { ...process.env, DATABASE_URL: urlFor(template) },
+    env: { ...process.env, DATABASE_URL: urlFor(template), DIRECT_URL: urlFor(template) },
     stdio: "inherit",
   });
 

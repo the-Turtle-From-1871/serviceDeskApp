@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import prisma from "@/lib/prisma";
 import { recordAudits } from "./audit.service";
 import { resetDb } from "../../../tests/helpers/db";

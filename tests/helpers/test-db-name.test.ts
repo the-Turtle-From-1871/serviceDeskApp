@@ -59,7 +59,9 @@ describe("test database names", () => {
     // VITEST_POOL_ID, not VITEST_WORKER_ID — see the comment in setup-env.ts.
     // VITEST_WORKER_ID is an unbounded per-file counter; asserting against it
     // here would make this test agree with the very bug it exists to catch.
-    const worker = Number(process.env.VITEST_POOL_ID ?? 1);
+    // `||`, not `??` — see setup-env.ts: an empty string must also fall back
+    // to 1, and `Number("") === 0` would defeat that with `??`.
+    const worker = Number(process.env.VITEST_POOL_ID) || 1;
     expect(process.env.DATABASE_URL).toContain(workerDbName(worker));
     expect(process.env.DATABASE_URL).toContain("connection_limit=2");
   });
