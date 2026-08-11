@@ -49,10 +49,19 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
     return true;
   };
 
+  // The single place `entry.key` (and, when it differs, the pre-check key it
+  // was found under) gets registered in `seen`. Callers must NOT add either
+  // key beforehand — for an item-kind scan `entry.key` and `preKey` are
+  // byte-identical (`resolveScannedItemId` returns the very item it was asked
+  // for), so pre-registering `preKey` would make this check see it as already
+  // scanned on the very first look-up.
   const push = (entry: ScannedEntry, linkedSeenKey?: string) => {
     if (seen.current.has(entry.key)) return false;
     seen.current.add(entry.key);
-    if (linkedSeenKey) linkedKey.current.set(entry.key, linkedSeenKey);
+    if (linkedSeenKey) {
+      seen.current.add(linkedSeenKey);
+      linkedKey.current.set(entry.key, linkedSeenKey);
+    }
     setScanned((prev) => [...prev, entry]);
     return true;
   };
@@ -90,9 +99,12 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
 
       if (res.ok) {
         const kind = res.item.status === "ACTIVE" ? "found" : "retired";
-        seen.current.add(preKey);
         const entry: ScannedEntry = { key: `id:${res.item.id}`, kind, item: res.item };
-        if (push(entry, preKey)) {
+        // For an item-kind scan preKey IS entry.key (resolveScannedItemId
+        // returns the item it was asked for) — only register it separately
+        // when it names a genuinely different key, i.e. a serial-kind scan.
+        const linkedSeenKey = preKey !== entry.key ? preKey : undefined;
+        if (push(entry, linkedSeenKey)) {
           say(kind === "found" ? "ok" : "err",
             kind === "found"
               ? `Added ${res.item.make} ${res.item.model}`

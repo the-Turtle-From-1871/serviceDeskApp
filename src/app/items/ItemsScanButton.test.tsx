@@ -26,6 +26,7 @@ vi.mock("@/components/QrScanner", () => ({
       <button onClick={() => onDecode(["2TK94709FN, HP ProBook 650 G5, ProdID 5PF3"])}>emit-hp</button>
       <button onClick={() => onDecode(["7X2K9L3"])}>emit-dell</button>
       <button onClick={() => onDecode(["NOSUCH123"])}>emit-unknown</button>
+      <button onClick={() => onDecode(["https://x.example/i/i1"])}>emit-sticker</button>
       {/* Named literally "Done" to match the real QrScanner's footer button —
           this test asserts against /^Done/, which Task 7 later suffixes with
           a count. */}
@@ -62,6 +63,8 @@ beforeEach(() => {
     sn === "2TK94709FN" ? { ok: true, item: HP }
     : sn === "7X2K9L3" ? { ok: true, item: DELL_RETIRED }
     : { ok: false, code: "NOT_FOUND" });
+  resolveScannedItemId.mockImplementation(async (id: string) =>
+    id === "i1" ? { ok: true, item: HP } : { ok: false, code: "NOT_FOUND" });
   createScannedItemsAction.mockResolvedValue({
     ok: true,
     items: [{ id: "i3", make: "Acme", model: "Widget", serialNumber: "NOSUCH123", status: "ACTIVE" }],
@@ -198,6 +201,52 @@ describe("ItemsScanButton", () => {
       // All four "frames" land well inside the 1.5s throttle window, so only
       // the first repeat should have produced a beep.
       expect(beep).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("scanning our own printed sticker (/i/<id>)", () => {
+    it("adds the item to the list on the very first scan", async () => {
+      const user = userEvent.setup();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-sticker" }));
+      expect(await screen.findByText(/2TK94709FN/)).toBeDefined();
+      expect(screen.queryByText(/^Already scanned$/i)).toBeNull();
+    });
+
+    it("commits the sticker-scanned item to the selection on Done", async () => {
+      const user = userEvent.setup();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-sticker" }));
+      await screen.findByText(/2TK94709FN/);
+      await user.click(screen.getByRole("button", { name: /^Done/ }));
+      await waitFor(() => expect(screen.getByTestId("sel").textContent).toBe("i1"));
+    });
+
+    it("scanning the same sticker twice adds exactly one row and flags the repeat", async () => {
+      const user = userEvent.setup();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-sticker" }));
+      await screen.findByText(/2TK94709FN/);
+      await user.click(screen.getByRole("button", { name: "emit-sticker" }));
+      expect(await screen.findByText(/^Already scanned$/i)).toBeDefined();
+      expect(screen.getAllByText(/2TK94709FN/)).toHaveLength(1);
+    });
+
+    it("lets the same sticker be scanned again after its row is removed", async () => {
+      const user = userEvent.setup();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-sticker" }));
+      await screen.findByText(/2TK94709FN/);
+      await user.click(screen.getByRole("button", { name: "Remove 2TK94709FN" }));
+      expect(screen.queryByText(/2TK94709FN/)).toBeNull();
+      resolveScannedItemId.mockClear();
+      await user.click(screen.getByRole("button", { name: "emit-sticker" }));
+      expect(await screen.findByText(/2TK94709FN/)).toBeDefined();
+      expect(resolveScannedItemId).toHaveBeenCalledTimes(1);
     });
   });
 
