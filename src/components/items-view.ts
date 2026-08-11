@@ -80,6 +80,27 @@ export type ItemRow = {
   lastSyncDateTime: string | null;
 };
 
+/**
+ * What a SELECTION actually consumes — deliberately NOT the full ItemRow.
+ *
+ * ItemRow carries fifteen fields (readiness, auditState, holderName, deviceUIC,
+ * MDM telemetry) derived by two extra page-level queries in order to RENDER A
+ * TABLE ROW. A scanned item is not rendered as a table row and is usually not
+ * even on the current page, so producing a full ItemRow per scan would mean
+ * running those queries to populate fields nobody displays. ItemRow is a
+ * superset of this, so every existing caller still typechecks.
+ *
+ * Declared HERE rather than in the provider because the items service imports
+ * it, and this module carries no "use client".
+ */
+export type SelectedItem = {
+  id: string;
+  make: string;
+  model: string;
+  serialNumber: string;
+  status: "ACTIVE" | "RETIRED";
+};
+
 export type SortPref = GenericSortPref<SortField>;
 
 export const ITEM_COLUMNS: { key: ColumnKey; label: string }[] = [
