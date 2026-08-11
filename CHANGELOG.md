@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## 2026-08-11
 
 ### Added
+- **A device the MDM export stops listing is now counted as dropped off the network, with the date it happened.** Until now the only way onto that list was having no sync time recorded at all. A device that Intune simply stops reporting kept whatever sync date it last had, quietly aged through the dormant list, and fell off the far end after 90 days — so *"the pull no longer picks this device up"* was invisible. It is now the strongest signal on the list, and each such device carries a **Dropped off** date: the date of the first import that did not include it.
+
+  The export marks every row **Missing from import** (the newest export left it out — this is the one with a date), **Dropped out** (MDM knows it but has never reported a sync time) or **Never enrolled** (no MDM record at all). Dated devices are listed first, longest-gone first, so the handful worth chasing sit above the never-enrolled backlog.
+
+  **A device that comes back removes itself.** Nothing is stored as a flag — the date is worked out from when the device was last seen in an import — so the next export that includes it clears it with no tidying up.
+
+  **Only the scheduled nightly import counts.** Uploading a CSV by hand on the *Import items* page will never mark the rest of the fleet as missing, however few rows it contains; a hand upload still records the devices it lists, it just does not set the bar everything else is measured against. And nothing is flagged at all until the first scheduled import has run after this ships, so it arms itself rather than declaring the whole property book missing on day one.
+
+  #### Notes
+  - Migration `20260811210000_item_last_imported_at` adds the nullable `Item.lastImportedAt` column plus two indexes. **Apply it to Supabase before merging**, per migrate-before-push. No backfill — the only honest value for a device nobody has stamped yet is "unknown", and that is what suppresses the flag until the first scheduled import.
+  - Loaner devices are **not** excluded from this list yet; that waits on the loaner field being built separately.
+
 - **A second dashboard list: devices that dropped off the network.** The dormant list only ever showed devices MDM *has* seen — one it has never heard from has no date to measure, so it was excluded as "we cannot say" and appeared nowhere at all. There is now a card and an Excel export for exactly those: **no MDM sync time, but a device name** (a row with no name is a hand-made or scanned stub, not a machine that fell off the network).
 
   **It is two different problems and the sheet says which is which.** Every row is marked either **Dropped out** — MDM used to report this device and no longer does, so check whether it was unenrolled, wiped or reassigned — or **Never enrolled**, meaning MDM has no record of it at all and the question is whether it should be enrolled. Dropped-out devices are listed **first**, because on the current fleet only **12 of 164** are in that group and sorting them together would bury them under the 152 that were never enrolled.

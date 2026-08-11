@@ -1203,6 +1203,13 @@ export async function commitImport(
   const plan = planImport(rows, existing);
   const { toCreate, toUpdate, unchanged, skipped } = plan;
 
+  // ONE instant for the whole import, taken before the transaction opens.
+  // Every row this file carried is stamped with the same value, so "seen in
+  // the same import" is an exact equality rather than a range — and a device
+  // cannot appear to have been seen a few milliseconds after its neighbours
+  // just because the batch took time to write.
+  const importedAt = new Date();
+
   const { added, updated, skipped: finalSkipped } = await prisma.$transaction(async (tx) => {
     // Register any category the CSV introduced, the same way units are learned
     // above. The import is deliberately NOT blocked by an unknown category —
@@ -1226,7 +1233,10 @@ export async function commitImport(
     const created = await tx.item.createMany({
       // The DB unique(serialNumber, citext) is the race-safe backstop: skip rather
       // than throw on a serial a concurrent import inserted after loadExistingBySerial.
-      data: toCreate.map((d) => ({ ...d, createdById: editor.id })),
+      // `lastImportedAt` rides along on the insert rather than needing a second
+      // pass: this file carried the serial, which is exactly what the column
+      // records, and createMany returns no ids to stamp afterwards.
+      data: toCreate.map((d) => ({ ...d, createdById: editor.id, lastImportedAt: importedAt })),
       skipDuplicates: true,
     });
 
@@ -1341,9 +1351,41 @@ export async function commitImport(
     const updatedCount = updatedIds.size;
     if (edits.length > 0) await tx.itemEdit.createMany({ data: edits });
 
+    // STAMP EVERY MATCHED ROW AS SEEN — including the ones nothing changed on.
+    //
+    // This is the half that is easy to miss and the half that matters most: on
+    // a steady fleet most rows land in `unchanged`, which writes nothing at all,
+    // so stamping only the updates would mark ~1,000 devices as missing from an
+    // import that listed every one of them.
+    //
+    // Raw SQL rather than `updateMany`, for the same reason the batched update
+    // above is raw: Prisma's `@updatedAt` fires on updateMany, and bumping
+    // `updatedAt` on a thousand untouched rows every night would destroy the
+    // one signal that means "something about this device actually changed".
+    // One statement regardless of fleet size.
+    const seenIds = [
+      ...toUpdate.map((u) => u.itemId),
+      ...unchanged.map((u) => existing.get(u.serialNumber.toLowerCase())?.id),
+    ].filter((id): id is string => Boolean(id));
+    if (seenIds.length > 0) {
+      await tx.$executeRaw`
+        UPDATE "Item" SET "lastImportedAt" = ${importedAt}
+        WHERE "id" IN (${Prisma.join(seenIds)})`;
+    }
+
     const allSkipped = vanished.length > 0 ? [...skipped, ...vanished] : skipped;
     await tx.importBatch.create({
       data: {
+        // STAMPED WITH THE SAME INSTANT the rows were, not `now()`.
+        //
+        // Load-bearing, not tidiness. A device is "missing from the newest
+        // census" when `lastImportedAt < ImportBatch.createdAt`, and
+        // `importedAt` is taken BEFORE this transaction opens — so with the
+        // column default, every device this very import listed would be stamped
+        // a few milliseconds EARLIER than the batch recording it, and the whole
+        // fleet would read as missing from the import that had just carried it.
+        // Equal timestamps make `<` false, which is the correct answer.
+        createdAt: importedAt,
         createdById: editor.id,
         filename,
         addedCount: created.count,

@@ -72,15 +72,19 @@ export function DroppedDevicesCard({ count, scope }: { count: number; scope: Ite
             {count.toLocaleString()} device{count === 1 ? "" : "s"} dropped off the network
           </p>
           <p className="text-xs text-muted-foreground">
-            No MDM sync time at all · {scopeLabel(scope)}. These cannot appear on the list above at
-            any age, because there is no date to measure — this is the only place they show up.
-            Devices with no device name are not listed.
+            The MDM export has stopped listing these, or has never reported a sync time for them ·{" "}
+            {scopeLabel(scope)}. Neither can appear on the list above at any age, because there is no
+            sync date to measure — this is the only place they show up. Devices with no device name
+            are not listed.
           </p>
           <p className="text-xs text-muted-foreground">
-            The export marks each one <strong>Dropped out</strong> (MDM used to report it and no
-            longer does — check whether it was unenrolled, wiped or reassigned) or{" "}
-            <strong>Never enrolled</strong> (MDM has no record of it at all, so the question is
-            whether it should be enrolled). Dropped-out devices are listed first.
+            The export marks each one <strong>Missing from import</strong> (the latest export did not
+            list it — the sheet gives the date it first went missing, so check whether it was
+            unenrolled, wiped or reassigned), <strong>Dropped out</strong> (MDM knows it but has
+            never reported a sync time) or <strong>Never enrolled</strong> (no MDM record at all, so
+            the question is whether it should be enrolled). The dated ones are listed first,
+            longest-gone first — and a device that reappears in a later export drops off this list
+            on its own.
           </p>
           <p className="mt-1 text-xs text-muted-foreground" role="status" aria-live="polite">
             {message}

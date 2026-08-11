@@ -310,6 +310,28 @@ model Item {
   // near-unique per row can't swallow the secondary sort key. This column still
   // backs the badge itself and the dashboard aggregate.
   lastAuditedAt              DateTime?
+  // When an MDM import last CARRIED this serial — stamped on every row an
+  // import touched, including rows it changed nothing on. "MDM still knows
+  // about this device", as distinct from lastSyncAt's "MDM last spoke to it".
+  //
+  // WHY IT IS STORED WHEN SO LITTLE ELSE HERE IS: this is an OBSERVATION, not a
+  // state. It records that a file arrived containing this serial at a moment in
+  // time, which nothing else in the database remembers — a row absent from a
+  // CSV leaves no trace anywhere by definition. It is not the hand-tickable
+  // flag `isAccountedFor` and `deployableStatus` were (see below); nobody can
+  // set it, and it is written by exactly one code path.
+  //
+  // DROPPED-OFF-NETWORK IS DERIVED FROM IT, NOT STORED. A device is dropped off
+  // when this stamp predates the newest FLEET CENSUS import, and the date it
+  // dropped off is the earliest census after this stamp — see
+  // analytics.service.ts. Storing a `droppedOffAt` instead would need clearing
+  // when the device reappears, and a flag that must be un-set is exactly the
+  // shape this schema keeps refusing.
+  //
+  // NULL means no import has ever carried the serial, which is a different
+  // thing from having dropped off and is deliberately NOT flagged: those
+  // devices are the "Never enrolled" half of the same list.
+  lastImportedAt            DateTime?
 
   serviceQueueItem ServiceQueueItem?
   edits            ItemEdit[]
@@ -336,6 +358,9 @@ model Item {
   // over a mostly-null column on every dashboard load — the same shape as
   // lastLogonAt above, and the same plain B-tree.
   @@index([lastSyncAt])
+  // The dropped-off-network list compares this against the newest census
+  // import, and it is mostly-null today — the same shape as the two above.
+  @@index([lastImportedAt])
   // Trigram GIN for the public, per-keystroke serial search (searchItemsBySerial),
   // which is `ILIKE '%q%'` — a leading wildcard a B-tree can't serve. Needs pg_trgm.
   @@index([serialNumber(ops: raw("gin_trgm_ops"))], type: Gin, map: "Item_serialNumber_trgm_idx")
@@ -536,6 +561,11 @@ model ImportBatch {
   sourceHash   String?
 
   @@index([createdById])
+  // The dropped-off-network derivation asks two questions of this table on
+  // every dashboard load — "when was the newest FLEET CENSUS?" and "which was
+  // the first census after this device was last seen?" — and both filter on a
+  // non-null sourceHash ordered by time.
+  @@index([sourceHash, createdAt])
 }
 
 model ReturnTransaction {
