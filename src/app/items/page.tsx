@@ -39,6 +39,10 @@ export default async function ItemsListPage({
   // actions re-check MANAGE_QUEUE, which is the real boundary.
   const canAudit = user.capabilities.includes("ADMINISTER");
   const canQueue = user.capabilities.includes("MANAGE_QUEUE");
+  // The bulk rename writes deviceName, which is admin-only item vocabulary —
+  // the same capability the scan button's create path takes. renameItemsAction
+  // re-checks it.
+  const canRename = user.capabilities.includes("MANAGE_ITEMS");
 
   // Server-side paginate + sort: only the current page is fetched and serialized to
   // the client (the list was previously unbounded). The audit-status badge and the
@@ -157,6 +161,7 @@ export default async function ItemsListPage({
             signatures={signatures}
             canAudit={canAudit}
             canQueue={canQueue}
+            canRename={canRename}
           />
         </ItemSelectionProvider>
       </main>

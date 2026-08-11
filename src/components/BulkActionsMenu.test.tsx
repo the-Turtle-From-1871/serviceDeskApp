@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { BulkActionsMenu } from "./BulkActionsMenu";
 import { recordAuditsAction } from "@/app/admin/actions/audit";
+import { previewItemRenameAction } from "@/app/admin/actions/items";
 
 /**
  * READ THIS BEFORE ADDING A TEST HERE. **jsdom implements no Popover API at
@@ -29,6 +31,17 @@ vi.mock("@/app/admin/actions/queue", () => ({
   flagItemsForServiceAction: vi.fn(),
   completeServiceItemsAction: vi.fn(),
 }));
+// The rename preview is DEBOUNCED and fires on its own once the fields make a
+// valid sequence, so it cannot be a bare vi.fn(): `.then` on undefined rejects
+// inside the effect. The default NEVER SETTLES, deliberately — that holds every
+// other test in this file at the "server has not answered yet" state, which is
+// where the instant client-side range line lives. The one test that exercises
+// the server's answer overrides it and restores this afterwards.
+const pendingForever = () => new Promise<never>(() => {});
+vi.mock("@/app/admin/actions/items", () => ({
+  previewItemRenameAction: vi.fn(() => new Promise<never>(() => {})),
+  renameItemsAction: vi.fn(),
+}));
 
 // This suite runs without vitest `globals: true`, so @testing-library/react's
 // auto-cleanup never registers. Mirrors ItemSelectTable.test.tsx.
@@ -44,7 +57,7 @@ const hidden = { hidden: true } as const;
 
 test("the popover element carries NO class — a layout class would render it while closed", () => {
   const { container } = render(
-    <BulkActionsMenu itemIds={["a1"]} signatures={SIGS} canAudit canQueue />,
+    <BulkActionsMenu itemIds={["a1"]} signatures={SIGS} canAudit canQueue canRename={false} />,
   );
   const popover = container.querySelector("[popover]");
   expect(popover).not.toBeNull();
@@ -61,7 +74,7 @@ test("the popover element carries NO class — a layout class would render it wh
 // wiring is all that can be pinned.
 test("wires the trigger to the panel by id, and the panel is its next sibling", () => {
   const { container } = render(
-    <BulkActionsMenu itemIds={["a1"]} signatures={SIGS} canAudit canQueue />,
+    <BulkActionsMenu itemIds={["a1"]} signatures={SIGS} canAudit canQueue canRename={false} />,
   );
   const trigger = screen.getByRole("button", { name: /More actions/ });
   expect(trigger.getAttribute("popovertarget")).toBe("items-bulkactions");
@@ -75,29 +88,29 @@ test("wires the trigger to the panel by id, and the panel is its next sibling", 
 
 test("audit controls are absent without ADMINISTER", () => {
   const { unmount } = render(
-    <BulkActionsMenu itemIds={["a1"]} signatures={SIGS} canAudit canQueue />,
+    <BulkActionsMenu itemIds={["a1"]} signatures={SIGS} canAudit canQueue canRename={false} />,
   );
   expect(screen.getByLabelText(/sign as/i)).toBeTruthy();
   unmount();
 
-  render(<BulkActionsMenu itemIds={["a1"]} signatures={[]} canAudit={false} canQueue />);
+  render(<BulkActionsMenu itemIds={["a1"]} signatures={[]} canAudit={false} canQueue canRename={false} />);
   expect(screen.queryByLabelText(/sign as/i)).toBeNull();
 });
 
 test("queue controls are absent without MANAGE_QUEUE", () => {
   const { unmount } = render(
-    <BulkActionsMenu itemIds={["a1"]} signatures={SIGS} canAudit canQueue />,
+    <BulkActionsMenu itemIds={["a1"]} signatures={SIGS} canAudit canQueue canRename={false} />,
   );
   expect(screen.getByLabelText(/service type/i)).toBeTruthy();
   unmount();
 
-  render(<BulkActionsMenu itemIds={["a1"]} signatures={SIGS} canAudit canQueue={false} />);
+  render(<BulkActionsMenu itemIds={["a1"]} signatures={SIGS} canAudit canQueue={false} canRename={false} />);
   expect(screen.queryByLabelText(/service type/i)).toBeNull();
 });
 
-test("the whole menu is absent when the caller can do neither", () => {
+test("the whole menu is absent when the caller can do nothing", () => {
   const { container } = render(
-    <BulkActionsMenu itemIds={["a1"]} signatures={[]} canAudit={false} canQueue={false} />,
+    <BulkActionsMenu itemIds={["a1"]} signatures={[]} canAudit={false} canQueue={false} canRename={false} />,
   );
   expect(container.querySelector("[popover]")).toBeNull();
   expect(screen.queryByRole("button", { name: /More actions/ })).toBeNull();
@@ -106,7 +119,7 @@ test("the whole menu is absent when the caller can do neither", () => {
 // The signature list is the one thing that can be empty while the capability is
 // held, and an empty <select> with no explanation reads as a broken control.
 test("says why the audit control is unusable when there are no saved signatures", () => {
-  render(<BulkActionsMenu itemIds={["a1"]} signatures={[]} canAudit canQueue={false} />);
+  render(<BulkActionsMenu itemIds={["a1"]} signatures={[]} canAudit canQueue={false} canRename={false} />);
   expect((screen.getByLabelText(/sign as/i) as HTMLSelectElement).disabled).toBe(true);
   expect(screen.getByText(/No saved signatures/i)).toBeTruthy();
 });
@@ -126,7 +139,7 @@ describe("recording an audit", () => {
 
   const openAudit = () => {
     render(
-      <BulkActionsMenu itemIds={["a1", "a2", "a3"]} signatures={SIGS} canAudit canQueue={false} />,
+      <BulkActionsMenu itemIds={["a1", "a2", "a3"]} signatures={SIGS} canAudit canQueue={false} canRename={false} />,
     );
     fireEvent.change(screen.getByLabelText(/sign as/i), { target: { value: "s1" } });
     return screen.getByRole("button", { name: /^Audit /, ...hidden });
@@ -161,10 +174,107 @@ describe("recording an audit", () => {
 // renders with a selection, but the component is handed the ids directly, so it
 // must not offer a button that would post an empty batch.
 test("disables every control when the selection is empty", () => {
-  render(<BulkActionsMenu itemIds={[]} signatures={SIGS} canAudit canQueue />);
+  render(<BulkActionsMenu itemIds={[]} signatures={SIGS} canAudit canQueue canRename />);
   const trigger = screen.getByRole("button", { name: /More actions/ }) as HTMLButtonElement;
   expect(trigger.disabled).toBe(true);
-  for (const name of [/^Audit /, /^Flag for service$/, /^Complete service$/]) {
+  for (const name of [/^Audit /, /^Flag for service$/, /^Complete service$/, /^Rename /]) {
     expect((screen.getByRole("button", { name, ...hidden }) as HTMLButtonElement).disabled).toBe(true);
   }
+  // The two rename fields too — an empty batch has nothing to number.
+  for (const label of [/name prefix/i, /start at/i]) {
+    expect((screen.getByLabelText(label) as HTMLInputElement).disabled).toBe(true);
+  }
+});
+
+/**
+ * The range line is computed on the CLIENT from `buildRenameSequence` — the same
+ * pure builder the server writes from — so it appears as you type and costs no
+ * round trip. This is the one thing in this file that exercises behaviour rather
+ * than structure, and it is only testable because that builder is pure.
+ *
+ * What it is NOT evidence for: the debounced collision check that runs beside it
+ * reaches a mocked module here, and the panel these fields live in is never
+ * actually openable in jsdom.
+ */
+test("shows the computed range as the fields change", async () => {
+  const user = userEvent.setup();
+  render(<BulkActionsMenu itemIds={["a", "b", "c"]} signatures={[]} canAudit={false} canQueue={false} canRename />);
+  await user.type(screen.getByLabelText(/name prefix/i), "LAPTOP");
+  await user.clear(screen.getByLabelText(/start at/i));
+  await user.type(screen.getByLabelText(/start at/i), "001");
+  // First and last of the sequence, in one line, so three devices read as
+  // LAPTOP-001 … LAPTOP-003.
+  expect(screen.getByText(/LAPTOP-001/)).toBeTruthy();
+  expect(screen.getByText(/LAPTOP-003/)).toBeTruthy();
+});
+
+/**
+ * THE SERVER'S NUMBERS WIN ONCE THEY LAND, because `previewRename` numbers over
+ * ACTIVE rows only. Ten selected devices of which two are retired write
+ * 001..008, and people print labels off this line — so the client-side range
+ * (which cannot know a row is retired) is a placeholder, not the answer.
+ */
+describe("the range line", () => {
+  // Restore the file-wide never-settling default, or this override leaks into
+  // whatever runs next.
+  afterEach(() => { vi.mocked(previewItemRenameAction).mockImplementation(pendingForever); });
+
+  test("switches to the server's count, which excludes retired rows", async () => {
+    vi.mocked(previewItemRenameAction).mockResolvedValue({
+      ok: true, count: 8, first: "LAPTOP-001", last: "LAPTOP-008", skipped: 2, collisions: [],
+    });
+    const user = userEvent.setup();
+    const ids = Array.from({ length: 10 }, (_, i) => `i${i}`);
+    render(<BulkActionsMenu itemIds={ids} signatures={[]} canAudit={false} canQueue={false} canRename />);
+    await user.type(screen.getByLabelText(/name prefix/i), "LAPTOP");
+
+    // Instant, client-side: all ten, because nothing here knows two are retired.
+    expect(screen.getByText(/10 devices, in scan order: LAPTOP-001 … LAPTOP-010/)).toBeTruthy();
+
+    // …and once the debounced preview lands, the line is the server's answer,
+    // skipped count and all. The Apply button is kept in step with it.
+    const settled = await screen.findByText(
+      /8 devices, in scan order: LAPTOP-001 … LAPTOP-008/,
+      undefined,
+      { timeout: 3000 },
+    );
+    // `outcome()`'s hedge, verbatim: `skipped` counts ids that resolve to no
+    // item as well as retired ones, so this line must not say "retired".
+    expect(settled.textContent).toContain("Skipped 2 (retired or not applicable).");
+    expect((screen.getByRole("button", { name: /^Rename /, ...hidden }) as HTMLButtonElement).textContent)
+      .toBe("Rename 8");
+  });
+
+  test("the collision list names a few and summarises the rest", async () => {
+    // `findNameCollisions` can return one row per item in the batch — up to 500
+    // — and this line sits inside a height-capped sheet, so an unbounded join
+    // pushes Apply (and the "change the prefix" hint) off the screen.
+    const collisions = Array.from({ length: 12 }, (_, i) => ({
+      name: `LAPTOP-${String(i + 1).padStart(3, "0")}`,
+      serialNumber: `S${i + 1}`,
+    }));
+    vi.mocked(previewItemRenameAction).mockResolvedValue({
+      ok: true, count: 12, first: "LAPTOP-001", last: "LAPTOP-012", skipped: 0, collisions,
+    });
+    const user = userEvent.setup();
+    render(
+      <BulkActionsMenu
+        itemIds={Array.from({ length: 12 }, (_, i) => `i${i}`)}
+        signatures={[]} canAudit={false} canQueue={false} canRename
+      />,
+    );
+    await user.type(screen.getByLabelText(/name prefix/i), "LAPTOP");
+
+    const alert = await screen.findByRole("alert", { ...hidden }, { timeout: 3000 });
+    // The COUNT is the full one; the enumeration is not.
+    expect(alert.textContent).toContain("12 names already taken");
+    expect(alert.textContent).toContain("LAPTOP-005 (S5)");
+    expect(alert.textContent).not.toContain("LAPTOP-006");
+    expect(alert.textContent).toContain("…and 7 more");
+  });
+});
+
+test("rename controls are absent without MANAGE_ITEMS", () => {
+  render(<BulkActionsMenu itemIds={["a"]} signatures={[]} canAudit canQueue canRename={false} />);
+  expect(screen.queryByLabelText(/name prefix/i)).toBeNull();
 });
