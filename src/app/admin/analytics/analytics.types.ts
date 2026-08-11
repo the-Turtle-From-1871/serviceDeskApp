@@ -71,9 +71,13 @@ export const STALE_EXPORT_MAX = 5000;
 /**
  * Columns of the exported sheet, in order.
  *
- * ONE definition, read by the service that builds the rows and by the client
- * that writes the file — the CSV writer takes columns and rows separately, so
- * two lists would silently emit blank columns rather than fail.
+ * ONE definition, read by the service that BUILDS the rows and by the workbook
+ * builder that WRITES them — two lists would silently emit blank columns rather
+ * than fail, since each side keys rows by header.
+ *
+ * The client no longer sees this list at all: since the export became a
+ * server-built .xlsx (2026-08-11) the action hands back finished bytes, not
+ * `{columns, rows}`. The wording here still described the CSV path.
  */
 export const STALE_DEVICE_COLUMNS = [
   "Serial",

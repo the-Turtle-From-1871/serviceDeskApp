@@ -63,6 +63,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   **What went with it:** the step in *Import items* that asked you to name a unit for each device name it could not decode, and the "N units auto-detected" line in the import summary. Nothing else about importing changed, and units themselves are untouched — you still manage them on the Units page, which lists **Devices with no home unit** so you can see exactly which ones need one.
 
 ### Fixed
+- **The exported dormant-device sheet had unreadable column headings.** The header row was meant to be white on the dark ledger colour and came out black on it — the spreadsheet library renamed that property and silently ignores the old name, so the file was valid, the colours on the data rows were right, and only the headings were affected. Re-export to get a readable one; nothing about which devices are listed has changed.
+
 - **Flagging a batch for service no longer forgets which hand receipt a device came in on.** An item flagged from the receipt builder carries that receipt, and the item page shows it; re-flagging the same device as part of a scanned batch used to blank that link permanently. A batch flag now says nothing about the receipt rather than erasing it.
 - **Completing service on a batch no longer touches retired devices.** A retired device's open ticket was being closed and counted among the devices completed. It is now passed over and reported alongside the other skips, matching the other bulk actions. Clearing a stale ticket off a retired device is still possible one device at a time, from its own page.
 

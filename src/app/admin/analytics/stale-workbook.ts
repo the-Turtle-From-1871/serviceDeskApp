@@ -55,6 +55,18 @@ import {
  *  Excel's default. White bold text on it, which is why it is dark. */
 const HEADER_FILL = "#1F2933";
 
+/** Header text.
+ *
+ *  The property is `textColor`, NOT `color`. write-excel-file renamed it in
+ *  v3 and silently DISCARDS an unknown key — `getCellStyleProperties`
+ *  destructures only the names it knows — so `color` type-checks, builds,
+ *  writes a valid file and leaves the cell on Excel's default `theme="1"`,
+ *  which is black. That shipped: every sheet exported before this fix had
+ *  black column headings on the near-black fill above, at roughly 1.5:1.
+ *  Nothing caught it because no test asserted on the header's font; one does
+ *  now. */
+const HEADER_TEXT = "#FFFFFF";
+
 /** Column widths, in characters. Excel's default (~8.4) truncates a device name
  *  and an ISO date alike, and a sheet someone has to widen by hand before they
  *  can read it is a sheet that gets closed. Keyed by header so a reordered or
@@ -107,7 +119,7 @@ export async function buildStaleDevicesWorkbook(
   const header: Row = STALE_DEVICE_COLUMNS.map((c) => ({
     value: c,
     fontWeight: "bold" as const,
-    color: "#FFFFFF",
+    textColor: HEADER_TEXT,
     backgroundColor: HEADER_FILL,
   }));
 
