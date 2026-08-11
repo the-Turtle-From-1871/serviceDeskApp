@@ -13,6 +13,7 @@ import {
 } from "./analytics.service";
 import { firstParam } from "@/lib/search-params";
 import { UnitFilter } from "./Filters";
+import { StaleDevicesCard } from "./StaleDevicesCard";
 import {
   AuditReadinessWidget,
   FleetKpiWidget,
@@ -70,8 +71,16 @@ export default async function AnalyticsPage({
   const rawUnit = firstParam(sp.unit)?.trim();
   const scope: ItemScope = { uic: rawUic ? rawUic : null, unit: rawUnit ? rawUnit : null };
 
-  const { units, auditReadiness, kpis, velocity, allocations, fleetTotal, vocabulary } =
-    await getDashboard(scope, range, groupBy);
+  const {
+    units,
+    auditReadiness,
+    kpis,
+    velocity,
+    allocations,
+    fleetTotal,
+    staleDeviceCount,
+    vocabulary,
+  } = await getDashboard(scope, range, groupBy);
 
   return (
     <div className="stack">
@@ -101,6 +110,13 @@ export default async function AnalyticsPage({
               </span>
             )}
           </div>
+        </div>
+
+        {/* Sits directly under the filters and above the charts: it is the one
+            thing on this page that produces a work list rather than a reading,
+            and it is scoped by the same filter bar it sits beneath. */}
+        <div className="lg:col-span-2">
+          <StaleDevicesCard count={staleDeviceCount} scope={scope} />
         </div>
 
         <AuditReadinessWidget data={auditReadiness} scope={scope} />

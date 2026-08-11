@@ -34,6 +34,60 @@ export const isRangeKey = (v: string): v is RangeKey => v in RANGES;
  *  label so they stay visible instead of vanishing from the breakdown. */
 export const UNCATEGORIZED = "Uncategorized";
 
+/* ---------- Stale-device export (30-90 days since last MDM logon) ---------- */
+
+/**
+ * The staleness window, in days since `Item.lastLogonAt`.
+ *
+ * BOTH ENDS ARE DELIBERATE. A device seen inside 30 days is not stale. A device
+ * unseen for MORE than 90 days is excluded too — that is a different problem
+ * (long-term lost kit) needing a different response, and folding it in here
+ * would bury the devices still worth chasing under a backlog nobody clears.
+ *
+ * Held here rather than in the service so the button's label, the card's
+ * wording and the SQL boundaries all read from one pair of numbers.
+ */
+export const STALE_MIN_DAYS = 30;
+export const STALE_MAX_DAYS = 90;
+
+/**
+ * Hard cap on the exported row count.
+ *
+ * The fleet is ~1,200 items and this is a narrow slice of it, so the cap should
+ * never bind — but "bound every list" has no exception for a list that happens
+ * to be small today (CLAUDE.md). If it ever binds, the card SAYS so: silently
+ * handing over a truncated property-book extract is a confident wrong answer
+ * about which devices need chasing.
+ */
+export const STALE_EXPORT_MAX = 5000;
+
+/**
+ * Columns of the exported sheet, in order.
+ *
+ * ONE definition, read by the service that builds the rows and by the client
+ * that writes the file — the CSV writer takes columns and rows separately, so
+ * two lists would silently emit blank columns rather than fail.
+ */
+export const STALE_DEVICE_COLUMNS = [
+  "Serial",
+  "Device name",
+  "Make",
+  "Model",
+  "Category",
+  "Home unit",
+  "UIC",
+  "Holder",
+  "Position",
+  "Storage location",
+  "Last logon user",
+  "Last logon date",
+  "Days since logon",
+  "Readiness",
+] as const;
+
+/** One row of the sheet, keyed by the header it sits under. */
+export type StaleDeviceRow = Record<(typeof STALE_DEVICE_COLUMNS)[number], string | number>;
+
 /** Shown for the leaderboard bucket holding items with no value in the chosen
  *  grouping dimension. That bucket is REAL inventory, so it is displayed rather
  *  than filtered away — drop it and the table's Total column stops reconciling
