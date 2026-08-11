@@ -27,6 +27,12 @@ export type ItemLoggedFields = {
   enrollmentDate: string | null;
   compliance: string | null;
   lastSyncDateTime: string | null;
+  // Listed here so planImport can diff it, but — like the telemetry fields
+  // above it — only ever passed through `silentAfter`, never `loggedAfter`. It
+  // is the importer's note that a device needs renaming in Intune, not a
+  // custody fact, so it must not reach ItemEdit. No form or schema exposes it:
+  // `z.object()` strips it from any submitted payload.
+  mdmProposedName: string | null;
 };
 
 export type FieldChange = {

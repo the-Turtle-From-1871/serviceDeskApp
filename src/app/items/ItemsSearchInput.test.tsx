@@ -33,7 +33,7 @@ describe("ItemsSearchInput", () => {
     // delay: null disables user-event's own per-keystroke setTimeout waits,
     // so it never competes with the fake clock we advance by hand below.
     const user = userEvent.setup({ delay: null });
-    render(<ItemsSearchInput q="" sortKeys={[{ key: "serialNumber", dir: "asc" }]} uic={null} />);
+    render(<ItemsSearchInput q="" sortKeys={[{ key: "serialNumber", dir: "asc" }]} uic={null} needsRename={false} />);
 
     const input = screen.getByRole("textbox", { name: /search/i });
     await user.type(input, "abc");
@@ -63,7 +63,7 @@ describe("ItemsSearchInput", () => {
     // fake clock never advances.
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const user = userEvent.setup({ delay: null });
-    render(<ItemsSearchInput q="printer" sortKeys={[]} uic={null} />);
+    render(<ItemsSearchInput q="printer" sortKeys={[]} uic={null} needsRename={false} />);
 
     const input = screen.getByRole("textbox", { name: /search/i }) as HTMLInputElement;
     expect(input.value).toBe("printer");
@@ -84,7 +84,7 @@ describe("ItemsSearchInput", () => {
     // e.g. /items?sort=make&dir=asc&page=3 would silently bounce the user
     // back to page 1 after 300ms with zero interaction.
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    render(<ItemsSearchInput q="" sortKeys={[{ key: "make", dir: "asc" }]} uic={null} />);
+    render(<ItemsSearchInput q="" sortKeys={[{ key: "make", dir: "asc" }]} uic={null} needsRename={false} />);
 
     await vi.advanceTimersByTimeAsync(300);
 
@@ -95,7 +95,7 @@ describe("ItemsSearchInput", () => {
 
   it("mounting with a non-empty q already in the URL does not navigate", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    render(<ItemsSearchInput q="foo" sortKeys={[]} uic={null} />);
+    render(<ItemsSearchInput q="foo" sortKeys={[]} uic={null} needsRename={false} />);
 
     await vi.advanceTimersByTimeAsync(300);
 
@@ -107,14 +107,14 @@ describe("ItemsSearchInput", () => {
   it("uses the latest sort/dir, not a stale closure, if they change while the debounce is pending", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const user = userEvent.setup({ delay: null });
-    const { rerender } = render(<ItemsSearchInput q="" sortKeys={[{ key: "serialNumber", dir: "asc" }]} uic={null} />);
+    const { rerender } = render(<ItemsSearchInput q="" sortKeys={[{ key: "serialNumber", dir: "asc" }]} uic={null} needsRename={false} />);
 
     const input = screen.getByRole("textbox", { name: /search/i });
     await user.type(input, "abc");
 
     // Sort changes (e.g. user clicked a column header) while the debounce
     // timer armed by typing is still pending.
-    rerender(<ItemsSearchInput q="" sortKeys={[{ key: "make", dir: "desc" }]} uic={null} />);
+    rerender(<ItemsSearchInput q="" sortKeys={[{ key: "make", dir: "desc" }]} uic={null} needsRename={false} />);
 
     await vi.advanceTimersByTimeAsync(300);
 
@@ -140,7 +140,7 @@ describe("ItemsSearchInput", () => {
           { key: "make", dir: "asc" },
           { key: "serialNumber", dir: "desc" },
         ]}
-        uic="W6BTAA"
+        uic="W6BTAA" needsRename={false}
       />,
     );
 
@@ -160,7 +160,7 @@ describe("ItemsSearchInput", () => {
     const submitHandler = vi.fn((e: Event) => e.preventDefault());
     window.addEventListener("submit", submitHandler);
 
-    render(<ItemsSearchInput q="" sortKeys={[]} uic={null} />);
+    render(<ItemsSearchInput q="" sortKeys={[]} uic={null} needsRename={false} />);
     const input = screen.getByRole("textbox", { name: /search/i });
     const user = userEvent.setup();
     await user.type(input, "x{enter}");

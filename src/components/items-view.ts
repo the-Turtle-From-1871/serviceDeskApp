@@ -130,11 +130,24 @@ const SORT_LABEL = new Map<string, string>(SORTABLE_COLUMNS.map((c) => [c.key, c
  *  does with one: parseSortKeys drops a key outside ITEM_SORT_COLUMNS, so the
  *  list comes back in the default order. Claiming a sort that is not applied
  *  would be a confident wrong answer about the property book. */
-export function sortFilterSummary(sort: string | null, dir: SortDir, uic: string | null): string {
+export function sortFilterSummary(
+  sort: string | null,
+  dir: SortDir,
+  uic: string | null,
+  needsRename = false,
+): string {
   const label = sort ? SORT_LABEL.get(sort) : undefined;
   const sortPart = label ? `${label} ${dir === "asc" ? "▲" : "▼"}` : "Newest";
+  const parts = [sortPart];
   const unit = uic?.trim();
-  return unit ? `${sortPart} · ${unit}` : sortPart;
+  if (unit) parts.push(unit);
+  // Short — "Needs rename" would crowd a 390px trigger that may already be
+  // carrying a sort and a unit, and this is the least ambiguous abbreviation
+  // of the three. An ACTIVE filter must be visible with the menu shut, for the
+  // same reason the sort is: a list silently showing 3 of 1,204 devices is a
+  // confident wrong answer about the property book.
+  if (needsRename) parts.push("Rename");
+  return parts.join(" · ");
 }
 
 const SORT_FIELDS = new Set<string>(SORTABLE_COLUMNS.map((c) => c.key));
