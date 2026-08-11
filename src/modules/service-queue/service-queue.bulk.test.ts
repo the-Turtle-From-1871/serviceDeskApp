@@ -97,6 +97,30 @@ describe("upsertServiceRequests", () => {
     expect(await prisma.serviceQueueItem.count({ where: { itemId: retired.id } })).toBe(0);
   });
 
+  it("KEEPS an existing row's receipt link — a batch flag says nothing about transferId", async () => {
+    const item = await mkItem("BULKQ10");
+    const transfer = await prisma.transfer.create({
+      data: {
+        receiptNumber: "HR-BULK01",
+        itemSummary: "1x Dell 5540",
+        senderName: "Sender",
+        receiverName: "Receiver",
+        receiverSignature: "data:image/png;base64,x",
+      },
+    });
+    await prisma.serviceQueueItem.create({
+      data: { itemId: item.id, serviceType: "REPAIR", status: "PENDING", transferId: transfer.id },
+    });
+
+    await upsertServiceRequests({ itemIds: [item.id], serviceType: "REIMAGE" });
+
+    const row = await prisma.serviceQueueItem.findUniqueOrThrow({ where: { itemId: item.id } });
+    expect(row.serviceType).toBe("REIMAGE");
+    // The item came in on a hand receipt; re-flagging it from a scanned cart
+    // must not erase which one. Null is only ever written on CREATE.
+    expect(row.transferId).toBe(transfer.id);
+  });
+
   it("requires a note for OTHER", async () => {
     const item = await mkItem("BULKQ9");
     await expect(
@@ -155,6 +179,26 @@ describe("completeServiceItems", () => {
 
     const res = await completeServiceItems([pending.id, none.id]);
     expect(res).toEqual({ updated: 1, skipped: 1 });
+  });
+
+  it("excludes a RETIRED item's ticket and reports it as skipped", async () => {
+    const active = await mkItem("BULKC7");
+    const retired = await mkItem("BULKC8", "RETIRED");
+    for (const it of [active, retired]) {
+      await prisma.serviceQueueItem.create({
+        data: { itemId: it.id, serviceType: "REPAIR", status: "PENDING" },
+      });
+    }
+
+    const res = await completeServiceItems([active.id, retired.id]);
+    expect(res).toEqual({ updated: 1, skipped: 1 });
+
+    // The retired device's ticket is left PENDING — the single-item path is
+    // where a stale ticket on retired kit gets cleared, deliberately.
+    const row = await prisma.serviceQueueItem.findUniqueOrThrow({ where: { itemId: retired.id } });
+    expect(row.status).toBe("PENDING");
+    const fresh = await prisma.item.findUniqueOrThrow({ where: { id: retired.id } });
+    expect(fresh.markedReadyAt).toBeNull();
   });
 
   it("does not re-complete an already COMPLETED row", async () => {

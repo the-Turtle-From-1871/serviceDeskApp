@@ -111,8 +111,14 @@ type BulkUpsertInput = {
  * (computeServiceDueAt), NO CHANGE on update (serviceDueAtUpdate returns {}) —
  * so re-flagging a live request cannot move a deadline nobody touched.
  *
- * transferId is null: a scanned batch has no receipt behind it, matching the
- * item-page flag rather than the receipt builder's.
+ * transferId is null ON CREATE ONLY: a scanned batch has no receipt behind it,
+ * matching the item-page flag rather than the receipt builder's. It is
+ * deliberately ABSENT from the update, so re-flagging an item that was first
+ * flagged from the hand-receipt builder keeps the receipt it came in on (the
+ * item page renders that link). "This batch has no receipt" licenses a null on
+ * a row being created; it is not a statement that an existing link is wrong —
+ * the same principle the blank deadline follows two paragraphs up, that a save
+ * saying nothing about a field must not be a decision about it.
  *
  * RETIRED items are excluded and REPORTED, not refused — see recordAudits.
  *
@@ -157,7 +163,6 @@ export async function upsertServiceRequests(
         data: {
           serviceType: input.serviceType,
           serviceNote,
-          transferId: null,
           status: "PENDING",
           ...serviceDueAtUpdate(input.overrideDays, now),
         },
@@ -244,6 +249,14 @@ export function completeServiceItem(id: string): Promise<ServiceQueueItem> {
  * canComplete guard: a row that is not PENDING simply is not in the set, so a
  * completed row is SKIPPED rather than erroring the whole batch.
  *
+ * It is scoped to ACTIVE items as well as PENDING rows, so RETIRED kit is
+ * excluded and counted in `skipped` — the cross-cutting rule every bulk action
+ * here follows (see recordAudits and upsertServiceRequests). Completing a
+ * ticket is a claim that a device came back to the bench, which is meaningless
+ * for kit that left the fleet, and counting it in `updated` overstated what the
+ * sweep achieved. The SINGLE-item path is deliberately unscoped: clearing a
+ * stale ticket off a retired device is a real, deliberate act on one row.
+ *
  * Steps 2 and 3 stay in one transaction for the reason the single-item version
  * gives: a queue row that says COMPLETED while the item was never marked on
  * hand is the inconsistency worth preventing. Like that version it deliberately
@@ -265,7 +278,9 @@ export async function completeServiceItems(
   const now = new Date();
   return prisma.$transaction(async (tx) => {
     const pending = await tx.serviceQueueItem.findMany({
-      where: { itemId: { in: ids }, status: "PENDING" },
+      // A relation filter, not a second query: one round trip still, and a
+      // retired item's ticket is never in the set to be completed.
+      where: { itemId: { in: ids }, status: "PENDING", item: { status: "ACTIVE" } },
       select: { id: true, itemId: true },
     });
     if (pending.length === 0) return { updated: 0, skipped: ids.length };

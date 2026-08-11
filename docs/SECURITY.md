@@ -467,8 +467,11 @@ never refused — the same shape as the audit batch above, so a retired device
 scanned into a cart does not fail the rest of the batch. `serviceType` is
 validated against the `ServiceType` Zod enum, so a crafted value (anything
 other than `REIMAGE`/`REPAIR`/`OTHER`) is refused with an error rather than
-silently defaulted to one. Unlike the single-item flag, `transferId` is always
-written `null` — a scanned batch has no hand receipt behind it.
+silently defaulted to one. `transferId` is written `null` on CREATE only — a
+scanned batch has no hand receipt behind it — and is deliberately absent from
+the UPDATE, so re-flagging an item first flagged from the receipt builder keeps
+the receipt it came in on rather than having that link erased by a save that
+said nothing about it.
 
 **`completeServiceItemsAction` is the batched twin of `completeServiceAction`,
 added 2026-08-11** (`src/app/admin/actions/queue.ts`), gated on
@@ -482,12 +485,15 @@ queue row for each is resolved server-side by a `findMany` scoped to
 set rather than causing an error. Item ids are client-supplied and bounded at
 `MAX_BULK_ITEMS` (500), both in the action's Zod schema (a readable message)
 and again in `completeServiceItems` itself (the backstop for any other
-caller, throwing `ServiceQueueError("TOO_MANY")`). Non-pending rows are
-excluded and reported back as `skipped`, never refused — the same shape as
-the batched flag and audit actions above. The queue-row status flip and the
-item's `markedReadyAt` stamp happen inside the same transaction (mirroring
-`completeServiceItem`), so a queue row can never read `COMPLETED` while the
-item was never marked back on hand; the item update is scoped to
+caller, throwing `ServiceQueueError("TOO_MANY")`). Non-pending rows **and the
+tickets of RETIRED items** are excluded and reported back as `skipped`, never
+refused — the same shape as the batched flag and audit actions above (the
+lookup is scoped `status: "PENDING"` **and** `item: { status: "ACTIVE" }`). The
+single-item `completeServiceAction` stays unscoped on purpose: clearing a stale
+ticket off a retired device is a deliberate act on one row. The queue-row status
+flip and the item's `markedReadyAt` stamp happen inside the same transaction
+(mirroring `completeServiceItem`), so a queue row can never read `COMPLETED`
+while the item was never marked back on hand; the item update is scoped to
 `status: "ACTIVE"`, and `dueAt`/`overdueAlertedAt` are deliberately left on
 the finished row, matching the single-item action.
 
