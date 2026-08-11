@@ -5,6 +5,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-08-11
 
+### Added
+- **The fleet export can now import itself.** Dropping the MDM export in the Downloads folder is all that is needed — a scheduled job picks up the newest `items*.csv`, imports it, and deletes it. The browser's `items (1).csv`, `items (2).csv` naming is handled: the newest one wins. Nothing changes about what an import does, only about who has to click through it; the interactive *Import items* page is untouched and still there.
+
+  It refuses to send a file that is still downloading, and it **only deletes an export the server confirmed it imported** — a rejected or failed import leaves the file where it is and tries again a few minutes later. Everything it does is written to a log, since the CSV itself is gone afterwards.
+
+  **This is the direct push (`POST /api/items/import`), not the Google Drive relay.** The relay exists only for the workstation whose web filter blocks the app; where the app is reachable, this is the shorter path and puts nothing on a public link.
+
+  #### Notes
+  - New scripts in **`scripts/items-import/`** (worker, one-time setup, and a shim that keeps the recurring task from flashing a console window). `scripts/items-import/README.md` covers setup and troubleshooting.
+  - Requires **`MDM_IMPORT_SECRET`** to already be set in Vercel and the app redeployed since; unset, every import returns `401`. Setup stores that value **DPAPI-encrypted in `C:\ops\items-import\`** — never in the repository, because it authenticates a write endpoint into the production property book. The run log lives beside it.
+  - **`DEPLOY.md` §7 corrected:** its `Invoke-RestMethod -Form` example is **PowerShell 7 only** (`-Form` arrived in 6.1 and does not exist in Windows PowerShell 5.1, still the default shell on Windows 11). Also documented there: never let the client follow redirects, and never treat a bare `200` as proof of an import.
+  - **Worth knowing before enabling it:** the import treats the CSV as the source of truth for a known device's name, home unit, category and assigned user, so an automatic import silently reverts hand edits made in the app since the previous one.
+
 ### Removed
 - **Home units are no longer guessed from a device's name.** The import used to read a device name like `HI-DCSIM-LT-001`, look for a piece of it that matched a known unit, and fill in the home unit when the spreadsheet left that column blank. It no longer does. A device's home unit comes from the **homeUnit column** in the spreadsheet, or from editing the device in the app — and stays blank otherwise.
 
