@@ -23,7 +23,8 @@ Every task's requirements implicitly include all of these.
 - **Tests sit beside their subject** — `x.ts` → `x.test.ts`. jsdom is opt-in per file via `// @vitest-environment jsdom` on **line 1**.
 - **`npm run build` and jsdom are NOT evidence for a CSS change.** Neither has a layout engine.
 - **Docs ship in the same commit as the code**, per `CLAUDE.md`.
-- **The working tree must be clean before starting.** At time of writing there is an unfinished merge (`.git/MERGE_HEAD` present, three files `UU`). Do not begin Task 1 until `git status` is clean.
+- **Work happens in the worktree `C:\inventoryApp\.claude\worktrees\bulk-scan-actions`, on branch `worktree-bulk-scan-actions`.** Branched from `a8ce592`. `node_modules` resolves by parent-walk — do not run `npm install`, and never delete `node_modules` recursively from here.
+- **Line numbers in this plan are indicative only.** The file moved between planning and execution (#109, #111, #112 all landed). Search for the symbol named, not the line cited.
 
 ---
 
@@ -86,22 +87,31 @@ The selection is a `useState` Map today, so a screen lock loses a 150-item sweep
 export const MAX_BULK_ITEMS = 500;
 ```
 
-- [ ] **Step 2: Re-export it from the service so the five existing call sites are untouched**
+- [ ] **Step 2: Import AND re-export it from the service, so nothing downstream changes**
 
-In `src/modules/items/items.service.ts`, replace the declaration at lines 580-582:
+In `src/modules/items/items.service.ts`, delete the `export const MAX_BULK_ITEMS = 500;` declaration and its docblock (search for the symbol — it sits just above `markItemsReady`; do not trust a line number, the file moves).
+
+**Both an import and a re-export are required.** `MAX_BULK_ITEMS` is used at five sites *inside* this file (`markItemsReady`, `clearItemsReady`, `setItemsStatus`, `setItemsCategory`, and the scanned-items create). A bare `export { X } from "./y"` re-exports the name without binding it in module scope, so those five uses would fail to compile.
+
+Extend the existing `items.schema` import on line 9:
 
 ```ts
-/** Hard cap on one bulk action. The UI selects at most a page at a time, but
- *  the action is reachable by POST, so the server bounds it too. */
-export const MAX_BULK_ITEMS = 500;
+import {
+  newItemSchema,
+  normalizeCategoryName,
+  MAX_BULK_ITEMS,
+  type NewItemInput,
+  type ScannedItemInput,
+} from "./items.schema";
 ```
 
-with a re-export, and add the import at the top of the file next to the other `items.schema` imports:
+then re-export it beside the other exports so every existing importer of `items.service` keeps working:
 
 ```ts
 // Re-exported, not redeclared: the definition lives in the pure schema module
-// so the client selection can import it too. See items.schema.ts.
-export { MAX_BULK_ITEMS } from "./items.schema";
+// so the /items selection (a Client Component) can import it without pulling
+// Prisma into the browser bundle. See items.schema.ts.
+export { MAX_BULK_ITEMS };
 ```
 
 - [ ] **Step 3: Run the existing suites that touch the cap, to prove the move changed nothing**
