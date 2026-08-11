@@ -1,8 +1,9 @@
 "use server";
 import { z } from "zod";
 import { requireCapability, AuthError } from "@/lib/authz";
-import { listStaleDevices } from "@/app/admin/analytics/analytics.service";
+import { listStaleDevices, listDroppedDevices } from "@/app/admin/analytics/analytics.service";
 import { buildStaleDevicesWorkbook } from "@/app/admin/analytics/stale-workbook";
+import { buildDroppedDevicesWorkbook } from "@/app/admin/analytics/dropped-workbook";
 
 /* ============================================================
    Export actions for the readiness dashboard.
@@ -39,7 +40,7 @@ const scopeSchema = z.object({
 /* Annotated, not inferred: a `"use server"` module may only export async
    functions, so the shape stays local — but naming it keeps the result a real
    discriminated union the client can narrow with `"error" in res`. */
-type StaleExportResult =
+type DeviceExportResult =
   | { error: string }
   | { ok: true; base64: string; rowCount: number; truncated: boolean };
 
@@ -56,9 +57,9 @@ type StaleExportResult =
  * Base64 rather than a download route so this stays a Server Action: the
  * capability re-check below, the "you no longer have access" sentence and the
  * truncation notice all survive, where a route would answer a revoked grant
- * with a bare 403 in a new tab. The payload is bounded by STALE_EXPORT_MAX.
+ * with a bare 403 in a new tab. The payload is bounded by DEVICE_EXPORT_MAX.
  */
-export async function exportStaleDevicesAction(input: unknown): Promise<StaleExportResult> {
+export async function exportStaleDevicesAction(input: unknown): Promise<DeviceExportResult> {
   try {
     await requireCapability("VIEW_ANALYTICS");
   } catch (e) {
@@ -88,6 +89,49 @@ export async function exportStaleDevicesAction(input: unknown): Promise<StaleExp
   } catch (e) {
     // Generic to the client, detail to the server log (CLAUDE.md §5).
     console.error("[exportStaleDevicesAction] unexpected error:", e);
+    return { error: "Something went wrong building that export. Please try again." };
+  }
+}
+
+/**
+ * The dropped-off-network list, as an .xlsx.
+ *
+ * The same shape as the export above — same gate, same Zod-revalidated scope,
+ * same cap, same base64 hand-off — over a DIFFERENT population: devices with no
+ * MDM sync time at all, which the dormant window can never surface because
+ * there is no date for it to measure.
+ *
+ * Deliberately a second action rather than a parameter on the first. The two
+ * answer different questions, carry different columns and are read by different
+ * people at different times; a `kind` argument would mean one function whose
+ * result shape depends on a caller-supplied string, and a crafted value would
+ * have to be validated back into exactly this branch anyway.
+ */
+export async function exportDroppedDevicesAction(input: unknown): Promise<DeviceExportResult> {
+  try {
+    await requireCapability("VIEW_ANALYTICS");
+  } catch (e) {
+    if (e instanceof AuthError) {
+      return {
+        error:
+          e.code === "FORBIDDEN"
+            ? "You no longer have access to analytics."
+            : "Your session has expired. Sign in and try again.",
+      };
+    }
+    throw e;
+  }
+
+  const parsed = scopeSchema.safeParse(input);
+  if (!parsed.success) return { error: "That filter could not be read. Reload the page." };
+
+  try {
+    const { rows, truncated } = await listDroppedDevices(parsed.data);
+    if (rows.length === 0) return { ok: true, base64: "", rowCount: 0, truncated: false };
+    const workbook = await buildDroppedDevicesWorkbook(rows, parsed.data, truncated);
+    return { ok: true, base64: workbook.toString("base64"), rowCount: rows.length, truncated };
+  } catch (e) {
+    console.error("[exportDroppedDevicesAction] unexpected error:", e);
     return { error: "Something went wrong building that export. Please try again." };
   }
 }

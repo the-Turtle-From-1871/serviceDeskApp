@@ -14,6 +14,7 @@ import {
   type ItemScope,
   type StaleDeviceRow,
 } from "./analytics.types";
+import { headerRow, columnWidths, COMMON_WIDTHS } from "./workbook-style";
 import {
   SEVERITY_FILL,
   severityLabel,
@@ -51,32 +52,16 @@ import {
    such a value.
    ============================================================ */
 
-/** Header fill — the ledger's ink, so the sheet reads as ours rather than as
- *  Excel's default. White bold text on it, which is why it is dark. */
-const HEADER_FILL = "#1F2933";
+/* Header treatment and column widths are SHARED with the dropped-off-network
+   sheet — see workbook-style.ts, which also records why the text colour
+   property is `textColor` and not `color`. */
 
-/** Column widths, in characters. Excel's default (~8.4) truncates a device name
- *  and an ISO date alike, and a sheet someone has to widen by hand before they
- *  can read it is a sheet that gets closed. Keyed by header so a reordered or
- *  renamed column cannot silently take the wrong width. */
-const COLUMN_WIDTH: Partial<Record<(typeof STALE_DEVICE_COLUMNS)[number], number>> = {
-  Serial: 18,
-  "Device name": 22,
-  Make: 14,
-  Model: 18,
-  Category: 14,
-  "Home unit": 30,
-  UIC: 10,
-  Holder: 24,
-  Position: 16,
-  "Storage location": 18,
-  "Last logon user": 26,
+/** Widths for the two columns only this sheet has. */
+const COLUMN_WIDTH: Record<string, number> = {
+  ...COMMON_WIDTHS,
   "Last sync date": 14,
   "Days since sync": 15,
-  Compliance: 14,
-  Readiness: 16,
 };
-const DEFAULT_WIDTH = 16;
 
 /**
  * Severity for one already-built export row.
@@ -104,12 +89,7 @@ export async function buildStaleDevicesWorkbook(
   scope: ItemScope,
   truncated: boolean,
 ): Promise<Buffer> {
-  const header: Row = STALE_DEVICE_COLUMNS.map((c) => ({
-    value: c,
-    fontWeight: "bold" as const,
-    color: "#FFFFFF",
-    backgroundColor: HEADER_FILL,
-  }));
+  const header: Row = headerRow(STALE_DEVICE_COLUMNS);
 
   const body: SheetData = rows.map((row) => {
     const fill = SEVERITY_FILL[severityOf(row)];
@@ -162,7 +142,7 @@ export async function buildStaleDevicesWorkbook(
 
   return writeXlsxFile([header, ...body, ...legend], {
     sheet: "Dormant devices",
-    columns: STALE_DEVICE_COLUMNS.map((c) => ({ width: COLUMN_WIDTH[c] ?? DEFAULT_WIDTH })),
+    columns: columnWidths(STALE_DEVICE_COLUMNS, COLUMN_WIDTH),
     // Freeze the header so the columns stay named while someone scrolls 86 rows
     // — or 5,000.
     stickyRowsCount: 1,

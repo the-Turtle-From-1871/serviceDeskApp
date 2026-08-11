@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## 2026-08-11
 
 ### Added
+- **A second dashboard list: devices that dropped off the network.** The dormant list only ever showed devices MDM *has* seen — one it has never heard from has no date to measure, so it was excluded as "we cannot say" and appeared nowhere at all. There is now a card and an Excel export for exactly those: **no MDM sync time, but a device name** (a row with no name is a hand-made or scanned stub, not a machine that fell off the network).
+
+  **It is two different problems and the sheet says which is which.** Every row is marked either **Dropped out** — MDM used to report this device and no longer does, so check whether it was unenrolled, wiped or reassigned — or **Never enrolled**, meaning MDM has no record of it at all and the question is whether it should be enrolled. Dropped-out devices are listed **first**, because on the current fleet only **12 of 164** are in that group and sorting them together would bury them under the 152 that were never enrolled.
+
+  Unlike the dormant sheet the rows are not colour-coded: every device here has no sync time, so there is no age to shade. Two other differences worth knowing — the list **does** include devices out on an open hand receipt (a receipt explains why nobody signed in, not why MDM has no record), and it excludes retired kit, like every other figure on the page.
+
 - **The fleet export can now import itself.** Dropping the MDM export in the Downloads folder is all that is needed — a scheduled job picks up the newest `items*.csv`, imports it, and deletes it. The browser's `items (1).csv`, `items (2).csv` naming is handled: the newest one wins. Nothing changes about what an import does, only about who has to click through it; the interactive *Import items* page is untouched and still there.
 
   It refuses to send a file that is still downloading, and it **only deletes an export the server confirmed it imported** — a rejected or failed import leaves the file where it is and tries again a few minutes later. Everything it does is written to a log, since the CSV itself is gone afterwards.
@@ -26,6 +32,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   **The 500 limit is a hard stop while you scan, not a surprise at the end.** Once there is no room left the scanner refuses the next code with an error beep and says *"Selection is full (500) — not added"*, so nothing you hear "Added" for can go missing when you tap Done. Remove a row from the list, or apply an action and clear the batch, and scanning carries on.
 
 - **Two confirmations before something irreversible.** *Record audit* now asks first, naming how many devices and which signature it will sign as — it writes an accountability record for every device and cannot be undone. *Clear selection* asks before discarding a batch of more than 20, which now takes a re-scan to rebuild rather than a moment.
+- **Devices can be marked as loaners.** Scan or select a batch on the Items list, open **More actions**, and tap **Mark as loaner** — or **Remove loaner mark** to take them back out of the pool. Marked devices show a **Loaner** badge on their own page and in the list, and **Sort & filter** gains a *Loaners only* checkbox so the whole pool is one tap away.
+
+  **The mark survives the nightly import.** It is a field of its own rather than a category or a storage location, which is why: those columns come from the spreadsheet, so an import would have quietly undone the mark within a day.
+
+  #### Notes
+  - Migration `20260811210000_item_is_loaner` adds the `Item.isLoaner` column (NOT NULL, default false) and its index. **Apply it to Supabase before merging**, per migrate-before-push: Prisma enumerates every column in its SELECT, so until the column exists *every* item read fails, not just the new control.
 
 ### Changed
 - **The dormant-device export is now a colour-coded Excel file instead of a CSV.** Every row is shaded so the sheet can be worked down without reading a single date: **red** if the device is not compliant, otherwise **orange** at 60–90 days since its last MDM check-in and **yellow** at 30–59. Non-compliance wins, so a device out of policy is red however recently it synced — on the current fleet that is 82 of the 86 devices listed, which is rather the point: those are the ones to pick up first.
@@ -63,6 +75,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   **What went with it:** the step in *Import items* that asked you to name a unit for each device name it could not decode, and the "N units auto-detected" line in the import summary. Nothing else about importing changed, and units themselves are untouched — you still manage them on the Units page, which lists **Devices with no home unit** so you can see exactly which ones need one.
 
 ### Fixed
+- **The exported dormant-device sheet had unreadable column headings.** The header row was meant to be white on the dark ledger colour and came out black on it — the spreadsheet library renamed that property and silently ignores the old name, so the file was valid, the colours on the data rows were right, and only the headings were affected. Re-export to get a readable one; nothing about which devices are listed has changed.
+
 - **Flagging a batch for service no longer forgets which hand receipt a device came in on.** An item flagged from the receipt builder carries that receipt, and the item page shows it; re-flagging the same device as part of a scanned batch used to blank that link permanently. A batch flag now says nothing about the receipt rather than erasing it.
 - **Completing service on a batch no longer touches retired devices.** A retired device's open ticket was being closed and counted among the devices completed. It is now passed over and reported alongside the other skips, matching the other bulk actions. Clearing a stale ticket off a retired device is still possible one device at a time, from its own page.
 

@@ -59,7 +59,7 @@ export const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsh
  *
  * `atob` gives one character per byte, so the values are already 0-255 and the
  * Uint8Array copy is exact; decoding through a string is fine at this size,
- * bounded by STALE_EXPORT_MAX.
+ * bounded by DEVICE_EXPORT_MAX.
  */
 export function downloadBase64(filename: string, base64: string, mime: string) {
   const bin = atob(base64);

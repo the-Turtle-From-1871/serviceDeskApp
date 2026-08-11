@@ -9,7 +9,7 @@ import { downloadBase64, exportName, XLSX_MIME } from "./export";
 import {
   STALE_MIN_DAYS,
   STALE_MAX_DAYS,
-  STALE_EXPORT_MAX,
+  DEVICE_EXPORT_MAX,
   scopeLabel,
   type ItemScope,
 } from "./analytics.types";
@@ -87,7 +87,7 @@ export function StaleDevicesCard({ count, scope }: { count: number; scope: ItemS
       );
       setMessage(
         res.truncated
-          ? `Exported the first ${STALE_EXPORT_MAX.toLocaleString()} devices — there are more. Filter by unit to cover the rest.`
+          ? `Exported the first ${DEVICE_EXPORT_MAX.toLocaleString()} devices — there are more. Filter by unit to cover the rest.`
           : `Exported ${res.rowCount.toLocaleString()} device${res.rowCount === 1 ? "" : "s"}.`,
       );
     });

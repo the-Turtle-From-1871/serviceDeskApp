@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { ChevronDown } from "lucide-react";
 import { recordAuditsAction } from "@/app/admin/actions/audit";
 import { flagItemsForServiceAction, completeServiceItemsAction } from "@/app/admin/actions/queue";
-import { previewItemRenameAction, renameItemsAction } from "@/app/admin/actions/items";
+import { previewItemRenameAction, renameItemsAction, setItemsLoanerAction } from "@/app/admin/actions/items";
 // PURE — no DOM, no Prisma — which is the only reason a Client Component may
 // import it. The server rebuilds the names it writes from the same function, so
 // the two cannot disagree about the SHAPE of a name. They can still disagree
@@ -45,7 +45,7 @@ const plural = (n: number) => (n === 1 ? "" : "s");
 const COLLISIONS_SHOWN = 5;
 
 /** "Audited 47 items. Skipped 2 (retired or not applicable)." — the skip count
- *  is never silent: all three of these actions pass over rows they cannot act
+ *  is never silent: all four of these actions pass over rows they cannot act
  *  on (retired kit, or an item with no pending queue row), and an operator who
  *  scanned 49 devices must be told 2 did nothing. Reporting rather than
  *  refusing is the cross-cutting rule for bulk actions here, and it diverges
@@ -56,12 +56,14 @@ function outcome(verb: string, updated: number, skipped: number): string {
 }
 
 /**
- * The /items selection bar's overflow sheet: the three bulk actions that need
- * inputs of their own and cannot fit inline. The bar is sticky and overlays the
- * table, so every line of height hides another row of what you are selecting
- * from — stacked inline, these three covered a phone viewport entirely.
+ * The /items selection bar's overflow sheet: four bulk actions — audit, the
+ * service queue, rename and the loaner mark — that need inputs or dedicated
+ * buttons of their own and cannot fit inline. The bar is sticky and overlays
+ * the table, so every line of height hides another row of what you are
+ * selecting from — stacked inline, these four covered a phone viewport
+ * entirely.
  *
- * THIS COMPONENT honours `canAudit`, `canQueue` and `canRename` independently —
+ * THIS COMPONENT honours `canAudit`, `canQueue` and `canManageItems` independently —
  * each group renders only when its flag is set, and none of them means no
  * trigger at all.
  * ITS ONE CALLER CURRENTLY DOES NOT EXERCISE THAT. `/items` mounts the whole
@@ -75,18 +77,21 @@ function outcome(verb: string, updated: number, skipped: number): string {
  *
  * Either way this is PRESENTATION, never a boundary: `recordAuditsAction` calls
  * `requireAdmin()` (= `requireCapability("ADMINISTER")`), both queue actions
- * call `requireCapability("MANAGE_QUEUE")`, and both rename actions call
- * `requireCapability("MANAGE_ITEMS")`, re-read from the DB per request. The
- * batch is client-supplied ids, so that server guard is the whole of it — the
- * `isAdmin` wrapper above is a VISIBILITY gap, not a security one, and nothing
- * is over-exposed by it.
+ * call `requireCapability("MANAGE_QUEUE")`, and both rename actions and
+ * `setItemsLoanerAction` call `requireCapability("MANAGE_ITEMS")`, re-read from
+ * the DB per request. The batch is client-supplied ids, so that server guard
+ * is the whole of it — the `isAdmin` wrapper above is a VISIBILITY gap, not a
+ * security one, and nothing is over-exposed by it.
  *
  * Only ids are posted. For the audit, the signer's name and image are re-read
  * server-side scoped to the acting admin — the browser is handed signature
  * NAMES only (`listSignatureNames`) and never any ink. For the rename, only a
  * prefix and a start number are posted: the server rebuilds the name list
  * itself, so this control can never be turned into "write any string to any
- * item".
+ * item". For the loaner mark, only one flag rides along — `isLoaner`, read
+ * server-side as exactly `"1"` = true and anything else = false — so this
+ * control can only ever set or clear a single boolean, never an arbitrary
+ * write.
  *
  * POPOVER RULES — all inherited from SortFilterMenu and all load-bearing:
  *  - The element carrying `popover` has NO className. An author `display` beats
@@ -106,15 +111,15 @@ export function BulkActionsMenu({
   signatures,
   canAudit,
   canQueue,
-  canRename,
+  canManageItems,
 }: {
   itemIds: string[];
   /** Names only — `listSignatureNames`. No image blob reaches the browser. */
   signatures: { id: string; name: string }[];
   canAudit: boolean;
   canQueue: boolean;
-  /** MANAGE_ITEMS — the bulk rename. */
-  canRename: boolean;
+  /** MANAGE_ITEMS — the bulk rename and the loaner mark. */
+  canManageItems: boolean;
 }) {
   const menuId = "items-bulkactions";
   const triggerId = "items-bulkactions-trigger";
@@ -145,6 +150,16 @@ export function BulkActionsMenu({
   const [renameMsg, setRenameMsg] = useState<Msg>(null);
   // A FOURTH transition, for the same reason as the other three.
   const [renamePending, startRename] = useTransition();
+
+  // ONE message for both buttons, matching the queue pair above: they are two
+  // ends of one job and are never used together, and this bar is sticky over
+  // the table, where every line of height hides another row of what you are
+  // selecting from.
+  const [loanerMsg, setLoanerMsg] = useState<Msg>(null);
+  // Two transitions, not one — a slow write must not point the busy state at
+  // the button that was not pressed. Same reasoning as the three above.
+  const [markPending, startMark] = useTransition();
+  const [unmarkPending, startUnmark] = useTransition();
 
   const none = itemIds.length === 0;
   const ids = itemIds.join(",");
@@ -196,7 +211,7 @@ export function BulkActionsMenu({
   // dispatched request may write.
   const seq = useRef(0);
   useEffect(() => {
-    if (none || !canRename || !hasSequence) return;
+    if (none || !canManageItems || !hasSequence) return;
     const t = setTimeout(() => {
       const fd = new FormData();
       fd.set("itemIds", ids);
@@ -233,7 +248,7 @@ export function BulkActionsMenu({
     // `range` is derived from these and is a fresh object every render, so
     // depending on it directly would re-run this on every render — hence the
     // boolean `hasSequence` rather than the object.
-  }, [prefix, start, ids, none, canRename, hasSequence]);
+  }, [prefix, start, ids, none, canManageItems, hasSequence]);
 
   // What the line actually says, and what Apply actually promises. The preview
   // when there is one, the client-side range until then, nothing if the fields
@@ -306,7 +321,7 @@ export function BulkActionsMenu({
   // Nothing this caller may do — render no trigger at all rather than a button
   // that opens onto an empty sheet. Placed after the hooks, which must not sit
   // behind a conditional return.
-  if (!canAudit && !canQueue && !canRename) return null;
+  if (!canAudit && !canQueue && !canManageItems) return null;
 
   return (
     <>
@@ -451,7 +466,7 @@ export function BulkActionsMenu({
             </div>
           )}
 
-          {canRename && (
+          {canManageItems && (
             <div className="stack" style={{ gap: 6 }}>
               {/* "Rename — " prefixes the first label because this is the third
                   section in one panel and a bare "Name prefix" says nothing
@@ -536,6 +551,32 @@ export function BulkActionsMenu({
               {/* See the audit message above: a failure announces as an alert. */}
               {renameMsg && (
                 <span role={renameMsg.ok ? "status" : "alert"} className={renameMsg.ok ? "subtle" : "alert-error"}>{renameMsg.text}</span>
+              )}
+              {/* No confirm: the audit control confirms because it writes
+                  accountability records that cannot be undone. This writes one
+                  reversible boolean, and its inverse is the next button. */}
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={markPending || unmarkPending || none}
+                onClick={() =>
+                  run(startMark, setLoanerMsg, { isLoaner: "1" }, setItemsLoanerAction, "Marked as loaner")
+                }
+              >
+                {markPending ? "Marking…" : "Mark as loaner"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={markPending || unmarkPending || none}
+                onClick={() =>
+                  run(startUnmark, setLoanerMsg, { isLoaner: "0" }, setItemsLoanerAction, "Removed the loaner mark from")
+                }
+              >
+                {unmarkPending ? "Removing…" : "Remove loaner mark"}
+              </button>
+              {loanerMsg && (
+                <span role={loanerMsg.ok ? "status" : "alert"} className={loanerMsg.ok ? "subtle" : "alert-error"}>{loanerMsg.text}</span>
               )}
             </div>
           )}

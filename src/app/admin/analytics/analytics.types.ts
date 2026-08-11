@@ -58,7 +58,7 @@ export const STALE_MIN_DAYS = 30;
 export const STALE_MAX_DAYS = 90;
 
 /**
- * Hard cap on the exported row count.
+ * Hard cap on the exported row count, SHARED by both device exports.
  *
  * The fleet is ~1,200 items and this is a narrow slice of it, so the cap should
  * never bind — but "bound every list" has no exception for a list that happens
@@ -66,14 +66,18 @@ export const STALE_MAX_DAYS = 90;
  * handing over a truncated property-book extract is a confident wrong answer
  * about which devices need chasing.
  */
-export const STALE_EXPORT_MAX = 5000;
+export const DEVICE_EXPORT_MAX = 5000;
 
 /**
  * Columns of the exported sheet, in order.
  *
- * ONE definition, read by the service that builds the rows and by the client
- * that writes the file — the CSV writer takes columns and rows separately, so
- * two lists would silently emit blank columns rather than fail.
+ * ONE definition, read by the service that BUILDS the rows and by the workbook
+ * builder that WRITES them — two lists would silently emit blank columns rather
+ * than fail, since each side keys rows by header.
+ *
+ * The client no longer sees this list at all: since the export became a
+ * server-built .xlsx (2026-08-11) the action hands back finished bytes, not
+ * `{columns, rows}`. The wording here still described the CSV path.
  */
 export const STALE_DEVICE_COLUMNS = [
   "Serial",
@@ -102,6 +106,53 @@ export const STALE_DEVICE_COLUMNS = [
 
 /** One row of the sheet, keyed by the header it sits under. */
 export type StaleDeviceRow = Record<(typeof STALE_DEVICE_COLUMNS)[number], string | number>;
+
+/* ------- Dropped-off-network export (no MDM sync time at all) ------- */
+
+/**
+ * The SIBLING list to the dormant one, and the distinction is the whole point.
+ *
+ * The dormant list asks "MDM saw this device, but not for 30-90 days". This one
+ * asks "MDM cannot see this device AT ALL" — `Item.lastSyncAt IS NULL`. A device
+ * with no sync instant can never appear on the dormant list at any age, because
+ * there is no date to measure, so without this list it is invisible rather than
+ * overdue.
+ *
+ * IT REQUIRES A DEVICE NAME, by explicit decision (2026-08-11). A row with no
+ * name and no MDM record is a hand-created or scanned stub, not a machine that
+ * fell off the network — on the live fleet that excluded 5 rows, including one
+ * left over from testing.
+ *
+ * WHAT THE LIST HONESTLY CONTAINS, measured the day it was built: 164 devices,
+ * of which only **12 had ever been in MDM and dropped out**; the other **152
+ * have no MDM record of any kind** and most arrived in one pre-MDM inventory
+ * load on 2026-07-16. Both are worth chasing and neither can be seen any other
+ * way, but they are different problems — which is why `MDM record` below is a
+ * column and not a footnote. Do not quietly widen or narrow this predicate
+ * without re-reading that split; "dropped off the network" describes the 12.
+ */
+export const DROPPED_DEVICE_COLUMNS = [
+  "Serial",
+  "Device name",
+  "Make",
+  "Model",
+  "Category",
+  "Home unit",
+  "UIC",
+  "Holder",
+  "Position",
+  "Storage location",
+  // The column that makes the sheet actionable: "Dropped out" is a device MDM
+  // used to report and no longer does; "Never enrolled" never appeared in an
+  // export at all. Derived from whether any MDM telemetry was ever stored.
+  "MDM record",
+  "Last logon user",
+  "Last logon date",
+  "Compliance",
+  "Readiness",
+] as const;
+
+export type DroppedDeviceRow = Record<(typeof DROPPED_DEVICE_COLUMNS)[number], string | number>;
 
 /** Shown for the leaderboard bucket holding items with no value in the chosen
  *  grouping dimension. That bucket is REAL inventory, so it is displayed rather

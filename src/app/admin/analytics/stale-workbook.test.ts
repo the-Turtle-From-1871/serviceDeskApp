@@ -70,6 +70,29 @@ describe("buildStaleDevicesWorkbook", () => {
     expect(names).toContain("xl/styles.xml");
   });
 
+  test("gives the header row EXPLICIT white text, not Excel's theme default", async () => {
+    // The regression this exists for: write-excel-file renamed `color` to
+    // `textColor` in v3 and silently discards an unknown key, so `color:
+    // "#FFFFFF"` type-checks, builds, produces a valid file — and leaves the
+    // header on `theme="1"`, which is black on the near-black header fill at
+    // about 1.5:1. Every sheet shipped that way until it was caught by reading
+    // the bytes. Asserting the resolved FONT is what catches it; asserting the
+    // value passed to the writer would not.
+    const { sheet, styles } = open(await buildStaleDevicesWorkbook([row()], UNSCOPED, false));
+    const rowXml = sheet.match(/<row[^>]*\br="1"[^>]*>([\s\S]*?)<\/row>/)?.[1] ?? "";
+    const styleIndex = Number(rowXml.match(/<c[^>]*\bs="(\d+)"/)?.[1]);
+    const cellXfs = styles.match(/<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/)?.[1] ?? "";
+    const xf = [...cellXfs.matchAll(/<xf\b[^>]*\/?>/g)].map((m) => m[0])[styleIndex];
+    const fontId = Number(xf?.match(/fontId="(\d+)"/)?.[1] ?? 0);
+    const fontsXml = styles.match(/<fonts[^>]*>([\s\S]*?)<\/fonts>/)?.[1] ?? "";
+    const font = [...fontsXml.matchAll(/<font>([\s\S]*?)<\/font>/g)].map((m) => m[1])[fontId] ?? "";
+
+    // An explicit rgb, and white — a `theme=` colour here is the bug.
+    expect(font).toMatch(/<color[^>]*rgb="[0-9A-Fa-f]*FFFFFF"/i);
+    expect(font).not.toMatch(/<color[^>]*theme=/);
+    expect(font).toContain("<b/>");
+  });
+
   test("paints each row the colour its own data earns", async () => {
     // Three devices, one per band, in one sheet — so this also proves the fills
     // are applied per row rather than one style being reused for all of them.

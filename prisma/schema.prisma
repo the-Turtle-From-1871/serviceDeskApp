@@ -220,6 +220,20 @@ model Item {
   // public per-keystroke search. Revisit if the fleet grows an order of
   // magnitude.
   storageLocation            String?
+  /// Pool stock: a device kept to lend out temporarily, over and over.
+  ///
+  /// STORED rather than derived, unlike readiness and accountability — and the
+  /// distinction is the reason this column is allowed to exist. Those two were
+  /// dropped because they stored answers the data already knew. NOTHING here can
+  /// infer loaner-ness: no signal separates a laptop kept for lending from an
+  /// identical one issued permanently. It is a standing decision by the property
+  /// manager, so a person is the only possible source.
+  ///
+  /// DELIBERATELY NOT IMPORTABLE. The CSV importer writes a named column set
+  /// (see import.ts), and this is not in it — which is the entire reason it is a
+  /// new column rather than a reused deviceCategory/homeUnit/storageLocation.
+  /// Any of those would be reverted by the nightly Drive import within a day.
+  isLoaner                   Boolean           @default(false)
   notes                      String?
   // The email of the person actually using the device. Distinct from the
   // hand-receipt holder (derived from the latest OPEN Transfer), which stays the
@@ -308,6 +322,9 @@ model Item {
   // filters feeding groupBy — a plain B-tree serves them.
   @@index([deviceCategory])
   @@index([deviceUIC])
+  // Low-cardinality equality filter feeding a paginated list, same as
+  // deviceCategory/deviceUIC above.
+  @@index([isLoaner])
   // Audit-status sort on /items: a bare ORDER BY lastAuditedAt, no nulls override.
   @@index([lastAuditedAt])
   // Readiness derivation reads these two on every dashboard aggregate and on

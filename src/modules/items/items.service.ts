@@ -149,6 +149,9 @@ export type ItemsPage = {
   /** Echoed back so the page can rebuild its own URL without re-reading the
    *  querystring — the same reason `uic` is here. */
   needsRename: boolean;
+  /** Echoed back so the page can rebuild its own URL without re-reading the
+   *  querystring — the same reason `uic` and `needsRename` are here. */
+  loaner: boolean;
 };
 
 /**
@@ -263,7 +266,12 @@ function recipientMatchSql(tokens: string[]): Prisma.Sql {
  *  The recipient branch is an EXISTS over open hand receipts (recipientMatchSql)
  *  — the filter now spans a relation, so the Prisma twin above is a nested
  *  `some`, not another column `contains`. Both must change together. */
-function itemFilterSql(search: string | null, uic: string | null, needsRename: boolean): Prisma.Sql {
+function itemFilterSql(
+  search: string | null,
+  uic: string | null,
+  needsRename: boolean,
+  loaner: boolean,
+): Prisma.Sql {
   const pattern = search ? `%${search}%` : null;
   return Prisma.sql`
     (${pattern}::text IS NULL
@@ -274,7 +282,8 @@ function itemFilterSql(search: string | null, uic: string | null, needsRename: b
       OR i."storageLocation" ILIKE ${pattern}::text
       OR ${recipientMatchSql(search ? recipientTokens(search) : [])})
     AND (${uic}::text IS NULL OR i."deviceUIC" = ${uic}::text)
-    AND (${needsRename}::boolean IS NOT TRUE OR i."mdmProposedName" IS NOT NULL)`;
+    AND (${needsRename}::boolean IS NOT TRUE OR i."mdmProposedName" IS NOT NULL)
+    AND (${loaner}::boolean IS NOT TRUE OR i."isLoaner" IS TRUE)`;
 }
 
 /**
@@ -300,6 +309,7 @@ async function derivedOrderedItemIds(opts: {
   search: string | null;
   uic: string | null;
   needsRename: boolean;
+  loaner: boolean;
   sortKeys: SortKey[];
   skip: number;
   take: number;
@@ -335,7 +345,7 @@ async function derivedOrderedItemIds(opts: {
     SELECT i."id"
     FROM "Item" i
     ${READINESS_JOINS}
-    WHERE ${itemFilterSql(opts.search, opts.uic, opts.needsRename)}
+    WHERE ${itemFilterSql(opts.search, opts.uic, opts.needsRename, opts.loaner)}
     ORDER BY ${Prisma.join(terms, ", ")}
     LIMIT ${opts.take} OFFSET ${opts.skip}`);
   return rows.map((r) => r.id);
@@ -357,11 +367,15 @@ export async function listItems(opts: {
    *  Intune. A worklist, so it is one-way: false means "no filter", never
    *  "only devices that are fine". */
   needsRename?: boolean;
+  /** Show only loaner-pool stock. A ONE-WAY worklist filter, like needsRename:
+   *  false means "no filter", never "only devices that are not loaners". */
+  loaner?: boolean;
 } = {}): Promise<ItemsPage> {
   const pageSize = opts.pageSize && opts.pageSize > 0 ? Math.floor(opts.pageSize) : ITEMS_PAGE_SIZE;
   const search = opts.search?.trim();
   const uic = opts.uic?.trim() || null;
   const needsRename = opts.needsRename === true;
+  const loaner = opts.loaner === true;
 
   const filters: Prisma.ItemWhereInput[] = [];
   if (search) {
@@ -407,6 +421,9 @@ export async function listItems(opts: {
   // real reason: the two would disagree about which rows the page contains
   // depending only on whether the chosen sort happens to involve a derived key.
   if (needsRename) filters.push({ mdmProposedName: { not: null } });
+  // The Prisma twin of the clause in itemFilterSql. Both paths must carry every
+  // filter or items.readiness-sort.parity.test.ts fails.
+  if (loaner) filters.push({ isLoaner: true });
   const where: Prisma.ItemWhereInput | undefined =
     filters.length === 0 ? undefined : filters.length === 1 ? filters[0] : { AND: filters };
 
@@ -447,6 +464,7 @@ export async function listItems(opts: {
           search: search ?? null,
           uic,
           needsRename,
+          loaner,
           sortKeys,
           skip,
           take: pageSize,
@@ -465,6 +483,7 @@ export async function listItems(opts: {
     sortKeys,
     uic,
     needsRename,
+    loaner,
   };
 }
 
@@ -705,6 +724,40 @@ export async function clearItemsReady(itemIds: string[]): Promise<{ updated: num
     data: { markedReadyAt: null },
   });
   return { updated: res.count };
+}
+
+/**
+ * Mark items as loaner-pool stock, or take them back out of the pool.
+ *
+ * One updateMany, never a loop — the batched twin of every other bulk control
+ * on the /items selection bar.
+ *
+ * RETIRED items are excluded and REPORTED, not refused: a device that has left
+ * the fleet cannot be pool stock, and one retired row must not fail a batch of
+ * fifty. That is the cross-cutting rule for bulk actions here and it diverges
+ * from the single-item paths on purpose.
+ *
+ * `skipped` is "rows this action did not write", which includes rows that no
+ * longer exist as well as retired ones. It deliberately does NOT filter on
+ * `isLoaner: !isLoaner` — that would make the count exact but would reclassify
+ * "already a loaner" as skipped, which the sheet reports as "retired or not
+ * applicable" and would read as a failure.
+ *
+ * Enforces NO permissions — the calling Server Action owns the capability gate.
+ */
+export async function setItemsLoaner(
+  itemIds: string[],
+  isLoaner: boolean,
+): Promise<{ updated: number; skipped: number }> {
+  const ids = [...new Set(itemIds.filter((id) => id.trim() !== ""))];
+  if (ids.length === 0) return { updated: 0, skipped: 0 };
+  if (ids.length > MAX_BULK_ITEMS) throw new ItemError("TOO_MANY");
+
+  const res = await prisma.item.updateMany({
+    where: { id: { in: ids }, status: "ACTIVE" },
+    data: { isLoaner },
+  });
+  return { updated: res.count, skipped: ids.length - res.count };
 }
 
 /**
