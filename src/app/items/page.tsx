@@ -112,6 +112,7 @@ export default async function ItemsListPage({
               lastLogonUserPrincipalName: it.lastLogonUserPrincipalName,
               lastLogonDate: it.lastLogonDate,
               compliance: it.compliance,
+              lastSyncDateTime: it.lastSyncDateTime,
               // A row that vanished between the two queries falls back to
               // "we know nothing about it" rather than dropping the row.
               readiness: readiness.get(it.id) ?? "UNTRIAGED",

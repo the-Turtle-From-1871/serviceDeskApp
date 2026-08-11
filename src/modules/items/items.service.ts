@@ -527,6 +527,7 @@ const UPDATABLE_ITEM_COLUMNS = new Set<string>([
   "lastLogonAt",
   "enrollmentDate",
   "compliance",
+  "lastSyncDateTime",
 ]);
 
 /** Prisma FIELD name -> physical COLUMN name, for fields that differ.
@@ -822,7 +823,7 @@ async function loadExistingBySerial(serials: string[]): Promise<Map<string, Exis
     select: {
       id: true, status: true, serialNumber: true, make: true, model: true, deviceName: true, homeUnit: true,
       deviceUIC: true, deviceCategory: true, storageLocation: true, currentUserEmail: true, lastLogonUserPrincipalName: true, lastLogonDate: true,
-      enrollmentDate: true, compliance: true,
+      enrollmentDate: true, compliance: true, lastSyncDateTime: true,
     },
   });
   const map = new Map<string, ExistingItem>();

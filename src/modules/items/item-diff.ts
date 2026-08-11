@@ -26,6 +26,7 @@ export type ItemLoggedFields = {
   lastLogonDate: string | null;
   enrollmentDate: string | null;
   compliance: string | null;
+  lastSyncDateTime: string | null;
 };
 
 export type FieldChange = {

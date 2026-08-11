@@ -23,8 +23,15 @@ import type { SortField } from "@/modules/items/sort-keys";
  *  (modules/transfers/holders.query.ts) with no column for Prisma to name, and
  *  it is deliberately NOT a third derived sort key — that would mean a scalar
  *  subquery in the raw ORDER BY, its own parity coverage and a nulls decision.
- *  Sortability is the SORTABLE_COLUMNS list below; visibility is this one. */
-export type ColumnKey = SortField | "holder";
+ *  Sortability is the SORTABLE_COLUMNS list below; visibility is this one.
+ *
+ *  `lastSyncDateTime` is the second such column, for a different reason:
+ *  it HAS a real column, but it holds the MDM export's raw text
+ *  ("8/9/2026 6:02:11 AM"), so `ORDER BY` on it sorts lexically — 10/1/2025
+ *  ahead of 7/25/2026. A sort that confidently returns the wrong order is
+ *  worse than no sort, and the honest fix is a parsed twin (as lastLogonAt is
+ *  to lastLogonDate), not an ORDER BY on the text. */
+export type ColumnKey = SortField | "holder" | "lastSyncDateTime";
 
 /* Readiness labels have ONE definition, in modules/items/readiness.ts, next to
    the function that derives them. Re-exported here so the table imports its
@@ -58,7 +65,7 @@ export type ItemRow = {
   homeUnit: string | null;
   /** Where the device physically sits when nobody holds it. Free text. */
   storageLocation: string | null;
-  /* MDM telemetry, shown in the phone card's More panel. All three are stored
+  /* MDM telemetry, shown in the phone card's More panel. All four are stored
      VERBATIM as text by the importer (`lastLogonDate` is a raw string like
      "7/25/2026 1:40:21 AM", never a Date) — so they are rendered as-is, exactly
      as the item detail card does. `Item.lastLogonAt` is the parsed twin and is
@@ -68,6 +75,9 @@ export type ItemRow = {
   lastLogonUserPrincipalName: string | null;
   lastLogonDate: string | null;
   compliance: string | null;
+  /* When MDM last checked in with the device — NOT when a person last signed
+     in. The only one of the four that is also a desktop column. */
+  lastSyncDateTime: string | null;
 };
 
 export type SortPref = GenericSortPref<SortField>;
@@ -83,17 +93,24 @@ export const ITEM_COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: "readiness", label: "Readiness" },
   { key: "status", label: "Status" },
   { key: "auditState", label: "Audit" },
+  { key: "lastSyncDateTime", label: "Last sync" },
 ];
 
-/** The Sort control's options — every column EXCEPT `holder`.
+/** Columns the table renders but the server cannot order by — see ColumnKey for
+ *  why each one is here. Named rather than inlined into the filter below so
+ *  adding a third is one edit in one place, and so the reason lives with the
+ *  list rather than in a `!==` chain. */
+const UNSORTABLE_COLUMNS = new Set<string>(["holder", "lastSyncDateTime"]);
+
+/** The Sort control's options — every column EXCEPT the unsortable ones.
  *
  *  This used to be `ITEM_COLUMNS` itself, on the invariant that the table shows
- *  nothing it cannot also sort. `holder` breaks that invariant deliberately (see
+ *  nothing it cannot also sort. That invariant is deliberately broken (see
  *  ColumnKey), so the two lists diverge here rather than offering a sort the
- *  server would silently drop: parseSortKeys does not accept `holder`, so a
+ *  server would silently drop: parseSortKeys accepts neither key, so a
  *  `?sort=holder` URL falls back to the default order with no error. */
 export const SORTABLE_COLUMNS: { key: SortField; label: string }[] = ITEM_COLUMNS.filter(
-  (c): c is { key: SortField; label: string } => c.key !== "holder",
+  (c): c is { key: SortField; label: string } => !UNSORTABLE_COLUMNS.has(c.key),
 );
 
 const SORT_LABEL = new Map<string, string>(SORTABLE_COLUMNS.map((c) => [c.key, c.label]));

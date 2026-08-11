@@ -1,0 +1,11 @@
+-- When MDM last checked in with the device. Distinct from "lastLogonDate",
+-- which is when a PERSON last signed in: a device powered on in a cage syncs
+-- nightly with no logon for months.
+--
+-- Nullable and additive, so this is safe to apply before the code that reads
+-- it deploys. Plain TEXT and deliberately NOT indexed: it holds the MDM
+-- export's raw string ("8/9/2026 6:02:11 AM"), nothing filters or orders by
+-- it, and it has no parsed timestamptz twin the way lastLogonDate has
+-- lastLogonAt — because nothing computes over it.
+-- AlterTable
+ALTER TABLE "Item" ADD COLUMN     "lastSyncDateTime" TEXT;

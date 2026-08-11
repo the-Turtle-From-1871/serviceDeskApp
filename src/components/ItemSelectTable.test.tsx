@@ -105,6 +105,7 @@ describe("ItemSelectTable — delete dialog structure (closed-dialog layout regr
     lastLogonUserPrincipalName: null,
     lastLogonDate: null,
     compliance: null,
+    lastSyncDateTime: null,
   };
 
   function renderRow() {
@@ -183,6 +184,7 @@ describe("ItemSelectTable — mobile card structure", () => {
     lastLogonUserPrincipalName: "jane.doe@army.mil",
     lastLogonDate: "7/25/2026 1:40:21 AM",
     compliance: "Compliant",
+    lastSyncDateTime: "8/9/2026 6:02:11 AM",
   };
   const RETIRED = { ...ROW, id: "item-2", serialNumber: "SN2", status: "RETIRED" as const };
 
@@ -281,10 +283,24 @@ describe("ItemSelectTable — mobile card structure", () => {
       "Compliance",
       "Logon user",
       "Logon date",
+      "Last sync",
     ]);
     // UIC and Category were moved out; they stay desktop columns only.
     expect(terms).not.toContain("UIC");
     expect(terms).not.toContain("Category");
+  });
+
+  // Last sync and Logon date are different facts, and the card is the surface
+  // where they sit closest together — so pin that both render their own value
+  // rather than one shadowing the other.
+  it("renders the last sync time and the logon date as separate rows", () => {
+    const { container } = renderRows();
+    const pairs = [...container.querySelectorAll("td.cell-more dt")].map((dt, i) => [
+      dt.textContent,
+      [...container.querySelectorAll("td.cell-more dd")][i]?.textContent,
+    ]);
+    expect(pairs).toContainEqual(["Logon date", "7/25/2026 1:40:21 AM"]);
+    expect(pairs).toContainEqual(["Last sync", "8/9/2026 6:02:11 AM"]);
   });
 
   // SLOC is the one row that goes away rather than showing a dash — most of the
@@ -311,6 +327,7 @@ describe("ItemSelectTable — mobile card structure", () => {
         "Compliance",
         "Logon user",
         "Logon date",
+        "Last sync",
       ]);
     }
   });
@@ -322,17 +339,17 @@ describe("ItemSelectTable — mobile card structure", () => {
   // showed three labelled but empty rows on a phone.
   it("renders a dash for null, empty and whitespace-only values alike", () => {
     const shapes = [
-      { ...ROW, id: "b1", serialNumber: "B1", holderName: null, homeUnit: null, storageLocation: null, compliance: null, lastLogonUserPrincipalName: null, lastLogonDate: null },
-      { ...ROW, id: "b2", serialNumber: "B2", holderName: "", homeUnit: "", storageLocation: "", compliance: "", lastLogonUserPrincipalName: "", lastLogonDate: "" },
-      { ...ROW, id: "b3", serialNumber: "B3", holderName: "  ", homeUnit: "   ", storageLocation: "  ", compliance: " ", lastLogonUserPrincipalName: "  ", lastLogonDate: " " },
+      { ...ROW, id: "b1", serialNumber: "B1", holderName: null, homeUnit: null, storageLocation: null, compliance: null, lastLogonUserPrincipalName: null, lastLogonDate: null, lastSyncDateTime: null },
+      { ...ROW, id: "b2", serialNumber: "B2", holderName: "", homeUnit: "", storageLocation: "", compliance: "", lastLogonUserPrincipalName: "", lastLogonDate: "", lastSyncDateTime: "" },
+      { ...ROW, id: "b3", serialNumber: "B3", holderName: "  ", homeUnit: "   ", storageLocation: "  ", compliance: " ", lastLogonUserPrincipalName: "  ", lastLogonDate: " ", lastSyncDateTime: "   " },
     ];
     const { container } = renderRows({ items: shapes });
     const rows = [...container.querySelectorAll("tbody tr")];
     expect(rows).toHaveLength(shapes.length);
     for (const tr of rows) {
       const values = [...tr.querySelectorAll("td.cell-more dd")].map((d) => d.textContent);
-      // Five, not six: a blank SLOC drops its row entirely, in all three shapes.
-      expect(values).toEqual(["—", "—", "—", "—", "—"]);
+      // Six, not seven: a blank SLOC drops its row entirely, in all three shapes.
+      expect(values).toEqual(["—", "—", "—", "—", "—", "—"]);
     }
   });
 
@@ -382,7 +399,10 @@ describe("ItemSelectTable — mobile card structure", () => {
   // exists to show what the CARD dropped, which is a fixed set, not what a
   // desktop preference happens to have hidden.
   it("shows the same fields regardless of the Columns preference", () => {
-    window.localStorage.setItem("items:hiddenCols", JSON.stringify(["holder", "deviceUIC", "deviceCategory"]));
+    // `lastSyncDateTime` is hidden here on purpose: it is the one panel field
+    // that is ALSO a desktop column, so it is the only one that could plausibly
+    // disappear from the card when the menu hides it. It must not.
+    window.localStorage.setItem("items:hiddenCols", JSON.stringify(["holder", "deviceUIC", "deviceCategory", "lastSyncDateTime"]));
     const { container } = renderRows();
     // First row only — renderRows() draws two, so an unscoped query returns
     // both cards' worth.
@@ -394,6 +414,7 @@ describe("ItemSelectTable — mobile card structure", () => {
       "Compliance",
       "Logon user",
       "Logon date",
+      "Last sync",
     ]);
     window.localStorage.clear();
   });
@@ -483,6 +504,7 @@ describe("ItemSelectTable — long-press selection", () => {
     lastLogonUserPrincipalName: null,
     lastLogonDate: null,
     compliance: null,
+    lastSyncDateTime: null,
   };
   const RETIRED = { ...ROW, id: "item-2", serialNumber: "SN2", status: "RETIRED" as const };
   let realSetPointerCapture: HTMLElement["setPointerCapture"];
