@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   readinessState,
-  parseLastLogonAt,
+  parseMdmDateTime,
   READINESS_ORDER,
   READINESS_LABEL,
   type ReadinessSignals,
@@ -118,43 +118,43 @@ describe("readinessState", () => {
   });
 });
 
-describe("parseLastLogonAt", () => {
+describe("parseMdmDateTime", () => {
   it("parses the MDM export's format", () => {
-    expect(parseLastLogonAt("7/25/2026 1:40:21 AM")?.toISOString()).toBe("2026-07-25T01:40:21.000Z");
+    expect(parseMdmDateTime("7/25/2026 1:40:21 AM")?.toISOString()).toBe("2026-07-25T01:40:21.000Z");
   });
 
   it("handles PM correctly", () => {
-    expect(parseLastLogonAt("7/25/2026 1:40:21 PM")?.toISOString()).toBe("2026-07-25T13:40:21.000Z");
+    expect(parseMdmDateTime("7/25/2026 1:40:21 PM")?.toISOString()).toBe("2026-07-25T13:40:21.000Z");
   });
 
   it("maps 12 AM to midnight and 12 PM to noon", () => {
-    expect(parseLastLogonAt("7/25/2026 12:00:00 AM")?.toISOString()).toBe("2026-07-25T00:00:00.000Z");
-    expect(parseLastLogonAt("7/25/2026 12:00:00 PM")?.toISOString()).toBe("2026-07-25T12:00:00.000Z");
+    expect(parseMdmDateTime("7/25/2026 12:00:00 AM")?.toISOString()).toBe("2026-07-25T00:00:00.000Z");
+    expect(parseMdmDateTime("7/25/2026 12:00:00 PM")?.toISOString()).toBe("2026-07-25T12:00:00.000Z");
   });
 
   it("accepts a date with no time", () => {
-    expect(parseLastLogonAt("7/8/2025")?.toISOString()).toBe("2025-07-08T00:00:00.000Z");
+    expect(parseMdmDateTime("7/8/2025")?.toISOString()).toBe("2025-07-08T00:00:00.000Z");
   });
 
   it("accepts ISO-8601", () => {
-    expect(parseLastLogonAt("2026-07-25T01:40:21Z")?.toISOString()).toBe("2026-07-25T01:40:21.000Z");
+    expect(parseMdmDateTime("2026-07-25T01:40:21Z")?.toISOString()).toBe("2026-07-25T01:40:21.000Z");
   });
 
   it("returns null for blank or missing input", () => {
-    expect(parseLastLogonAt(null)).toBeNull();
-    expect(parseLastLogonAt(undefined)).toBeNull();
-    expect(parseLastLogonAt("   ")).toBeNull();
+    expect(parseMdmDateTime(null)).toBeNull();
+    expect(parseMdmDateTime(undefined)).toBeNull();
+    expect(parseMdmDateTime("   ")).toBeNull();
   });
 
   it("returns null rather than throwing on junk", () => {
     // An unparseable date must degrade to "unknown", never fail an import.
-    expect(parseLastLogonAt("not a date")).toBeNull();
-    expect(parseLastLogonAt("Never")).toBeNull();
+    expect(parseMdmDateTime("not a date")).toBeNull();
+    expect(parseMdmDateTime("Never")).toBeNull();
   });
 
   it("rejects an impossible date instead of rolling it over", () => {
     // Date.UTC would silently turn 2/30 into 3/2.
-    expect(parseLastLogonAt("2/30/2026")).toBeNull();
-    expect(parseLastLogonAt("13/1/2026")).toBeNull();
+    expect(parseMdmDateTime("2/30/2026")).toBeNull();
+    expect(parseMdmDateTime("13/1/2026")).toBeNull();
   });
 });

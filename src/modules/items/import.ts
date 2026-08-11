@@ -1,7 +1,7 @@
 import { importRowSchema } from "./items.schema";
 import type { RawRow } from "./csv";
 import { diffItemFields, type FieldChange, type ItemLoggedFields } from "./item-diff";
-import { parseLastLogonAt } from "./readiness";
+import { parseMdmDateTime } from "./readiness";
 
 export type SkippedRow = { row: number; serialNumber: string; reason: string };
 
@@ -72,6 +72,9 @@ export type NewItemImport = {
   enrollmentDate?: string;
   compliance?: string;
   lastSyncDateTime?: string;
+  /** Derived from lastSyncDateTime at plan time; see readiness.ts. Backs the
+   *  dormant-device window, which is why the sync column needs an instant. */
+  lastSyncAt?: Date;
 };
 
 // A row that matched an existing serial and has at least one changed field.
@@ -81,8 +84,8 @@ export type ItemUpdate = {
   row: number;
   itemId: string;
   serialNumber: string;
-  // `string | Date` because the derived `lastLogonAt` instant travels
-  // alongside the raw `lastLogonDate` text it is parsed from.
+  // `string | Date` because the derived `lastLogonAt`/`lastSyncAt` instants
+  // travel alongside the raw text they are parsed from.
   data: Record<string, string | Date | null>;
   loggedChanges: FieldChange[];
   makeModelMismatch: boolean;
@@ -108,6 +111,11 @@ type Candidate = {
   /** Parsed once here, reused by the winner. `null` when the export gave no
    *  usable date — which is a real state, not an error. */
   lastLogonAt: Date | null;
+  /** The sync instant, parsed alongside it. Deliberately NOT consulted by
+   *  `preferredCandidate`: the duplicate contest asks which enrolment record is
+   *  the live one, and a stale enrolment can still be syncing. Recency of USE is
+   *  the question there, which is the logon. */
+  lastSyncAt: Date | null;
 };
 
 /**
@@ -195,7 +203,8 @@ export function planImport(
       d,
       sn,
       snKey: sn.toLowerCase(),
-      lastLogonAt: parseLastLogonAt(d.lastLogonDate) ?? null,
+      lastLogonAt: parseMdmDateTime(d.lastLogonDate) ?? null,
+      lastSyncAt: parseMdmDateTime(d.lastSyncDateTime) ?? null,
     });
   }
 
@@ -336,7 +345,15 @@ export function planImport(
       // so a refreshed lastLogonDate whose lastLogonAt went stale would leave
       // the two disagreeing about the same device.
       if (data.lastLogonDate !== undefined) {
-        data.lastLogonAt = parseLastLogonAt(data.lastLogonDate as string | null);
+        data.lastLogonAt = parseMdmDateTime(data.lastLogonDate as string | null);
+      }
+      // Same rule for the sync twin, and here it is load-bearing rather than
+      // defensive: the dormant-device list reads `lastSyncAt` alone, so a
+      // refreshed `lastSyncDateTime` whose instant went stale would keep
+      // reporting a device as unseen while the raw text on its page says MDM
+      // checked in last night.
+      if (data.lastSyncDateTime !== undefined) {
+        data.lastSyncAt = parseMdmDateTime(data.lastSyncDateTime as string | null);
       }
       // Retired items still get their fields updated (data holds every change),
       // but emit no loggedChanges so commitImport writes no ItemEdit for them.
@@ -369,6 +386,10 @@ export function planImport(
       enrollmentDate: d.enrollmentDate,
       compliance: d.compliance,
       lastSyncDateTime: d.lastSyncDateTime,
+      // Parsed in phase 1 alongside the logon, and reused here for the same
+      // reason: one parse per row means the instant and the text it came from
+      // can never disagree about the same device.
+      lastSyncAt: c.lastSyncAt ?? undefined,
     };
     // No derivation here either — a new device's home unit comes from the CSV
     // column or stays blank. See the note in the matched branch above for why

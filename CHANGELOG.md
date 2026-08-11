@@ -5,6 +5,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-08-11
 
+### Changed
+- **The dormant-device list on the dashboard now measures the last MDM check-in instead of the last sign-in.** It used to ask *who has nobody signed in to for 30–90 days*; it now asks *what has MDM not heard from for 30–90 days*, which is the question you chase a missing device with. A machine sitting unused on a shelf still syncs every night, so it no longer clutters the list — and a machine that has genuinely dropped off the network shows up even if the last person to use it signed in yesterday.
+
+  The card and the exported spreadsheet say so throughout: *N devices MDM has not seen recently*, and the sheet's **Last logon date** / **Days since logon** columns are now **Last sync date** / **Days since sync**. **Last logon user** stays — the person MDM last saw on the device is still who to ask about it.
+
+  **Expect a small list at first.** A device only has a sync time once an import has recorded one, and that has only been imported since 10 Aug — so devices no import has covered since then are not counted yet, the same way a device MDM has never seen has never been counted. The list fills in as imports run. Everything else about it is unchanged: over 90 days is still excluded, so are retired devices and anything out on an open hand receipt.
+
+  #### Notes
+  - Migration `20260811150000_item_last_sync_at` adds the nullable `Item.lastSyncAt` column (the last-sync text parsed to a real timestamp), its index, and a best-effort backfill of the sync times already stored. **Apply it to Supabase before merging**, per migrate-before-push: Prisma enumerates every column in its SELECT, so until the column exists *every* item read fails, not just the dashboard.
+  - Sorting the **Last sync** column on the items list is still not available — the change makes it possible but does not wire it up.
+
 ### Removed
 - **Home units are no longer guessed from a device's name.** The import used to read a device name like `HI-DCSIM-LT-001`, look for a piece of it that matched a known unit, and fill in the home unit when the spreadsheet left that column blank. It no longer does. A device's home unit comes from the **homeUnit column** in the spreadsheet, or from editing the device in the app — and stays blank otherwise.
 
