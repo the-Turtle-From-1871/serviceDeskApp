@@ -12,14 +12,18 @@ import { previewItemRenameAction, renameItemsAction } from "@/app/admin/actions/
 // numbers over the survivors. That is why the range line prefers the preview's
 // numbers once they arrive and treats this builder as the instant placeholder.
 import { buildRenameSequence } from "@/modules/items/rename-sequence";
+// TYPE-ONLY, so it is fully erased at compile time and pulls no Prisma into
+// this client bundle — the same trick `ItemSelectTable` uses for `SortKey`. A
+// second local declaration of the shape would drift silently the moment a
+// field is ADDED to the service's version: structural typing catches a rename,
+// not an addition.
+import type { RenameCollision } from "@/modules/items/items.service";
 import { SERVICE_TYPE_OPTIONS } from "@/modules/service-queue/service-form";
 import { useDismissSwallowsTap } from "./SortFilterMenu";
 
 type Msg = { ok: boolean; text: string } | null;
 
 type BulkResult = { error: string } | { ok: true; updated: number; skipped: number };
-
-type RenameCollision = { name: string; serialNumber: string };
 
 /** The rename preview, as `previewItemRenameAction` reports it. `count` is the
  *  number of names that will actually be WRITTEN — it counts ACTIVE rows only,
@@ -34,6 +38,11 @@ type RenamePreview = {
 };
 
 const plural = (n: number) => (n === 1 ? "" : "s");
+
+/** How many colliding names the refusal line lists by name before it summarises
+ *  the rest. `findNameCollisions` can return one per item in the batch — up to
+ *  `MAX_BULK_ITEMS` (500) — and the line lives inside a height-capped sheet. */
+const COLLISIONS_SHOWN = 5;
 
 /** "Audited 47 items. Skipped 2 (retired or not applicable)." — the skip count
  *  is never silent: all three of these actions pass over rows they cannot act
@@ -169,6 +178,10 @@ export function BulkActionsMenu({
   // overwrite the range numbers. It OUTRANKS the advisory preview for the same
   // sequence — `renameItemsAction` re-checks inside its transaction, which is
   // the answer that actually counts.
+  //
+  // Outranking is by KEY, which is not by itself enough: a preview that lands
+  // AFTER the refusal is a strictly later read of the same names, so the effect
+  // below retires the refusal when one arrives (see the note there).
   const [refused, setRefused] = useState<{ key: string; list: RenameCollision[] } | null>(null);
   const collisions = (refused?.key === renameKey ? refused.list : null) ?? preview?.collisions ?? [];
 
@@ -195,10 +208,18 @@ export function BulkActionsMenu({
           if (mine !== seq.current) return;
           if (!("ok" in res)) return;
           const { count, first, last, skipped, collisions: list } = res;
-          setFound({
-            key: `${ids}|${prefix}|${start}`,
-            preview: { count, first, last, skipped, collisions: list },
-          });
+          const key = `${ids}|${prefix}|${start}`;
+          setFound({ key, preview: { count, first, last, skipped, collisions: list } });
+          // A REFUSAL MUST NOT OUTLIVE A FRESHER READ OF THE SAME NAMES. The
+          // key match alone made it permanent: refuse at LAPTOP/001, switch the
+          // prefix to DESKTOP, someone else frees LAPTOP-005, switch back — the
+          // clean preview lands and the dead refusal still blocks Apply on a
+          // collision that no longer exists, with no way out but a prefix
+          // nobody wanted. This preview is a strictly LATER DB read of the same
+          // names, so it supersedes it. Not the late-reply bug the `seq` guard
+          // above exists for: that guard is still what decides whether this
+          // reply may write at all, so a SUPERSEDED reply clears nothing.
+          setRefused((r) => (r?.key === key ? null : r));
         })
         // Swallowed on purpose. This is an ADVISORY read that fires on its own
         // while someone types, so a rejection (offline, a deploy mid-keystroke)
@@ -468,22 +489,37 @@ export function BulkActionsMenu({
                   a lie in exactly the case a bulk action exists for. The
                   client-side range is the instant placeholder that keeps typing
                   responsive until the debounced preview replies. */}
+              {/* THE SKIP WORDING IS `outcome()`'s, VERBATIM, and deliberately
+                  hedged. `skipped` counts every selected id the server did not
+                  rename — retired rows AND ids that no longer resolve to an
+                  item at all, which a selection restored from storage can hold
+                  after someone deletes a device. Calling those "retired" is a
+                  confident wrong answer on the one line people act on. */}
               {line && (
                 <span className="subtle">
                   {line.count === 0
-                    ? `Nothing to rename — all ${line.skipped} selected device${plural(line.skipped)} retired.`
+                    ? `Nothing to rename — all ${line.skipped} selected device${plural(line.skipped)} skipped (retired or not applicable).`
                     : `${line.count} device${plural(line.count)}, in scan order: ${line.first} … ${line.last}`}
                   {line.count > 0 && line.skipped > 0 &&
-                    ` ${line.skipped} retired device${plural(line.skipped)} skipped.`}
+                    ` Skipped ${line.skipped} (retired or not applicable).`}
                 </span>
               )}
               {/* Names the offenders and their serials rather than just refusing:
                   the fix is a different prefix or start, and you cannot pick one
-                  without knowing what is in the way. */}
+                  without knowing what is in the way.
+
+                  CAPPED AT `COLLISIONS_SHOWN`. A batch of 500 can collide 500
+                  times, and all of them joined into one line inside a
+                  height-capped sheet pushes Apply off the screen — so the
+                  message about how to recover would hide the control you
+                  recover with. The count is always the full one; a few examples
+                  is all it takes to pick a different prefix. */}
               {collisions.length > 0 && (
                 <span role="alert" className="alert-error">
                   {collisions.length} name{plural(collisions.length)} already taken:{" "}
-                  {collisions.map((c) => `${c.name} (${c.serialNumber})`).join(", ")}
+                  {collisions.slice(0, COLLISIONS_SHOWN).map((c) => `${c.name} (${c.serialNumber})`).join(", ")}
+                  {collisions.length > COLLISIONS_SHOWN &&
+                    ` …and ${collisions.length - COLLISIONS_SHOWN} more`}
                 </span>
               )}
               <button

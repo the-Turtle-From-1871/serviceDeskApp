@@ -238,9 +238,39 @@ describe("the range line", () => {
       undefined,
       { timeout: 3000 },
     );
-    expect(settled.textContent).toContain("2 retired devices skipped.");
+    // `outcome()`'s hedge, verbatim: `skipped` counts ids that resolve to no
+    // item as well as retired ones, so this line must not say "retired".
+    expect(settled.textContent).toContain("Skipped 2 (retired or not applicable).");
     expect((screen.getByRole("button", { name: /^Rename /, ...hidden }) as HTMLButtonElement).textContent)
       .toBe("Rename 8");
+  });
+
+  test("the collision list names a few and summarises the rest", async () => {
+    // `findNameCollisions` can return one row per item in the batch — up to 500
+    // — and this line sits inside a height-capped sheet, so an unbounded join
+    // pushes Apply (and the "change the prefix" hint) off the screen.
+    const collisions = Array.from({ length: 12 }, (_, i) => ({
+      name: `LAPTOP-${String(i + 1).padStart(3, "0")}`,
+      serialNumber: `S${i + 1}`,
+    }));
+    vi.mocked(previewItemRenameAction).mockResolvedValue({
+      ok: true, count: 12, first: "LAPTOP-001", last: "LAPTOP-012", skipped: 0, collisions,
+    });
+    const user = userEvent.setup();
+    render(
+      <BulkActionsMenu
+        itemIds={Array.from({ length: 12 }, (_, i) => `i${i}`)}
+        signatures={[]} canAudit={false} canQueue={false} canRename
+      />,
+    );
+    await user.type(screen.getByLabelText(/name prefix/i), "LAPTOP");
+
+    const alert = await screen.findByRole("alert", { ...hidden }, { timeout: 3000 });
+    // The COUNT is the full one; the enumeration is not.
+    expect(alert.textContent).toContain("12 names already taken");
+    expect(alert.textContent).toContain("LAPTOP-005 (S5)");
+    expect(alert.textContent).not.toContain("LAPTOP-006");
+    expect(alert.textContent).toContain("…and 7 more");
   });
 });
 
