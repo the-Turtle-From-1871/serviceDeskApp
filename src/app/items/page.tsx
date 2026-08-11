@@ -26,6 +26,8 @@ export default async function ItemsListPage({
     uic?: string | string[];
     /** `?needsRename=1` — the rename worklist. Any other value is "off". */
     needsRename?: string | string[];
+    /** `?loaner=1` — the loaner-pool worklist. Any other value is "off". */
+    loaner?: string | string[];
   }>;
 }) {
   const user = await requireUser();
@@ -63,6 +65,9 @@ export default async function ItemsListPage({
       // Exactly "1" is on. A permissive check (any non-empty value) would make
       // `?needsRename=0` mean the opposite of what it says.
       needsRename: firstParam(sp.needsRename) === "1",
+      // Exactly "1" is on, matching needsRename. A permissive check would make
+      // `?loaner=0` mean the opposite of what it says.
+      loaner: firstParam(sp.loaner) === "1",
     }),
     listItemUics(),
     isAdmin ? listCategoryNames() : Promise.resolve<string[]>([]),
@@ -112,6 +117,7 @@ export default async function ItemsListPage({
             sortKeys={result.sortKeys}
             uic={result.uic}
             needsRename={result.needsRename}
+            loaner={result.loaner}
           />
           {/* Gated on the CAPABILITY, not `isAdmin`: a USER granted MANAGE_ITEMS
               individually may create scanned serials, a VIEWER may not. */}
