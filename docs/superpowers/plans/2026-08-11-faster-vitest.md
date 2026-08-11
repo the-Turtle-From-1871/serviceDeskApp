@@ -472,7 +472,20 @@ and add:
     // process-level isolation for its per-worker databases, and Prisma's native
     // bindings do not belong in worker threads.
     pool: "forks",
+    // MUST NOT exceed MAX_TEST_WORKERS. globalSetup provisions exactly that many
+    // databases, so a worker numbered beyond it would resolve to a database
+    // nobody created and fail to connect. Vitest's default is derived from the
+    // core count, so on a bigger machine it would silently overrun.
+    maxWorkers: MAX_TEST_WORKERS,
 ```
+
+with the import at the top of the file:
+
+```ts
+import { MAX_TEST_WORKERS } from "./tests/helpers/test-db-name";
+```
+
+**Why this is not optional:** `globalSetup` creates databases 1…`MAX_TEST_WORKERS`. If Vitest ever spawns worker `MAX_TEST_WORKERS + 1` — which its core-derived default would do on a 16-core machine — that worker's `DATABASE_URL` names a database that was never created, and every test in it fails to connect. Deriving both numbers from one constant makes the mismatch unrepresentable.
 
 - [ ] **Step 4: Verify `test:ui` skips provisioning**
 
