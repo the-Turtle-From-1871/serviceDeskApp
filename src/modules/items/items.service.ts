@@ -22,6 +22,7 @@ import { READINESS_JOINS, READINESS_RANK } from "./readiness.sql";
 import { CUSTODY_FROM, OPEN_CUSTODY_PREDICATE } from "@/modules/transfers/custody.sql";
 import { ItemError } from "./items.errors";
 import { recipientTokens } from "./recipient-search";
+import { buildRenameSequence } from "./rename-sequence";
 
 export async function createItem(input: NewItemInput, createdById: string): Promise<Item> {
   const data = newItemSchema.parse(input);
@@ -808,6 +809,160 @@ export async function setItemsCategory(
     await learnCategories([deviceCategory], tx);
 
     return { updated: res.count, unchanged: before.length - edits.length };
+  });
+}
+
+export type RenameCollision = { name: string; serialNumber: string };
+
+export type RenameResult =
+  | { ok: false; collisions: RenameCollision[] }
+  | { ok: true; renamed: number; unchanged: number; skipped: number };
+
+/** The ACTIVE ids among `ids`, in the caller's order, with their current names.
+ *  Caller order is the numbering, so this must never sort. */
+async function activeRenameTargets(
+  client: Prisma.TransactionClient | typeof prisma,
+  ids: string[],
+): Promise<{ active: string[]; before: Map<string, string | null> }> {
+  const rows = await client.item.findMany({
+    where: { id: { in: ids }, status: "ACTIVE" },
+    select: { id: true, deviceName: true },
+  });
+  const before = new Map(rows.map((r) => [r.id, r.deviceName]));
+  return { active: ids.filter((id) => before.has(id)), before };
+}
+
+/** Names among `names` already held by an item OUTSIDE `excludeIds`.
+ *
+ *  Case-INSENSITIVE: `deviceName` is not citext (unlike `serialNumber`), so a
+ *  plain IN would call "LAPTOP-005" and "laptop-005" different names, which
+ *  nobody reading the property book would. Matches how units.service.ts
+ *  compares unit names. Values are bound via Prisma.join, never interpolated. */
+async function findNameCollisions(
+  client: Prisma.TransactionClient | typeof prisma,
+  names: string[],
+  excludeIds: string[],
+): Promise<RenameCollision[]> {
+  if (names.length === 0) return [];
+  const lowered = names.map((n) => n.toLowerCase());
+  return client.$queryRaw<RenameCollision[]>(Prisma.sql`
+    SELECT "deviceName" AS name, "serialNumber"::text AS "serialNumber"
+    FROM "Item"
+    WHERE lower("deviceName") IN (${Prisma.join(lowered)})
+      AND "id" NOT IN (${Prisma.join(excludeIds)})
+    ORDER BY "deviceName"
+  `);
+}
+
+/**
+ * What a bulk rename WOULD do. Read-only and advisory — `renameItems` re-checks
+ * inside its own transaction, which is what closes the window where another
+ * session takes one of these names between this call and the tap.
+ *
+ * Enforces NO permissions — the calling Server Action owns the guard.
+ */
+export async function previewRename(
+  itemIds: string[],
+  prefix: string,
+  start: string,
+): Promise<{ count: number; first: string; last: string; skipped: number; collisions: RenameCollision[] }> {
+  const ids = [...new Set(itemIds.filter((id) => id.trim() !== ""))];
+  if (ids.length === 0) return { count: 0, first: "", last: "", skipped: 0, collisions: [] };
+  if (ids.length > MAX_BULK_ITEMS) throw new ItemError("TOO_MANY");
+
+  const { active } = await activeRenameTargets(prisma, ids);
+  if (active.length === 0) {
+    return { count: 0, first: "", last: "", skipped: ids.length, collisions: [] };
+  }
+
+  const names = buildRenameSequence(active.length, prefix, start);
+  return {
+    count: names.length,
+    first: names[0],
+    last: names[names.length - 1],
+    skipped: ids.length - active.length,
+    collisions: await findNameCollisions(prisma, names, active),
+  };
+}
+
+/**
+ * Rename many items to a consecutive PREFIX-NNN sequence, in CALLER ORDER.
+ *
+ * Takes `prefix`/`start` and builds the names itself — it must never accept a
+ * name list, or an admin-gated action becomes "write any string to any item".
+ * `deviceName` is kept in the admin-only editableItemFields set precisely so it
+ * is not reachable that way.
+ *
+ * Numbers are assigned over the SURVIVORS. Filtering retired rows before
+ * numbering is what gives eight survivors of ten 001..008 rather than gaps at
+ * the retired positions — the labels are printed and the pile is physical, so a
+ * shifted sequence beats a gapped one.
+ *
+ * Four queries in one transaction, never one per item. The write is a
+ * VALUES-join UPDATE because `updateMany` sets ONE value across every matched
+ * row and a rename needs a different value per row. This is deliberately NOT
+ * the importer's batched UPDATE: that one splices column IDENTIFIERS, which is
+ * why it carries UPDATABLE_ITEM_COLUMNS / FIELD_TO_COLUMN / COLUMN_CAST. Here
+ * the column is a literal, so none of that applies. No chunking either —
+ * MAX_BULK_ITEMS is 500 and this binds two parameters per row, 1,000 against
+ * Postgres's 65,535 ceiling.
+ *
+ * NOTE: `Item.deviceName` is MDM-owned and the nightly Drive import reverts a
+ * rename within a night. That is an accepted product decision, not an oversight
+ * — see the design spec. Do not "fix" it here.
+ *
+ * Enforces NO permissions — the calling Server Action owns the guard.
+ */
+export async function renameItems(
+  itemIds: string[],
+  prefix: string,
+  start: string,
+  editor: ItemEditor,
+): Promise<RenameResult> {
+  const ids = [...new Set(itemIds.filter((id) => id.trim() !== ""))];
+  if (ids.length === 0) return { ok: true, renamed: 0, unchanged: 0, skipped: 0 };
+  if (ids.length > MAX_BULK_ITEMS) throw new ItemError("TOO_MANY");
+
+  return prisma.$transaction(async (tx) => {
+    const { active, before } = await activeRenameTargets(tx, ids);
+    const skipped = ids.length - active.length;
+    if (active.length === 0) return { ok: true, renamed: 0, unchanged: 0, skipped };
+
+    const names = buildRenameSequence(active.length, prefix, start);
+
+    const collisions = await findNameCollisions(tx, names, active);
+    if (collisions.length > 0) return { ok: false, collisions };
+
+    // Pure, in-memory diff — no query in this map.
+    const edits = active
+      .map((id, i) => ({
+        id,
+        name: names[i],
+        changes: diffItemFields({ deviceName: before.get(id) ?? null }, { deviceName: names[i] }),
+      }))
+      .filter((e) => e.changes.length > 0);
+
+    const unchanged = active.length - edits.length;
+    if (edits.length === 0) return { ok: true, renamed: 0, unchanged, skipped };
+
+    await tx.$executeRaw(Prisma.sql`
+      UPDATE "Item" SET "deviceName" = v.name
+      FROM (VALUES ${Prisma.join(
+        edits.map((e) => Prisma.sql`(${e.id}::text, ${e.name}::text)`),
+      )}) AS v(id, name)
+      WHERE "Item"."id" = v.id
+    `);
+
+    await tx.itemEdit.createMany({
+      data: edits.map((e) => ({
+        itemId: e.id,
+        editedById: editor.id,
+        editedByName: editor.name,
+        changes: e.changes as unknown as Prisma.InputJsonValue,
+      })),
+    });
+
+    return { ok: true, renamed: edits.length, unchanged, skipped };
   });
 }
 
