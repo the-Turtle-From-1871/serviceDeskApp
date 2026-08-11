@@ -108,6 +108,9 @@ beforeEach(() => {
 // The grace window and the repeat throttle are both wall-clock comparisons, so
 // these tests move time by hand. `vi.clearAllMocks()` in the beforeEach above
 // only clears call records, not this implementation, so the order is immaterial.
+// The value matters: it equals the startedAt fillSelection() writes into the
+// persisted selection, so freezing the clock here cannot age a batch out from
+// under the cap tests.
 let nowMs = 1_754_870_000_000;
 beforeEach(() => {
   nowMs = 1_754_870_000_000;
@@ -445,6 +448,27 @@ describe("ItemsScanButton", () => {
 
       expect(screen.getByTestId("scan-notice").textContent).toMatch(/^Added HP/);
       expect(beep).not.toHaveBeenCalled();
+    });
+
+    // The grace must SUPPRESS, not throttle. sayAlreadyScanned checks the grace
+    // and returns BEFORE noticeThrottled, so a silenced repeat leaves lastNotice
+    // alone — and the first repeat past the window speaks at once. Swap those two
+    // guards and the +2,999ms repeat below stamps lastNotice instead, which would
+    // hold this one silent until +4,499ms. Every other test in this file still
+    // passes with the guards swapped; this is the one that does not.
+    it("a suppressed repeat does not open a throttle window", async () => {
+      const user = userEvent.setup();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      await screen.findByText("2TK94709FN");
+
+      nowMs += 2_999;
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+
+      nowMs += 2;
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      expect(await screen.findByText("2TK94709FN already scanned")).toBeDefined();
     });
 
     it("names the serial once the grace has expired, and adds no second row", async () => {

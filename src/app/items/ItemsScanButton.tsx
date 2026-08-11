@@ -55,7 +55,7 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
   // resolved from). Removing a row has to release both, or the label that was
   // just removed from the list still reads as "already scanned".
   const linkedKey = useRef(new Map<string, string>());
-  // Throttles the "Already scanned" notice — `seen` itself dedupes forever,
+  // Throttles the repeat notice — `seen` itself dedupes forever,
   // but a linear barcode re-decodes on every camera frame, and without this a
   // code still sitting under the camera would beep continuously instead of
   // once every so often. Same 1.5s window ReceiptBuilderForm uses for its own
