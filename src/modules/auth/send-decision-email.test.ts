@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { sendDecisionEmail } from "./send-decision-email";
+import { CAPABILITY_LABELS } from "@/modules/users/capabilities";
 
 function fakeSender() {
   const send = vi.fn().mockResolvedValue(undefined);
@@ -20,8 +21,16 @@ describe("sendDecisionEmail", () => {
       { sender },
     );
     const msg = send.mock.calls[0][0];
-    expect(msg.text).toContain("Manage the service queue");
-    expect(msg.text).toContain("Administer the application");
+    // Read the labels from capabilities.ts — the SINGLE definition — rather
+    // than restating them. This test hardcoded "Administer the application"
+    // and went red the day that label became "Grant Administrator"; it stayed
+    // red on main because CI runs Semgrep and `next build`, never the suite.
+    expect(msg.text).toContain(CAPABILITY_LABELS.MANAGE_QUEUE);
+    expect(msg.text).toContain(CAPABILITY_LABELS.ADMINISTER);
+    // Not tautological: the point is that the email renders HUMAN labels
+    // through that shared map, so the raw enum name must never reach a reader.
+    expect(msg.text).not.toContain("MANAGE_QUEUE");
+    expect(msg.text).not.toContain("ADMINISTER");
   });
 
   // Mail clients strip CSS and block images, so colour and icons cannot be the

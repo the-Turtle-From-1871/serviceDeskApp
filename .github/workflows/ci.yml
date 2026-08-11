@@ -97,3 +97,78 @@ jobs:
           AUTH_SECRET: ci-placeholder-secret-not-used-at-runtime
           APP_URL: http://localhost:3000
         run: npm run build
+
+  # --- Test suite --------------------------------------------------------------
+  # Most of this suite is DB-backed (service/integration tests that TRUNCATE and
+  # reseed), so it needs a real Postgres rather than a mock. It is the gate the
+  # other two jobs cannot be: Semgrep and `next build` both pass on a branch whose
+  # tests are red, which is exactly how a broken assertion once merged and stayed
+  # red on main.
+  test:
+    name: Tests (vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        # 16 to match docker-compose.yml and Supabase. The official image ships
+        # contrib, which is what supplies citext, pg_trgm and pgcrypto — the
+        # migrations create all three and fail without them.
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          # The name is load-bearing, not cosmetic: tests/helpers/db.ts refuses
+          # to TRUNCATE unless DATABASE_URL contains "handreceipt_test". That
+          # guard is what stops the suite ever pointing at a real database, so
+          # the CI database has to satisfy it too.
+          POSTGRES_DB: handreceipt_test
+        ports:
+          - 5432:5432
+        # Without a health gate the first test file races the server's startup
+        # and fails with ECONNREFUSED rather than anything meaningful.
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        # There is no postinstall hook, and `npm test` does not generate (only
+        # `npm run build` does), so without this every test importing
+        # @prisma/client fails to resolve.
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/handreceipt_test?schema=public
+        run: npx prisma generate
+
+      - name: Write .env.test
+        # tests/helpers/setup-env.ts loads `.env.test` with `override: true`,
+        # so this file — not the job env — is what the suite actually reads.
+        # Turnstile and the Redis rate-limit store are deliberately left unset:
+        # both are documented to no-op when unconfigured, which is how CI and a
+        # fresh dev machine keep working.
+        run: |
+          cat > .env.test <<'EOF'
+          DATABASE_URL="postgresql://postgres:postgres@localhost:5432/handreceipt_test?schema=public"
+          DIRECT_URL="postgresql://postgres:postgres@localhost:5432/handreceipt_test?schema=public"
+          AUTH_SECRET="ci-placeholder-secret-not-used-outside-ci"
+          APP_URL="http://localhost:3000"
+          EOF
+
+      - name: Run tests
+        # `migrateTestDb()` shells out to `prisma migrate deploy` per DB-backed
+        # file; prisma.config.ts reads DIRECT_URL ?? DATABASE_URL, so both are
+        # set above. Migrations are idempotent, so repeating it is a no-op after
+        # the first.
+        run: npm test
