@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { BulkActionsMenu } from "./BulkActionsMenu";
+import { recordAuditsAction } from "@/app/admin/actions/audit";
 
 /**
  * READ THIS BEFORE ADDING A TEST HERE. **jsdom implements no Popover API at
@@ -64,8 +65,10 @@ test("wires the trigger to the panel by id, and the panel is its next sibling", 
   );
   const trigger = screen.getByRole("button", { name: /More actions/ });
   expect(trigger.getAttribute("popovertarget")).toBe("items-bulkactions");
-  // This bar renders inside a page whose table contains the Retire <form>; a
-  // bare button defaults to submit.
+  // A bare <button> defaults to type="submit", and this one must never submit
+  // anything — it only opens a popover. (The selection bar is a SIBLING of the
+  // table, not inside its Retire <form>, so there is no form for it to submit
+  // today; `type` is what keeps that true if one ever wraps it.)
   expect(trigger.getAttribute("type")).toBe("button");
   expect(trigger.nextElementSibling).toBe(container.querySelector("#items-bulkactions"));
 });
@@ -106,6 +109,52 @@ test("says why the audit control is unusable when there are no saved signatures"
   render(<BulkActionsMenu itemIds={["a1"]} signatures={[]} canAudit canQueue={false} />);
   expect((screen.getByLabelText(/sign as/i) as HTMLSelectElement).disabled).toBe(true);
   expect(screen.getByText(/No saved signatures/i)).toBeTruthy();
+});
+
+/**
+ * Bulk audit confirms first. It is the most consequential control in the app —
+ * N accountability records asserting a named person laid eyes on N devices, no
+ * undo — and the batch it acts on may have been rehydrated from a sweep the
+ * operator no longer remembers, so the copy has to name the count AND the
+ * signer rather than asking a generic "are you sure".
+ */
+describe("recording an audit", () => {
+  const confirmSpy = vi.spyOn(window, "confirm");
+  // The action mock is module-level, so its call log would otherwise carry over
+  // and make "not called" depend on test order.
+  afterEach(() => { confirmSpy.mockReset(); vi.mocked(recordAuditsAction).mockReset(); });
+
+  const openAudit = () => {
+    render(
+      <BulkActionsMenu itemIds={["a1", "a2", "a3"]} signatures={SIGS} canAudit canQueue={false} />,
+    );
+    fireEvent.change(screen.getByLabelText(/sign as/i), { target: { value: "s1" } });
+    return screen.getByRole("button", { name: /^Audit /, ...hidden });
+  };
+
+  test("names the count and the signer, and writes nothing when declined", () => {
+    confirmSpy.mockReturnValue(false);
+    fireEvent.click(openAudit());
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    const copy = String(confirmSpy.mock.calls[0][0]);
+    expect(copy).toContain("3 items");
+    expect(copy).toContain("SGT Smith");
+    expect(recordAuditsAction).not.toHaveBeenCalled();
+  });
+
+  test("posts the batch once the confirm is accepted", () => {
+    confirmSpy.mockReturnValue(true);
+    // A real result shape: `run` reads it, so a bare undefined would reject
+    // inside the transition rather than failing anything visibly.
+    vi.mocked(recordAuditsAction).mockResolvedValue({ ok: true, updated: 3, skipped: 0 });
+    fireEvent.click(openAudit());
+
+    expect(recordAuditsAction).toHaveBeenCalledTimes(1);
+    const fd = vi.mocked(recordAuditsAction).mock.calls[0][0] as FormData;
+    expect(fd.get("itemIds")).toBe("a1,a2,a3");
+    expect(fd.get("signatureId")).toBe("s1");
+  });
 });
 
 // Nothing selected means nothing to act on. The bar that hosts this only

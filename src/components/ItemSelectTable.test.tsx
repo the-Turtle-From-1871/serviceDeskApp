@@ -19,11 +19,21 @@ const renderTable = (ui: ReactElement) =>
 // vi.mock's factory is lifted above the imports.
 const push = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: vi.fn(), push }),
+  // `refresh` is what the bar's action buttons call to repaint the badges they
+  // just moved; without it in the mock, clicking one throws.
+  useRouter: () => ({ replace: vi.fn(), push, refresh: vi.fn() }),
   usePathname: () => "/items",
   useSearchParams: () => new URLSearchParams(),
 }));
-vi.mock("@/app/admin/actions/items", () => ({ toggleItemStatusAction: vi.fn(), deleteItemAction: vi.fn() }));
+// markItemsReadyAction is stubbed with a real result shape (not a bare vi.fn())
+// so "Mark as on hand" can actually be clicked here — see the persisted-batch
+// suite at the bottom, which pins that a success does NOT clear the selection.
+const markItemsReadyAction = vi.hoisted(() => vi.fn(async () => ({ updated: 2 })));
+vi.mock("@/app/admin/actions/items", () => ({
+  toggleItemStatusAction: vi.fn(),
+  deleteItemAction: vi.fn(),
+  markItemsReadyAction,
+}));
 
 // This suite runs without vitest `globals: true`, so @testing-library/react's
 // auto-cleanup (which checks for a global `afterEach`) never registers.
@@ -984,5 +994,81 @@ describe("ItemSelectTable — Sort & filter menu", () => {
       .filter((el) => !el.closest(`#${MENU_ID}`));
     expect(loose).toHaveLength(0);
     expect(screen.queryByRole("button", { name: /^(Asc|Desc)/, hidden: true })).toBeNull();
+  });
+});
+
+/**
+ * The selection bar's guards on a PERSISTED batch.
+ *
+ * A selection now survives a reload, so the two controls that can destroy one
+ * are no longer cheap: a scanned sweep costs twenty minutes of walking and
+ * there is no undo. Neither guard was needed while the selection lived in
+ * useState.
+ *
+ * These seed localStorage directly, which is where ItemSelectionProvider
+ * rehydrates from — the same path a batch takes across a reload.
+ */
+describe("ItemSelectTable — the persisted batch is not thrown away on one tap", () => {
+  const seedSelection = (n: number) =>
+    window.localStorage.setItem(
+      "items:selection:v1",
+      JSON.stringify({
+        startedAt: 1754870000000,
+        items: Array.from({ length: n }, (_, i) => ({
+          id: `sel-${i}`, make: "Dell", model: "5540",
+          serialNumber: `SEL${i}`, status: "ACTIVE",
+        })),
+      }),
+    );
+
+  const confirmSpy = vi.spyOn(window, "confirm");
+  afterEach(() => confirmSpy.mockReset());
+
+  it("confirms before clearing a batch above the threshold, and keeps it on cancel", () => {
+    seedSelection(21);
+    confirmSpy.mockReturnValue(false);
+    renderEmpty();
+
+    act(() => { fireEvent.click(screen.getByRole("button", { name: /Clear selection/ })); });
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    // Names the count, so the confirm is about THIS batch rather than generic.
+    expect(confirmSpy.mock.calls[0][0]).toContain("21");
+    expect(screen.getByText(/21 selected · /)).toBeTruthy();
+  });
+
+  it("clears when that confirm is accepted", () => {
+    seedSelection(21);
+    confirmSpy.mockReturnValue(true);
+    renderEmpty();
+
+    act(() => { fireEvent.click(screen.getByRole("button", { name: /Clear selection/ })); });
+    expect(screen.queryByText(/selected · /)).toBeNull();
+  });
+
+  // Below the threshold the batch is a desk-side handful — a confirm on every
+  // tap would be noise, and it costs a moment to rebuild.
+  it("does NOT confirm for a small selection", () => {
+    seedSelection(3);
+    renderEmpty();
+
+    act(() => { fireEvent.click(screen.getByRole("button", { name: /Clear selection/ })); });
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(screen.queryByText(/selected · /)).toBeNull();
+  });
+
+  // "Mark as on hand" used to pass onDone={clear}. Harmless with an in-memory
+  // selection; with a persisted one it discarded the sweep AND unmounted the
+  // bar carrying its own success message before it could be read.
+  it("keeps the selection after Mark as on hand, and shows the outcome", async () => {
+    seedSelection(2);
+    renderEmpty();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Mark as on hand/ }));
+    });
+
+    expect(markItemsReadyAction).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/Marked 2 items on hand\./)).toBeTruthy();
+    expect(screen.getByText(/2 selected · /)).toBeTruthy();
   });
 });

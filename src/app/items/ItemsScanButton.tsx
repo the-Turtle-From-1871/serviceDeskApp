@@ -5,6 +5,7 @@ import { QrScanner, SCAN_FORMATS } from "@/components/QrScanner";
 import { parseScans, describeScan } from "@/modules/items/scan-code";
 import { resolveScannedSerial, resolveScannedItemId } from "@/app/actions/scan";
 import { useItemSelection } from "@/components/ItemSelection";
+import { MAX_BULK_ITEMS } from "@/modules/items/items.schema";
 import { ScannedCreateForm } from "./ScannedCreateForm";
 import type { ScannedEntry, NewEntry } from "./scan-session";
 import { beep } from "@/lib/beep";
@@ -15,9 +16,19 @@ import { beep } from "@/lib/beep";
  * Every scan APPENDS; nothing navigates. The continuous-scanning rules are the
  * ones ReceiptBuilderForm already proved: one lookup in flight at a time, and a
  * dedupe window so a code still under the camera is not read twice.
+ *
+ * THE 500 CAP IS A HARD STOP AT DECODE TIME, not a warning at the end. The
+ * selection is only touched on Done, and addMany silently drops anything past
+ * MAX_BULK_ITEMS — so a sheet that kept accepting scans would beep "Added" for
+ * devices that then vanished, with no record of which. Worse, the bar's own
+ * "limit reached" notice sits behind this sheet (`.scan-sheet` is
+ * `fixed; inset: 0; z-index: 50`) for the whole session, so it can say nothing.
+ * A scan with no room left is therefore REFUSED where the operator is still
+ * holding the device: an error beep, a message naming the cap, and NOTHING
+ * written to `seen` — so the same label scans normally once room is made.
  */
 export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
-  const { addMany } = useItemSelection();
+  const { addMany, roomLeft } = useItemSelection();
   const [scanning, setScanning] = useState(false);
   const [phase, setPhase] = useState<"scanning" | "creating">("scanning");
   const [scanned, setScanned] = useState<ScannedEntry[]>([]);
@@ -39,6 +50,12 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
   // once every so often. Same 1.5s window ReceiptBuilderForm uses for its own
   // repeat-decode dedupe.
   const lastNotice = useRef<{ key: string; at: number }>({ key: "", at: 0 });
+  // How many rows collected in THIS session will land in the selection on Done
+  // — everything except the retired ones, which addMany refuses. A ref for the
+  // same reason `seen` is one: onDecode fires again before React has
+  // re-rendered, so reading `scanned` here would let two scans through a cap
+  // with one slot left.
+  const willSelect = useRef(0);
 
   const say = (kind: "ok" | "err", text: string) => { setNotice({ kind, text }); beep(kind); };
 
@@ -46,6 +63,18 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
     const now = Date.now();
     if (lastNotice.current.key === key && now - lastNotice.current.at < 1500) return false;
     lastNotice.current = { key, at: now };
+    return true;
+  };
+
+  // No room for one more? Compared against the LIVE selection size, so a batch
+  // committed in another tab counts. Throttled per code like "Already scanned"
+  // — a linear barcode re-decodes on every camera frame, and a refusal that
+  // beeps continuously teaches people to ignore it.
+  const refuseIfFull = (key: string) => {
+    if (willSelect.current < roomLeft()) return false;
+    if (noticeThrottled(key)) {
+      say("err", `Selection is full (${MAX_BULK_ITEMS}) — not added. Apply an action or clear some first.`);
+    }
     return true;
   };
 
@@ -62,15 +91,20 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
       seen.current.add(linkedSeenKey);
       linkedKey.current.set(entry.key, linkedSeenKey);
     }
+    // A retired row is listed but never selected (addMany refuses it), so it
+    // costs no slot against the cap.
+    if (entry.kind !== "retired") willSelect.current += 1;
     setScanned((prev) => [...prev, entry]);
     return true;
   };
 
   // Drops one row: from the list, and from `seen` (both keys it may have
   // registered), so the label it came from can be scanned again in this same
-  // session — the fix for a neighbouring label caught by mistake.
-  const remove = (key: string) => {
+  // session — the fix for a neighbouring label caught by mistake. It also hands
+  // the slot back, so removing a row makes room for the next scan.
+  const remove = (key: string, kind: ScannedEntry["kind"]) => {
     setScanned((prev) => prev.filter((e) => e.key !== key));
+    if (kind !== "retired") willSelect.current = Math.max(0, willSelect.current - 1);
     seen.current.delete(key);
     const linked = linkedKey.current.get(key);
     if (linked) {
@@ -99,6 +133,10 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
 
       if (res.ok) {
         const kind = res.item.status === "ACTIVE" ? "found" : "retired";
+        // Refuse BEFORE anything is recorded — an "Added" beep for a device
+        // that Done would silently drop is the failure this guard exists for.
+        // A retired scan is exempt: it is listed, never selected.
+        if (kind === "found" && refuseIfFull(preKey)) return;
         const entry: ScannedEntry = { key: `id:${res.item.id}`, kind, item: res.item };
         // For an item-kind scan preKey IS entry.key (resolveScannedItemId
         // returns the item it was asked for) — only register it separately
@@ -135,6 +173,11 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
         //
         // Grounded in the fleet: of 1,204 items, ZERO carry an all-digit
         // serial, so a scan that converts at all is an express code.
+        //
+        // An unknown serial also costs a slot: ScannedCreateForm hands its
+        // created items straight to addMany, so collecting more than there is
+        // room for would drop them exactly like a found scan.
+        if (refuseIfFull(preKey)) return;
         const newSerial = intent.altSerial ?? intent.serial;
         if (push({ key: preKey, kind: "new", serial: newSerial, label: intent.label })) {
           say("err", `${newSerial} is not in the book`);
@@ -172,6 +215,7 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
 
   const start = () => {
     setScanned([]);
+    willSelect.current = 0;
     seen.current = new Set();
     linkedKey.current = new Map();
     lastNotice.current = { key: "", at: 0 };
@@ -184,6 +228,10 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
   if (!scanning) return <button type="button" className="btn btn-secondary" onClick={start}>Scan</button>;
 
   const foundCount = scanned.filter((e) => e.kind === "found").length;
+  // The render-time twin of the `willSelect` ref (both move in push/remove, so
+  // they agree by the time anything paints). Compared against the live room so
+  // the sheet reports the stop the decode loop is enforcing.
+  const full = scanned.filter((e) => e.kind !== "retired").length >= roomLeft();
 
   // The create batch's own outcome — how many were actually new vs. already
   // existed under the same serial (createMany's skipDuplicates can find both
@@ -250,7 +298,7 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
                     type="button"
                     className="scan-list__remove"
                     aria-label={`Remove ${serial}`}
-                    onClick={() => remove(e.key)}
+                    onClick={() => remove(e.key, e.kind)}
                   >
                     <X aria-hidden="true" focusable="false" />
                   </button>
@@ -262,6 +310,15 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
         <p className="scan-list__count subtle">
           {foundCount} item{foundCount === 1 ? "" : "s"} will be selected
         </p>
+        {/* A standing statement of the hard stop, not just the one-shot notice:
+            the selection bar's own "limit reached" line is behind this sheet
+            (`.scan-sheet` is fixed, inset 0, z-index 50) for the whole session,
+            so if the sheet does not say it, nothing does. */}
+        {full && (
+          <p className="scan-list__count alert-error">
+            Selection is full ({MAX_BULK_ITEMS}) — further scans are refused.
+          </p>
+        )}
       </div>
     </QrScanner>
   );

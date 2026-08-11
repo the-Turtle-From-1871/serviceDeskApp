@@ -45,6 +45,12 @@ const HIDDEN_KEY = "items:hiddenCols";
 const DEFAULT_HIDDEN: ColumnKey[] = ["deviceCategory"];
 const hiddenStore = makeStore(HIDDEN_KEY, parseHiddenCols);
 
+/** Above this many selected items, "Clear selection" confirms first. The
+ *  selection is persisted, so clearing can throw away a sweep collected over
+ *  twenty minutes; below the threshold the batch is a desk-side handful that
+ *  costs a moment to rebuild, and a confirm on every tap would be noise. */
+const CLEAR_CONFIRM_MIN = 20;
+
 /** A value for the card's More panel, or the em-dash placeholder. `present`
  *  owns the "is this missing" rule (see items-view.ts); this only picks the
  *  mark. `/i/<id>`'s detail card keeps its own `dash` constant — the two
@@ -721,15 +727,23 @@ export function ItemSelectTable({
                   {" "}· started {new Date(startedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
                 </span>
               )}
-              {/* A hard stop, not a warning: addMany REFUSES past this point, so
-                  a scan that appears to do nothing must say why. Without this the
-                  camera beeps "already scanned" for a device that was never
-                  added. */}
-              {atCap && (
-                <span role="status" className="alert-error">
-                  {" "}· limit reached ({MAX_BULK_ITEMS}) — apply an action or clear some before scanning more
-                </span>
-              )}
+              {/* A hard stop, not a warning: the scan sheet REFUSES a scan past
+                  this point and says so at decode time (see ItemsScanButton),
+                  and addMany drops anything that still reaches it. This line is
+                  the same fact for someone selecting by tapping.
+
+                  The live region is rendered UNCONDITIONALLY and filled
+                  conditionally. A region that mounts with its content is
+                  announced unreliably — the assistive tech has to observe the
+                  region before the text lands in it — so the container has to
+                  exist first and the text has to arrive as a mutation. */}
+              <span role="status">
+                {atCap && (
+                  <span className="alert-error">
+                    {" "}· limit reached ({MAX_BULK_ITEMS}) — apply an action or clear some before scanning more
+                  </span>
+                )}
+              </span>
             </span>
             <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
               {tooMany
@@ -743,10 +757,23 @@ export function ItemSelectTable({
                   <thead> checkbox hidden below 720px and selections surviving
                   paging, a selection made on page 1 left no reachable control
                   to undo it once you paged away. Reload was the only exit. */}
+              {/* Confirmed above CLEAR_CONFIRM_MIN: the selection now SURVIVES
+                  a reload, so this button can discard a 150-device sweep that
+                  cost twenty minutes of walking, and there is no undo. A small
+                  batch is cheap to rebuild, so it still clears on one tap. */}
               <button
                 type="button"
                 className="btn btn-secondary"
-                onClick={() => clear()}
+                onClick={() => {
+                  if (
+                    selected.size > CLEAR_CONFIRM_MIN &&
+                    !window.confirm(
+                      `Clear all ${selected.size} selected items?\n\n` +
+                      `This batch cannot be recovered — the devices would have to be scanned again.`,
+                    )
+                  ) return;
+                  clear();
+                }}
               >
                 Clear selection
               </button>
@@ -769,14 +796,16 @@ export function ItemSelectTable({
               with the Apply buttons, whose selects carry a label above them. */}
           {isAdmin && (
             <div className="row" style={{ gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-              <MarkReadyButton
-                itemIds={[...selected.keys()]}
-                onDone={() => clear()}
-              />
-              {/* No onDone: unlike "Mark as on hand", these controls keep the
-                  selection so their outcome message survives (clearing it
-                  unmounts this whole bar), and so readiness and category can be
-                  applied in one pass. */}
+              {/* NO onDone — nothing in this bar clears the selection.
+                  "Mark as on hand" used to, which was harmless when the
+                  selection was in-memory and a mistake now that it persists: it
+                  discarded a scanned sweep on one tap, and unmounted the bar
+                  holding its own "Marked 47 items on hand." before it could be
+                  read. ReadinessControls and BulkActionsMenu already refuse for
+                  the same reason; Clear selection is the one way out. */}
+              <MarkReadyButton itemIds={[...selected.keys()]} />
+              {/* Keeps the selection too, so readiness and category can be
+                  applied to one batch in a single pass. */}
               <ReadinessControls
                 itemIds={[...selected.keys()]}
                 categories={categories}

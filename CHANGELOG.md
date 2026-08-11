@@ -11,6 +11,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   They live behind a **More actions** button on the selection bar at the bottom of the items list, and each one says what it did — *"Audited 47 items. Skipped 2 (retired or not applicable)."* The selection is deliberately kept afterwards, so the result stays on screen and a second action can be applied to the same batch. Recording an audit needs Administrator; the two service actions need the service-queue permission, and you only see what you can use.
 - The `/items` selection now survives a reload, a screen lock and a re-login. A batch scanned over several minutes is no longer lost, and the selection bar shows when it was started. Selections are capped at 500 items, matching the limit bulk actions already enforced.
 
+  **The 500 limit is a hard stop while you scan, not a surprise at the end.** Once there is no room left the scanner refuses the next code with an error beep and says *"Selection is full (500) — not added"*, so nothing you hear "Added" for can go missing when you tap Done. Remove a row from the list, or apply an action and clear the batch, and scanning carries on.
+
+- **Two confirmations before something irreversible.** *Record audit* now asks first, naming how many devices and which signature it will sign as — it writes an accountability record for every device and cannot be undone. *Clear selection* asks before discarding a batch of more than 20, which now takes a re-scan to rebuild rather than a moment.
+
+### Changed
+- **Marking devices on hand no longer clears the selection.** It used to empty the batch on success, which was harmless when the selection vanished on reload and is not now — a scanned sweep is worth keeping, and clearing it also took away the *"Marked 47 items on hand."* message before it could be read. Every control in the selection bar now keeps the batch; *Clear selection* is the one way out.
+
 ### Removed
 - **Home units are no longer guessed from a device's name.** The import used to read a device name like `HI-DCSIM-LT-001`, look for a piece of it that matched a known unit, and fill in the home unit when the spreadsheet left that column blank. It no longer does. A device's home unit comes from the **homeUnit column** in the spreadsheet, or from editing the device in the app — and stays blank otherwise.
 

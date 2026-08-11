@@ -1,4 +1,5 @@
 import { makeStore } from "./persisted-pref";
+import { MAX_BULK_ITEMS } from "@/modules/items/items.schema";
 import type { SelectedItem } from "./items-view";
 
 /** Versioned, so a future shape change retires old batches instead of parsing
@@ -33,7 +34,12 @@ export function parseSelection(raw: string | null): PersistedSelection {
   try {
     const v = JSON.parse(raw) as { startedAt?: unknown; items?: unknown };
     if (!Array.isArray(v.items)) return EMPTY_SELECTION;
-    const items = v.items.filter(isSelectedItem);
+    // Capped at the same MAX_BULK_ITEMS every writer and every bulk action
+    // enforces. Nothing in the app can store more than 500, so a longer array
+    // is either a hand-edited key or a forged one — and without this the client
+    // would happily render and post a batch the server refuses outright,
+    // telling the operator "too many items" about a selection they never made.
+    const items = v.items.filter(isSelectedItem).slice(0, MAX_BULK_ITEMS);
     const startedAt =
       typeof v.startedAt === "number" && Number.isFinite(v.startedAt) ? v.startedAt : 0;
     return { startedAt, items };

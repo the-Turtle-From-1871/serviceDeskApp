@@ -86,6 +86,12 @@ export function BulkActionsMenu({
   const [serviceType, setServiceType] = useState("");
   const [note, setNote] = useState("");
   const [auditMsg, setAuditMsg] = useState<Msg>(null);
+  // ONE message for both queue actions, knowingly: Flag and Complete are two
+  // ends of the same job and are not used together, so a second line of height
+  // in a bar that already covers a phone viewport buys nothing. The known cost
+  // is that firing the second while the first is still in flight overwrites its
+  // outcome — the transitions are separate, so the writes themselves never
+  // interfere, only the report of the earlier one.
   const [queueMsg, setQueueMsg] = useState<Msg>(null);
   // THREE transitions, not one. These are independent operations sharing a
   // panel, and with a single `pending` flag a slow bulk write points the busy
@@ -169,9 +175,21 @@ export function BulkActionsMenu({
                 type="button"
                 className="btn btn-secondary"
                 disabled={auditPending || none || !signatureId}
-                onClick={() =>
-                  run(startAudit, setAuditMsg, { signatureId }, recordAuditsAction, "Audited")
-                }
+                onClick={() => {
+                  // The one control here that writes accountability records —
+                  // it asserts that a named person laid eyes on every one of
+                  // these devices, and there is no undo. The confirm names the
+                  // count AND the signer, because both are things a mistap gets
+                  // wrong (the wrong batch rehydrated from a previous sweep, or
+                  // the wrong name left in the picker).
+                  const signer = signatures.find((s) => s.id === signatureId)?.name ?? "";
+                  const ok = window.confirm(
+                    `Record an audit for ${itemIds.length} item${plural(itemIds.length)}, signed as ${signer}?\n\n` +
+                    `This writes an accountability record for each device and cannot be undone.`,
+                  );
+                  if (!ok) return;
+                  run(startAudit, setAuditMsg, { signatureId }, recordAuditsAction, "Audited");
+                }}
               >
                 {auditPending ? "Recording…" : `Audit ${itemIds.length} item${plural(itemIds.length)}`}
               </button>
@@ -180,8 +198,12 @@ export function BulkActionsMenu({
               {signatures.length === 0 && (
                 <span className="subtle">No saved signatures — add one under Account.</span>
               )}
+              {/* role="alert" on a failure, "status" on a success. A polite
+                  live region carrying .alert-error is an error a screen-reader
+                  user is never told about; the same bar already uses "alert"
+                  for its receipt errors. */}
               {auditMsg && (
-                <span role="status" className={auditMsg.ok ? "subtle" : "alert-error"}>{auditMsg.text}</span>
+                <span role={auditMsg.ok ? "status" : "alert"} className={auditMsg.ok ? "subtle" : "alert-error"}>{auditMsg.text}</span>
               )}
             </div>
           )}
@@ -250,8 +272,9 @@ export function BulkActionsMenu({
               >
                 {completePending ? "Completing…" : "Complete service"}
               </button>
+              {/* See the audit message above: a failure announces as an alert. */}
               {queueMsg && (
-                <span role="status" className={queueMsg.ok ? "subtle" : "alert-error"}>{queueMsg.text}</span>
+                <span role={queueMsg.ok ? "status" : "alert"} className={queueMsg.ok ? "subtle" : "alert-error"}>{queueMsg.text}</span>
               )}
             </div>
           )}

@@ -17,6 +17,12 @@ type ItemSelectionValue = {
   /** True once the selection has reached MAX_BULK_ITEMS — further scans are
    *  refused rather than collected and failed at the end. */
   atCap: boolean;
+  /** How many more items the selection can take, read LIVE from the store
+   *  rather than from this render's snapshot. The scan sheet calls it from its
+   *  decode loop, which fires again before React has re-rendered — a render
+   *  value there would let two scans through a cap with one slot left. Stable,
+   *  so it never invalidates a memo. */
+  roomLeft: () => number;
   toggle: (item: SelectedItem) => void;
   addMany: (items: SelectedItem[]) => void;
   removeMany: (ids: string[]) => void;
@@ -96,17 +102,24 @@ export function ItemSelectionProvider({ children }: { children: ReactNode }) {
 
   const clear = useCallback(() => selectionStore.set(EMPTY_SELECTION), []);
 
+  // Live, not derived from `selected`: see the contract note above.
+  const roomLeft = useCallback(
+    () => Math.max(0, MAX_BULK_ITEMS - selectionStore.get().items.length),
+    [],
+  );
+
   const value = useMemo(
     () => ({
       selected,
       startedAt: persisted.startedAt,
       atCap: selected.size >= MAX_BULK_ITEMS,
+      roomLeft,
       toggle,
       addMany,
       removeMany,
       clear,
     }),
-    [selected, persisted.startedAt, toggle, addMany, removeMany, clear],
+    [selected, persisted.startedAt, roomLeft, toggle, addMany, removeMany, clear],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
