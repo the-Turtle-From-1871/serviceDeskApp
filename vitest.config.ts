@@ -34,5 +34,7 @@ export default defineConfig({
     include: ["src/**/*.test.ts", "src/**/*.test.tsx", "tests/**/*.test.ts", "scripts/**/*.test.mjs"],
     fileParallelism: false, // integration tests share one test DB
     setupFiles: ["tests/helpers/setup-env.ts"],
+    // Provisions the per-worker databases once per run. See global-setup.ts.
+    globalSetup: ["tests/helpers/global-setup.ts"],
   },
 });
