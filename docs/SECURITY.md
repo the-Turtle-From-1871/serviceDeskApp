@@ -472,7 +472,12 @@ the next click. It is **read-only** — no write, no revalidation. The
 caller-supplied unit scope is **re-validated with Zod and bound as query
 parameters**, never spliced (§5). And the result set is **capped with an
 overflow probe** rather than unbounded. It writes **no audit row** — see Known
-gaps #7, which this adds to rather than resolves. *Last reviewed: 2026-08-10.*
+gaps #7, which this adds to rather than resolves. **2026-08-11: the window moved
+from the sign-in column to the MDM sync column** (`lastLogonAt` → `lastSyncAt`)
+and two date headers changed with it. That changes WHICH devices are listed, not
+what a row exposes: the same three PII fields, the same cap, the same gate, and
+the sheet still carries `lastLogonUserPrincipalName`. No posture change.
+*Last reviewed: 2026-08-11.*
 
 **Admin-only capabilities:** returns, user management, named signatures,
 service-queue mutations, receipt timers, **recording** an audit, analytics,

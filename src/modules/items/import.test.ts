@@ -25,6 +25,20 @@ describe("planImport", () => {
     expect(toCreate[0]).toMatchObject({ make: "M4", model: "Carbine", serialNumber: "S1" });
   });
 
+  it("derives both parsed instants on a created row", () => {
+    // A brand-new device has to arrive with lastSyncAt already set, or it sits
+    // outside the dormant-device window until some later import happens to
+    // change its sync text.
+    const { toCreate } = planImport(
+      [mk(1, { lastLogonDate: "7/25/2026 1:40:21 AM", lastSyncDateTime: "8/9/2026 6:02:11 AM" })],
+      new Map(),
+    );
+    expect(toCreate[0]).toMatchObject({
+      lastLogonAt: new Date("2026-07-25T01:40:21.000Z"),
+      lastSyncAt: new Date("2026-08-09T06:02:11.000Z"),
+    });
+  });
+
   it("updates deviceName on a serial match (logged) and leaves make/model", () => {
     const { toUpdate, unchanged } = planImport(
       [mk(1, { serialNumber: "A1", deviceName: "NewName" })],
@@ -81,6 +95,32 @@ describe("planImport", () => {
     );
     expect(toUpdate[0].data.lastLogonDate).toBe("not a date");
     expect(toUpdate[0].data.lastLogonAt).toBeNull();
+  });
+
+  it("keeps the parsed sync instant in step with the raw sync text", () => {
+    // lastSyncAt is what the dormant-device list buckets on, so an instant left
+    // behind by a refreshed lastSyncDateTime would keep reporting a device as
+    // unseen while its own page shows MDM checked in last night.
+    const { toUpdate } = planImport(
+      [mk(1, { serialNumber: "A1", lastSyncDateTime: "8/9/2026 6:02:11 AM" })],
+      map("A1", existing({ id: "x", lastSyncDateTime: "6/1/2026 1:00:00 AM" })),
+    );
+    expect(toUpdate[0].data).toEqual({
+      lastSyncDateTime: "8/9/2026 6:02:11 AM",
+      lastSyncAt: new Date("2026-08-09T06:02:11.000Z"),
+    });
+    // Silent for the same reason as the rest of the telemetry, and more so: MDM
+    // syncs most devices most nights.
+    expect(toUpdate[0].loggedChanges).toEqual([]);
+  });
+
+  it("nulls the parsed sync instant when the incoming sync date is unparseable", () => {
+    const { toUpdate } = planImport(
+      [mk(1, { serialNumber: "A1", lastSyncDateTime: "Never" })],
+      map("A1", existing({ id: "x", lastSyncDateTime: "6/1/2026 1:00:00 AM" })),
+    );
+    expect(toUpdate[0].data.lastSyncDateTime).toBe("Never");
+    expect(toUpdate[0].data.lastSyncAt).toBeNull();
   });
 
   it("marks a fully-matching row unchanged", () => {

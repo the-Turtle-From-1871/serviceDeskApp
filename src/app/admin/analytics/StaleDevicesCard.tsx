@@ -17,12 +17,18 @@ import {
 /**
  * The dormant-device chase list, as a count and a download.
  *
- * WHAT "DORMANT" MEANS HERE: no USER SIGN-IN for 30-90 days (`Item.lastLogonAt`).
- * It is NOT "MDM has not checked in" — that is `lastSyncDateTime`, a different
- * column answering a different question, and the two routinely disagree (a
- * device powered on in a cage syncs nightly with nobody signing in for months).
- * This card shipped describing itself as MDM silence, which was simply wrong;
- * the wording here, in the changelog and in the rules doc all say sign-in now.
+ * WHAT "DORMANT" MEANS HERE: NO MDM CHECK-IN for 30-90 days (`Item.lastSyncAt`,
+ * the parsed `lastSyncDateTime`). It is NOT "nobody has signed in" — that is
+ * `lastLogonAt`, a different column answering a different question, and the two
+ * routinely disagree (a device powered on in a cage syncs nightly with nobody
+ * signing in for months). This card shipped measuring SIGN-IN while describing
+ * itself as MDM silence; the wording was fixed first and the column followed on
+ * 2026-08-11, so the two now agree on the question the desk actually works.
+ *
+ * KNOWN AND EXPECTED: the count is low today. `lastSyncAt` only exists from the
+ * import that filled it, so a device the fleet export has not covered since
+ * 2026-08-10 has no sync instant and is not counted — same treatment as any
+ * other "we cannot say" row. It fills in as imports run.
  *
  * NOT a ChartCard: there is no chart. A list of individual devices is a
  * spreadsheet, not a plot — bucketing it would hide the one thing it is for,
@@ -91,14 +97,13 @@ export function StaleDevicesCard({ count, scope }: { count: number; scope: ItemS
       <CardContent className="flex flex-wrap items-center gap-x-4 gap-y-3 p-4">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-foreground">
-            {count.toLocaleString()} device{count === 1 ? "" : "s"} with no recent sign-in
+            {count.toLocaleString()} device{count === 1 ? "" : "s"} MDM has not seen recently
           </p>
           <p className="text-xs text-muted-foreground">
-            Nobody has signed in for {STALE_MIN_DAYS}–{STALE_MAX_DAYS} days · {scopeLabel(scope)}.
-            This is the last <em>user sign-in</em>, not the last MDM check-in — a device can sync
-            nightly with nobody using it. Devices with no sign-in for over {STALE_MAX_DAYS} days,
-            devices nobody has ever signed in to, and devices out on an open hand receipt are not
-            counted.
+            MDM has not checked in for {STALE_MIN_DAYS}–{STALE_MAX_DAYS} days · {scopeLabel(scope)}.
+            This is the last <em>MDM sync</em>, not the last user sign-in — a device can sit unused
+            and still sync nightly. Devices unseen for over {STALE_MAX_DAYS} days, devices with no
+            sync time recorded yet, and devices out on an open hand receipt are not counted.
           </p>
           {/* aria-live so the outcome reaches a screen reader: the visible
               evidence of success is a file landing outside the page. */}

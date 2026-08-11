@@ -51,8 +51,8 @@ describe("import CSV template", () => {
   it("carries a lastLogonDate the readiness parser understands", async () => {
     // Readiness compares the parsed instant to markedReadyAt. A template whose
     // example date does not parse would teach the wrong format.
-    const { parseLastLogonAt } = await import("@/modules/items/readiness");
-    expect(parseLastLogonAt(rows[0].lastLogonDate)).toBeInstanceOf(Date);
+    const { parseMdmDateTime } = await import("@/modules/items/readiness");
+    expect(parseMdmDateTime(rows[0].lastLogonDate)).toBeInstanceOf(Date);
   });
 
   it("lists serialNumber, the only required column", () => {
