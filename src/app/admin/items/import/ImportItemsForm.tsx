@@ -16,15 +16,13 @@ export const TEMPLATE =
 const MAX_CSV_BYTES = 5 * 1024 * 1024; // 5 MB
 
 type Skipped = { row: number; serialNumber: string; reason: string };
-type Unresolved = { row: number; deviceName: string; segments: string[] };
 type Mismatch = { serialNumber: string };
 type Analysis = {
-  counts: { toImport: number; toUpdate: number; unchanged: number; skipped: number; autoDetected: number };
+  counts: { toImport: number; toUpdate: number; unchanged: number; skipped: number };
   skipped: Skipped[];
-  unresolved: Unresolved[];
   mismatches: Mismatch[];
 };
-type CommitResult = { added: number; updated: number; skipped: Skipped[]; unchanged: number; detected: number; mismatches: Mismatch[] };
+type CommitResult = { added: number; updated: number; skipped: Skipped[]; unchanged: number; mismatches: Mismatch[] };
 
 function groupSkipped(skipped: Skipped[]) {
   const by = new Map<string, string[]>();
@@ -37,15 +35,10 @@ function groupSkipped(skipped: Skipped[]) {
 
 export function ImportItemsForm() {
   const [file, setFile] = useState<File | null>(null);
-  const [phase, setPhase] = useState<"idle" | "busy" | "resolve" | "done">("idle");
+  const [phase, setPhase] = useState<"idle" | "busy" | "confirm" | "done">("idle");
   const [error, setError] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [result, setResult] = useState<CommitResult | null>(null);
-
-  // learned[UPPERCASE_ABBREV] = fullName, collected during the resolve step
-  const [learned, setLearned] = useState<Record<string, string>>({});
-
-  const isResolvedBy = (u: Unresolved) => u.segments.find((s) => learned[s.toUpperCase()]);
 
   async function onAnalyze(e: React.FormEvent) {
     e.preventDefault();
@@ -61,8 +54,7 @@ export function ImportItemsForm() {
       return;
     }
     setAnalysis(res);
-    setLearned({});
-    setPhase("resolve");
+    setPhase("confirm");
   }
 
   async function onCommit() {
@@ -71,11 +63,10 @@ export function ImportItemsForm() {
     setPhase("busy");
     const fd = new FormData();
     fd.set("file", file);
-    fd.set("resolutions", JSON.stringify(Object.entries(learned).map(([abbreviation, fullName]) => ({ abbreviation, fullName }))));
     const res = await commitImportAction(fd);
     if ("error" in res) {
       setError(res.error);
-      setPhase("resolve");
+      setPhase("confirm");
       return;
     }
     setResult(res);
@@ -86,7 +77,6 @@ export function ImportItemsForm() {
     setFile(null);
     setAnalysis(null);
     setResult(null);
-    setLearned({});
     setError(null);
     setPhase("idle");
   }
@@ -97,7 +87,6 @@ export function ImportItemsForm() {
         <div className="card stack-sm">
           <p className="alert-success">{result.added} item{result.added === 1 ? "" : "s"} added · {result.updated} updated.</p>
           {result.unchanged > 0 && <p className="subtle">{result.unchanged} already up to date.</p>}
-          {result.detected > 0 && <p className="subtle">{result.detected} home unit{result.detected === 1 ? "" : "s"} auto-detected from device names.</p>}
           {result.mismatches.length > 0 && (
             <p className="alert-warning">CSV make/model differ from what&apos;s stored for: {result.mismatches.map((m) => m.serialNumber).join(", ")}. Make and model are never changed by import.</p>
           )}
@@ -122,31 +111,21 @@ export function ImportItemsForm() {
     );
   }
 
-  if ((phase === "resolve" || phase === "busy") && analysis) {
-    const pending = analysis.unresolved.filter((u) => !isResolvedBy(u));
+  if ((phase === "confirm" || phase === "busy") && analysis) {
     return (
       <div className="stack">
         <div className="card stack-sm">
-          <p><strong>{analysis.counts.toImport}</strong> to add · <strong>{analysis.counts.toUpdate}</strong> to update · <strong>{analysis.counts.unchanged}</strong> unchanged · <strong>{analysis.counts.autoDetected}</strong> units auto-detected · <strong>{analysis.counts.skipped}</strong> skipped.</p>
+          <p><strong>{analysis.counts.toImport}</strong> to add · <strong>{analysis.counts.toUpdate}</strong> to update · <strong>{analysis.counts.unchanged}</strong> unchanged · <strong>{analysis.counts.skipped}</strong> skipped.</p>
           {analysis.mismatches.length > 0 && (
             <p className="alert-warning">CSV make/model differ from what&apos;s stored for: {analysis.mismatches.map((m) => m.serialNumber).join(", ")}. Make and model are never overwritten by import.</p>
           )}
-          {analysis.unresolved.length > 0 && (
-            <p className="subtle">{pending.length} of {analysis.unresolved.length} device name{analysis.unresolved.length === 1 ? "" : "s"} still need a unit. Pick the segment that is the unit code and name it, or leave it — unresolved items import with an empty home unit.</p>
-          )}
+          {/* The unit-resolution step used to live here: a row per device name
+              the importer could not decode a unit from, asking an admin to pick
+              a segment and name it. Home units are no longer derived from
+              device names (2026-08-11), so there is nothing to resolve — the
+              home unit comes from the CSV column or stays blank, and
+              /admin/units lists the devices that have none. */}
         </div>
-
-        {pending.length > 0 && (
-          <div className="card stack-sm" style={{ maxHeight: 360, overflowY: "auto" }}>
-            {pending.map((u) => (
-              <ResolveRow
-                key={u.row}
-                unresolved={u}
-                onSave={(abbrev, fullName) => setLearned((m) => ({ ...m, [abbrev.toUpperCase()]: fullName }))}
-              />
-            ))}
-          </div>
-        )}
 
         {error && <p role="alert" className="alert-error">{error}</p>}
         <div className="row">
@@ -229,35 +208,6 @@ export function ImportItemsForm() {
           <Link href="/items" className="btn btn-ghost">Back to items</Link>
         </div>
       </form>
-    </div>
-  );
-}
-
-function ResolveRow({ unresolved, onSave }: { unresolved: Unresolved; onSave: (abbrev: string, fullName: string) => void }) {
-  const [segment, setSegment] = useState<string>(unresolved.segments[0] ?? "");
-  const [fullName, setFullName] = useState("");
-  return (
-    <div className="field" style={{ borderBottom: "1px solid var(--border, #ccc)", paddingBottom: 8 }}>
-      <p className="label" style={{ fontFamily: "monospace" }}>{unresolved.deviceName}</p>
-      <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-        {unresolved.segments.map((s, i) => (
-          <label key={i} className="subtle" style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
-            <input type="radio" name={`seg-${unresolved.row}`} checked={segment === s} onChange={() => setSegment(s)} />
-            {s}
-          </label>
-        ))}
-      </div>
-      <div className="row" style={{ gap: 8, marginTop: 4 }}>
-        <input className="input" placeholder="Full unit name" value={fullName} onChange={(e) => setFullName(e.target.value)} />
-        <button
-          type="button"
-          className="btn btn-ghost"
-          disabled={!segment || !fullName.trim()}
-          onClick={() => onSave(segment, fullName.trim())}
-        >
-          Save unit
-        </button>
-      </div>
     </div>
   );
 }
