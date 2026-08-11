@@ -6,6 +6,7 @@ import { readinessForItems } from "@/modules/items/readiness.query";
 import { holdersForItems } from "@/modules/transfers/holders.query";
 import { SiteHeader } from "@/components/SiteHeader";
 import { ItemSelectTable } from "@/components/ItemSelectTable";
+import { ItemSelectionProvider } from "@/components/ItemSelection";
 import { ItemsSearchInput } from "./ItemsSearchInput";
 import { ItemsScanButton } from "./ItemsScanButton";
 import { auditState } from "@/modules/audit/audit.status";
@@ -82,6 +83,11 @@ export default async function ItemsListPage({
           {isAdmin && <Link href="/admin/items/import" className="btn btn-secondary">Import CSV</Link>}
         </div>
 
+        {/* The selection is shared by the search row's scan button AND the
+            table below — the provider has to wrap BOTH, or the scan sheet
+            (a sibling client component) commits into a separate, empty
+            selection and silently does nothing. */}
+        <ItemSelectionProvider>
         {/* The scan button sits with the search box because it does the same
             job by other means: both narrow the list to one device. */}
         <div className="row" style={{ gap: 8, alignItems: "flex-start" }}>
@@ -135,6 +141,7 @@ export default async function ItemsListPage({
             needsRename={result.needsRename}
             categories={categoryNames.map((name) => ({ name }))}
           />
+        </ItemSelectionProvider>
       </main>
     </>
   );
