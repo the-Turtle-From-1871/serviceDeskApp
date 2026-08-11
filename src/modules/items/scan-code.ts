@@ -13,7 +13,14 @@ import { parseItemScan } from "./scan-url";
 
 export type ScanIntent =
   | { kind: "item"; id: string }
-  | { kind: "serial"; serial: string; altSerial?: string };
+  | {
+      kind: "serial";
+      serial: string;
+      altSerial?: string;
+      /** Make/model read off the label, for PREFILLING a create form only.
+       *  Never used to look anything up. */
+      label?: { make: string; model: string };
+    };
 
 // A shape filter, NOT a security control — it exists so a stray barcode costs
 // no round trip. The DB is the authority on whether a serial names an item,
@@ -138,10 +145,27 @@ export function describeScan(texts: readonly string[]): string {
  * already taken by the bare-serial path, so reaching here without one means
  * the payload is something else entirely.
  */
-function serialFromList(raw: string): string | null {
+function serialFieldFromList(raw: string): { serial: string; fields: string[]; at: number } | null {
   const fields = raw.split(/\s*,\s*/);
   if (fields.length < 2) return null;
-  return fields.find((field) => SERIAL_SHAPE.test(field)) ?? null;
+  const at = fields.findIndex((field) => SERIAL_SHAPE.test(field));
+  return at === -1 ? null : { serial: fields[at], fields, at };
+}
+
+/**
+ * The device description HP prints beside the serial —
+ * `2TK94709FN, HP ProBook 650 G5, ProdID …`. The stored row for that serial is
+ * make "HP", model "HP ProBook 650 G5", so the MODEL is the whole field and the
+ * MAKE is its first token; that is how this data is actually shaped.
+ *
+ * The field immediately after the serial, and only if it is NOT itself
+ * serial-shaped — a list of two serials describes nothing.
+ */
+function labelHint(fields: string[], at: number): { make: string; model: string } | undefined {
+  const desc = fields[at + 1]?.trim();
+  if (!desc || SERIAL_SHAPE.test(desc)) return undefined;
+  const make = desc.split(/\s+/)[0];
+  return make ? { make, model: desc } : undefined;
 }
 
 export function parseScan(text: string): ScanIntent | null {
@@ -156,10 +180,15 @@ export function parseScan(text: string): ScanIntent | null {
   // scans keeps scanning exactly as it did. Otherwise the payload is a list of
   // fields: a KEYED serial is stronger evidence than a positional one, so it is
   // tried first, and only then the "first field that is a serial" rule.
-  const serial =
-    (SERIAL_SHAPE.test(raw) ? raw : null) ??
-    serialFromFields(raw) ??
-    serialFromList(raw);
+  let serial = SERIAL_SHAPE.test(raw) ? raw : serialFromFields(raw);
+  let label: { make: string; model: string } | undefined;
+  if (!serial) {
+    const list = serialFieldFromList(raw);
+    if (list) {
+      serial = list.serial;
+      label = labelHint(list.fields, list.at);
+    }
+  }
   if (!serial) return null;
 
   // The raw value is the PRIMARY candidate and the conversion only ever an
@@ -168,5 +197,10 @@ export function parseScan(text: string): ScanIntent | null {
   // trying raw first makes that unrepresentable, at the cost of one extra
   // query only when the raw value misses.
   const altSerial = expressServiceCodeToServiceTag(serial);
-  return altSerial ? { kind: "serial", serial, altSerial } : { kind: "serial", serial };
+  return {
+    kind: "serial",
+    serial,
+    ...(altSerial ? { altSerial } : {}),
+    ...(label ? { label } : {}),
+  };
 }
