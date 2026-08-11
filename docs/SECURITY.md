@@ -454,10 +454,13 @@ rename.
 **`setItemsLoanerAction` marks or unmarks the selected items as loaner-pool
 stock, gated on `requireCapability("MANAGE_ITEMS")`**
 (`src/app/admin/actions/items.ts`), beside `markItemsReadyAction` above. Item
-ids are client-supplied and bounded at `MAX_BULK_ITEMS` (500), enforced in the
-action's own Zod schema; `setItemsLoaner`
-(`src/modules/items/items.service.ts`) enforces no permissions of its own, so
-the Server Action is the whole boundary. Retired items are excluded from the
+ids are client-supplied and bounded at `MAX_BULK_ITEMS` (500); the bound is
+enforced by `setItemsLoaner` itself (`src/modules/items/items.service.ts`),
+which throws `ItemError("TOO_MANY")` above the limit, and the action catches
+that and returns a readable message — the schema deliberately has no `.max()`
+of its own, so there is one cap definition rather than a second one that
+could drift from it. `setItemsLoaner` otherwise enforces no permissions, so
+the Server Action is the whole authorization boundary. Retired items are excluded from the
 write and reported back as `skipped`, matching the other bulk item actions
 above. The only value this control can write is a single boolean
 (`isLoaner`), and only the literal string `"1"` reads as true — anything else

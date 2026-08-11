@@ -104,6 +104,7 @@ describe("setItemsLoanerAction", () => {
     f.set("itemIds", "a1,a2");
     f.set("isLoaner", "1");
     await expect(setItemsLoanerAction(f)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(setItemsLoaner).not.toHaveBeenCalled();
   });
 
   it("refuses an empty selection", async () => {
