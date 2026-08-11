@@ -2070,6 +2070,10 @@ input[type="file"].input {
 .scan-list__flag { margin-left: auto; color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
 .scan-list__empty, .scan-list__count { margin: 0; }
 
+.scan-create { padding: 12px; }
+.scan-create__row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.scan-create__row .input { flex: 1 1 8rem; min-height: var(--tap); }
+
 /* The "Scan to add" button. Desktop leaves it where it sits in the items card
    (just under the title). On a phone it moves to the BOTTOM of the items
    fieldset — in normal flow, appended after the table — rather than floating

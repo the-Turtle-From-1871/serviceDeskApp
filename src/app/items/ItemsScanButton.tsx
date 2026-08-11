@@ -4,7 +4,8 @@ import { QrScanner, SCAN_FORMATS } from "@/components/QrScanner";
 import { parseScans, describeScan } from "@/modules/items/scan-code";
 import { resolveScannedSerial, resolveScannedItemId } from "@/app/actions/scan";
 import { useItemSelection } from "@/components/ItemSelection";
-import type { ScannedEntry } from "./scan-session";
+import { ScannedCreateForm } from "./ScannedCreateForm";
+import type { ScannedEntry, NewEntry } from "./scan-session";
 import { beep } from "@/lib/beep";
 
 /**
@@ -17,6 +18,7 @@ import { beep } from "@/lib/beep";
 export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
   const { addMany } = useItemSelection();
   const [scanning, setScanning] = useState(false);
+  const [phase, setPhase] = useState<"scanning" | "creating">("scanning");
   const [scanned, setScanned] = useState<ScannedEntry[]>([]);
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const looking = useRef(false);
@@ -77,15 +79,21 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
     }
   };
 
-  // Done commits the ACTIVE items and closes. It ADDS to whatever is already
-  // selected rather than replacing it, so a scanned batch can extend a
-  // selection made by tapping. Clearing stays the selection bar's own job.
-  const finish = () => {
+  const commitFound = () =>
     addMany(
       scanned
         .filter((e): e is ScannedEntry & { kind: "found" } => e.kind === "found")
         .map((e) => e.item),
     );
+
+  const unknowns = scanned.filter((e): e is NewEntry => e.kind === "new");
+
+  // Done commits the ACTIVE items and closes — unless there are unknown serials
+  // and the operator may create them, in which case the sheet becomes the
+  // create form. It ADDS to whatever is already selected rather than replacing.
+  const finish = () => {
+    commitFound();
+    if (canCreate && unknowns.length > 0) return setPhase("creating");
     setScanning(false);
   };
 
@@ -93,6 +101,7 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
     setScanned([]);
     seen.current = new Set();
     setNotice(null);
+    setPhase("scanning");
     setScanning(true);
   };
 
@@ -100,8 +109,24 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
 
   const foundCount = scanned.filter((e) => e.kind === "found").length;
 
+  if (phase === "creating") {
+    return (
+      <ScannedCreateForm
+        entries={unknowns}
+        onCancel={() => setScanning(false)}
+        onCreated={(items) => { addMany(items); setScanning(false); }}
+      />
+    );
+  }
+
   return (
-    <QrScanner formats={SCAN_FORMATS} onDecode={onDecode} onClose={finish} notice={notice}>
+    <QrScanner
+      formats={SCAN_FORMATS}
+      onDecode={onDecode}
+      onClose={finish}
+      notice={notice}
+      doneLabel={`Done · ${foundCount} item${foundCount === 1 ? "" : "s"}`}
+    >
       <div className="scan-list">
         {scanned.length === 0 ? (
           <p className="scan-list__empty subtle">Scanned items appear here.</p>

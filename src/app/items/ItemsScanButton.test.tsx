@@ -110,4 +110,28 @@ describe("ItemsScanButton", () => {
     // "NOSUCH123 is not in the book", which an unanchored match also hits.
     expect(await screen.findByText(/^Not in the book$/i)).toBeDefined();
   });
+
+  it("offers the create form on Done when a serial was unknown", async () => {
+    const user = userEvent.setup();
+    setup(true);
+    await open(user);
+    await user.click(screen.getByRole("button", { name: "emit-unknown" }));
+    // Anchored for the same reason as the earlier test in this file: the scan
+    // notice also reads "...is not in the book" and an unanchored match hits both.
+    await screen.findByText(/^Not in the book$/i);
+    await user.click(screen.getByRole("button", { name: /^Done/ }));
+    expect(await screen.findByRole("button", { name: /^Create 1/ })).toBeDefined();
+  });
+
+  it("shows no create path without MANAGE_ITEMS", async () => {
+    const user = userEvent.setup();
+    setup(false);
+    await open(user);
+    await user.click(screen.getByRole("button", { name: "emit-unknown" }));
+    // Anchored for the same reason as the earlier test in this file: the scan
+    // notice also reads "...is not in the book" and an unanchored match hits both.
+    await screen.findByText(/^Not in the book$/i);
+    await user.click(screen.getByRole("button", { name: /^Done/ }));
+    expect(screen.queryByRole("button", { name: /^Create/ })).toBeNull();
+  });
 });

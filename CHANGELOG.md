@@ -18,6 +18,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-08-10
 
+### Added
+- **Scanning now collects items instead of jumping to one.** The Scan button on the items list used to open the first device it read and close the camera. It now keeps the camera open and lists everything you scan at the bottom of the screen, so you can work down a shelf with the kit in your hands. Tap **Done** and everything you scanned comes back **selected** in the list — ready for Create receipt, Print QR codes, Mark as on hand or Set category, exactly as if you had ticked each row.
+
+  A **retired** device is listed and clearly marked but is not selected, matching the list itself, where retired rows can never be part of a bulk action.
+
+  A serial that **is not in the book** is flagged as you scan it rather than ending the session. On Done, anyone who can manage items gets one form to create them all at once, with make and model already filled in from the label where the code carries them. These are created without a device name, so **they have no home unit until one is added** — the form says so.
+
+  Looking up a single device now takes one extra tap: scan it, tap Done, tap the row. That is the trade for having one behaviour instead of a mode to get wrong.
+
 ### Changed
 - **When a device appears twice in one import file, the most recently seen record now wins.** A device that is re-imaged and re-enrolled shows up twice in the MDM export under the same serial: the live record, and a stale enrolment nobody removed. The import previously kept whichever copy came first in the file and ignored the rest.
 
