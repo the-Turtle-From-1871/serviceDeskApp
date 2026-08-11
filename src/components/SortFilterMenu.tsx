@@ -73,8 +73,15 @@ export type MenuIdPrefix = "items" | "queue";
  *
  * The trigger is excluded — its own click is what toggles the panel shut, and
  * swallowing that would leave the button dead while open.
+ *
+ * EXPORTED so `BulkActionsMenu` (the /items selection bar's "More actions"
+ * sheet) can share it. It is the only implementation of this fix in the app and
+ * must stay so: a second copy is how one of them silently loses the capture
+ * phase again. Each caller registers its own listeners keyed on its own ids, so
+ * two menus on one page do not interfere — each ignores a tap while its own
+ * popover is closed.
  */
-function useDismissSwallowsTap(menuId: string, triggerId: string) {
+export function useDismissSwallowsTap(menuId: string, triggerId: string) {
   const swallow = useRef(false);
 
   useEffect(() => {

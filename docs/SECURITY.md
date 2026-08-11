@@ -438,6 +438,65 @@ respectively, and must stay unforgeable by hand. Widening that enum is a
 security change, not a feature toggle — so a change here needs an update to
 this document in the same commit.
 
+**`recordAuditsAction` is the batched twin of `markAuditedAction` and shares its
+guard.** `src/app/admin/actions/audit.ts`, gated on `requireAdmin()`
+(`ADMINISTER`) exactly like the single-item action beside it. The client posts
+only a comma-separated `itemIds` string and a `signatureId`; the signer name and
+image are re-read server-side via `getOwnedSignature(id, session.user.id)`, so a
+signature id belonging to another admin — or a bogus one — is refused with
+"Select a valid signature." rather than trusted from the form. Item ids are
+client-supplied and therefore bounded at `MAX_BULK_ITEMS` (500) both in the
+action's Zod schema (a readable message) and again in `recordAudits()`
+(`src/modules/audit/audit.service.ts`, the backstop for any other caller, which
+throws `ItemError("TOO_MANY")`). Retired items are excluded from the write and
+reported back as `skipped`, never refused — the batch equivalent of the
+single-item action's "Retired items cannot be audited" rejection, but a
+retired device in a 150-item sweep must not fail the other 149.
+
+**`flagItemsForServiceAction` is the batched twin of `setServiceAction`, added
+2026-08-11** (`src/app/admin/actions/queue.ts`), gated on
+`requireCapability("MANAGE_QUEUE")` exactly like the single-item action beside
+it — the service functions underneath (`upsertServiceRequests`,
+`src/modules/service-queue/service-queue.service.ts`) enforce no permissions of
+their own, so the Server Action is the whole boundary. Item ids are
+client-supplied and bounded at `MAX_BULK_ITEMS` (500), both in the action's Zod
+schema (a readable message) and again in `upsertServiceRequests` itself (the
+backstop for any other caller, throwing `ServiceQueueError("TOO_MANY")`).
+Retired items are excluded from the write and reported back as `skipped`,
+never refused — the same shape as the audit batch above, so a retired device
+scanned into a cart does not fail the rest of the batch. `serviceType` is
+validated against the `ServiceType` Zod enum, so a crafted value (anything
+other than `REIMAGE`/`REPAIR`/`OTHER`) is refused with an error rather than
+silently defaulted to one. `transferId` is written `null` on CREATE only — a
+scanned batch has no hand receipt behind it — and is deliberately absent from
+the UPDATE, so re-flagging an item first flagged from the receipt builder keeps
+the receipt it came in on rather than having that link erased by a save that
+said nothing about it.
+
+**`completeServiceItemsAction` is the batched twin of `completeServiceAction`,
+added 2026-08-11** (`src/app/admin/actions/queue.ts`), gated on
+`requireCapability("MANAGE_QUEUE")` exactly like the other queue actions on
+this page — `completeServiceItems()`
+(`src/modules/service-queue/service-queue.service.ts`) enforces no permissions
+of its own, so the Server Action is the whole boundary. It takes ITEM ids, not
+queue-row ids — the selection bar on `/items` knows items, and the pending
+queue row for each is resolved server-side by a `findMany` scoped to
+`status: "PENDING"`, so a non-pending or missing row is simply absent from the
+set rather than causing an error. Item ids are client-supplied and bounded at
+`MAX_BULK_ITEMS` (500), both in the action's Zod schema (a readable message)
+and again in `completeServiceItems` itself (the backstop for any other
+caller, throwing `ServiceQueueError("TOO_MANY")`). Non-pending rows **and the
+tickets of RETIRED items** are excluded and reported back as `skipped`, never
+refused — the same shape as the batched flag and audit actions above (the
+lookup is scoped `status: "PENDING"` **and** `item: { status: "ACTIVE" }`). The
+single-item `completeServiceAction` stays unscoped on purpose: clearing a stale
+ticket off a retired device is a deliberate act on one row. The queue-row status
+flip and the item's `markedReadyAt` stamp happen inside the same transaction
+(mirroring `completeServiceItem`), so a queue row can never read `COMPLETED`
+while the item was never marked back on hand; the item update is scoped to
+`status: "ACTIVE"`, and `dueAt`/`overdueAlertedAt` are deliberately left on
+the finished row, matching the single-item action.
+
 **Permanent item deletion is `requireAdmin()`-gated and has no undo.**
 `deleteItemAction` (`src/app/admin/actions/items.ts`) is the sole caller of
 `deleteItem()` (`src/modules/items/items.service.ts`), which enforces no
@@ -2158,6 +2217,23 @@ is ever reconsidered, is to drop that one row from the More panel and leave it
 on `/i/<id>` — the aggregation goes away and the fact stays reachable. Widening
 it further — a column in the desktop table, an export, a search over it — should
 not happen without revisiting this entry.
+
+**15. The persisted `/items` selection outlives a sign-out, so a shared browser
+hands the next technician the previous one's batch.** ⚠️ *Accepted 2026-08-11,
+with the persistence it documents.* `items:selection:v1` in **localStorage**
+(`src/components/item-selection-store.ts`) holds the selected devices —
+id, make, model, serial and status — plus a `startedAt` stamp, and nothing
+clears it on sign-out: only `clear()`, or the browser's own site-data reset.
+On a shared desk machine the next person to sign in sees a populated selection
+bar reading "47 selected · started 4:12pm", which *implies the batch is theirs*
+and is one tap from a bulk action. Sensitivity is low — every field in it is
+already public-by-design behind the PIN gate ([§2](#2-authorization)), it is
+client-side only, and every bulk write re-checks item status and the caller's
+capability server-side — but it is **new client-side state crossing a session
+boundary**, which is why it is recorded here rather than left undocumented. The
+lever, if it stops being acceptable, is clearing the key on sign-out (and
+ideally on a change of `session.user.id`), which costs a batch that survives a
+re-login — the case the persistence was added for.
 
 ---
 

@@ -8,9 +8,13 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { AuditLight } from "@/components/AuditLight";
 import { MarkReadyButton } from "@/components/MarkReadyButton";
 import { ReadinessControls } from "@/components/ReadinessControls";
+import { BulkActionsMenu } from "@/components/BulkActionsMenu";
 import { DeleteItemButton } from "@/components/DeleteItemButton";
 import { toggleItemStatusAction } from "@/app/admin/actions/items";
 import { MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW } from "@/modules/transfers/receipt-lines";
+// From the PURE schema module, never items.service.ts — that imports Prisma,
+// which must not reach the browser bundle.
+import { MAX_BULK_ITEMS } from "@/modules/items/items.schema";
 import {
   READINESS_LABEL,
   ITEM_COLUMNS,
@@ -41,6 +45,12 @@ const HIDDEN_KEY = "items:hiddenCols";
 const DEFAULT_HIDDEN: ColumnKey[] = ["deviceCategory"];
 const hiddenStore = makeStore(HIDDEN_KEY, parseHiddenCols);
 
+/** Above this many selected items, "Clear selection" confirms first. The
+ *  selection is persisted, so clearing can throw away a sweep collected over
+ *  twenty minutes; below the threshold the batch is a desk-side handful that
+ *  costs a moment to rebuild, and a confirm on every tap would be noise. */
+const CLEAR_CONFIRM_MIN = 20;
+
 /** A value for the card's More panel, or the em-dash placeholder. `present`
  *  owns the "is this missing" rule (see items-view.ts); this only picks the
  *  mark. `/i/<id>`'s detail card keeps its own `dash` constant — the two
@@ -67,6 +77,9 @@ export function ItemSelectTable({
   uics,
   needsRename,
   categories = [],
+  signatures = [],
+  canAudit = false,
+  canQueue = false,
 }: {
   items: ItemRow[];
   isAdmin: boolean;
@@ -83,6 +96,21 @@ export function ItemSelectTable({
    *  and passed down — never a per-row lookup. Only used by the admin bulk
    *  controls in the selection bar. */
   categories?: { name: string }[];
+  /** The acting admin's saved signature NAMES, for the bulk-audit control.
+   *  `listSignatureNames` selects `{ id, name }` — no image blob reaches the
+   *  browser; recordAuditsAction re-reads the ink server-side scoped to the
+   *  acting admin. Empty for anyone without ADMINISTER. */
+  signatures?: { id: string; name: string }[];
+  /** Capability gates for the "More actions" sheet — ADMINISTER for the bulk
+   *  audit, MANAGE_QUEUE for the two service actions. BulkActionsMenu honours
+   *  them independently, but note the bulk row below is still wrapped in
+   *  `isAdmin`, so on `/items` both arrive true or the sheet is not mounted at
+   *  all; these do not currently let a non-admin through. Presentation either
+   *  way — `requireAdmin()` / `requireCapability("MANAGE_QUEUE")` inside the
+   *  three actions is the real boundary. Defaulted off so a caller that forgets
+   *  to pass them offers nothing rather than something it cannot do. */
+  canAudit?: boolean;
+  canQueue?: boolean;
 }) {
   const router = useRouter();
   const secondarySort = sortKeys[1] ?? null;
@@ -92,7 +120,7 @@ export function ItemSelectTable({
   // It is a Map (id -> item), not a Set of ids, so it survives paging — the
   // receipt-group validation below needs each selected item's make/model, and
   // an item selected on page 1 is no longer in `items` once you page forward.
-  const { selected, toggle, addMany, removeMany, clear } = useItemSelection();
+  const { selected, startedAt, atCap, toggle, addMany, removeMany, clear } = useItemSelection();
   const selectedIds = useMemo(() => new Set(selected.keys()), [selected]);
 
   const allState = useMemo(() => selectAllState(items, selectedIds), [items, selectedIds]);
@@ -683,10 +711,40 @@ export function ItemSelectTable({
       )}
 
       {selected.size > 0 && (
-        // zIndex keeps this bar above the table rows it floats over.
-        <div className="card stack-sm" style={{ position: "sticky", bottom: 0, zIndex: 2 }}>
+        // Sticky offset + zIndex live in globals.css (.selection-bar) so the
+        // mobile breakpoint can lift the bar clear of the bottom nav rail —
+        // an inline style can't be media-queried.
+        <div className="card stack-sm selection-bar">
           <div className="row" style={{ justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-            <span>{selected.size} selected · {groupCount} row{groupCount === 1 ? "" : "s"}</span>
+            <span>
+              {selected.size} selected · {groupCount} row{groupCount === 1 ? "" : "s"}
+              {/* When the batch began. A scanned sweep is collected over twenty
+                  minutes walking a room and now SURVIVES a reload, so without a
+                  start time an old selection rehydrated on a later visit is
+                  indistinguishable from one made just now. */}
+              {startedAt > 0 && (
+                <span className="subtle">
+                  {" "}· started {new Date(startedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                </span>
+              )}
+              {/* A hard stop, not a warning: the scan sheet REFUSES a scan past
+                  this point and says so at decode time (see ItemsScanButton),
+                  and addMany drops anything that still reaches it. This line is
+                  the same fact for someone selecting by tapping.
+
+                  The live region is rendered UNCONDITIONALLY and filled
+                  conditionally. A region that mounts with its content is
+                  announced unreliably — the assistive tech has to observe the
+                  region before the text lands in it — so the container has to
+                  exist first and the text has to arrive as a mutation. */}
+              <span role="status">
+                {atCap && (
+                  <span className="alert-error">
+                    {" "}· limit reached ({MAX_BULK_ITEMS}) — apply an action or clear some before scanning more
+                  </span>
+                )}
+              </span>
+            </span>
             <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
               {tooMany
                 ? <span role="alert" className="alert-error">Too many item types ({groupCount}). Max {MAX_RECEIPT_ROWS} per receipt — split into two.</span>
@@ -699,10 +757,23 @@ export function ItemSelectTable({
                   <thead> checkbox hidden below 720px and selections surviving
                   paging, a selection made on page 1 left no reachable control
                   to undo it once you paged away. Reload was the only exit. */}
+              {/* Confirmed above CLEAR_CONFIRM_MIN: the selection now SURVIVES
+                  a reload, so this button can discard a 150-device sweep that
+                  cost twenty minutes of walking, and there is no undo. A small
+                  batch is cheap to rebuild, so it still clears on one tap. */}
               <button
                 type="button"
                 className="btn btn-secondary"
-                onClick={() => clear()}
+                onClick={() => {
+                  if (
+                    selected.size > CLEAR_CONFIRM_MIN &&
+                    !window.confirm(
+                      `Clear all ${selected.size} selected items?\n\n` +
+                      `This batch cannot be recovered — the devices would have to be scanned again.`,
+                    )
+                  ) return;
+                  clear();
+                }}
               >
                 Clear selection
               </button>
@@ -725,17 +796,40 @@ export function ItemSelectTable({
               with the Apply buttons, whose selects carry a label above them. */}
           {isAdmin && (
             <div className="row" style={{ gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-              <MarkReadyButton
-                itemIds={[...selected.keys()]}
-                onDone={() => clear()}
-              />
-              {/* No onDone: unlike "Mark as on hand", these controls keep the
-                  selection so their outcome message survives (clearing it
-                  unmounts this whole bar), and so readiness and category can be
-                  applied in one pass. */}
+              {/* NO onDone — nothing in this bar clears the selection.
+                  "Mark as on hand" used to, which was harmless when the
+                  selection was in-memory and a mistake now that it persists: it
+                  discarded a scanned sweep on one tap, and unmounted the bar
+                  holding its own "Marked 47 items on hand." before it could be
+                  read. ReadinessControls and BulkActionsMenu already refuse for
+                  the same reason; Clear selection is the one way out. */}
+              <MarkReadyButton itemIds={[...selected.keys()]} />
+              {/* Keeps the selection too, so readiness and category can be
+                  applied to one batch in a single pass. */}
               <ReadinessControls
                 itemIds={[...selected.keys()]}
                 categories={categories}
+              />
+              {/* Audit / flag for service / complete service, behind ONE button.
+                  Two of the three need inputs of their own, and this bar is
+                  sticky over the table — inline they covered a phone viewport.
+
+                  READ THE `isAdmin &&` ON THE ROW ABOVE. It gates this row along
+                  with MarkReadyButton and ReadinessControls, and `isAdmin` is
+                  `user.role === "ADMIN"` — so although BulkActionsMenu honours
+                  canAudit/canQueue separately (and renders nothing when both are
+                  false), the ADMIN baseline carries all nine capabilities and the
+                  only pair that reaches it here is (true, true). A USER granted
+                  MANAGE_QUEUE individually gets no bulk controls at all on this
+                  page. That is a known VISIBILITY gap, deliberately left alone:
+                  the wrapper is shared with the two components above it and
+                  widening it is a separate decision. It is not a security gap —
+                  every action re-checks its capability server-side. */}
+              <BulkActionsMenu
+                itemIds={[...selected.keys()]}
+                signatures={signatures}
+                canAudit={canAudit}
+                canQueue={canQueue}
               />
             </div>
           )}

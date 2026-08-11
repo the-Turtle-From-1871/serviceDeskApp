@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ItemSelectionProvider, useItemSelection } from "@/components/ItemSelection";
+import { MAX_BULK_ITEMS } from "@/modules/items/items.schema";
 
 const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
@@ -82,6 +83,11 @@ const open = async (user: ReturnType<typeof userEvent.setup>) => {
 };
 
 afterEach(cleanup);
+// The selection is now persisted to localStorage (see item-selection-store.ts),
+// which — unlike the old useState — survives across tests in this file unless
+// cleared: without this, a later test's fresh ItemSelectionProvider would
+// rehydrate the previous test's selection instead of starting empty.
+afterEach(() => window.localStorage.clear());
 beforeEach(() => {
   vi.clearAllMocks();
   resolveScannedSerial.mockImplementation(async (sn: string) =>
@@ -303,6 +309,87 @@ describe("ItemsScanButton", () => {
     await screen.findByText(/^Not in the book$/i);
     await user.click(screen.getByRole("button", { name: /^Done/ }));
     expect(screen.queryByRole("button", { name: /^Create/ })).toBeNull();
+  });
+
+  describe("the 500 cap is a hard stop at decode time", () => {
+    // Fills the persisted selection so the sheet opens with `roomLeft() === 0`.
+    // Written straight to localStorage, which is where ItemSelectionProvider
+    // rehydrates from — the same path a batch scanned before a reload takes.
+    const fillSelection = (n = MAX_BULK_ITEMS) =>
+      window.localStorage.setItem(
+        "items:selection:v1",
+        JSON.stringify({
+          startedAt: 1754870000000,
+          items: Array.from({ length: n }, (_, i) => ({
+            id: `full-${i}`, make: "Dell", model: "5540",
+            serialNumber: `SN${i}`, status: "ACTIVE",
+          })),
+        }),
+      );
+
+    it("REFUSES a scan with no room left, audibly, and adds nothing", async () => {
+      const user = userEvent.setup();
+      fillSelection();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+
+      // The refusal names the cap and is beeped as an error — the operator is
+      // still holding the device, which is the whole point of refusing here.
+      expect(await screen.findByTestId("scan-notice")).toHaveProperty(
+        "textContent",
+        expect.stringContaining("Selection is full (500)"),
+      );
+      expect(beep).toHaveBeenCalledWith("err");
+      expect(beep).not.toHaveBeenCalledWith("ok");
+      // And nothing was collected, so Done cannot silently drop it later.
+      expect(screen.queryByText(/2TK94709FN/)).toBeNull();
+      await user.click(screen.getByRole("button", { name: /^Done/ }));
+      await waitFor(() =>
+        expect(screen.getByTestId("sel").textContent).not.toContain("i1"),
+      );
+    });
+
+    it("says so in the sheet as well, since the bar's notice is behind it", async () => {
+      const user = userEvent.setup();
+      fillSelection();
+      setup();
+      await open(user);
+      expect(screen.getByText(/Selection is full \(500\) — further scans are refused\./)).toBeDefined();
+    });
+
+    it("counts the rows collected in THIS session against the cap", async () => {
+      const user = userEvent.setup();
+      // One slot left: the first scan takes it, the second is refused.
+      fillSelection(MAX_BULK_ITEMS - 1);
+      setup();
+      await open(user);
+
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      expect(await screen.findByText(/2TK94709FN/)).toBeDefined();
+      expect(beep).toHaveBeenCalledWith("ok");
+
+      await user.click(screen.getByRole("button", { name: "emit-unknown" }));
+      await waitFor(() =>
+        expect(screen.getByTestId("scan-notice").textContent).toContain("Selection is full"),
+      );
+      expect(screen.queryByText(/^Not in the book$/i)).toBeNull();
+    });
+
+    it("hands the slot back when the row is removed", async () => {
+      const user = userEvent.setup();
+      fillSelection(MAX_BULK_ITEMS - 1);
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      await screen.findByText(/2TK94709FN/);
+      await user.click(screen.getByRole("button", { name: "Remove 2TK94709FN" }));
+
+      // The refusal must not outlive the row that caused it, or a mis-scan
+      // permanently costs the batch a device.
+      await user.click(screen.getByRole("button", { name: "emit-unknown" }));
+      expect(await screen.findByText(/^Not in the book$/i)).toBeDefined();
+    });
   });
 
   describe("removing a mis-scanned row", () => {

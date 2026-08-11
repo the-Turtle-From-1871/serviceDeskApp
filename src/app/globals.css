@@ -395,6 +395,18 @@ h3 {
   font-weight: 600;
   margin-bottom: 14px;
 }
+/* The /items selection bar (ItemSelectTable). Sticky rather than fixed, so it
+   scrolls with the table until it hits the scrollport's own bottom edge —
+   zIndex keeps it above the table rows it floats over. `bottom: 0` here
+   resolves against the SCROLLPORT, which is why it needs a mobile override
+   below: it does not know about the padding-bottom `body:has(.nav-rail)`
+   carries to clear the fixed rail, so at ≤720px this same bar would sit
+   UNDER the rail's band without that override. */
+.selection-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+}
 /* Fluid down to ~21px at 390px so headings like "Find an item or hand
    receipt" stop wrapping mid-phrase; capped at the original 26px so the
    desktop rendering is byte-identical to before. */
@@ -791,13 +803,16 @@ input[type="file"].input {
 }
 
 /* The [popover] element. NO class, no `display`, see above.
-   Selected BY ID — one selector per page that mounts a SortFilterMenu — so that
-   no shared class exists which could later grow a `display` and re-create the
-   closed-popover trap. The cost is deliberate: a new caller must add its id to
-   all four groups below (base, ::backdrop, and the two inside the anchored
-   block), and there is no class for it to inherit them from instead. */
+   Selected BY ID — one selector per popover menu in the app: the two
+   SortFilterMenus (/items, /admin/queue) and the /items selection bar's
+   BulkActionsMenu — so that no shared class exists which could later grow a
+   `display` and re-create the closed-popover trap. The cost is deliberate: a
+   new caller must add its id to all four groups below (base, ::backdrop, and
+   the two inside the anchored block), and there is no class for it to inherit
+   them from instead. */
 #items-sortfilter,
-#queue-sortfilter {
+#queue-sortfilter,
+#items-bulkactions {
   /* Undo the UA popover box: `border: solid; padding: 0.25em; overflow: auto;
      inset: 0; margin: auto` — that last pair is what centres an unstyled
      popover in the viewport. */
@@ -814,7 +829,8 @@ input[type="file"].input {
   width: 100%;
 }
 #items-sortfilter::backdrop,
-#queue-sortfilter::backdrop {
+#queue-sortfilter::backdrop,
+#items-bulkactions::backdrop {
   background: rgb(25 28 24 / 0.4);
 }
 
@@ -899,15 +915,28 @@ input[type="file"].input {
   @supports (anchor-name: --probe) {
     /* Anchored dropdown. If either gate fails the sheet rules above stand
        untouched — which is what Safari below 26 gets, and it is fine. */
-    /* One anchor name for whichever menu this page mounts. It sits on the
-       shared .menu-trigger class, and only one SortFilterMenu exists per page,
-       so a page-specific name would buy nothing and mislead — it was
+    /* One anchor name for whichever SortFilterMenu this page mounts. It sits on
+       the shared .menu-trigger class, and only one SortFilterMenu exists per
+       page, so a page-specific name would buy nothing and mislead — it was
        --items-sortfilter while /items was the only caller. */
     .menu-trigger {
       anchor-name: --sortfilter-trigger;
     }
+    /* …but /items now mounts a SECOND popover menu — the selection bar's
+       "More actions" — and its trigger carries the same .menu-trigger class for
+       its layout and chevron. When two elements share an anchor-name the LAST
+       one in tree order wins, and the selection bar comes after the toolbar, so
+       leaving this alone would anchor the Sort & filter dropdown to the bulk
+       button at the bottom of the page the moment anything was selected. An id
+       (1,0,0) beats the class (0,1,0), so this takes the bulk trigger out of the
+       shared name and gives it its own. A THIRD menu on one page needs the same
+       treatment; there is deliberately no shared class to hang it on. */
+    #items-bulkactions-trigger {
+      anchor-name: --bulkactions-trigger;
+    }
     #items-sortfilter,
-    #queue-sortfilter {
+    #queue-sortfilter,
+    #items-bulkactions {
       position-anchor: --sortfilter-trigger;
       /* Below the trigger, left edge aligned with it. */
       position-area: block-end span-inline-end;
@@ -920,9 +949,15 @@ input[type="file"].input {
       min-width: 240px;
       max-width: 320px;
     }
+    /* AFTER the group above, not before it: at equal (1,0,0) specificity the
+       later rule wins, and this is the half that keeps the two menus apart. */
+    #items-bulkactions {
+      position-anchor: --bulkactions-trigger;
+    }
     /* A dropdown is not modal; dimming the page behind it would be. */
     #items-sortfilter::backdrop,
-    #queue-sortfilter::backdrop {
+    #queue-sortfilter::backdrop,
+    #items-bulkactions::backdrop {
       background: transparent;
     }
     .popup-menu__panel {
@@ -1478,6 +1513,19 @@ input[type="file"].input {
      4px proud of its search box. Match the row: take --tap-lg only where a
      --tap-lg control is actually present. */
   .toolbar:has(.btn-primary) .menu-trigger { height: var(--tap-lg); }
+  /* The selection bar's `bottom: 0` resolves against the scrollport, so it
+     ignores the rail clearance `body:has(.nav-rail)` carries — every control
+     in the bar used to end above the rail's band by luck, until "More
+     actions" didn't. Copy body's expression VERBATIM (not a hardcoded 57px):
+     --nav-rail-h already carries a comment that the rendered height must
+     equal it exactly, and a second hand-computed answer is how that drifts.
+     Scoped with the SAME `body:has(.nav-rail)` the clearance rule uses, so the
+     offset exists exactly where the rail it clears does: a page rendering the
+     bar without the rail (no AppHeader) would otherwise float it 57px above
+     nothing, and the two rules could disagree about whether a rail is there. */
+  body:has(.nav-rail) .selection-bar {
+    bottom: calc(var(--nav-rail-h) + 1px + env(safe-area-inset-bottom));
+  }
   /* Checkboxes are tap targets too, not decorations. 13px is the UA default. */
   .table input[type="checkbox"],
   label > input[type="checkbox"] {
