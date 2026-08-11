@@ -81,6 +81,18 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
   const say = (kind: "ok" | "err", text: string) => { setNotice({ kind, text }); beep(kind); };
 
   const noticeThrottled = (key: string) => {
+    // react-hooks/purity flags Date.now() anywhere it can reach from a
+    // component body, and it cannot tell that this closure runs only from
+    // onDecode — a camera-frame callback, never render. Its exemption
+    // heuristic recognises DOM event props only, and QrScanner takes onDecode
+    // as an ordinary prop. This line linted clean on its own and started
+    // erroring only when a second local caller was added below
+    // (facebook/react#34046 is the same shape). Suppressed per line rather
+    // than hoisting these helpers to module scope and threading the refs
+    // through as arguments, which would rewrite refuseIfFull to dodge a rule
+    // that is wrong about this code. The React Compiler transform is not
+    // enabled in this repo, so nothing here changes at runtime.
+    // eslint-disable-next-line react-hooks/purity -- event-handler only; never called during render
     const now = Date.now();
     if (lastNotice.current.key === key && now - lastNotice.current.at < 1500) return false;
     lastNotice.current = { key, at: now };
@@ -115,6 +127,8 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
    * scanned" says nothing about which label the camera is stuck on.
    */
   const sayAlreadyScanned = (key: string) => {
+    // Same false positive as noticeThrottled above — see the note there.
+    // eslint-disable-next-line react-hooks/purity -- event-handler only; never called during render
     if (Date.now() - lastAddedAt.current < NOTICE_GRACE_MS) return;
     if (!noticeThrottled(key)) return;
     const serial = seenSerial.current.get(key);
