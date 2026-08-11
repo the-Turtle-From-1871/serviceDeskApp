@@ -5,6 +5,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-08-10
 
+### Added
+- **Devices now show when MDM last synced with them, alongside when someone last signed in.** The property book already carried a *Last logon date* — when a **person** last signed in to the device. It now also carries **Last sync** — when **MDM last checked in** with the device. They answer different questions and routinely disagree: a laptop sitting powered on in a cage syncs every night with no logon for months, while one somebody took home may show a recent logon and no sync since. Read together they distinguish a device that is alive but unused from one that has genuinely dropped off the network.
+
+  It is filled from a **`LastSync`** column in the MDM export (`Last Sync`, `last_sync`, `LastSyncDateTime` and `LastSyncDate` are all recognised). A file without that column imports exactly as before and leaves the field blank; a blank cell leaves whatever is already stored untouched, like every other imported column. The downloadable CSV template includes the column and an example value.
+
+  It appears on the device page under *Last sync date*, in the **More** panel on the items list on a phone, and as a **Last sync** column on the items list on a computer — which you can hide from the *Columns* menu like any other. The value is shown exactly as the export wrote it, so it matches what you see in MDM.
+
+  Two deliberate limits. **You cannot sort or filter by it**, because it is stored as the export's own text rather than a real date, and ordering that text would put `10/1/2025` before `7/25/2026` — a wrong answer presented confidently is worse than no sort at all. And a change to it is **not** recorded in a device's edit history: MDM syncs almost every device most nights, so logging it would add about 1,200 history entries a night and bury the custody changes the history exists to show.
+
+  **Note:** adds a nullable `Item.lastSyncDateTime` column (migration `20260810140000_add_last_sync_date_time`). Additive and safe to apply before deploy; no backfill — the field stays blank on every device until the next import carries the column.
+
 ### Changed
 - **When a device appears twice in one import file, the most recently seen record now wins.** A device that is re-imaged and re-enrolled shows up twice in the MDM export under the same serial: the live record, and a stale enrolment nobody removed. The import previously kept whichever copy came first in the file and ignored the rest.
 

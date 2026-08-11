@@ -234,6 +234,15 @@ model Item {
   lastLogonAt                DateTime?
   enrollmentDate             String?
   compliance                 String?
+  // When MDM last CHECKED IN with the device — a different question from
+  // lastLogonDate, which is when a PERSON last signed in. A device sitting
+  // powered-on in a cage syncs nightly with no logon for months; a device
+  // someone took home syncs only when it sees the network. Deliberately has NO
+  // parsed twin: nothing computes over it (readiness reads lastLogonAt), so a
+  // second column would be a denormalisation with no reader. Stored verbatim
+  // like enrollmentDate/compliance above and rendered as-is, so it matches the
+  // MDM export people cross-check against.
+  lastSyncDateTime           String?
   status                     ItemStatus        @default(ACTIVE)
   // READINESS IS DERIVED, NOT STORED — see modules/items/readiness.ts.
   //

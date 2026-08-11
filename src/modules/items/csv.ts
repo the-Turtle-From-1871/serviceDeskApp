@@ -18,6 +18,7 @@ export type RawRow = {
   lastLogonDate: string;
   enrollmentDate: string;
   compliance: string;
+  lastSyncDateTime: string;
 };
 
 // Map a normalized (lowercased, alphanumeric-only) header to a canonical field.
@@ -65,6 +66,20 @@ const HEADER_MAP: Record<string, keyof Omit<RawRow, "row">> = {
   lastlogondate: "lastLogonDate",
   enrollmentdate: "enrollmentDate",
   compliance: "compliance",
+  // When MDM last checked in with the device — NOT when a person last signed
+  // in (that is lastLogonDate above). The export's own header is "LastSync";
+  // normalizeHeader strips case and punctuation, so "Last Sync", "last_sync"
+  // and "Last-Sync" all arrive here too, and the two longer spellings cover an
+  // export that names the column more fully.
+  //
+  // NOTE the deliberate absence of a bare `sync`, for the same reason a bare
+  // `type` and a bare `location` are absent above: it is a generic word an MDM
+  // export can spend on a sync STATUS ("Succeeded", "Pending") rather than a
+  // timestamp, and aliasing it would fill this column with the wrong kind of
+  // value on every matched device. Keep the alias list explicit.
+  lastsync: "lastSyncDateTime",
+  lastsyncdatetime: "lastSyncDateTime",
+  lastsyncdate: "lastSyncDateTime",
 };
 
 const normalizeHeader = (h: string) => h.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -113,6 +128,7 @@ export function parseItemsCsv(text: string): { rows: RawRow[]; error?: string } 
     lastLogonDate: r.lastLogonDate ?? "",
     enrollmentDate: r.enrollmentDate ?? "",
     compliance: r.compliance ?? "",
+    lastSyncDateTime: r.lastSyncDateTime ?? "",
   }));
   return { rows };
 }

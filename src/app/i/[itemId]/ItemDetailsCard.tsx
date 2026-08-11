@@ -18,6 +18,7 @@ export type ItemDetailsValues = {
   lastLogonDate: string | null;
   enrollmentDate: string | null;
   compliance: string | null;
+  lastSyncDateTime: string | null;
 };
 
 type Props = {
@@ -182,6 +183,11 @@ export function ItemDetailsCard({ item, isAdmin, units, categories, suggestions,
           <dd>{item.lastLogonUserPrincipalName || dash}</dd>
           <dt>Last logon date</dt>
           <dd>{item.lastLogonDate || dash}</dd>
+          {/* When MDM last checked in, as opposed to when a person last signed
+              in. Sits next to the logon date because the pair is what says
+              whether a device is alive-but-unused or simply gone. */}
+          <dt>Last sync date</dt>
+          <dd>{item.lastSyncDateTime || dash}</dd>
           <dt>Enrollment date</dt>
           <dd>{item.enrollmentDate || dash}</dd>
           <dt>Compliance</dt>
