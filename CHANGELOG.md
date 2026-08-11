@@ -23,7 +23,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
   A **retired** device is listed and clearly marked but is not selected, matching the list itself, where retired rows can never be part of a bulk action.
 
-  A serial that **is not in the book** is flagged as you scan it rather than ending the session. On Done, anyone who can manage items gets one form to create them all at once, with make and model already filled in from the label where the code carries them. These are created without a device name, so **they have no home unit until one is added** — the form says so.
+  A serial that **is not in the book** is flagged as you scan it rather than ending the session. On Done, anyone who can manage items gets one form to create them all at once, with make and model already filled in from the label where the code carries them. These are created without a device name, so **they have no home unit until one is added** — the form says so. Once you submit, the sheet tells you how many were actually created and how many already existed under that serial, before it closes — it no longer just vanishes.
+
+  Caught a neighbouring label by mistake? Each row in the list has its own **Remove** button, so you can drop it without losing anything else you scanned or clearing the whole session. The label can be scanned again right after.
+
+  Scanning the same item twice now says so — **"Already scanned"** — instead of silently doing nothing, so a re-scan reads as acknowledged rather than as a broken scanner.
+
+  A category typed while creating an unknown serial now joins the managed category list, exactly like every other place an item's category can be set.
 
   Looking up a single device now takes one extra tap: scan it, tap Done, tap the row. That is the trade for having one behaviour instead of a mode to get wrong.
 

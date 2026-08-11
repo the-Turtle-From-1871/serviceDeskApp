@@ -11,6 +11,10 @@ vi.mock("@/app/actions/scan", () => ({
   resolveScannedItemId: (id: string) => resolveScannedItemId(id),
 }));
 vi.mock("@/lib/beep", () => ({ beep: vi.fn() }));
+const createScannedItemsAction = vi.fn();
+vi.mock("@/app/admin/actions/scanned-items", () => ({
+  createScannedItemsAction: (rows: unknown) => createScannedItemsAction(rows),
+}));
 
 vi.mock("@/components/QrScanner", () => ({
   SCAN_FORMATS: ["qr_code"],
@@ -33,6 +37,7 @@ vi.mock("@/components/QrScanner", () => ({
 }));
 
 import { ItemsScanButton } from "./ItemsScanButton";
+import { beep } from "@/lib/beep";
 
 const HP = { id: "i1", make: "HP", model: "HP ProBook 650 G5", serialNumber: "2TK94709FN", status: "ACTIVE" as const };
 const DELL_RETIRED = { id: "i2", make: "Dell", model: "Latitude", serialNumber: "7X2K9L3", status: "RETIRED" as const };
@@ -57,6 +62,12 @@ beforeEach(() => {
     sn === "2TK94709FN" ? { ok: true, item: HP }
     : sn === "7X2K9L3" ? { ok: true, item: DELL_RETIRED }
     : { ok: false, code: "NOT_FOUND" });
+  createScannedItemsAction.mockResolvedValue({
+    ok: true,
+    items: [{ id: "i3", make: "Acme", model: "Widget", serialNumber: "NOSUCH123", status: "ACTIVE" }],
+    created: 1,
+    existed: 0,
+  });
 });
 
 describe("ItemsScanButton", () => {
@@ -133,5 +144,73 @@ describe("ItemsScanButton", () => {
     await screen.findByText(/^Not in the book$/i);
     await user.click(screen.getByRole("button", { name: /^Done/ }));
     expect(screen.queryByRole("button", { name: /^Create/ })).toBeNull();
+  });
+
+  describe("removing a mis-scanned row", () => {
+    it("drops the row from the list and out of the Done selection", async () => {
+      const user = userEvent.setup();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      await screen.findByText(/2TK94709FN/);
+      await user.click(screen.getByRole("button", { name: "Remove 2TK94709FN" }));
+      expect(screen.queryByText(/2TK94709FN/)).toBeNull();
+      await user.click(screen.getByRole("button", { name: /^Done/ }));
+      await waitFor(() => expect(screen.getByTestId("sel").textContent).toBe(""));
+    });
+
+    it("lets the same label be scanned again afterward", async () => {
+      const user = userEvent.setup();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      await screen.findByText(/2TK94709FN/);
+      await user.click(screen.getByRole("button", { name: "Remove 2TK94709FN" }));
+      resolveScannedSerial.mockClear();
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      await screen.findByText(/2TK94709FN/);
+      expect(resolveScannedSerial).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("re-scanning an already-listed item", () => {
+    it("shows an 'Already scanned' notice and does not add a second row", async () => {
+      const user = userEvent.setup();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      await screen.findByText(/2TK94709FN/);
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      expect(await screen.findByText(/^Already scanned$/i)).toBeDefined();
+      expect(screen.getAllByText(/2TK94709FN/)).toHaveLength(1);
+    });
+
+    it("does not beep on every frame the code sits in view", async () => {
+      const user = userEvent.setup();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      await screen.findByText(/2TK94709FN/);
+      vi.mocked(beep).mockClear();
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      // All four "frames" land well inside the 1.5s throttle window, so only
+      // the first repeat should have produced a beep.
+      expect(beep).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("reports how many were created (and how many already existed) after the create form is submitted", async () => {
+    const user = userEvent.setup();
+    setup(true);
+    await open(user);
+    await user.click(screen.getByRole("button", { name: "emit-unknown" }));
+    await screen.findByText(/^Not in the book$/i);
+    await user.click(screen.getByRole("button", { name: /^Done/ }));
+    await user.type(await screen.findByLabelText(/Make for NOSUCH123/i), "Acme");
+    await user.type(screen.getByLabelText(/Model for NOSUCH123/i), "Widget");
+    await user.click(screen.getByRole("button", { name: /^Create 1/ }));
+    expect(await screen.findByText(/1 item created\./i)).toBeDefined();
   });
 });

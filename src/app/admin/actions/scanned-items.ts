@@ -4,6 +4,7 @@ import { requireCapability, AuthError } from "@/lib/authz";
 import { createScannedItems, MAX_BULK_ITEMS } from "@/modules/items/items.service";
 import { ItemError } from "@/modules/items/items.errors";
 import { scannedItemSchema, type ScannedItemInput } from "@/modules/items/items.schema";
+import { learnCategories } from "@/modules/items/categories.service";
 import type { SelectedItem } from "@/components/items-view";
 import { z } from "zod";
 
@@ -40,7 +41,24 @@ export async function createScannedItemsAction(rows: ScannedItemInput[]): Promis
 
   try {
     const res = await createScannedItems(parsed.data, user.id);
+
+    // A category typed directly into a scanned row joins the vocabulary, so the
+    // managed list keeps reflecting what is actually in the fleet — the same
+    // rule every other item write site follows (see createItemAction). Outside
+    // the try above, and swallowing its own failure, because it is a SEPARATE
+    // transaction that runs after the item write has committed: a failure here
+    // must not undo or fail-report a batch that already exists.
+    const categories = [...new Set(parsed.data.map((r) => r.deviceCategory).filter((c): c is string => Boolean(c)))];
+    if (categories.length > 0) {
+      try {
+        await learnCategories(categories);
+      } catch (e) {
+        console.error("[createScannedItemsAction] learnCategories failed (items already created):", e);
+      }
+    }
+
     revalidatePath("/items");
+    revalidatePath("/admin/categories");
     revalidatePath("/admin/analytics");
     return { ok: true, ...res };
   } catch (e) {
