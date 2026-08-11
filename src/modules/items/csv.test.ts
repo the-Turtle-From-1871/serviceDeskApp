@@ -142,4 +142,37 @@ describe("parseItemsCsv header aliasing", () => {
     const { rows } = parseItemsCsv("serialNumber,make\nABC123,Dell\n");
     expect(rows[0]?.storageLocation).toBe("");
   });
+
+  it("maps every accepted spelling of the last-sync column", () => {
+    for (const header of ["lastSync", "LastSync", "Last Sync", "last_sync", "Last-Sync", "lastSyncDateTime", "Last Sync Date Time", "lastSyncDate"]) {
+      const { rows, error } = parseItemsCsv(`serialNumber,${header}\nABC123,8/9/2026 6:02:11 AM\n`);
+      expect(error, `header "${header}" failed to parse`).toBeUndefined();
+      expect(rows[0]?.lastSyncDateTime, `header "${header}" did not map`).toBe("8/9/2026 6:02:11 AM");
+    }
+  });
+
+  it("IGNORES a bare `sync` header", () => {
+    // Deliberate, like the bare `type` and `location` cases above: `Sync` is a
+    // generic word an MDM export can spend on a sync STATUS rather than a
+    // timestamp, and aliasing it would fill the column with the wrong kind of
+    // value on every matched device.
+    const { rows, error } = parseItemsCsv("serialNumber,sync\nABC123,Succeeded\n");
+    expect(error).toBeUndefined();
+    expect(rows[0]?.lastSyncDateTime).toBe("");
+  });
+
+  it("keeps last sync and last logon separate when both columns are present", () => {
+    // The whole point of the field: they answer different questions, so a CSV
+    // carrying both must not let one overwrite the other.
+    const { rows } = parseItemsCsv(
+      "serialNumber,lastLogonDate,lastSync\nABC123,7/25/2026 1:40:21 AM,8/9/2026 6:02:11 AM\n",
+    );
+    expect(rows[0]?.lastLogonDate).toBe("7/25/2026 1:40:21 AM");
+    expect(rows[0]?.lastSyncDateTime).toBe("8/9/2026 6:02:11 AM");
+  });
+
+  it("leaves lastSyncDateTime blank when the column is absent", () => {
+    const { rows } = parseItemsCsv("serialNumber,make\nABC123,Dell\n");
+    expect(rows[0]?.lastSyncDateTime).toBe("");
+  });
 });

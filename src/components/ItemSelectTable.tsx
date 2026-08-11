@@ -232,6 +232,12 @@ export function ItemSelectTable({
       {!isHidden("readiness") && <td className="cell-desktop" data-label="Readiness">{READINESS_LABEL[it.readiness]}</td>}
       {!isHidden("status") && <td className="cell-desktop" data-label="Status"><StatusBadge status={it.status} /></td>}
       {!isHidden("auditState") && <td className="cell-desktop" data-label="Audit" style={{ textAlign: "center" }}><AuditLight state={it.auditState} /></td>}
+      {/* `orDash`, not the `??` the columns above use. This is an MDM column,
+          so an absent value arrives as null from some exports, "" from others
+          and "   " from a few — and `??` renders the last two as a blank cell
+          that reads like a rendering fault rather than a missing fact. Same
+          rule the More panel applies to the other three MDM fields. */}
+      {!isHidden("lastSyncDateTime") && <td className="cell-desktop" data-label="Last sync">{orDash(it.lastSyncDateTime)}</td>}
 
       {/* ---- The mobile card, in three cells of its own ----
           Every cell above is hidden below 720px and these three replace them.
@@ -315,7 +321,7 @@ export function ItemSelectTable({
       </td>
 
       {/* The custody and telemetry facts the compact card drops — Holder, Home
-          unit, SLOC, Compliance, Logon user, Logon date — behind a
+          unit, SLOC, Compliance, Logon user, Logon date, Last sync — behind a
           chevron at the card's bottom edge.
 
           UIC and Category used to sit here in place of Home unit and the three
@@ -411,6 +417,14 @@ export function ItemSelectTable({
             <dd className="mono">{orDash(it.lastLogonUserPrincipalName)}</dd>
             <dt>Logon date</dt>
             <dd>{orDash(it.lastLogonDate)}</dd>
+            {/* "Last sync", not "Sync date": it is 9 characters, so it fits
+                inside the track "Logon user" already sets and costs the value
+                column nothing — and dropping "Last" would leave a label that
+                reads like a verb. This answers a different question from the
+                logon date above (MDM checked in vs. a person signed in), which
+                is why the card carries both. */}
+            <dt>Last sync</dt>
+            <dd>{orDash(it.lastSyncDateTime)}</dd>
           </dl>
         </details>
       </td>

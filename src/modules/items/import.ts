@@ -27,6 +27,7 @@ export type ExistingItem = {
   lastLogonDate: string | null;
   enrollmentDate: string | null;
   compliance: string | null;
+  lastSyncDateTime: string | null;
 };
 
 // A row that will create a new item. make/model are required for creates (checked
@@ -48,6 +49,7 @@ export type NewItemImport = {
   lastLogonAt?: Date;
   enrollmentDate?: string;
   compliance?: string;
+  lastSyncDateTime?: string;
 };
 
 // A row that matched an existing serial and has at least one changed field.
@@ -162,6 +164,7 @@ export function planImport(
       lastLogonDate: r.lastLogonDate,
       enrollmentDate: r.enrollmentDate,
       compliance: r.compliance,
+      lastSyncDateTime: r.lastSyncDateTime,
     });
     if (!parsed.success) {
       skipped.push({ row: r.row, serialNumber: r.serialNumber, reason: parsed.error.issues[0]?.message ?? "invalid row" });
@@ -291,6 +294,11 @@ export function planImport(
       if (d.lastLogonDate !== undefined) silentAfter.lastLogonDate = d.lastLogonDate;
       if (d.enrollmentDate !== undefined) silentAfter.enrollmentDate = d.enrollmentDate;
       if (d.compliance !== undefined) silentAfter.compliance = d.compliance;
+      // Silent for a stronger reason than the rest: MDM syncs every device
+      // most nights, so this value changes on nearly every row of nearly every
+      // import. Logging it would write ~1,200 ItemEdit rows a night and bury
+      // the custody edits the history exists to show.
+      if (d.lastSyncDateTime !== undefined) silentAfter.lastSyncDateTime = d.lastSyncDateTime;
       const silentChanges = diffItemFields(match, silentAfter);
 
       const allChanges = [...loggedChanges, ...silentChanges];
@@ -338,6 +346,7 @@ export function planImport(
       lastLogonAt: c.lastLogonAt ?? undefined,
       enrollmentDate: d.enrollmentDate,
       compliance: d.compliance,
+      lastSyncDateTime: d.lastSyncDateTime,
     };
     if (!item.homeUnit && item.deviceName) {
       const full = detectHomeUnit(item.deviceName, unitsByAbbrev);
