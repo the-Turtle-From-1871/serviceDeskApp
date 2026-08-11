@@ -510,4 +510,35 @@ describe("ItemsScanButton", () => {
     await user.click(screen.getByRole("button", { name: /^Create 1/ }));
     expect(await screen.findByText(/1 item created\./i)).toBeDefined();
   });
+
+  // Both halves of a mixed batch must survive the create step: the in-book
+  // devices committed by Done, and the serials created from the form. Losing
+  // either means re-selecting a shelf by hand before any bulk action can run.
+  //
+  // TWO devices, deliberately — the found HP (i1) and the unknown serial the
+  // create mock returns as i3 — so the assertion tells "kept the found half"
+  // apart from "kept the created half".
+  //
+  // SCOPE: this pins the CLIENT logic only. The bug reported against this flow
+  // was the page refresh from createScannedItemsAction's revalidatePath("/items")
+  // destroying an in-memory selection; jsdom models neither, and the selection
+  // is localStorage-backed now anyway. Read a pass here as "the sheet commits
+  // both halves", never as "the reported bug is fixed" — that is a device check.
+  it("keeps the in-book items AND the created ones selected after the create form", async () => {
+    const user = userEvent.setup();
+    setup(true);
+    await open(user);
+    await user.click(screen.getByRole("button", { name: "emit-hp" }));
+    await screen.findByText("2TK94709FN");
+    await user.click(screen.getByRole("button", { name: "emit-unknown" }));
+    await screen.findByText(/^Not in the book$/i);
+
+    await user.click(screen.getByRole("button", { name: /^Done/ }));
+    await user.type(await screen.findByLabelText(/Make for NOSUCH123/i), "Acme");
+    await user.type(screen.getByLabelText(/Model for NOSUCH123/i), "Widget");
+    await user.click(screen.getByRole("button", { name: /^Create 1/ }));
+    await screen.findByText(/1 item created\./i);
+
+    await waitFor(() => expect(screen.getByTestId("sel").textContent).toBe("i1,i3"));
+  });
 });
