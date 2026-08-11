@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireCapability } from "@/lib/authz";
 import {
   upsertServiceRequest,
+  upsertServiceRequests,
   clearServiceRequest,
   completeServiceItem,
   reopenServiceItem,
@@ -12,6 +13,7 @@ import {
 import { getCurrentOpenTransferId } from "@/modules/transfers/transfers.service";
 import { ServiceQueueError } from "@/modules/service-queue/service-queue.errors";
 import { parseOverrideDays } from "@/modules/service-queue/service-form";
+import { MAX_BULK_ITEMS } from "@/modules/items/items.schema";
 
 const idSchema = z.object({ id: z.string().min(1) });
 const setSchema = z.object({
@@ -19,6 +21,23 @@ const setSchema = z.object({
   serviceType: z.enum(["REIMAGE", "REPAIR", "OTHER"]),
   note: z.string().optional(),
 });
+
+const bulkFlagSchema = z.object({
+  itemIds: z
+    .array(z.string().min(1))
+    .min(1, "Select at least one item.")
+    .max(MAX_BULK_ITEMS, `Too many items selected. The limit is ${MAX_BULK_ITEMS} per action.`),
+  serviceType: z.enum(["REIMAGE", "REPAIR", "OTHER"]),
+  note: z.string().optional(),
+});
+
+type BulkQueueResult =
+  | { error: string }
+  | { ok: true; updated: number; skipped: number };
+
+function bulkIds(formData: FormData): string[] {
+  return String(formData.get("itemIds") ?? "").split(",").filter(Boolean);
+}
 
 function revalidateItem(itemId: string) {
   revalidatePath("/admin/queue");
@@ -137,4 +156,47 @@ export async function reopenServiceAction(formData: FormData): Promise<void> {
   }
   revalidatePath("/admin/queue");
   if (itemId) revalidatePath(`/i/${itemId}`);
+}
+
+/**
+ * Flag every selected item for service — the /items selection-bar twin of
+ * setServiceAction, for a cart of devices scanned off a shelf.
+ *
+ * No transferId: a scanned batch has no receipt behind it. Unlike
+ * setServiceAction, `overrideDays` is accepted on every call, because a batch
+ * has no per-item "already flagged?" state for the form to branch on — a blank
+ * still means no deadline on create and no change on update.
+ */
+export async function flagItemsForServiceAction(formData: FormData): Promise<BulkQueueResult> {
+  await requireCapability("MANAGE_QUEUE");
+
+  const parsed = bulkFlagSchema.safeParse({
+    itemIds: bulkIds(formData),
+    serviceType: String(formData.get("serviceType") ?? ""),
+    note: String(formData.get("note") ?? ""),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+
+  try {
+    const { updated, skipped } = await upsertServiceRequests({
+      itemIds: parsed.data.itemIds,
+      serviceType: parsed.data.serviceType,
+      note: parsed.data.note,
+      overrideDays: parseOverrideDays(formData.get("overrideDays")),
+    });
+    revalidatePath("/items");
+    revalidatePath("/admin/queue");
+    // A PENDING queue row reads as IN_REPAIR in the fleet buckets.
+    revalidatePath("/admin/analytics");
+    return { ok: true, updated, skipped };
+  } catch (e) {
+    if (e instanceof ServiceQueueError && e.code === "NOTE_REQUIRED") {
+      return { error: "Describe the service needed for 'Other'." };
+    }
+    if (e instanceof ServiceQueueError && e.code === "TOO_MANY") {
+      return { error: `Too many items selected. The limit is ${MAX_BULK_ITEMS} per action.` };
+    }
+    console.error("[flagItemsForServiceAction] unexpected error:", e);
+    return { error: "Something went wrong flagging those items. Please try again." };
+  }
 }

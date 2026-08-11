@@ -453,6 +453,23 @@ reported back as `skipped`, never refused — the batch equivalent of the
 single-item action's "Retired items cannot be audited" rejection, but a
 retired device in a 150-item sweep must not fail the other 149.
 
+**`flagItemsForServiceAction` is the batched twin of `setServiceAction`, added
+2026-08-11** (`src/app/admin/actions/queue.ts`), gated on
+`requireCapability("MANAGE_QUEUE")` exactly like the single-item action beside
+it — the service functions underneath (`upsertServiceRequests`,
+`src/modules/service-queue/service-queue.service.ts`) enforce no permissions of
+their own, so the Server Action is the whole boundary. Item ids are
+client-supplied and bounded at `MAX_BULK_ITEMS` (500), both in the action's Zod
+schema (a readable message) and again in `upsertServiceRequests` itself (the
+backstop for any other caller, throwing `ServiceQueueError("TOO_MANY")`).
+Retired items are excluded from the write and reported back as `skipped`,
+never refused — the same shape as the audit batch above, so a retired device
+scanned into a cart does not fail the rest of the batch. `serviceType` is
+validated against the `ServiceType` Zod enum, so a crafted value (anything
+other than `REIMAGE`/`REPAIR`/`OTHER`) is refused with an error rather than
+silently defaulted to one. Unlike the single-item flag, `transferId` is always
+written `null` — a scanned batch has no hand receipt behind it.
+
 **Permanent item deletion is `requireAdmin()`-gated and has no undo.**
 `deleteItemAction` (`src/app/admin/actions/items.ts`) is the sole caller of
 `deleteItem()` (`src/modules/items/items.service.ts`), which enforces no

@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import { canComplete, canReopen } from "./service-queue.status";
 import { ServiceQueueError } from "./service-queue.errors";
 import { computeServiceDueAt, serviceDueAtUpdate } from "./sla";
+import { MAX_BULK_ITEMS } from "@/modules/items/items.schema";
 
 // Trimmed fields the queue list and item card render — never pull unrelated PII.
 const queueItemSelect = { serialNumber: true, deviceName: true, homeUnit: true } satisfies Prisma.ItemSelect;
@@ -86,6 +87,102 @@ export async function upsertServiceRequest(input: UpsertInput): Promise<ServiceQ
         ...serviceDueAtUpdate(input.overrideDays, now),
       },
     });
+  });
+}
+
+type BulkUpsertInput = {
+  itemIds: string[];
+  serviceType: ServiceType;
+  note?: string | null;
+  overrideDays?: number | null;
+};
+
+/**
+ * Flag MANY items for service in one pass — the batched twin of
+ * upsertServiceRequest, for a cart of devices scanned off a shelf.
+ *
+ * Four queries in one transaction, never one per item. The COMPLETED wipe stays
+ * AHEAD of the update for the same reason it does in the single-item path: a
+ * device that broke a second time would otherwise inherit the finished round's
+ * dueAt (opening as "Overdue 17d") and its overdueAlertedAt, which the sweep's
+ * `overdueAlertedAt: null` filter turns into "this lapse can never alert".
+ *
+ * Blank days keeps its two meanings — NO deadline on create
+ * (computeServiceDueAt), NO CHANGE on update (serviceDueAtUpdate returns {}) —
+ * so re-flagging a live request cannot move a deadline nobody touched.
+ *
+ * transferId is null: a scanned batch has no receipt behind it, matching the
+ * item-page flag rather than the receipt builder's.
+ *
+ * RETIRED items are excluded and REPORTED, not refused — see recordAudits.
+ *
+ * Enforces NO permissions — the calling Server Action owns the guard.
+ */
+export async function upsertServiceRequests(
+  input: BulkUpsertInput,
+): Promise<{ updated: number; skipped: number }> {
+  // Throws NOTE_REQUIRED before any query, so an OTHER with no note cannot
+  // half-apply across a batch.
+  const serviceNote = normalizeNote(input.serviceType, input.note);
+
+  const ids = [...new Set(input.itemIds.filter((id) => id.trim() !== ""))];
+  if (ids.length === 0) return { updated: 0, skipped: 0 };
+  if (ids.length > MAX_BULK_ITEMS) throw new ServiceQueueError("TOO_MANY");
+
+  const now = new Date();
+  return prisma.$transaction(async (tx) => {
+    const active = await tx.item.findMany({
+      where: { id: { in: ids }, status: "ACTIVE" },
+      select: { id: true },
+    });
+    const activeIds = active.map((a) => a.id);
+    if (activeIds.length === 0) return { updated: 0, skipped: ids.length };
+
+    const existing = await tx.serviceQueueItem.findMany({
+      where: { itemId: { in: activeIds } },
+      select: { itemId: true },
+    });
+    const existingIds = new Set(existing.map((e) => e.itemId));
+
+    // New round resets: scoped to COMPLETED, so a genuine re-save of a PENDING
+    // row keeps its deadline.
+    await tx.serviceQueueItem.updateMany({
+      where: { itemId: { in: activeIds }, status: "COMPLETED" },
+      data: { dueAt: null, overdueAlertedAt: null },
+    });
+
+    if (existingIds.size > 0) {
+      await tx.serviceQueueItem.updateMany({
+        where: { itemId: { in: [...existingIds] } },
+        data: {
+          serviceType: input.serviceType,
+          serviceNote,
+          transferId: null,
+          status: "PENDING",
+          ...serviceDueAtUpdate(input.overrideDays, now),
+        },
+      });
+    }
+
+    const fresh = activeIds.filter((id) => !existingIds.has(id));
+    if (fresh.length > 0) {
+      await tx.serviceQueueItem.createMany({
+        data: fresh.map((itemId) => ({
+          itemId,
+          serviceType: input.serviceType,
+          serviceNote,
+          transferId: null,
+          status: "PENDING" as const,
+          dueAt: computeServiceDueAt(now, input.overrideDays),
+          overdueAlertedAt: null,
+        })),
+        // Race-safe against the same item being flagged elsewhere between the
+        // read and the write, leaning on the unique itemId constraint.
+        skipDuplicates: true,
+      });
+    }
+
+    return { updated: activeIds.length, skipped: ids.length - activeIds.length };
   });
 }
 
