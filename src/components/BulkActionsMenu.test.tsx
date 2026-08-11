@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BulkActionsMenu } from "./BulkActionsMenu";
 import { recordAuditsAction } from "@/app/admin/actions/audit";
+import { previewItemRenameAction } from "@/app/admin/actions/items";
 
 /**
  * READ THIS BEFORE ADDING A TEST HERE. **jsdom implements no Popover API at
@@ -31,12 +32,14 @@ vi.mock("@/app/admin/actions/queue", () => ({
   completeServiceItemsAction: vi.fn(),
 }));
 // The rename preview is DEBOUNCED and fires on its own once the fields make a
-// valid sequence, so it must resolve a real result shape rather than undefined —
-// a bare vi.fn() returns undefined and `.then` on it rejects inside the effect.
+// valid sequence, so it cannot be a bare vi.fn(): `.then` on undefined rejects
+// inside the effect. The default NEVER SETTLES, deliberately — that holds every
+// other test in this file at the "server has not answered yet" state, which is
+// where the instant client-side range line lives. The one test that exercises
+// the server's answer overrides it and restores this afterwards.
+const pendingForever = () => new Promise<never>(() => {});
 vi.mock("@/app/admin/actions/items", () => ({
-  previewItemRenameAction: vi.fn(async () => ({
-    ok: true, count: 0, first: "", last: "", skipped: 0, collisions: [],
-  })),
+  previewItemRenameAction: vi.fn(() => new Promise<never>(() => {})),
   renameItemsAction: vi.fn(),
 }));
 
@@ -203,6 +206,42 @@ test("shows the computed range as the fields change", async () => {
   // LAPTOP-001 … LAPTOP-003.
   expect(screen.getByText(/LAPTOP-001/)).toBeTruthy();
   expect(screen.getByText(/LAPTOP-003/)).toBeTruthy();
+});
+
+/**
+ * THE SERVER'S NUMBERS WIN ONCE THEY LAND, because `previewRename` numbers over
+ * ACTIVE rows only. Ten selected devices of which two are retired write
+ * 001..008, and people print labels off this line — so the client-side range
+ * (which cannot know a row is retired) is a placeholder, not the answer.
+ */
+describe("the range line", () => {
+  // Restore the file-wide never-settling default, or this override leaks into
+  // whatever runs next.
+  afterEach(() => { vi.mocked(previewItemRenameAction).mockImplementation(pendingForever); });
+
+  test("switches to the server's count, which excludes retired rows", async () => {
+    vi.mocked(previewItemRenameAction).mockResolvedValue({
+      ok: true, count: 8, first: "LAPTOP-001", last: "LAPTOP-008", skipped: 2, collisions: [],
+    });
+    const user = userEvent.setup();
+    const ids = Array.from({ length: 10 }, (_, i) => `i${i}`);
+    render(<BulkActionsMenu itemIds={ids} signatures={[]} canAudit={false} canQueue={false} canRename />);
+    await user.type(screen.getByLabelText(/name prefix/i), "LAPTOP");
+
+    // Instant, client-side: all ten, because nothing here knows two are retired.
+    expect(screen.getByText(/10 devices, in scan order: LAPTOP-001 … LAPTOP-010/)).toBeTruthy();
+
+    // …and once the debounced preview lands, the line is the server's answer,
+    // skipped count and all. The Apply button is kept in step with it.
+    const settled = await screen.findByText(
+      /8 devices, in scan order: LAPTOP-001 … LAPTOP-008/,
+      undefined,
+      { timeout: 3000 },
+    );
+    expect(settled.textContent).toContain("2 retired devices skipped.");
+    expect((screen.getByRole("button", { name: /^Rename /, ...hidden }) as HTMLButtonElement).textContent)
+      .toBe("Rename 8");
+  });
 });
 
 test("rename controls are absent without MANAGE_ITEMS", () => {

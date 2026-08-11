@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown } from "lucide-react";
 import { recordAuditsAction } from "@/app/admin/actions/audit";
@@ -7,7 +7,10 @@ import { flagItemsForServiceAction, completeServiceItemsAction } from "@/app/adm
 import { previewItemRenameAction, renameItemsAction } from "@/app/admin/actions/items";
 // PURE — no DOM, no Prisma — which is the only reason a Client Component may
 // import it. The server rebuilds the names it writes from the same function, so
-// the range line below and the write cannot disagree.
+// the two cannot disagree about the SHAPE of a name. They can still disagree
+// about HOW MANY: only the server knows which selected rows are retired, and it
+// numbers over the survivors. That is why the range line prefers the preview's
+// numbers once they arrive and treats this builder as the instant placeholder.
 import { buildRenameSequence } from "@/modules/items/rename-sequence";
 import { SERVICE_TYPE_OPTIONS } from "@/modules/service-queue/service-form";
 import { useDismissSwallowsTap } from "./SortFilterMenu";
@@ -15,6 +18,20 @@ import { useDismissSwallowsTap } from "./SortFilterMenu";
 type Msg = { ok: boolean; text: string } | null;
 
 type BulkResult = { error: string } | { ok: true; updated: number; skipped: number };
+
+type RenameCollision = { name: string; serialNumber: string };
+
+/** The rename preview, as `previewItemRenameAction` reports it. `count` is the
+ *  number of names that will actually be WRITTEN — it counts ACTIVE rows only,
+ *  which is why it can be smaller than the selection and why the range line
+ *  prefers it over anything derived from `itemIds.length`. */
+type RenamePreview = {
+  count: number;
+  first: string;
+  last: string;
+  skipped: number;
+  collisions: RenameCollision[];
+};
 
 const plural = (n: number) => (n === 1 ? "" : "s");
 
@@ -136,22 +153,35 @@ export function BulkActionsMenu({
   }
   const hasSequence = range !== null;
 
-  // A COLLISION LIST IS ONLY EVER READ FOR THE SEQUENCE IT WAS COMPUTED FOR.
-  // It is stored tagged with that sequence's key and derived back out by
-  // comparison, rather than being cleared by a `setCollisions([])` at the top of
-  // the effect below. Two reasons: a stale list gates the Apply button, so
-  // leaving one attached to a DIFFERENT sequence would refuse names that are
-  // actually free — and the derived form has no render in which that can be
-  // true, where a clear-in-effect leaves one. It also keeps a synchronous
-  // setState out of an effect body, which the React Compiler lint refuses.
+  // A PREVIEW IS ONLY EVER READ FOR THE SEQUENCE IT WAS COMPUTED FOR. It is
+  // stored tagged with that sequence's key and derived back out by comparison,
+  // rather than being cleared by a `setState([])` at the top of the effect
+  // below. Two reasons: a stale reply drives the range line AND gates the Apply
+  // button, so leaving one attached to a DIFFERENT sequence would both misreport
+  // the names and refuse ones that are actually free — and the derived form has
+  // no render in which that can be true, where a clear-in-effect leaves one. It
+  // also keeps a synchronous setState out of an effect body, which the React
+  // Compiler lint refuses.
   const renameKey = `${ids}|${prefix}|${start}`;
-  const [found, setFound] = useState<{ key: string; list: { name: string; serialNumber: string }[] }>(
-    { key: "", list: [] },
-  );
-  const collisions = found.key === renameKey ? found.list : [];
+  const [found, setFound] = useState<{ key: string; preview: RenamePreview } | null>(null);
+  const preview = found?.key === renameKey ? found.preview : null;
+  // The transaction's own refusal, kept in its own tagged slot so it can never
+  // overwrite the range numbers. It OUTRANKS the advisory preview for the same
+  // sequence — `renameItemsAction` re-checks inside its transaction, which is
+  // the answer that actually counts.
+  const [refused, setRefused] = useState<{ key: string; list: RenameCollision[] } | null>(null);
+  const collisions = (refused?.key === renameKey ? refused.list : null) ?? preview?.collisions ?? [];
 
-  // The debounced collision check. A late reply for a superseded sequence lands
-  // under its own key and is simply never read.
+  // The debounced collision check.
+  //
+  // A LATE REPLY MUST NOT LAND AT ALL — being unreadable is not enough. `found`
+  // is a single slot, so a superseded reply writing its own key still EVICTS a
+  // current one: type "AB" then "A", let A's reply land with a collision, then
+  // AB's land with none, and the alert disappears while Apply re-enables on a
+  // colliding sequence — with no further request scheduled, because the deps
+  // have not changed. It fails OPEN. `seq` is the guard: only the most recently
+  // dispatched request may write.
+  const seq = useRef(0);
   useEffect(() => {
     if (none || !canRename || !hasSequence) return;
     const t = setTimeout(() => {
@@ -159,15 +189,42 @@ export function BulkActionsMenu({
       fd.set("itemIds", ids);
       fd.set("prefix", prefix);
       fd.set("start", start);
-      previewItemRenameAction(fd).then((res) => {
-        if ("ok" in res) setFound({ key: `${ids}|${prefix}|${start}`, list: res.collisions });
-      });
+      const mine = ++seq.current;
+      previewItemRenameAction(fd)
+        .then((res) => {
+          if (mine !== seq.current) return;
+          if (!("ok" in res)) return;
+          const { count, first, last, skipped, collisions: list } = res;
+          setFound({
+            key: `${ids}|${prefix}|${start}`,
+            preview: { count, first, last, skipped, collisions: list },
+          });
+        })
+        // Swallowed on purpose. This is an ADVISORY read that fires on its own
+        // while someone types, so a rejection (offline, a deploy mid-keystroke)
+        // must not surface as an error they did not ask for — the client-side
+        // range line still stands, and Apply reports for real. Without it every
+        // settled edit is an unhandled rejection; the sibling actions are awaited
+        // inside a transition, where React routes a throw to the error boundary.
+        .catch(() => {});
     }, 400);
     return () => clearTimeout(t);
     // `range` is derived from these and is a fresh object every render, so
     // depending on it directly would re-run this on every render — hence the
     // boolean `hasSequence` rather than the object.
   }, [prefix, start, ids, none, canRename, hasSequence]);
+
+  // What the line actually says, and what Apply actually promises. The preview
+  // when there is one, the client-side range until then, nothing if the fields
+  // do not yet make a sequence.
+  const line = preview
+    ? { count: preview.count, first: preview.first, last: preview.last, skipped: preview.skipped }
+    : range
+      ? { count: itemIds.length, first: range.first, last: range.last, skipped: 0 }
+      : null;
+  // Kept in step with the line: a button reading "Rename 10" over a line saying
+  // eight will be written is the same lie in a second place.
+  const applyCount = line ? line.count : itemIds.length;
 
   /** Apply. The selection is deliberately KEPT afterwards, exactly as `run`
    *  keeps it — clearing unmounts the sticky bar holding this message. */
@@ -182,9 +239,10 @@ export function BulkActionsMenu({
       if ("error" in res) return setRenameMsg({ ok: false, text: res.error });
       if ("conflict" in res) {
         // The preview is advisory; the action re-checks inside its transaction,
-        // so this is the answer that actually counts. Tagged with the sequence
-        // it was refused for, like the preview's own reply.
-        setFound({ key: renameKey, list: res.collisions });
+        // so this is the answer that actually counts. Its OWN tagged slot, so a
+        // refusal can never overwrite the range numbers with values it does not
+        // carry.
+        setRefused({ key: renameKey, list: res.collisions });
         return setRenameMsg({ ok: false, text: "Those names are already taken." });
       }
       setRenameMsg({
@@ -399,14 +457,24 @@ export function BulkActionsMenu({
                 disabled={renamePending || none}
                 onChange={(e) => setStart(e.target.value)}
               />
-              {/* Instant, from the client-side builder. "in scan order" is the
-                  load-bearing half: the numbers follow the order the batch was
-                  selected or scanned in, which is the order the devices are
-                  physically stacked. */}
-              {range && (
+              {/* "in scan order" is the load-bearing half: the numbers follow
+                  the order the batch was selected or scanned in, which is the
+                  order the devices are physically stacked.
+
+                  THE SERVER'S NUMBERS WIN ONCE THEY LAND. `previewRename`
+                  numbers over ACTIVE rows only, so ten selected devices of which
+                  two are retired write 001..008 — and people print labels off
+                  this line, so promising 001..010 from `itemIds.length` would be
+                  a lie in exactly the case a bulk action exists for. The
+                  client-side range is the instant placeholder that keeps typing
+                  responsive until the debounced preview replies. */}
+              {line && (
                 <span className="subtle">
-                  {itemIds.length} device{plural(itemIds.length)}, in scan order:{" "}
-                  {range.first} … {range.last}
+                  {line.count === 0
+                    ? `Nothing to rename — all ${line.skipped} selected device${plural(line.skipped)} retired.`
+                    : `${line.count} device${plural(line.count)}, in scan order: ${line.first} … ${line.last}`}
+                  {line.count > 0 && line.skipped > 0 &&
+                    ` ${line.skipped} retired device${plural(line.skipped)} skipped.`}
                 </span>
               )}
               {/* Names the offenders and their serials rather than just refusing:
@@ -421,10 +489,10 @@ export function BulkActionsMenu({
               <button
                 type="button"
                 className="btn btn-secondary"
-                disabled={renamePending || none || !range || collisions.length > 0}
+                disabled={renamePending || none || !range || applyCount === 0 || collisions.length > 0}
                 onClick={applyRename}
               >
-                {renamePending ? "Renaming…" : `Rename ${itemIds.length}`}
+                {renamePending ? "Renaming…" : `Rename ${applyCount}`}
               </button>
               {collisions.length > 0 && (
                 <span className="subtle">Change the prefix or start number to continue.</span>
