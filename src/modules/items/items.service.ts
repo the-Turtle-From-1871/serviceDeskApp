@@ -708,6 +708,40 @@ export async function clearItemsReady(itemIds: string[]): Promise<{ updated: num
 }
 
 /**
+ * Mark items as loaner-pool stock, or take them back out of the pool.
+ *
+ * One updateMany, never a loop — the batched twin of every other bulk control
+ * on the /items selection bar.
+ *
+ * RETIRED items are excluded and REPORTED, not refused: a device that has left
+ * the fleet cannot be pool stock, and one retired row must not fail a batch of
+ * fifty. That is the cross-cutting rule for bulk actions here and it diverges
+ * from the single-item paths on purpose.
+ *
+ * `skipped` is "rows this action did not write", which includes rows that no
+ * longer exist as well as retired ones. It deliberately does NOT filter on
+ * `isLoaner: !isLoaner` — that would make the count exact but would reclassify
+ * "already a loaner" as skipped, which the sheet reports as "retired or not
+ * applicable" and would read as a failure.
+ *
+ * Enforces NO permissions — the calling Server Action owns the capability gate.
+ */
+export async function setItemsLoaner(
+  itemIds: string[],
+  isLoaner: boolean,
+): Promise<{ updated: number; skipped: number }> {
+  const ids = [...new Set(itemIds.filter((id) => id.trim() !== ""))];
+  if (ids.length === 0) return { updated: 0, skipped: 0 };
+  if (ids.length > MAX_BULK_ITEMS) throw new ItemError("TOO_MANY");
+
+  const res = await prisma.item.updateMany({
+    where: { id: { in: ids }, status: "ACTIVE" },
+    data: { isLoaner },
+  });
+  return { updated: res.count, skipped: ids.length - res.count };
+}
+
+/**
  * Bulk lifecycle change — the many-row sibling of setItemStatus.
  *
  * `status` is the LIFECYCLE column (ACTIVE / RETIRED), not a readiness state.
