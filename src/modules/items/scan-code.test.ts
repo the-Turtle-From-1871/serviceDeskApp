@@ -74,6 +74,32 @@ describe("parseScan", () => {
     expect(parseScan("5CD1234ABC")).toEqual({ kind: "serial", serial: "5CD1234ABC" });
   });
 
+  // EVERY make in the property book, one real-shaped serial each. Censused
+  // 2026-08-11 over all 1,204 items: HP 731 (10 chars), Dell 413 (7),
+  // Microsoft 35 (14), Getac 24 (10) — no punctuation, nothing outside 4-20,
+  // nothing all-digit, each make uniform to the character.
+  //
+  // The point is not that these four strings parse — it is that SERIAL_SHAPE's
+  // range covers the whole fleet. Narrowing it (a tighter length, a stricter
+  // charset) would strand a vendor silently, and 59 of these devices belong to
+  // the two makes with the fewest units, which is exactly where nobody would
+  // notice. This test is what makes that fail loudly instead.
+  it.each([
+    ["Dell", "101MLZ3"],
+    ["HP", "1H853859V0"],
+    ["Getac", "RH339F0387"],
+    ["Microsoft Surface", "0F00LDD23333FB"],
+  ])("accepts a bare %s serial off its label", (_make, serial) => {
+    expect(parseScan(serial)).toEqual({ kind: "serial", serial });
+  });
+
+  // The boundaries of that range, so a future edit has to be deliberate about
+  // them rather than discovering them.
+  it("accepts the shortest and longest serials the range allows", () => {
+    expect(parseScan("ABCD")).toEqual({ kind: "serial", serial: "ABCD" });
+    expect(parseScan("A".repeat(20))).toEqual({ kind: "serial", serial: "A".repeat(20) });
+  });
+
   // The raw value is tried FIRST and the conversion offered as a fallback, so a
   // genuinely numeric serial can never be silently rewritten into a wrong tag.
   it("offers the converted tag as an alternative, never as a replacement", () => {
