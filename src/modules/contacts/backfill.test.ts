@@ -1,13 +1,12 @@
 import { beforeAll, beforeEach, expect, test } from "vitest";
 import prisma from "@/lib/prisma";
-import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
+import { resetDb } from "../../../tests/helpers/db";
 import { backfillContactsFromReceipts } from "./backfill";
 import { listContacts, createContact } from "./contacts.service";
 
 let userId: string;
 let seq = 0;
 
-beforeAll(() => migrateTestDb());
 beforeEach(async () => {
   await resetDb();
   seq = 0;

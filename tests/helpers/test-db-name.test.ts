@@ -50,4 +50,17 @@ describe("test database names", () => {
     expect(templateDbName(B).length).toBeLessThan(63);
     expect(workerDbName(MAX_TEST_WORKERS, B).length).toBeLessThan(63);
   });
+
+  it("the running worker is pointed at its own database", () => {
+    // Cheap, and it fails loudly if the rewrite in setup-env.ts ever silently
+    // stops happening — which would otherwise surface as inexplicable cross-talk
+    // between files months from now.
+    //
+    // VITEST_POOL_ID, not VITEST_WORKER_ID — see the comment in setup-env.ts.
+    // VITEST_WORKER_ID is an unbounded per-file counter; asserting against it
+    // here would make this test agree with the very bug it exists to catch.
+    const worker = Number(process.env.VITEST_POOL_ID ?? 1);
+    expect(process.env.DATABASE_URL).toContain(workerDbName(worker));
+    expect(process.env.DATABASE_URL).toContain("connection_limit=2");
+  });
 });

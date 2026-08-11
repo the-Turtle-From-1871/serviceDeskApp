@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, expect, test } from "vitest";
 import prisma from "@/lib/prisma";
-import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
+import { resetDb } from "../../../tests/helpers/db";
 import { saveDraft, purgeStaleDrafts, DRAFT_RETENTION_DAYS } from "./drafts.service";
 import { receiptDraftSchema } from "./drafts.schema";
 
@@ -8,7 +8,6 @@ let userId: string;
 const NOW = new Date("2026-08-06T00:00:00Z");
 const daysAgo = (n: number) => new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000);
 
-beforeAll(() => migrateTestDb());
 beforeEach(async () => {
   await resetDb();
   const u = await prisma.user.create({ data: { name: "A", email: "a@x.co", passwordHash: "x" } });

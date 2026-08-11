@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import prisma from "@/lib/prisma";
-import { resetDb, migrateTestDb } from "../../../../tests/helpers/db";
+import { resetDb } from "../../../../tests/helpers/db";
 import { getRecentReceipts, RECENT_RECEIPT_COUNT } from "./dashboard.service";
 
 const PREFIX = "RECENT-";
@@ -25,7 +25,6 @@ async function seedReceipt(key: string, createdAt: Date, opts: { closed?: boolea
 }
 
 beforeAll(async () => {
-  migrateTestDb();
   await resetDb();
   // Seeded out of chronological order so a passing ordering test cannot be an
   // artifact of insertion order.

@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, expect, test } from "vitest";
 import prisma from "@/lib/prisma";
-import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
+import { resetDb } from "../../../tests/helpers/db";
 import { getImportActor, IMPORT_SERVICE_ACCOUNT_EMAIL } from "./import-actor";
 
 // resetDb() TRUNCATEs User (and Item, Unit) CASCADE before every test, so the
@@ -23,7 +23,6 @@ function seedServiceAccount() {
   });
 }
 
-beforeAll(() => migrateTestDb());
 beforeEach(() => resetDb());
 
 test("getImportActor resolves the seeded service account", async () => {

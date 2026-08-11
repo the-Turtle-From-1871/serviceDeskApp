@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from "vitest";
 import prisma from "@/lib/prisma";
-import { resetDb, migrateTestDb } from "../../../../../tests/helpers/db";
+import { resetDb } from "../../../../../tests/helpers/db";
 import { IMPORT_SERVICE_ACCOUNT_EMAIL } from "@/modules/items/import-actor";
 
 // Same stub, same reason, as src/app/api/items/import/route.test.ts:
@@ -52,10 +52,6 @@ function seedServiceAccount() {
 // test file, so a leaked CRON_SECRET / DRIVE_CSV_URL would reach later files.
 const priorSecret = process.env.CRON_SECRET;
 const priorUrl = process.env.DRIVE_CSV_URL;
-
-beforeAll(() => {
-  migrateTestDb();
-});
 
 beforeEach(async () => {
   await resetDb();

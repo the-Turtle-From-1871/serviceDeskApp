@@ -1,9 +1,8 @@
-import { beforeAll, beforeEach, expect, test } from "vitest";
-import { migrateTestDb, resetDb } from "../../../tests/helpers/db";
+import { beforeEach, expect, test } from "vitest";
+import { resetDb } from "../../../tests/helpers/db";
 import { createUser, setUserActive, setUserRole, listUsers, changeUserPassword } from "./users.service";
 import { verifyPassword } from "@/lib/password";
 
-beforeAll(() => migrateTestDb());
 beforeEach(() => resetDb());
 
 const base = { unit: undefined, contactNumber: undefined } as const;

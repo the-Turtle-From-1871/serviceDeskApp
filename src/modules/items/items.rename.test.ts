@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import prisma from "@/lib/prisma";
 import { renameItems, previewRename } from "./items.service";
-import { migrateTestDb, resetDb } from "../../../tests/helpers/db";
+import { resetDb } from "../../../tests/helpers/db";
 
 let editorId: string;
 const editor = () => ({ id: editorId, name: "Tech" });
@@ -12,7 +12,6 @@ async function mkItem(serial: string, deviceName: string | null, status: "ACTIVE
   });
 }
 
-beforeAll(migrateTestDb);
 beforeEach(async () => {
   await resetDb();
   editorId = (await prisma.user.create({

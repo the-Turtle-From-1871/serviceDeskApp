@@ -1,13 +1,12 @@
 import { beforeAll, beforeEach, expect, test } from "vitest";
 import prisma from "@/lib/prisma";
-import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
+import { resetDb } from "../../../tests/helpers/db";
 import { saveDraft, listDrafts, getDraft, deleteDraft, MAX_DRAFTS_PER_USER } from "./drafts.service";
 import { receiptDraftSchema } from "./drafts.schema";
 
 let aliceId: string;
 let bobId: string;
 
-beforeAll(() => migrateTestDb());
 beforeEach(async () => {
   await resetDb();
   const [a, b] = await Promise.all([
