@@ -65,8 +65,25 @@ export function LoginForm({ turnstileSiteKey }: { turnstileSiteKey: string | nul
     if (signedIn) window.location.assign(LOGIN_DESTINATION);
   }, [signedIn]);
 
+  // The resend control is a SIBLING of the sign-in form, never a child of it.
+  //
+  // It renders its own <form>, and an HTML parser DROPS a <form> nested inside
+  // another one — so while this block lived inside the sign-in form, the
+  // server-rendered markup contained no resend control at all and it existed
+  // only because React inserted it after hydration. Chrome said so out loud
+  // ("In HTML, <form> cannot be a descendant of <form>. This will cause a
+  // hydration error"), and it failed on exactly the path a blocked user lands
+  // on. The parent is a `.card.stack`, so two siblings space themselves.
+  //
+  // Not solved with `formAction` on a button: that submits THIS form, which
+  // would post the user's password to the resend endpoint, which has no use for
+  // it. Not solved with a JS-only button either — this file works hard to keep
+  // sign-in functional without the client bundle (see `hydrated` above and the
+  // <meta refresh> below), and a button that needs JS would quietly opt the
+  // resend path out of that.
   return (
-    <form action={action} className="stack">
+    <>
+      <form action={action} className="stack">
       <div className="field">
         <label className="label" htmlFor="email">Email</label>
         {/* `autoComplete="username"`, NOT `"email"`, even though this field holds
@@ -89,18 +106,6 @@ export function LoginForm({ turnstileSiteKey }: { turnstileSiteKey: string | nul
           would be refused for a reason the user cannot see. */}
       {turnstileSiteKey && (
         <TurnstileWidget siteKey={turnstileSiteKey} resetOn={state} onStatus={setChallenge} />
-      )}
-      {/* Right password, unconfirmed address. Safe to name specifically ONLY
-          because reaching this state required the correct password — see
-          modules/auth/credentials.ts. */}
-      {state && "unverified" in state && (
-        <div className="alert-warning stack-sm" role="alert">
-          <p style={{ margin: 0 }}>
-            Confirm your email address before signing in. We sent a link to{" "}
-            <strong>{state.email}</strong>.
-          </p>
-          <ResendVerificationForm email={state.email} />
-        </div>
       )}
       {state && "error" in state && state.error && (
         <p role="alert" className="alert-error">{state.error}</p>
@@ -130,6 +135,19 @@ export function LoginForm({ turnstileSiteKey }: { turnstileSiteKey: string | nul
       <p className="subtle" style={{ textAlign: "center", margin: 0 }}>
         Don&rsquo;t have an account? <Link href="/register">Create one</Link>
       </p>
-    </form>
+      </form>
+      {/* Right password, unconfirmed address. Safe to name specifically ONLY
+          because reaching this state required the correct password — see
+          modules/auth/credentials.ts. */}
+      {state && "unverified" in state && (
+        <div className="alert-warning stack-sm" role="alert">
+          <p style={{ margin: 0 }}>
+            Confirm your email address before signing in. We sent a link to{" "}
+            <strong>{state.email}</strong>.
+          </p>
+          <ResendVerificationForm email={state.email} />
+        </div>
+      )}
+    </>
   );
 }

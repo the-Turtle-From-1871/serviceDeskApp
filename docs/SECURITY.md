@@ -438,6 +438,65 @@ respectively, and must stay unforgeable by hand. Widening that enum is a
 security change, not a feature toggle — so a change here needs an update to
 this document in the same commit.
 
+**`recordAuditsAction` is the batched twin of `markAuditedAction` and shares its
+guard.** `src/app/admin/actions/audit.ts`, gated on `requireAdmin()`
+(`ADMINISTER`) exactly like the single-item action beside it. The client posts
+only a comma-separated `itemIds` string and a `signatureId`; the signer name and
+image are re-read server-side via `getOwnedSignature(id, session.user.id)`, so a
+signature id belonging to another admin — or a bogus one — is refused with
+"Select a valid signature." rather than trusted from the form. Item ids are
+client-supplied and therefore bounded at `MAX_BULK_ITEMS` (500) both in the
+action's Zod schema (a readable message) and again in `recordAudits()`
+(`src/modules/audit/audit.service.ts`, the backstop for any other caller, which
+throws `ItemError("TOO_MANY")`). Retired items are excluded from the write and
+reported back as `skipped`, never refused — the batch equivalent of the
+single-item action's "Retired items cannot be audited" rejection, but a
+retired device in a 150-item sweep must not fail the other 149.
+
+**`flagItemsForServiceAction` is the batched twin of `setServiceAction`, added
+2026-08-11** (`src/app/admin/actions/queue.ts`), gated on
+`requireCapability("MANAGE_QUEUE")` exactly like the single-item action beside
+it — the service functions underneath (`upsertServiceRequests`,
+`src/modules/service-queue/service-queue.service.ts`) enforce no permissions of
+their own, so the Server Action is the whole boundary. Item ids are
+client-supplied and bounded at `MAX_BULK_ITEMS` (500), both in the action's Zod
+schema (a readable message) and again in `upsertServiceRequests` itself (the
+backstop for any other caller, throwing `ServiceQueueError("TOO_MANY")`).
+Retired items are excluded from the write and reported back as `skipped`,
+never refused — the same shape as the audit batch above, so a retired device
+scanned into a cart does not fail the rest of the batch. `serviceType` is
+validated against the `ServiceType` Zod enum, so a crafted value (anything
+other than `REIMAGE`/`REPAIR`/`OTHER`) is refused with an error rather than
+silently defaulted to one. `transferId` is written `null` on CREATE only — a
+scanned batch has no hand receipt behind it — and is deliberately absent from
+the UPDATE, so re-flagging an item first flagged from the receipt builder keeps
+the receipt it came in on rather than having that link erased by a save that
+said nothing about it.
+
+**`completeServiceItemsAction` is the batched twin of `completeServiceAction`,
+added 2026-08-11** (`src/app/admin/actions/queue.ts`), gated on
+`requireCapability("MANAGE_QUEUE")` exactly like the other queue actions on
+this page — `completeServiceItems()`
+(`src/modules/service-queue/service-queue.service.ts`) enforces no permissions
+of its own, so the Server Action is the whole boundary. It takes ITEM ids, not
+queue-row ids — the selection bar on `/items` knows items, and the pending
+queue row for each is resolved server-side by a `findMany` scoped to
+`status: "PENDING"`, so a non-pending or missing row is simply absent from the
+set rather than causing an error. Item ids are client-supplied and bounded at
+`MAX_BULK_ITEMS` (500), both in the action's Zod schema (a readable message)
+and again in `completeServiceItems` itself (the backstop for any other
+caller, throwing `ServiceQueueError("TOO_MANY")`). Non-pending rows **and the
+tickets of RETIRED items** are excluded and reported back as `skipped`, never
+refused — the same shape as the batched flag and audit actions above (the
+lookup is scoped `status: "PENDING"` **and** `item: { status: "ACTIVE" }`). The
+single-item `completeServiceAction` stays unscoped on purpose: clearing a stale
+ticket off a retired device is a deliberate act on one row. The queue-row status
+flip and the item's `markedReadyAt` stamp happen inside the same transaction
+(mirroring `completeServiceItem`), so a queue row can never read `COMPLETED`
+while the item was never marked back on hand; the item update is scoped to
+`status: "ACTIVE"`, and `dueAt`/`overdueAlertedAt` are deliberately left on
+the finished row, matching the single-item action.
+
 **Permanent item deletion is `requireAdmin()`-gated and has no undo.**
 `deleteItemAction` (`src/app/admin/actions/items.ts`) is the sole caller of
 `deleteItem()` (`src/modules/items/items.service.ts`), which enforces no
@@ -472,7 +531,12 @@ the next click. It is **read-only** — no write, no revalidation. The
 caller-supplied unit scope is **re-validated with Zod and bound as query
 parameters**, never spliced (§5). And the result set is **capped with an
 overflow probe** rather than unbounded. It writes **no audit row** — see Known
-gaps #7, which this adds to rather than resolves. *Last reviewed: 2026-08-10.*
+gaps #7, which this adds to rather than resolves. **2026-08-11: the window moved
+from the sign-in column to the MDM sync column** (`lastLogonAt` → `lastSyncAt`)
+and two date headers changed with it. That changes WHICH devices are listed, not
+what a row exposes: the same three PII fields, the same cap, the same gate, and
+the sheet still carries `lastLogonUserPrincipalName`. No posture change.
+*Last reviewed: 2026-08-11.*
 
 **Admin-only capabilities:** returns, user management, named signatures,
 service-queue mutations, receipt timers, **recording** an audit, analytics,
@@ -1460,6 +1524,18 @@ was removed on 2026-08-08. Keeping this document current is now a convention. Se
 **Dependencies are vetted before install** — `npm view <package>` first, to catch
 hallucinated or unhealthy packages.
 
+**`npm audit` is clean as of 2026-08-11** — production *and* dev, 0 vulnerabilities.
+It had not been: `next` sat on `16.2.9` carrying nine high-severity advisories, two
+of which named this app's own architecture — **middleware/proxy bypass in App Router**
+(and `src/proxy.ts` is the login + PIN gate) and **unauthenticated disclosure of
+internal Server Function endpoints** (Server Actions are the primary write path).
+That upgrade had been deferred as "breaking" on 2026-07-27 and stayed deferred for
+two weeks. `next` is now pinned exactly at `16.3.0`; the deferred `nodemailer` 7→9
+item closed itself when the dependency was deleted on 2026-08-04.
+**Note the pin is exact, like `react`** — a caret would let a minor land unreviewed,
+and this app's guide opens by warning that its Next is not the one you remember.
+Re-run `npm audit --omit=dev` when touching dependencies; there is no CI job for it.
+
 **Migrate before push** — `next build` never runs `migrate deploy`, so a prod
 migration must be applied *before* the merge deploys. See [`../DEPLOY.md`](../DEPLOY.md).
 
@@ -2160,6 +2236,53 @@ everything else `requireUser()` gates. The owner scoping in
 [§2](#2-authorization) stops a *different* account from reaching another
 user's drafts; it does not add a second factor on top of the session that
 already can.
+
+**14. `/items` ships one `@army.mil` address per row, whether or not anyone
+looks at it.** *Accepted 2026-08-11.* The phone card's **More** panel renders
+`lastLogonUserPrincipalName`, so every `/items` response carries up to
+`ITEMS_PAGE_SIZE` personal addresses in its RSC payload — a closed `<details>`
+still ships its contents (see `.claude/rules/ui-styling.md`), so the data is on
+the wire even for a user who never expands a single card.
+
+**It is not a new disclosure.** The route is `requireUser()`-gated, and
+`/i/<id>` has rendered the same field to any signed-in user since the MDM
+telemetry import landed (2026-07-23), where showing it to non-admins was an
+explicit product decision, not an oversight. Nothing here is readable by anyone
+who could not already read it one device at a time.
+
+**What changed is AGGREGATION, and that is why it is written down.** `CLAUDE.md`
+says plainly: *never pull PII into list/search/type-ahead queries.* This is that
+pattern — a list route now carries a page of real people's addresses in one
+response — so the rule is being knowingly bent rather than quietly broken. The
+practical difference is what one captured response is worth: a page of the
+duty roster instead of a single device's last user. It raises the value of a
+stolen session ([0d](#known-gaps--accepted-risks)) and of anything that logs
+response bodies.
+
+Accepted because the field is the point of the panel: the technician holding the
+device needs to know who last signed in to it, and making them open each item
+individually to learn that would defeat the card. The cheap mitigation, if this
+is ever reconsidered, is to drop that one row from the More panel and leave it
+on `/i/<id>` — the aggregation goes away and the fact stays reachable. Widening
+it further — a column in the desktop table, an export, a search over it — should
+not happen without revisiting this entry.
+
+**15. The persisted `/items` selection outlives a sign-out, so a shared browser
+hands the next technician the previous one's batch.** ⚠️ *Accepted 2026-08-11,
+with the persistence it documents.* `items:selection:v1` in **localStorage**
+(`src/components/item-selection-store.ts`) holds the selected devices —
+id, make, model, serial and status — plus a `startedAt` stamp, and nothing
+clears it on sign-out: only `clear()`, or the browser's own site-data reset.
+On a shared desk machine the next person to sign in sees a populated selection
+bar reading "47 selected · started 4:12pm", which *implies the batch is theirs*
+and is one tap from a bulk action. Sensitivity is low — every field in it is
+already public-by-design behind the PIN gate ([§2](#2-authorization)), it is
+client-side only, and every bulk write re-checks item status and the caller's
+capability server-side — but it is **new client-side state crossing a session
+boundary**, which is why it is recorded here rather than left undocumented. The
+lever, if it stops being acceptable, is clearing the key on sign-out (and
+ideally on a change of `session.user.id`), which costs a batch that survives a
+re-login — the case the persistence was added for.
 
 ---
 

@@ -6,7 +6,7 @@ import {
   getUnitAllocations,
   itemWhere,
   listStaleDevices,
-  staleLogonWindow,
+  staleSyncWindow,
 } from "./analytics.service";
 import { STALE_MIN_DAYS, STALE_MAX_DAYS } from "./analytics.types";
 
@@ -40,6 +40,7 @@ function mkItem(data: {
   markedReadyAt?: Date;
   lastLogonUserPrincipalName?: string;
   lastLogonAt?: Date | null;
+  lastSyncAt?: Date | null;
   deviceName?: string;
   serialNumber?: string;
 }) {
@@ -286,9 +287,9 @@ async function issueOnOpenReceipt(
 const serialsOf = (rows: Awaited<ReturnType<typeof listStaleDevices>>["rows"]) =>
   rows.map((r) => r.Serial);
 
-describe("staleLogonWindow", () => {
+describe("staleSyncWindow", () => {
   test("spans from 90 days ago to 30 days ago", () => {
-    const { from, to } = staleLogonWindow(NOW);
+    const { from, to } = staleSyncWindow(NOW);
     expect(from).toEqual(daysAgo(STALE_MAX_DAYS));
     expect(to).toEqual(daysAgo(STALE_MIN_DAYS));
   });
@@ -296,29 +297,43 @@ describe("staleLogonWindow", () => {
 
 describe("listStaleDevices — what lands in the sheet", () => {
   test("includes only devices last seen inside the window", async () => {
-    await mkItem({ serialNumber: "FRESH", lastLogonAt: daysAgo(15) });
-    await mkItem({ serialNumber: "STALE", lastLogonAt: daysAgo(45) });
+    await mkItem({ serialNumber: "FRESH", lastSyncAt: daysAgo(15) });
+    await mkItem({ serialNumber: "STALE", lastSyncAt: daysAgo(45) });
     // Past 90 days: a different problem, deliberately excluded (the whole point
     // of the upper bound).
-    await mkItem({ serialNumber: "LOST", lastLogonAt: daysAgo(95) });
+    await mkItem({ serialNumber: "LOST", lastSyncAt: daysAgo(95) });
 
     const { rows } = await listStaleDevices(UNSCOPED, NOW);
     expect(serialsOf(rows)).toEqual(["STALE"]);
   });
 
-  test("excludes devices MDM has never seen", async () => {
-    // Null covers both "never enrolled" and "the export's date would not parse"
-    // — neither is "last seen 45 days ago", so neither belongs on a chase list.
-    await mkItem({ serialNumber: "NEVER", lastLogonAt: null });
-    await mkItem({ serialNumber: "STALE", lastLogonAt: daysAgo(45) });
+  test("excludes devices MDM has never reported a sync for", async () => {
+    // Null covers "never enrolled", "the export's date would not parse" and —
+    // commonly, since the column is newer than the fleet — "no import has
+    // filled it in yet". None is "last seen 45 days ago", so none belongs on a
+    // chase list.
+    await mkItem({ serialNumber: "NEVER", lastSyncAt: null });
+    await mkItem({ serialNumber: "STALE", lastSyncAt: daysAgo(45) });
 
     const { rows } = await listStaleDevices(UNSCOPED, NOW);
     expect(serialsOf(rows)).toEqual(["STALE"]);
+  });
+
+  test("reads the SYNC column, not the sign-in column", async () => {
+    // The two disagree constantly, which is the whole reason both exist — so a
+    // row where they disagree is the only fixture that can tell which one the
+    // predicate reads. This list shipped over lastLogonAt and was moved on
+    // 2026-08-11; swapping it back would pass every other test in this file.
+    await mkItem({ serialNumber: "UNUSED-BUT-ONLINE", lastSyncAt: daysAgo(1), lastLogonAt: daysAgo(45) });
+    await mkItem({ serialNumber: "USED-BUT-OFFLINE", lastSyncAt: daysAgo(45), lastLogonAt: daysAgo(1) });
+
+    const { rows } = await listStaleDevices(UNSCOPED, NOW);
+    expect(serialsOf(rows)).toEqual(["USED-BUT-OFFLINE"]);
   });
 
   test("excludes retired kit", async () => {
-    await mkItem({ serialNumber: "RETIRED", lastLogonAt: daysAgo(45), status: "RETIRED" });
-    await mkItem({ serialNumber: "STALE", lastLogonAt: daysAgo(45) });
+    await mkItem({ serialNumber: "RETIRED", lastSyncAt: daysAgo(45), status: "RETIRED" });
+    await mkItem({ serialNumber: "STALE", lastSyncAt: daysAgo(45) });
 
     const { rows } = await listStaleDevices(UNSCOPED, NOW);
     expect(serialsOf(rows)).toEqual(["STALE"]);
@@ -327,9 +342,9 @@ describe("listStaleDevices — what lands in the sheet", () => {
   test("excludes a device out on an open hand receipt", async () => {
     // MDM silence is EXPECTED for kit deliberately issued out, and the receipt
     // already says who has it.
-    const issued = await mkItem({ serialNumber: "ISSUED", lastLogonAt: daysAgo(45) });
+    const issued = await mkItem({ serialNumber: "ISSUED", lastSyncAt: daysAgo(45) });
     await issueOnOpenReceipt(issued.id, issued.serialNumber);
-    await mkItem({ serialNumber: "STALE", lastLogonAt: daysAgo(45) });
+    await mkItem({ serialNumber: "STALE", lastSyncAt: daysAgo(45) });
 
     const { rows } = await listStaleDevices(UNSCOPED, NOW);
     expect(serialsOf(rows)).toEqual(["STALE"]);
@@ -339,9 +354,9 @@ describe("listStaleDevices — what lands in the sheet", () => {
     // Custody has ENDED in both shapes, so MDM silence is unexplained again and
     // the device belongs on the list. Either half of the predicate alone would
     // wrongly keep one of these out.
-    const returned = await mkItem({ serialNumber: "RETURNED", lastLogonAt: daysAgo(45) });
+    const returned = await mkItem({ serialNumber: "RETURNED", lastSyncAt: daysAgo(45) });
     await issueOnOpenReceipt(returned.id, returned.serialNumber, { returnedAt: daysAgo(2) });
-    const closed = await mkItem({ serialNumber: "CLOSED", lastLogonAt: daysAgo(46) });
+    const closed = await mkItem({ serialNumber: "CLOSED", lastSyncAt: daysAgo(46) });
     await issueOnOpenReceipt(closed.id, closed.serialNumber, { status: "CLOSED" });
 
     const { rows } = await listStaleDevices(UNSCOPED, NOW);
@@ -349,8 +364,8 @@ describe("listStaleDevices — what lands in the sheet", () => {
   });
 
   test("treats the window as half-open: 90 days in, 30 days out", async () => {
-    await mkItem({ serialNumber: "AT-90", lastLogonAt: daysAgo(STALE_MAX_DAYS) });
-    await mkItem({ serialNumber: "AT-30", lastLogonAt: daysAgo(STALE_MIN_DAYS) });
+    await mkItem({ serialNumber: "AT-90", lastSyncAt: daysAgo(STALE_MAX_DAYS) });
+    await mkItem({ serialNumber: "AT-30", lastSyncAt: daysAgo(STALE_MIN_DAYS) });
 
     // Exactly one boundary claims a device landing on it, so a row can never be
     // counted by two windows or by neither.
@@ -359,17 +374,17 @@ describe("listStaleDevices — what lands in the sheet", () => {
   });
 
   test("honours the dashboard's unit scope", async () => {
-    await mkItem({ serialNumber: "ALPHA", lastLogonAt: daysAgo(45), deviceUIC: "WAAAAA" });
-    await mkItem({ serialNumber: "BRAVO", lastLogonAt: daysAgo(45), deviceUIC: "WBBBBB" });
+    await mkItem({ serialNumber: "ALPHA", lastSyncAt: daysAgo(45), deviceUIC: "WAAAAA" });
+    await mkItem({ serialNumber: "BRAVO", lastSyncAt: daysAgo(45), deviceUIC: "WBBBBB" });
 
     const { rows } = await listStaleDevices({ uic: "WAAAAA", unit: null }, NOW);
     expect(serialsOf(rows)).toEqual(["ALPHA"]);
   });
 
   test("orders stalest first", async () => {
-    await mkItem({ serialNumber: "B-40", lastLogonAt: daysAgo(40) });
-    await mkItem({ serialNumber: "A-80", lastLogonAt: daysAgo(80) });
-    await mkItem({ serialNumber: "C-60", lastLogonAt: daysAgo(60) });
+    await mkItem({ serialNumber: "B-40", lastSyncAt: daysAgo(40) });
+    await mkItem({ serialNumber: "A-80", lastSyncAt: daysAgo(80) });
+    await mkItem({ serialNumber: "C-60", lastSyncAt: daysAgo(60) });
 
     const { rows } = await listStaleDevices(UNSCOPED, NOW);
     expect(serialsOf(rows)).toEqual(["A-80", "C-60", "B-40"]);
@@ -377,14 +392,14 @@ describe("listStaleDevices — what lands in the sheet", () => {
 });
 
 describe("listStaleDevices — the exported row", () => {
-  test("carries the identity, the holder and the age of the logon", async () => {
+  test("carries the identity, the holder and the age of the sync", async () => {
     await mkItem({
       serialNumber: "SN-EXPORT",
       deviceName: "LAPTOP-042",
       homeUnit: "Alpha Co",
       deviceUIC: "WAAAAA",
       lastLogonUserPrincipalName: "pfc@army.mil",
-      lastLogonAt: daysAgo(45),
+      lastSyncAt: daysAgo(45),
     });
 
     const { rows } = await listStaleDevices(UNSCOPED, NOW);
@@ -395,17 +410,19 @@ describe("listStaleDevices — the exported row", () => {
       Model: "5540",
       "Home unit": "Alpha Co",
       UIC: "WAAAAA",
+      // Still carried: who MDM last saw on the device is who to ask about it,
+      // even though the window now measures the sync rather than the sign-in.
       "Last logon user": "pfc@army.mil",
       // ISO, so a spreadsheet sorts it — and in UTC, so it cannot slip a day.
-      "Last logon date": "2026-06-26",
-      "Days since logon": 45,
+      "Last sync date": "2026-06-26",
+      "Days since sync": 45,
       // Derived by the same CASE the rest of the app reads, not restated here.
       Readiness: "Deployed",
     });
   });
 
   test("renders an absent value as blank rather than dropping the column", async () => {
-    await mkItem({ serialNumber: "SPARSE", lastLogonAt: daysAgo(45) });
+    await mkItem({ serialNumber: "SPARSE", lastSyncAt: daysAgo(45) });
 
     const { rows } = await listStaleDevices(UNSCOPED, NOW);
     expect(rows[0]).toMatchObject({
@@ -421,12 +438,12 @@ describe("listStaleDevices — the exported row", () => {
 
 describe("countStaleDevices", () => {
   test("counts exactly the rows the export would carry", async () => {
-    await mkItem({ lastLogonAt: daysAgo(45) });
-    await mkItem({ lastLogonAt: daysAgo(70) });
-    await mkItem({ lastLogonAt: daysAgo(10) });
-    await mkItem({ lastLogonAt: daysAgo(200) });
-    await mkItem({ lastLogonAt: null });
-    const issued = await mkItem({ lastLogonAt: daysAgo(50) });
+    await mkItem({ lastSyncAt: daysAgo(45) });
+    await mkItem({ lastSyncAt: daysAgo(70) });
+    await mkItem({ lastSyncAt: daysAgo(10) });
+    await mkItem({ lastSyncAt: daysAgo(200) });
+    await mkItem({ lastSyncAt: null });
+    const issued = await mkItem({ lastSyncAt: daysAgo(50) });
     await issueOnOpenReceipt(issued.id, issued.serialNumber);
 
     // The card shows this number and the button hands over those rows. They are
@@ -439,9 +456,9 @@ describe("countStaleDevices", () => {
   });
 
   test("counts within the unit scope", async () => {
-    await mkItem({ lastLogonAt: daysAgo(45), deviceUIC: "WAAAAA" });
-    await mkItem({ lastLogonAt: daysAgo(45), deviceUIC: "WAAAAA" });
-    await mkItem({ lastLogonAt: daysAgo(45), deviceUIC: "WBBBBB" });
+    await mkItem({ lastSyncAt: daysAgo(45), deviceUIC: "WAAAAA" });
+    await mkItem({ lastSyncAt: daysAgo(45), deviceUIC: "WAAAAA" });
+    await mkItem({ lastSyncAt: daysAgo(45), deviceUIC: "WBBBBB" });
 
     expect(await countStaleDevices({ uic: "WAAAAA", unit: null }, NOW)).toBe(2);
   });

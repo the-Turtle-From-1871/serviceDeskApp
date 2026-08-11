@@ -29,8 +29,14 @@ import type { SortField } from "@/modules/items/sort-keys";
  *  it HAS a real column, but it holds the MDM export's raw text
  *  ("8/9/2026 6:02:11 AM"), so `ORDER BY` on it sorts lexically — 10/1/2025
  *  ahead of 7/25/2026. A sort that confidently returns the wrong order is
- *  worse than no sort, and the honest fix is a parsed twin (as lastLogonAt is
- *  to lastLogonDate), not an ORDER BY on the text. */
+ *  worse than no sort.
+ *
+ *  The parsed twin that would fix it now EXISTS — `Item.lastSyncAt`, added
+ *  2026-08-11 for the dormant-device window — so this is no longer a blocked
+ *  sort, just an unwired one: making it sortable means adding a `SortField`,
+ *  a `SORT_COLUMN` entry and the matching raw-path handling, and rendering the
+ *  cell would still show the verbatim text. Nobody has asked for it. What has
+ *  NOT changed is the rule: order by the twin, never by this text. */
 export type ColumnKey = SortField | "holder" | "lastSyncDateTime";
 
 /* Readiness labels have ONE definition, in modules/items/readiness.ts, next to

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/authz";
 import { listItems, listItemUics } from "@/modules/items/items.service";
 import { listCategoryNames } from "@/modules/items/categories.service";
+import { listSignatureNames } from "@/modules/signatures/signatures.service";
 import { readinessForItems } from "@/modules/items/readiness.query";
 import { holdersForItems } from "@/modules/transfers/holders.query";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -32,16 +33,23 @@ export default async function ItemsListPage({
   const sp = await searchParams;
   const q = firstParam(sp.q);
   const pageParam = firstParam(sp.page);
+  // Gated on the CAPABILITY, not the role — a USER granted MANAGE_QUEUE
+  // individually can work the service queue without being made an admin. Both
+  // are presentation: recordAuditsAction re-checks ADMINISTER and the two queue
+  // actions re-check MANAGE_QUEUE, which is the real boundary.
+  const canAudit = user.capabilities.includes("ADMINISTER");
+  const canQueue = user.capabilities.includes("MANAGE_QUEUE");
 
   // Server-side paginate + sort: only the current page is fetched and serialized to
   // the client (the list was previously unbounded). The audit-status badge and the
   // audit-status sort both read the denormalized Item.lastAuditedAt column.
-  // Three queries, all bounded and all independent of page size: the page of rows,
+  // Four queries, all bounded and all independent of page size: the page of rows,
   // the UIC filter's options, and — for admins only — the managed category
-  // vocabulary that backs the bulk "Change category" control. The vocabulary is a
-  // small curated list fetched ONCE per render, never per row. A standard USER
-  // never sees those controls, so they never pay for the query.
-  const [result, uics, categoryNames] = await Promise.all([
+  // vocabulary that backs the bulk "Change category" control plus the acting
+  // admin's saved signature NAMES for the bulk-audit control. Both are small
+  // curated lists fetched ONCE per render, never per row. A standard USER never
+  // sees those controls, so they never pay for either query.
+  const [result, uics, categoryNames, signatures] = await Promise.all([
     listItems({
       search: q,
       sort: firstParam(sp.sort) ?? null,
@@ -54,6 +62,10 @@ export default async function ItemsListPage({
     }),
     listItemUics(),
     isAdmin ? listCategoryNames() : Promise.resolve<string[]>([]),
+    // Names only — no signature image blob reaches the browser.
+    // recordAuditsAction re-reads the image server-side scoped to the acting
+    // admin, so the id posted back is not trusted for anything but lookup.
+    canAudit ? listSignatureNames(user.id) : Promise.resolve<{ id: string; name: string }[]>([]),
   ]);
   // Neither readiness nor the current holder can ride along on the item row —
   // both are derived from other tables. TWO extra queries derive them for the
@@ -142,6 +154,9 @@ export default async function ItemsListPage({
             uics={uics}
             needsRename={result.needsRename}
             categories={categoryNames.map((name) => ({ name }))}
+            signatures={signatures}
+            canAudit={canAudit}
+            canQueue={canQueue}
           />
         </ItemSelectionProvider>
       </main>

@@ -17,6 +17,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   - Requires **`MDM_IMPORT_SECRET`** to already be set in Vercel and the app redeployed since; unset, every import returns `401`. Setup stores that value **DPAPI-encrypted in `C:\ops\items-import\`** — never in the repository, because it authenticates a write endpoint into the production property book. The run log lives beside it.
   - **`DEPLOY.md` §7 corrected:** its `Invoke-RestMethod -Form` example is **PowerShell 7 only** (`-Form` arrived in 6.1 and does not exist in Windows PowerShell 5.1, still the default shell on Windows 11). Also documented there: never let the client follow redirects, and never treat a bare `200` as proof of an import.
   - **Worth knowing before enabling it:** the import treats the CSV as the source of truth for a known device's name, home unit, category and assigned user, so an automatic import silently reverts hand edits made in the app since the previous one.
+- Bulk actions for a selected or scanned batch: record an audit for every item under one signature, flag them all for service, or complete service on them all at once. Retired devices are passed over and reported rather than failing the batch.
+
+  They live behind a **More actions** button on the selection bar at the bottom of the items list, and each one says what it did — *"Audited 47 items. Skipped 2 (retired or not applicable)."* The selection is deliberately kept afterwards, so the result stays on screen and a second action can be applied to the same batch. Recording an audit needs Administrator; the two service actions need the service-queue permission, and you only see what you can use.
+- The `/items` selection now survives a reload, a screen lock and a re-login. A batch scanned over several minutes is no longer lost, and the selection bar shows when it was started. Selections are capped at 500 items, matching the limit bulk actions already enforced.
+
+  **The 500 limit is a hard stop while you scan, not a surprise at the end.** Once there is no room left the scanner refuses the next code with an error beep and says *"Selection is full (500) — not added"*, so nothing you hear "Added" for can go missing when you tap Done. Remove a row from the list, or apply an action and clear the batch, and scanning carries on.
+
+- **Two confirmations before something irreversible.** *Record audit* now asks first, naming how many devices and which signature it will sign as — it writes an accountability record for every device and cannot be undone. *Clear selection* asks before discarding a batch of more than 20, which now takes a re-scan to rebuild rather than a moment.
+
+### Changed
+- **Marking devices on hand no longer clears the selection.** It used to empty the batch on success, which was harmless when the selection vanished on reload and is not now — a scanned sweep is worth keeping, and clearing it also took away the *"Marked 47 items on hand."* message before it could be read. Every control in the selection bar now keeps the batch; *Clear selection* is the one way out.
+
+- **The Import items page now documents the lastSync column, and says what happens without it.** The downloadable template has carried `lastSync` since the column shipped, but the on-page column list stopped at `compliance`, so nobody building an export had any reason to include it. It is now listed with its accepted spellings (`lastSync`, `Last Sync`, `lastSyncDate`, `lastSyncDateTime`), alongside a note that it is *when MDM last checked in* rather than *when a person last signed in*, that the two routinely disagree, and that the dashboard's "devices MDM has not seen recently" list stays empty until the file carries it.
+
+- **The dormant-device list on the dashboard now measures the last MDM check-in instead of the last sign-in.** It used to ask *who has nobody signed in to for 30–90 days*; it now asks *what has MDM not heard from for 30–90 days*, which is the question you chase a missing device with. A machine sitting unused on a shelf still syncs every night, so it no longer clutters the list — and a machine that has genuinely dropped off the network shows up even if the last person to use it signed in yesterday.
+
+  The card and the exported spreadsheet say so throughout: *N devices MDM has not seen recently*, and the sheet's **Last logon date** / **Days since logon** columns are now **Last sync date** / **Days since sync**. **Last logon user** stays — the person MDM last saw on the device is still who to ask about it.
+
+  **Expect a small list at first.** A device only has a sync time once an import has recorded one, and that has only been imported since 10 Aug — so devices no import has covered since then are not counted yet, the same way a device MDM has never seen has never been counted. The list fills in as imports run. Everything else about it is unchanged: over 90 days is still excluded, so are retired devices and anything out on an open hand receipt.
+
+  #### Notes
+  - Migration `20260811150000_item_last_sync_at` adds the nullable `Item.lastSyncAt` column (the last-sync text parsed to a real timestamp), its index, and a best-effort backfill of the sync times already stored. **Apply it to Supabase before merging**, per migrate-before-push: Prisma enumerates every column in its SELECT, so until the column exists *every* item read fails, not just the dashboard.
+  - Sorting the **Last sync** column on the items list is still not available — the change makes it possible but does not wire it up.
 
 ### Removed
 - **Home units are no longer guessed from a device's name.** The import used to read a device name like `HI-DCSIM-LT-001`, look for a piece of it that matched a known unit, and fill in the home unit when the spreadsheet left that column blank. It no longer does. A device's home unit comes from the **homeUnit column** in the spreadsheet, or from editing the device in the app — and stays blank otherwise.
@@ -30,6 +53,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   **What went with it:** the step in *Import items* that asked you to name a unit for each device name it could not decode, and the "N units auto-detected" line in the import summary. Nothing else about importing changed, and units themselves are untouched — you still manage them on the Units page, which lists **Devices with no home unit** so you can see exactly which ones need one.
 
 ### Fixed
+- **Flagging a batch for service no longer forgets which hand receipt a device came in on.** An item flagged from the receipt builder carries that receipt, and the item page shows it; re-flagging the same device as part of a scanned batch used to blank that link permanently. A batch flag now says nothing about the receipt rather than erasing it.
+- **Completing service on a batch no longer touches retired devices.** A retired device's open ticket was being closed and counted among the devices completed. It is now passed over and reported alongside the other skips, matching the other bulk actions. Clearing a stale ticket off a retired device is still possible one device at a time, from its own page.
+
 - **A device's name is no longer replaced by a random one after it is re-imaged.** When a device is re-enrolled, MDM gives it an autogenerated name like `BE-7J5AKRNFLP6B`, and the import treated that as the truth — so a device called `NGHINBPMACN128` simply became `BE-7J5AKRNFLP6B` overnight. The import now keeps the name you gave it and records what MDM wanted instead. The item's page says so: *MDM calls this device BE-XXXX — rename it in Intune*. Rename it there and the note clears itself on the next import.
 
   **The same problem was quietly wrecking home units.** A device's home unit is worked out from the start of its name, so `BE-2AD6890X7IOL` matched a unit called `BE` and the device's home unit became `BE`. **18 devices are in that state now**, one of them previously `Safety Office`. Keeping the real name fixes this too, because the home unit is worked out from the real name again.
@@ -37,6 +63,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   Nothing is withheld where there is nothing better to keep: a device that already carries an autogenerated name, one with no name at all, and anything brand new to the property book all take whatever MDM calls them.
 
   **There is a worklist for them.** *Sort & filter* on the items list has a **Needs rename in Intune** tick box, so you can pull up every device waiting on a rename and work through them. The button reads back *· Rename* while it is on, so a list showing 3 devices out of 1,200 always says why.
+
+  **Only devices that are about to lose a good name are flagged.** A device that already carries an autogenerated name is not — nothing is being taken away from it, and there are 82 of those, which would bury the handful actually changing. A flagged device stays flagged until it is renamed in Intune, and if MDM changes its mind about what to call it in the meantime, the note follows the newest name rather than leaving you hunting for one MDM has abandoned.
+
+  **The item page can now tell you what a device used to be called.** A *Previous names* section appears on any device with a naming history worth showing. It gives the real name an autogenerated one replaced — which is what to type back into Intune — and, for a flagged device, the earlier names MDM asked for and moved on from. A long list there means the device has been re-enrolled repeatedly and nobody has renamed it yet.
 
   #### Notes
   - Migration `20260811000000_item_mdm_proposed_name` adds the nullable `Item.mdmProposedName` column. No backfill — every existing row means "no conflict", which is the correct starting state. **Apply it to Supabase before merging**, per migrate-before-push: Prisma enumerates every column in its SELECT, so until the column exists *every* item read fails, not just the new feature.
@@ -59,7 +89,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
   **Scanning a Dell's Express Service Code barcode creates the item under its Service Tag.** The two barcodes sit a centimetre apart on the same label and hold the same value written two ways — the 11-digit express code, and the 7-character tag Dell actually calls the serial. The tag is what the fleet export carries, so an item created under the express code would match nothing on the next import, and that import would add a *second* entry for the same laptop. Whichever of the two barcodes you scan, the item is now created under the tag. Looking a device up is unchanged: both forms still find it.
 
-  Looking up a single device now takes one extra tap: scan it, tap Done, tap the row. That is the trade for having one behaviour instead of a mode to get wrong.
+  **Scan just one device and Done opens it**, instead of handing you a selection of one. The button says so — it reads *Open 2TK94709FN* rather than *Done · 1 item* — so looking a single device up is still scan, tap, done. Scan a second and it goes back to building a selection; there is no mode to set, it simply follows what you scanned. A retired device opens too, since "why is this on the shelf" is exactly what a single scan usually asks. The one exception is deliberate: if you had already ticked rows before scanning, Done adds to that selection rather than navigating away and quietly discarding it.
 
 ### Changed
 - **When a device appears twice in one import file, the most recently seen record now wins.** A device that is re-imaged and re-enrolled shows up twice in the MDM export under the same serial: the live record, and a stale enrolment nobody removed. The import previously kept whichever copy came first in the file and ignored the rest.
