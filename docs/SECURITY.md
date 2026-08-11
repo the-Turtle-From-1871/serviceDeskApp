@@ -451,6 +451,19 @@ OTHER item) is reported as `{ conflict: true, collisions }` rather than a
 generic error string, so the UI can show which serials are blocking the
 rename.
 
+**`setItemsLoanerAction` marks or unmarks the selected items as loaner-pool
+stock, gated on `requireCapability("MANAGE_ITEMS")`**
+(`src/app/admin/actions/items.ts`), beside `markItemsReadyAction` above. Item
+ids are client-supplied and bounded at `MAX_BULK_ITEMS` (500), enforced in the
+action's own Zod schema; `setItemsLoaner`
+(`src/modules/items/items.service.ts`) enforces no permissions of its own, so
+the Server Action is the whole boundary. Retired items are excluded from the
+write and reported back as `skipped`, matching the other bulk item actions
+above. The only value this control can write is a single boolean
+(`isLoaner`), and only the literal string `"1"` reads as true — anything else
+is off — so a malformed or crafted POST cannot turn this into an arbitrary
+write; it can only flip the one flag it exists to flip.
+
 **Readiness is derived, so there is no stored state a POST could assert.** The
 readiness selector writes only the underlying signals — `markedReadyAt` (set or
 clear) and the `Item.status` lifecycle column. Its Zod target enum is an

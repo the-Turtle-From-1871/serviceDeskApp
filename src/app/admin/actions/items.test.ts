@@ -25,15 +25,18 @@ const { AuthError } = vi.hoisted(() => {
 // items.schema is NOT mocked — the real Zod constraints run, so this proves the
 // server refuses a forged target rather than merely hiding it in the UI.
 vi.mock("@/lib/authz", () => ({ requireCapability: () => requireCapability(), AuthError }));
+const setItemsLoaner = vi.fn();
+
 vi.mock("@/modules/items/items.service", () => ({
   MAX_BULK_ITEMS: 500,
   previewRename: (ids: string[], prefix: string, start: string) => previewRename(ids, prefix, start),
   renameItems: (ids: string[], prefix: string, start: string, editor: unknown) =>
     renameItems(ids, prefix, start, editor),
+  setItemsLoaner: (ids: string[], isLoaner: boolean) => setItemsLoaner(ids, isLoaner),
 }));
 vi.mock("next/cache", () => ({ revalidatePath: (p: string) => revalidatePath(p) }));
 
-import { previewItemRenameAction, renameItemsAction } from "./items";
+import { previewItemRenameAction, renameItemsAction, setItemsLoanerAction } from "./items";
 
 const ADMIN = { id: "admin-1", role: "ADMIN" as const, name: "Admin", email: "a@x.mil" };
 
@@ -91,5 +94,23 @@ describe("previewItemRenameAction", () => {
     await expect(
       previewItemRenameAction(rfd({ itemIds: "a1", prefix: "X", start: "1" })),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+});
+
+describe("setItemsLoanerAction", () => {
+  it("refuses a caller without MANAGE_ITEMS", async () => {
+    requireCapability.mockRejectedValueOnce(new AuthError("FORBIDDEN"));
+    const f = new FormData();
+    f.set("itemIds", "a1,a2");
+    f.set("isLoaner", "1");
+    await expect(setItemsLoanerAction(f)).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("refuses an empty selection", async () => {
+    const f = new FormData();
+    f.set("itemIds", "");
+    f.set("isLoaner", "1");
+    const res = await setItemsLoanerAction(f);
+    expect(res).toEqual({ error: "Select at least one item." });
   });
 });
