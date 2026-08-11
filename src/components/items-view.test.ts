@@ -35,6 +35,7 @@ const row = (over: Partial<ItemRow>): ItemRow => ({
   lastLogonDate: over.lastLogonDate ?? null,
   compliance: over.compliance ?? null,
   lastSyncDateTime: over.lastSyncDateTime ?? null,
+  isLoaner: over.isLoaner ?? false,
 });
 
 describe("sortItemRows", () => {
@@ -102,14 +103,16 @@ describe("columns", () => {
     expect(SORTABLE_COLUMNS.map((c) => c.key)).toContain("readiness");
   });
 
-  it("makes every displayed column sortable except holder and lastSyncDateTime", () => {
+  it("makes every displayed column sortable except holder, lastSyncDateTime and loaner", () => {
     // The Sort control must not silently omit a column the table renders for
-    // no reason — but there are two deliberate exceptions (see ColumnKey):
-    // `holder` has no column for Prisma to name, and `lastSyncDateTime` has one
+    // no reason — but there are three deliberate exceptions (see ColumnKey):
+    // `holder` has no column for Prisma to name, `lastSyncDateTime` has one
     // that holds the MDM export's raw text, so ordering by it would sort
     // lexically (10/1/2025 ahead of 7/25/2026) and confidently return the wrong
-    // order. Both are displayed without being offered as a sort key.
-    const unsortable = ["holder", "lastSyncDateTime"];
+    // order, and `loaner` is a two-value flag — a two-value sort is a filter
+    // wearing the wrong control, which `?loaner=1` is. All three are displayed
+    // without being offered as a sort key.
+    const unsortable = ["holder", "lastSyncDateTime", "loaner"];
     expect(SORTABLE_COLUMNS.map((c) => c.key)).toEqual(
       ITEM_COLUMNS.filter((c) => !unsortable.includes(c.key)).map((c) => c.key),
     );
@@ -235,6 +238,23 @@ describe("sortFilterSummary", () => {
   it("reads Newest for a key the server would drop", () => {
     expect(sortFilterSummary("holder", "asc", null)).toBe("Newest");
     expect(sortFilterSummary("nonsense", "asc", "2/6 IN")).toBe("Newest · 2/6 IN");
+  });
+
+  // The loaner worklist filter, same shape as Rename above: an active filter
+  // has to stay legible with the menu shut.
+  it("appends the loaner filter when it is active", () => {
+    expect(sortFilterSummary("make", "asc", null, false, true)).toBe("Make ▲ · Loaner");
+    expect(sortFilterSummary(null, "asc", null, false, true)).toBe("Newest · Loaner");
+  });
+
+  it("does not append the loaner filter when it is off", () => {
+    expect(sortFilterSummary("make", "asc", null, false, false)).toBe("Make ▲");
+  });
+
+  // Both worklist filters can be active together — Rename first, Loaner second,
+  // matching the order the two are checked in.
+  it("combines the rename and loaner filters in order", () => {
+    expect(sortFilterSummary("make", "asc", null, true, true)).toBe("Make ▲ · Rename · Loaner");
   });
 
   // Every offered option must produce a label — a missing entry would silently

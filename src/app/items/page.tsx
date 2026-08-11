@@ -144,6 +144,7 @@ export default async function ItemsListPage({
               deviceCategory: it.deviceCategory,
               homeUnit: it.homeUnit,
               storageLocation: it.storageLocation,
+              isLoaner: it.isLoaner,
               // Raw MDM text, passed straight through — see ItemRow.
               lastLogonUserPrincipalName: it.lastLogonUserPrincipalName,
               lastLogonDate: it.lastLogonDate,
@@ -163,6 +164,7 @@ export default async function ItemsListPage({
             uic={result.uic}
             uics={uics}
             needsRename={result.needsRename}
+            loaner={result.loaner}
             categories={categoryNames.map((name) => ({ name }))}
             signatures={signatures}
             canAudit={canAudit}

@@ -69,6 +69,7 @@ function renderEmpty(props: Partial<Parameters<typeof ItemSelectTable>[0]> = {})
       uic=""
       uics={[]}
       needsRename={false}
+      loaner={false}
       categories={[]}
       {...props}
     />,
@@ -140,6 +141,7 @@ describe("ItemSelectTable — delete dialog structure (closed-dialog layout regr
     lastLogonDate: null,
     compliance: null,
     lastSyncDateTime: null,
+    isLoaner: false,
   };
 
   function renderRow() {
@@ -154,6 +156,7 @@ describe("ItemSelectTable — delete dialog structure (closed-dialog layout regr
         totalPages={1}
         sortKeys={[]}
         uic="" needsRename={false}
+        loaner={false}
         uics={[]}
         categories={[]}
       />,
@@ -219,6 +222,7 @@ describe("ItemSelectTable — mobile card structure", () => {
     lastLogonDate: "7/25/2026 1:40:21 AM",
     compliance: "Compliant",
     lastSyncDateTime: "8/9/2026 6:02:11 AM",
+    isLoaner: false,
   };
   const RETIRED = { ...ROW, id: "item-2", serialNumber: "SN2", status: "RETIRED" as const };
 
@@ -234,6 +238,7 @@ describe("ItemSelectTable — mobile card structure", () => {
         totalPages={1}
         sortKeys={[]}
         uic="" needsRename={false}
+        loaner={false}
         uics={[]}
         categories={[]}
         {...props}
@@ -278,6 +283,30 @@ describe("ItemSelectTable — mobile card structure", () => {
     // The visible serial has to be IN the accessible name (WCAG 2.5.3) — the
     // card shows "SN1" and a voice user must be able to say it.
     expect(link!.getAttribute("aria-label")).toContain("SN1");
+  });
+
+  // The desktop Loaner column: a badge for a marked row, a dash for one that
+  // isn't — same `orDash`-style convention as every other optional column.
+  it("renders the Loaner badge for a marked row and a dash for an unmarked one", () => {
+    const { container } = renderRows({ items: [{ ...ROW, isLoaner: true }, { ...ROW, id: "item-2", serialNumber: "SN2", isLoaner: false }] });
+    const cells = [...container.querySelectorAll('td[data-label="Loaner"]')];
+    expect(cells).toHaveLength(2);
+    expect(cells[0].querySelector(".badge-loaner")).not.toBeNull();
+    expect(cells[0].textContent).toBe("Loaner");
+    expect(cells[1].querySelector(".badge-loaner")).toBeNull();
+    expect(cells[1].textContent).toBe("—");
+  });
+
+  // The mobile card badge sits in td.cell-primary beside the device name, per
+  // .claude/rules/ui-styling.md — NOT in the More panel, which is already at
+  // seven fields. Rendered only when true: an em-dash on every non-loaner card
+  // would be noise on a surface with no room to spare.
+  it("shows the loaner badge on the mobile card only for a marked item", () => {
+    const { container } = renderRows({ items: [{ ...ROW, isLoaner: true }, { ...ROW, id: "item-2", serialNumber: "SN2", isLoaner: false }] });
+    const rows = [...container.querySelectorAll("tbody tr")];
+    expect(rows).toHaveLength(2);
+    expect(rows[0].querySelector("td.cell-primary .badge-loaner")).not.toBeNull();
+    expect(rows[1].querySelector("td.cell-primary .badge-loaner")).toBeNull();
   });
 
   // The reason the card is built from three dedicated cells: every data cell
@@ -539,6 +568,7 @@ describe("ItemSelectTable — long-press selection", () => {
     lastLogonDate: null,
     compliance: null,
     lastSyncDateTime: null,
+    isLoaner: false,
   };
   const RETIRED = { ...ROW, id: "item-2", serialNumber: "SN2", status: "RETIRED" as const };
   let realSetPointerCapture: HTMLElement["setPointerCapture"];
@@ -578,6 +608,7 @@ describe("ItemSelectTable — long-press selection", () => {
         totalPages={1}
         sortKeys={[]}
         uic="" needsRename={false}
+        loaner={false}
         uics={[]}
         categories={[]}
       />,
@@ -840,6 +871,7 @@ describe("ItemSelectTable — Sort & filter menu", () => {
         totalPages={1}
         sortKeys={[{ key: "make", dir: "asc" }]}
         uic="" needsRename={false}
+        loaner={false}
         uics={["WABC01", "WXYZ99"]}
         categories={[]}
         {...props}

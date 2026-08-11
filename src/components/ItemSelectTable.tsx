@@ -76,6 +76,7 @@ export function ItemSelectTable({
   uic,
   uics,
   needsRename,
+  loaner,
   categories = [],
   signatures = [],
   canAudit = false,
@@ -93,6 +94,10 @@ export function ItemSelectTable({
   uic: string | null;
   uics: string[];
   needsRename: boolean;
+  /** The loaner-pool worklist filter, `?loaner=1`. Same one-way shape as
+   *  needsRename: false means "no filter", never "only devices that are not
+   *  loaners". */
+  loaner: boolean;
   /** The managed DeviceCategory vocabulary, fetched ONCE server-side by the page
    *  and passed down — never a per-row lookup. Only used by the admin bulk
    *  controls in the selection bar. */
@@ -257,6 +262,7 @@ export function ItemSelectTable({
           the Audit column IS the accountability signal now. */}
       {!isHidden("readiness") && <td className="cell-desktop" data-label="Readiness">{READINESS_LABEL[it.readiness]}</td>}
       {!isHidden("status") && <td className="cell-desktop" data-label="Status"><StatusBadge status={it.status} /></td>}
+      {!isHidden("loaner") && <td className="cell-desktop" data-label="Loaner">{it.isLoaner ? <span className="badge badge-loaner">Loaner</span> : <span className="subtle">—</span>}</td>}
       {!isHidden("auditState") && <td className="cell-desktop" data-label="Audit" style={{ textAlign: "center" }}><AuditLight state={it.auditState} /></td>}
       {/* `orDash`, not the `??` the columns above use. This is an MDM column,
           so an absent value arrives as null from some exports, "" from others
@@ -296,6 +302,12 @@ export function ItemSelectTable({
       </td>
       <td className="cell-primary" data-label="">
         <span className="cell-primary__name">{it.deviceName ? it.deviceName : <span className="subtle">Unnamed device</span>}</span>
+        {/* Rendered only when true — the More panel is at seven fields and
+            `.claude/rules/ui-styling.md` measures an eighth as reaching into
+            its second row, so the badge goes beside the name instead. An
+            em-dash on every non-loaner card would be noise on a surface with
+            no room to spare. */}
+        {it.isLoaner && <span className="badge badge-loaner">Loaner</span>}
         <span className="cell-primary__sub">{it.make} {it.model}</span>
       </td>
       <td className="cell-meta" data-label="">
@@ -506,6 +518,7 @@ export function ItemSelectTable({
     page?: number;
     uic?: string | null;
     needsRename?: boolean;
+    loaner?: boolean;
   }) => {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
@@ -523,6 +536,12 @@ export function ItemSelectTable({
     // exactly "1" by the page, so there is one spelling of "on".
     const nextNeedsRename = over.needsRename !== undefined ? over.needsRename : needsRename;
     if (nextNeedsRename) params.set("needsRename", "1");
+
+    // Same silent-drop trap as ItemsSearchInput: navigate rebuilds this URL for
+    // every sort, filter and page change, so a filter missing here vanishes
+    // the moment someone pages or re-sorts.
+    const nextLoaner = over.loaner !== undefined ? over.loaner : loaner;
+    if (nextLoaner) params.set("loaner", "1");
 
     const nextPage = over.page ?? page;
     if (nextPage > 1) params.set("page", String(nextPage));
@@ -553,6 +572,7 @@ export function ItemSelectTable({
   };
   const setUic = (next: string | null) => navigate({ uic: next, page: 1 });
   const setNeedsRename = (next: boolean) => navigate({ needsRename: next, page: 1 });
+  const setLoaner = (next: boolean) => navigate({ loaner: next, page: 1 });
 
   return (
     <>
@@ -566,7 +586,7 @@ export function ItemSelectTable({
         <SortFilterMenu
           idPrefix="items"
           columns={SORTABLE_COLUMNS}
-          summary={sortFilterSummary(sort, dir, uic, needsRename)}
+          summary={sortFilterSummary(sort, dir, uic, needsRename, loaner)}
           sort={sort}
           dir={dir}
           secondary={secondarySort?.key ?? null}
@@ -582,11 +602,10 @@ export function ItemSelectTable({
                 }
               : undefined
           }
-          toggle={{
-            label: "Needs rename in Intune",
-            checked: needsRename,
-            onChange: setNeedsRename,
-          }}
+          toggles={[
+            { label: "Needs rename in Intune", checked: needsRename, onChange: setNeedsRename },
+            { label: "Loaners only", checked: loaner, onChange: setLoaner },
+          ]}
           onPrimary={setPrimary}
           onDir={setPrimaryDir}
           onSecondary={setSecondary}
@@ -644,12 +663,12 @@ export function ItemSelectTable({
               search nobody ran, and gives no hint that a filter is hiding the
               other 1,200 devices. */}
           <div>
-            No items match {[uic ? "this unit" : null, needsRename ? "the rename filter" : null]
+            No items match {[uic ? "this unit" : null, needsRename ? "the rename filter" : null, loaner ? "the loaner filter" : null]
               .filter(Boolean)
               .join(" and ")}
-            {(uic || needsRename) && q.trim() ? " and " : ""}
+            {(uic || needsRename || loaner) && q.trim() ? " and " : ""}
             {q.trim() ? "your search" : ""}
-            {!uic && !needsRename && !q.trim() ? "the current view" : ""}.
+            {!uic && !needsRename && !loaner && !q.trim() ? "the current view" : ""}.
           </div>
           {/* Admin-only because creation is admin-only (createItemAction calls
               requireAdmin) — the server check is the authority, this is

@@ -36,8 +36,14 @@ import type { SortField } from "@/modules/items/sort-keys";
  *  sort, just an unwired one: making it sortable means adding a `SortField`,
  *  a `SORT_COLUMN` entry and the matching raw-path handling, and rendering the
  *  cell would still show the verbatim text. Nobody has asked for it. What has
- *  NOT changed is the rule: order by the twin, never by this text. */
-export type ColumnKey = SortField | "holder" | "lastSyncDateTime";
+ *  NOT changed is the rule: order by the twin, never by this text.
+ *
+ *  `loaner` is the THIRD displayable-but-unsortable column, for a third
+ *  reason: it is a two-value flag, and a two-value sort is a filter wearing
+ *  the wrong control. Ordering 1,200 rows by a boolean groups every loaner
+ *  at one end of the page and answers "which ones", not "in what order" —
+ *  the `?loaner=1` worklist filter is that question's real answer. */
+export type ColumnKey = SortField | "holder" | "lastSyncDateTime" | "loaner";
 
 /* Readiness labels have ONE definition, in modules/items/readiness.ts, next to
    the function that derives them. Re-exported here so the table imports its
@@ -71,6 +77,9 @@ export type ItemRow = {
   homeUnit: string | null;
   /** Where the device physically sits when nobody holds it. Free text. */
   storageLocation: string | null;
+  /** Pool stock — a device kept to lend out temporarily. Stored, not derived;
+   *  see the note on the column in schema.prisma. */
+  isLoaner: boolean;
   /* MDM telemetry, shown in the phone card's More panel. All four are stored
      VERBATIM as text by the importer (`lastLogonDate` is a raw string like
      "7/25/2026 1:40:21 AM", never a Date) — so they are rendered as-is, exactly
@@ -119,6 +128,7 @@ export const ITEM_COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: "deviceCategory", label: "Category" },
   { key: "readiness", label: "Readiness" },
   { key: "status", label: "Status" },
+  { key: "loaner", label: "Loaner" },
   { key: "auditState", label: "Audit" },
   { key: "lastSyncDateTime", label: "Last sync" },
 ];
@@ -127,7 +137,7 @@ export const ITEM_COLUMNS: { key: ColumnKey; label: string }[] = [
  *  why each one is here. Named rather than inlined into the filter below so
  *  adding a third is one edit in one place, and so the reason lives with the
  *  list rather than in a `!==` chain. */
-const UNSORTABLE_COLUMNS = new Set<string>(["holder", "lastSyncDateTime"]);
+const UNSORTABLE_COLUMNS = new Set<string>(["holder", "lastSyncDateTime", "loaner"]);
 
 /** The Sort control's options — every column EXCEPT the unsortable ones.
  *
@@ -162,6 +172,7 @@ export function sortFilterSummary(
   dir: SortDir,
   uic: string | null,
   needsRename = false,
+  loaner = false,
 ): string {
   const label = sort ? SORT_LABEL.get(sort) : undefined;
   const sortPart = label ? `${label} ${dir === "asc" ? "▲" : "▼"}` : "Newest";
@@ -174,14 +185,21 @@ export function sortFilterSummary(
   // same reason the sort is: a list silently showing 3 of 1,204 devices is a
   // confident wrong answer about the property book.
   if (needsRename) parts.push("Rename");
+  // Same reasoning as Rename, one abbreviation later: a trigger that already
+  // carries a sort, a unit AND the rename worklist has no room to spell out
+  // "Loaners only", and this filter needs to be just as visible with the menu
+  // shut — a list silently showing 40 loaners out of 1,204 devices is the same
+  // confident wrong answer.
+  if (loaner) parts.push("Loaner");
   return parts.join(" · ");
 }
 
 const SORT_FIELDS = new Set<string>(SORTABLE_COLUMNS.map((c) => c.key));
 // Visibility and sortability are separate CONCEPTS on purpose: hiding a column
 // must never imply you cannot sort by it. They also now differ in MEMBERSHIP —
-// COLUMN_KEYS has 10 keys (including "holder"), SORT_FIELDS has 9 — because
-// `holder` is displayable but not server-sortable (see SORTABLE_COLUMNS above).
+// COLUMN_KEYS has 11 keys (including "holder" and "loaner"), SORT_FIELDS has 9
+// — because `holder` and `loaner` are displayable but not server-sortable (see
+// SORTABLE_COLUMNS above).
 const COLUMN_KEYS = new Set<string>(ITEM_COLUMNS.map((c) => c.key));
 
 /** Client-side ordering of rows already in hand. The /items table does NOT use
