@@ -614,7 +614,19 @@ export function ItemSelectTable({
           result stay on screen and the filter can be undone. */}
       {items.length === 0 && (
         <div className="card empty stack">
-          <div>No items match {uic ? "this unit and " : ""}your search.</div>
+          {/* Every ACTIVE filter has to be named here, not just the unit. With
+              the rename worklist on and the search box empty — the normal case
+              once Intune is tidy — "No items match your search" describes a
+              search nobody ran, and gives no hint that a filter is hiding the
+              other 1,200 devices. */}
+          <div>
+            No items match {[uic ? "this unit" : null, needsRename ? "the rename filter" : null]
+              .filter(Boolean)
+              .join(" and ")}
+            {(uic || needsRename) && q.trim() ? " and " : ""}
+            {q.trim() ? "your search" : ""}
+            {!uic && !needsRename && !q.trim() ? "the current view" : ""}.
+          </div>
           {/* Admin-only because creation is admin-only (createItemAction calls
               requireAdmin) — the server check is the authority, this is
               presentation. Deliberately NOT suppressed while a uic filter is
