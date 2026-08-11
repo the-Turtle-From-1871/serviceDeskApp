@@ -8,9 +8,13 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { AuditLight } from "@/components/AuditLight";
 import { MarkReadyButton } from "@/components/MarkReadyButton";
 import { ReadinessControls } from "@/components/ReadinessControls";
+import { BulkActionsMenu } from "@/components/BulkActionsMenu";
 import { DeleteItemButton } from "@/components/DeleteItemButton";
 import { toggleItemStatusAction } from "@/app/admin/actions/items";
 import { MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW } from "@/modules/transfers/receipt-lines";
+// From the PURE schema module, never items.service.ts — that imports Prisma,
+// which must not reach the browser bundle.
+import { MAX_BULK_ITEMS } from "@/modules/items/items.schema";
 import {
   READINESS_LABEL,
   ITEM_COLUMNS,
@@ -67,6 +71,9 @@ export function ItemSelectTable({
   uics,
   needsRename,
   categories = [],
+  signatures = [],
+  canAudit = false,
+  canQueue = false,
 }: {
   items: ItemRow[];
   isAdmin: boolean;
@@ -83,6 +90,17 @@ export function ItemSelectTable({
    *  and passed down — never a per-row lookup. Only used by the admin bulk
    *  controls in the selection bar. */
   categories?: { name: string }[];
+  /** The acting admin's saved signature NAMES, for the bulk-audit control.
+   *  `listSignatureNames` selects `{ id, name }` — no image blob reaches the
+   *  browser; recordAuditsAction re-reads the ink server-side scoped to the
+   *  acting admin. Empty for anyone without ADMINISTER. */
+  signatures?: { id: string; name: string }[];
+  /** Capability gates for the "More actions" sheet — ADMINISTER for the bulk
+   *  audit, MANAGE_QUEUE for the two service actions. Presentation only: all
+   *  three actions re-check server-side. Defaulted off so a caller that forgets
+   *  to pass them offers nothing rather than something it cannot do. */
+  canAudit?: boolean;
+  canQueue?: boolean;
 }) {
   const router = useRouter();
   const secondarySort = sortKeys[1] ?? null;
@@ -92,7 +110,7 @@ export function ItemSelectTable({
   // It is a Map (id -> item), not a Set of ids, so it survives paging — the
   // receipt-group validation below needs each selected item's make/model, and
   // an item selected on page 1 is no longer in `items` once you page forward.
-  const { selected, toggle, addMany, removeMany, clear } = useItemSelection();
+  const { selected, startedAt, atCap, toggle, addMany, removeMany, clear } = useItemSelection();
   const selectedIds = useMemo(() => new Set(selected.keys()), [selected]);
 
   const allState = useMemo(() => selectAllState(items, selectedIds), [items, selectedIds]);
@@ -686,7 +704,27 @@ export function ItemSelectTable({
         // zIndex keeps this bar above the table rows it floats over.
         <div className="card stack-sm" style={{ position: "sticky", bottom: 0, zIndex: 2 }}>
           <div className="row" style={{ justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-            <span>{selected.size} selected · {groupCount} row{groupCount === 1 ? "" : "s"}</span>
+            <span>
+              {selected.size} selected · {groupCount} row{groupCount === 1 ? "" : "s"}
+              {/* When the batch began. A scanned sweep is collected over twenty
+                  minutes walking a room and now SURVIVES a reload, so without a
+                  start time an old selection rehydrated on a later visit is
+                  indistinguishable from one made just now. */}
+              {startedAt > 0 && (
+                <span className="subtle">
+                  {" "}· started {new Date(startedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                </span>
+              )}
+              {/* A hard stop, not a warning: addMany REFUSES past this point, so
+                  a scan that appears to do nothing must say why. Without this the
+                  camera beeps "already scanned" for a device that was never
+                  added. */}
+              {atCap && (
+                <span role="status" className="alert-error">
+                  {" "}· limit reached ({MAX_BULK_ITEMS}) — apply an action or clear some before scanning more
+                </span>
+              )}
+            </span>
             <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
               {tooMany
                 ? <span role="alert" className="alert-error">Too many item types ({groupCount}). Max {MAX_RECEIPT_ROWS} per receipt — split into two.</span>
@@ -736,6 +774,16 @@ export function ItemSelectTable({
               <ReadinessControls
                 itemIds={[...selected.keys()]}
                 categories={categories}
+              />
+              {/* Audit / flag for service / complete service, behind ONE button.
+                  Two of the three need inputs of their own, and this bar is
+                  sticky over the table — inline they covered a phone viewport.
+                  It renders nothing for a caller holding neither capability. */}
+              <BulkActionsMenu
+                itemIds={[...selected.keys()]}
+                signatures={signatures}
+                canAudit={canAudit}
+                canQueue={canQueue}
               />
             </div>
           )}

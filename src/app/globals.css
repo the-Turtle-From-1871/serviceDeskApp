@@ -791,13 +791,16 @@ input[type="file"].input {
 }
 
 /* The [popover] element. NO class, no `display`, see above.
-   Selected BY ID — one selector per page that mounts a SortFilterMenu — so that
-   no shared class exists which could later grow a `display` and re-create the
-   closed-popover trap. The cost is deliberate: a new caller must add its id to
-   all four groups below (base, ::backdrop, and the two inside the anchored
-   block), and there is no class for it to inherit them from instead. */
+   Selected BY ID — one selector per popover menu in the app: the two
+   SortFilterMenus (/items, /admin/queue) and the /items selection bar's
+   BulkActionsMenu — so that no shared class exists which could later grow a
+   `display` and re-create the closed-popover trap. The cost is deliberate: a
+   new caller must add its id to all four groups below (base, ::backdrop, and
+   the two inside the anchored block), and there is no class for it to inherit
+   them from instead. */
 #items-sortfilter,
-#queue-sortfilter {
+#queue-sortfilter,
+#items-bulkactions {
   /* Undo the UA popover box: `border: solid; padding: 0.25em; overflow: auto;
      inset: 0; margin: auto` — that last pair is what centres an unstyled
      popover in the viewport. */
@@ -814,7 +817,8 @@ input[type="file"].input {
   width: 100%;
 }
 #items-sortfilter::backdrop,
-#queue-sortfilter::backdrop {
+#queue-sortfilter::backdrop,
+#items-bulkactions::backdrop {
   background: rgb(25 28 24 / 0.4);
 }
 
@@ -899,15 +903,28 @@ input[type="file"].input {
   @supports (anchor-name: --probe) {
     /* Anchored dropdown. If either gate fails the sheet rules above stand
        untouched — which is what Safari below 26 gets, and it is fine. */
-    /* One anchor name for whichever menu this page mounts. It sits on the
-       shared .menu-trigger class, and only one SortFilterMenu exists per page,
-       so a page-specific name would buy nothing and mislead — it was
+    /* One anchor name for whichever SortFilterMenu this page mounts. It sits on
+       the shared .menu-trigger class, and only one SortFilterMenu exists per
+       page, so a page-specific name would buy nothing and mislead — it was
        --items-sortfilter while /items was the only caller. */
     .menu-trigger {
       anchor-name: --sortfilter-trigger;
     }
+    /* …but /items now mounts a SECOND popover menu — the selection bar's
+       "More actions" — and its trigger carries the same .menu-trigger class for
+       its layout and chevron. When two elements share an anchor-name the LAST
+       one in tree order wins, and the selection bar comes after the toolbar, so
+       leaving this alone would anchor the Sort & filter dropdown to the bulk
+       button at the bottom of the page the moment anything was selected. An id
+       (1,0,0) beats the class (0,1,0), so this takes the bulk trigger out of the
+       shared name and gives it its own. A THIRD menu on one page needs the same
+       treatment; there is deliberately no shared class to hang it on. */
+    #items-bulkactions-trigger {
+      anchor-name: --bulkactions-trigger;
+    }
     #items-sortfilter,
-    #queue-sortfilter {
+    #queue-sortfilter,
+    #items-bulkactions {
       position-anchor: --sortfilter-trigger;
       /* Below the trigger, left edge aligned with it. */
       position-area: block-end span-inline-end;
@@ -920,9 +937,15 @@ input[type="file"].input {
       min-width: 240px;
       max-width: 320px;
     }
+    /* AFTER the group above, not before it: at equal (1,0,0) specificity the
+       later rule wins, and this is the half that keeps the two menus apart. */
+    #items-bulkactions {
+      position-anchor: --bulkactions-trigger;
+    }
     /* A dropdown is not modal; dimming the page behind it would be. */
     #items-sortfilter::backdrop,
-    #queue-sortfilter::backdrop {
+    #queue-sortfilter::backdrop,
+    #items-bulkactions::backdrop {
       background: transparent;
     }
     .popup-menu__panel {

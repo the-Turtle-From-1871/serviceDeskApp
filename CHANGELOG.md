@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## 2026-08-11
 
 ### Added
+- Bulk actions for a selected or scanned batch: record an audit for every item under one signature, flag them all for service, or complete service on them all at once. Retired devices are passed over and reported rather than failing the batch.
+
+  They live behind a **More actions** button on the selection bar at the bottom of the items list, and each one says what it did — *"Audited 47 items. Skipped 2 (retired or not applicable)."* The selection is deliberately kept afterwards, so the result stays on screen and a second action can be applied to the same batch. Recording an audit needs Administrator; the two service actions need the service-queue permission, and you only see what you can use.
 - The `/items` selection now survives a reload, a screen lock and a re-login. A batch scanned over several minutes is no longer lost, and the selection bar shows when it was started. Selections are capped at 500 items, matching the limit bulk actions already enforced.
 
 ### Removed
