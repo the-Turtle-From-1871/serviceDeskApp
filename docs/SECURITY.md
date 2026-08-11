@@ -3,7 +3,7 @@
 A living inventory of every security control in this app — what it does, where
 it lives, and why. **Maintained over time**; see [Keeping this current](#keeping-this-current).
 
-**Last reviewed: 2026-08-10**
+**Last reviewed: 2026-08-11**
 
 Related: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`../CLAUDE.md`](../CLAUDE.md) · [`password-reset-hardening.md`](./password-reset-hardening.md)
 
@@ -2123,6 +2123,36 @@ everything else `requireUser()` gates. The owner scoping in
 [§2](#2-authorization) stops a *different* account from reaching another
 user's drafts; it does not add a second factor on top of the session that
 already can.
+
+**14. `/items` ships one `@army.mil` address per row, whether or not anyone
+looks at it.** *Accepted 2026-08-11.* The phone card's **More** panel renders
+`lastLogonUserPrincipalName`, so every `/items` response carries up to
+`ITEMS_PAGE_SIZE` personal addresses in its RSC payload — a closed `<details>`
+still ships its contents (see `.claude/rules/ui-styling.md`), so the data is on
+the wire even for a user who never expands a single card.
+
+**It is not a new disclosure.** The route is `requireUser()`-gated, and
+`/i/<id>` has rendered the same field to any signed-in user since the MDM
+telemetry import landed (2026-07-23), where showing it to non-admins was an
+explicit product decision, not an oversight. Nothing here is readable by anyone
+who could not already read it one device at a time.
+
+**What changed is AGGREGATION, and that is why it is written down.** `CLAUDE.md`
+says plainly: *never pull PII into list/search/type-ahead queries.* This is that
+pattern — a list route now carries a page of real people's addresses in one
+response — so the rule is being knowingly bent rather than quietly broken. The
+practical difference is what one captured response is worth: a page of the
+duty roster instead of a single device's last user. It raises the value of a
+stolen session ([0d](#known-gaps--accepted-risks)) and of anything that logs
+response bodies.
+
+Accepted because the field is the point of the panel: the technician holding the
+device needs to know who last signed in to it, and making them open each item
+individually to learn that would defeat the card. The cheap mitigation, if this
+is ever reconsidered, is to drop that one row from the More panel and leave it
+on `/i/<id>` — the aggregation goes away and the fact stays reachable. Widening
+it further — a column in the desktop table, an export, a search over it — should
+not happen without revisiting this entry.
 
 ---
 
