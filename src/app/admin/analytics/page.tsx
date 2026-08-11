@@ -14,6 +14,7 @@ import {
 import { firstParam } from "@/lib/search-params";
 import { UnitFilter } from "./Filters";
 import { StaleDevicesCard } from "./StaleDevicesCard";
+import { DroppedDevicesCard } from "./DroppedDevicesCard";
 import {
   AuditReadinessWidget,
   FleetKpiWidget,
@@ -79,6 +80,7 @@ export default async function AnalyticsPage({
     allocations,
     fleetTotal,
     staleDeviceCount,
+    droppedDeviceCount,
     vocabulary,
   } = await getDashboard(scope, range, groupBy);
 
@@ -117,6 +119,14 @@ export default async function AnalyticsPage({
             and it is scoped by the same filter bar it sits beneath. */}
         <div className="lg:col-span-2">
           <StaleDevicesCard count={staleDeviceCount} scope={scope} />
+        </div>
+
+        {/* Directly beneath its sibling, because the two are read together and
+            the pair is the point: the card above counts devices MDM saw 30-90
+            days ago, this one counts the devices it cannot see at all. Split
+            apart on the page, the second reads as a duplicate of the first. */}
+        <div className="lg:col-span-2">
+          <DroppedDevicesCard count={droppedDeviceCount} scope={scope} />
         </div>
 
         <AuditReadinessWidget data={auditReadiness} scope={scope} />

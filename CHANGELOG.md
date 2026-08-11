@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## 2026-08-11
 
 ### Added
+- **A second dashboard list: devices that dropped off the network.** The dormant list only ever showed devices MDM *has* seen — one it has never heard from has no date to measure, so it was excluded as "we cannot say" and appeared nowhere at all. There is now a card and an Excel export for exactly those: **no MDM sync time, but a device name** (a row with no name is a hand-made or scanned stub, not a machine that fell off the network).
+
+  **It is two different problems and the sheet says which is which.** Every row is marked either **Dropped out** — MDM used to report this device and no longer does, so check whether it was unenrolled, wiped or reassigned — or **Never enrolled**, meaning MDM has no record of it at all and the question is whether it should be enrolled. Dropped-out devices are listed **first**, because on the current fleet only **12 of 164** are in that group and sorting them together would bury them under the 152 that were never enrolled.
+
+  Unlike the dormant sheet the rows are not colour-coded: every device here has no sync time, so there is no age to shade. Two other differences worth knowing — the list **does** include devices out on an open hand receipt (a receipt explains why nobody signed in, not why MDM has no record), and it excludes retired kit, like every other figure on the page.
+
 - **The fleet export can now import itself.** Dropping the MDM export in the Downloads folder is all that is needed — a scheduled job picks up the newest `items*.csv`, imports it, and deletes it. The browser's `items (1).csv`, `items (2).csv` naming is handled: the newest one wins. Nothing changes about what an import does, only about who has to click through it; the interactive *Import items* page is untouched and still there.
 
   It refuses to send a file that is still downloading, and it **only deletes an export the server confirmed it imported** — a rejected or failed import leaves the file where it is and tries again a few minutes later. Everything it does is written to a log, since the CSV itself is gone afterwards.

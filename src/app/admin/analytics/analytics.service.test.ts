@@ -2,8 +2,10 @@ import { beforeAll, beforeEach, describe, expect, test } from "vitest";
 import prisma from "@/lib/prisma";
 import { resetDb, migrateTestDb } from "../../../../tests/helpers/db";
 import {
+  countDroppedDevices,
   countStaleDevices,
   getUnitAllocations,
+  listDroppedDevices,
   itemWhere,
   listStaleDevices,
   staleSyncWindow,
@@ -42,6 +44,8 @@ function mkItem(data: {
   lastLogonAt?: Date | null;
   lastSyncAt?: Date | null;
   compliance?: string | null;
+  enrollmentDate?: string | null;
+  lastLogonDate?: string | null;
   deviceName?: string;
   serialNumber?: string;
 }) {
@@ -466,5 +470,101 @@ describe("countStaleDevices", () => {
     await mkItem({ lastSyncAt: daysAgo(45), deviceUIC: "WBBBBB" });
 
     expect(await countStaleDevices({ uic: "WAAAAA", unit: null }, NOW)).toBe(2);
+  });
+});
+
+
+/* ============================================================
+   Dropped off the network — devices with NO sync time at all.
+
+   The sibling of the dormant window above. Its whole reason to exist is that
+   `lastSyncAt IS NULL` is EXCLUDED there, so these devices are invisible
+   everywhere else; the tests below pin that boundary from both sides.
+   ============================================================ */
+
+describe("listDroppedDevices", () => {
+  test("lists devices with no sync time and excludes ones that have it", async () => {
+    await mkItem({ serialNumber: "NO-SYNC", deviceName: "LAPTOP-1", lastSyncAt: null });
+    await mkItem({ serialNumber: "SYNCED", deviceName: "LAPTOP-2", lastSyncAt: daysAgo(45) });
+
+    const { rows } = await listDroppedDevices(UNSCOPED);
+    expect(rows.map((r) => r.Serial)).toEqual(["NO-SYNC"]);
+  });
+
+  test("the two lists are disjoint and together cover both states", async () => {
+    // The boundary that matters: a device is on exactly one of these lists, or
+    // neither — never both. A widening of either predicate breaks this.
+    await mkItem({ serialNumber: "DORMANT", deviceName: "LAPTOP-1", lastSyncAt: daysAgo(45) });
+    await mkItem({ serialNumber: "DROPPED", deviceName: "LAPTOP-2", lastSyncAt: null });
+
+    const stale = (await listStaleDevices(UNSCOPED, NOW)).rows.map((r) => r.Serial);
+    const dropped = (await listDroppedDevices(UNSCOPED)).rows.map((r) => r.Serial);
+    expect(stale).toEqual(["DORMANT"]);
+    expect(dropped).toEqual(["DROPPED"]);
+    expect(stale.filter((s) => dropped.includes(s))).toEqual([]);
+  });
+
+  test("requires a device name, so a scanned or hand-made stub is not listed", async () => {
+    await mkItem({ serialNumber: "NAMED", deviceName: "LAPTOP-1" });
+    await mkItem({ serialNumber: "UNNAMED", deviceName: undefined });
+    await mkItem({ serialNumber: "BLANK", deviceName: "   " });
+
+    const { rows } = await listDroppedDevices(UNSCOPED);
+    expect(rows.map((r) => r.Serial)).toEqual(["NAMED"]);
+  });
+
+  test("excludes retired kit", async () => {
+    await mkItem({ serialNumber: "RETIRED", deviceName: "LAPTOP-1", status: "RETIRED" });
+    await mkItem({ serialNumber: "ACTIVE", deviceName: "LAPTOP-2" });
+
+    const { rows } = await listDroppedDevices(UNSCOPED);
+    expect(rows.map((r) => r.Serial)).toEqual(["ACTIVE"]);
+  });
+
+  test("STILL lists a device out on an open hand receipt — unlike the dormant list", async () => {
+    // The deliberate divergence. A receipt explains why nobody has signed in;
+    // it does not explain why MDM has no record of the device at all.
+    const issued = await mkItem({ serialNumber: "ISSUED", deviceName: "LAPTOP-1" });
+    await issueOnOpenReceipt(issued.id, issued.serialNumber);
+
+    const { rows } = await listDroppedDevices(UNSCOPED);
+    expect(rows.map((r) => r.Serial)).toEqual(["ISSUED"]);
+  });
+
+  test("marks whether MDM ever knew the device, and lists those it did FIRST", async () => {
+    // 12 of 164 on the live fleet had dropped out; the rest were never
+    // enrolled. Sorting them together would bury the actionable ones.
+    await mkItem({ serialNumber: "NEVER", deviceName: "LAPTOP-1" });
+    await mkItem({
+      serialNumber: "DROPPED-OUT",
+      deviceName: "LAPTOP-2",
+      enrollmentDate: "5/1/2025 2:23:41 AM",
+      lastLogonAt: daysAgo(30),
+    });
+
+    const { rows } = await listDroppedDevices(UNSCOPED);
+    expect(rows.map((r) => r.Serial)).toEqual(["DROPPED-OUT", "NEVER"]);
+    expect(rows[0]["MDM record"]).toBe("Dropped out");
+    expect(rows[1]["MDM record"]).toBe("Never enrolled");
+  });
+
+  test("counts exactly the rows the export would carry", async () => {
+    await mkItem({ deviceName: "LAPTOP-1" });
+    await mkItem({ deviceName: "LAPTOP-2" });
+    await mkItem({ deviceName: "LAPTOP-3", lastSyncAt: daysAgo(45) });
+    await mkItem({ deviceName: undefined });
+
+    const count = await countDroppedDevices(UNSCOPED);
+    const { rows } = await listDroppedDevices(UNSCOPED);
+    expect(count).toBe(2);
+    expect(rows).toHaveLength(count);
+  });
+
+  test("honours the dashboard's unit scope", async () => {
+    await mkItem({ serialNumber: "ALPHA", deviceName: "LAPTOP-1", deviceUIC: "WAAAAA" });
+    await mkItem({ serialNumber: "BRAVO", deviceName: "LAPTOP-2", deviceUIC: "WBBBBB" });
+
+    const { rows } = await listDroppedDevices({ uic: "WAAAAA", unit: null });
+    expect(rows.map((r) => r.Serial)).toEqual(["ALPHA"]);
   });
 });
