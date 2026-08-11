@@ -458,6 +458,22 @@ admin-only suggestion vocabularies (units/categories/make-model-UIC
 type-ahead) stay behind that page's existing `isAdmin` gate, so this feature
 does not widen the public, unauthenticated surface. *Last reviewed: 2026-08-04.*
 
+**The dormant-device export is a Server Action gated on `VIEW_ANALYTICS`** —
+`exportStaleDevicesAction` (`src/app/admin/actions/analytics.ts`), added
+2026-08-10. It hands the browser up to 5,000 item rows (`STALE_EXPORT_MAX`)
+carrying `currentUserEmail`, `currentPosition` and
+`lastLogonUserPrincipalName` — holder PII that `/items` and `/i/<id>` already
+display, but leaving here in bulk as a file that outlives the session. Four
+things bound it. It **re-checks the capability itself** rather than inheriting
+the dashboard's gate, because a Server Action is a POST endpoint in its own
+right and nothing about rendering the page protects it; `requireCapability`
+re-reads role, `isActive` and the grants per request, so a revocation lands on
+the next click. It is **read-only** — no write, no revalidation. The
+caller-supplied unit scope is **re-validated with Zod and bound as query
+parameters**, never spliced (§5). And the result set is **capped with an
+overflow probe** rather than unbounded. It writes **no audit row** — see Known
+gaps #7, which this adds to rather than resolves. *Last reviewed: 2026-08-10.*
+
 **Admin-only capabilities:** returns, user management, named signatures,
 service-queue mutations, receipt timers, **recording** an audit, analytics,
 category management, permanent item deletion.
@@ -1952,6 +1968,13 @@ corroborated. Note also that only receipts are sealed: `ItemEdit`, `ItemAudit`
 and `ReturnTransaction` are ordinary mutable rows with no hash chain, and the app
 connects on a privileged role that bypasses RLS ([§10](#10-database-posture)), so
 DB-level history rewriting leaves no trace.
+**Reads are unrecorded too, and one of them is now a bulk export.** Added
+2026-08-10: `exportStaleDevicesAction` ([§2](#2-authorization)) hands any
+`VIEW_ANALYTICS` holder up to 5,000 rows of holder PII as a downloadable file,
+and — like every read in this application — leaves nothing behind saying it
+happened. *Who exported a slice of the property book, and when* is exactly as
+unanswerable as *who retired this device*, with the difference that the data
+then leaves the application entirely.
 
 **8. Anyone holding `MDM_IMPORT_SECRET` can create and update inventory rows.**
 *Accepted, bounded.* [§8](#8-background-jobs-cron). `POST /api/items/import`
