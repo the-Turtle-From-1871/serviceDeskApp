@@ -80,6 +80,7 @@ export function ItemSelectTable({
   signatures = [],
   canAudit = false,
   canQueue = false,
+  canRename = false,
 }: {
   items: ItemRow[];
   isAdmin: boolean;
@@ -102,15 +103,17 @@ export function ItemSelectTable({
    *  acting admin. Empty for anyone without ADMINISTER. */
   signatures?: { id: string; name: string }[];
   /** Capability gates for the "More actions" sheet — ADMINISTER for the bulk
-   *  audit, MANAGE_QUEUE for the two service actions. BulkActionsMenu honours
-   *  them independently, but note the bulk row below is still wrapped in
-   *  `isAdmin`, so on `/items` both arrive true or the sheet is not mounted at
-   *  all; these do not currently let a non-admin through. Presentation either
-   *  way — `requireAdmin()` / `requireCapability("MANAGE_QUEUE")` inside the
-   *  three actions is the real boundary. Defaulted off so a caller that forgets
-   *  to pass them offers nothing rather than something it cannot do. */
+   *  audit, MANAGE_QUEUE for the two service actions, MANAGE_ITEMS for the bulk
+   *  rename. BulkActionsMenu honours them independently, but note the bulk row
+   *  below is still wrapped in `isAdmin`, so on `/items` all three arrive true
+   *  or the sheet is not mounted at all; these do not currently let a non-admin
+   *  through. Presentation either way — `requireAdmin()` /
+   *  `requireCapability("MANAGE_QUEUE")` / `requireCapability("MANAGE_ITEMS")`
+   *  inside the actions is the real boundary. Defaulted off so a caller that
+   *  forgets to pass them offers nothing rather than something it cannot do. */
   canAudit?: boolean;
   canQueue?: boolean;
+  canRename?: boolean;
 }) {
   const router = useRouter();
   const secondarySort = sortKeys[1] ?? null;
@@ -810,16 +813,17 @@ export function ItemSelectTable({
                 itemIds={[...selected.keys()]}
                 categories={categories}
               />
-              {/* Audit / flag for service / complete service, behind ONE button.
-                  Two of the three need inputs of their own, and this bar is
-                  sticky over the table — inline they covered a phone viewport.
+              {/* Audit / flag for service / complete service / rename, behind
+                  ONE button. Three of the four need inputs of their own, and this
+                  bar is sticky over the table — inline they covered a phone
+                  viewport.
 
                   READ THE `isAdmin &&` ON THE ROW ABOVE. It gates this row along
                   with MarkReadyButton and ReadinessControls, and `isAdmin` is
                   `user.role === "ADMIN"` — so although BulkActionsMenu honours
-                  canAudit/canQueue separately (and renders nothing when both are
-                  false), the ADMIN baseline carries all nine capabilities and the
-                  only pair that reaches it here is (true, true). A USER granted
+                  canAudit/canQueue/canRename separately (and renders nothing when
+                  all are false), the ADMIN baseline carries all nine capabilities
+                  and the only combination that reaches it here is all-true. A USER granted
                   MANAGE_QUEUE individually gets no bulk controls at all on this
                   page. That is a known VISIBILITY gap, deliberately left alone:
                   the wrapper is shared with the two components above it and
@@ -830,6 +834,7 @@ export function ItemSelectTable({
                 signatures={signatures}
                 canAudit={canAudit}
                 canQueue={canQueue}
+                canRename={canRename}
               />
             </div>
           )}

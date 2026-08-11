@@ -1,9 +1,14 @@
 "use client";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown } from "lucide-react";
 import { recordAuditsAction } from "@/app/admin/actions/audit";
 import { flagItemsForServiceAction, completeServiceItemsAction } from "@/app/admin/actions/queue";
+import { previewItemRenameAction, renameItemsAction } from "@/app/admin/actions/items";
+// PURE — no DOM, no Prisma — which is the only reason a Client Component may
+// import it. The server rebuilds the names it writes from the same function, so
+// the range line below and the write cannot disagree.
+import { buildRenameSequence } from "@/modules/items/rename-sequence";
 import { SERVICE_TYPE_OPTIONS } from "@/modules/service-queue/service-form";
 import { useDismissSwallowsTap } from "./SortFilterMenu";
 
@@ -30,27 +35,32 @@ function outcome(verb: string, updated: number, skipped: number): string {
  * table, so every line of height hides another row of what you are selecting
  * from — stacked inline, these three covered a phone viewport entirely.
  *
- * THIS COMPONENT honours `canAudit` and `canQueue` independently — each group
- * renders only when its flag is set, and neither means no trigger at all.
+ * THIS COMPONENT honours `canAudit`, `canQueue` and `canRename` independently —
+ * each group renders only when its flag is set, and none of them means no
+ * trigger at all.
  * ITS ONE CALLER CURRENTLY DOES NOT EXERCISE THAT. `/items` mounts the whole
  * bulk row behind `isAdmin` (`user.role === "ADMIN"`), and the ADMIN baseline is
  * all nine capabilities, so the only combination that ever reaches this
- * component today is `(true, true)`. A `USER` granted `MANAGE_QUEUE`
+ * component today is all-true. A `USER` granted `MANAGE_QUEUE`
  * individually does NOT see the service actions here — see the note at the
  * mount site in ItemSelectTable. The independent gating is kept because it is
  * real, it is what a second caller or a widened wrapper would need, and it
  * costs nothing.
  *
  * Either way this is PRESENTATION, never a boundary: `recordAuditsAction` calls
- * `requireAdmin()` (= `requireCapability("ADMINISTER")`) and both queue actions
- * call `requireCapability("MANAGE_QUEUE")`, re-read from the DB per request. The
+ * `requireAdmin()` (= `requireCapability("ADMINISTER")`), both queue actions
+ * call `requireCapability("MANAGE_QUEUE")`, and both rename actions call
+ * `requireCapability("MANAGE_ITEMS")`, re-read from the DB per request. The
  * batch is client-supplied ids, so that server guard is the whole of it — the
  * `isAdmin` wrapper above is a VISIBILITY gap, not a security one, and nothing
  * is over-exposed by it.
  *
  * Only ids are posted. For the audit, the signer's name and image are re-read
  * server-side scoped to the acting admin — the browser is handed signature
- * NAMES only (`listSignatureNames`) and never any ink.
+ * NAMES only (`listSignatureNames`) and never any ink. For the rename, only a
+ * prefix and a start number are posted: the server rebuilds the name list
+ * itself, so this control can never be turned into "write any string to any
+ * item".
  *
  * POPOVER RULES — all inherited from SortFilterMenu and all load-bearing:
  *  - The element carrying `popover` has NO className. An author `display` beats
@@ -70,12 +80,15 @@ export function BulkActionsMenu({
   signatures,
   canAudit,
   canQueue,
+  canRename,
 }: {
   itemIds: string[];
   /** Names only — `listSignatureNames`. No image blob reaches the browser. */
   signatures: { id: string; name: string }[];
   canAudit: boolean;
   canQueue: boolean;
+  /** MANAGE_ITEMS — the bulk rename. */
+  canRename: boolean;
 }) {
   const menuId = "items-bulkactions";
   const triggerId = "items-bulkactions-trigger";
@@ -101,8 +114,88 @@ export function BulkActionsMenu({
   const [flagPending, startFlag] = useTransition();
   const [completePending, startComplete] = useTransition();
 
+  const [prefix, setPrefix] = useState("");
+  const [start, setStart] = useState("001");
+  const [renameMsg, setRenameMsg] = useState<Msg>(null);
+  // A FOURTH transition, for the same reason as the other three.
+  const [renamePending, startRename] = useTransition();
+
   const none = itemIds.length === 0;
   const ids = itemIds.join(",");
+
+  // The range line, computed on the CLIENT from the same pure builder the server
+  // writes from — instant, and no round trip per keystroke. try/catch rather
+  // than validation, because a half-typed start ("" while it is being retyped)
+  // is an expected transient and not an error worth a message.
+  let range: { first: string; last: string } | null = null;
+  try {
+    const names = buildRenameSequence(itemIds.length, prefix, start);
+    range = { first: names[0], last: names[names.length - 1] };
+  } catch {
+    range = null;
+  }
+  const hasSequence = range !== null;
+
+  // A COLLISION LIST IS ONLY EVER READ FOR THE SEQUENCE IT WAS COMPUTED FOR.
+  // It is stored tagged with that sequence's key and derived back out by
+  // comparison, rather than being cleared by a `setCollisions([])` at the top of
+  // the effect below. Two reasons: a stale list gates the Apply button, so
+  // leaving one attached to a DIFFERENT sequence would refuse names that are
+  // actually free — and the derived form has no render in which that can be
+  // true, where a clear-in-effect leaves one. It also keeps a synchronous
+  // setState out of an effect body, which the React Compiler lint refuses.
+  const renameKey = `${ids}|${prefix}|${start}`;
+  const [found, setFound] = useState<{ key: string; list: { name: string; serialNumber: string }[] }>(
+    { key: "", list: [] },
+  );
+  const collisions = found.key === renameKey ? found.list : [];
+
+  // The debounced collision check. A late reply for a superseded sequence lands
+  // under its own key and is simply never read.
+  useEffect(() => {
+    if (none || !canRename || !hasSequence) return;
+    const t = setTimeout(() => {
+      const fd = new FormData();
+      fd.set("itemIds", ids);
+      fd.set("prefix", prefix);
+      fd.set("start", start);
+      previewItemRenameAction(fd).then((res) => {
+        if ("ok" in res) setFound({ key: `${ids}|${prefix}|${start}`, list: res.collisions });
+      });
+    }, 400);
+    return () => clearTimeout(t);
+    // `range` is derived from these and is a fresh object every render, so
+    // depending on it directly would re-run this on every render — hence the
+    // boolean `hasSequence` rather than the object.
+  }, [prefix, start, ids, none, canRename, hasSequence]);
+
+  /** Apply. The selection is deliberately KEPT afterwards, exactly as `run`
+   *  keeps it — clearing unmounts the sticky bar holding this message. */
+  const applyRename = () => {
+    setRenameMsg(null);
+    const fd = new FormData();
+    fd.set("itemIds", ids);
+    fd.set("prefix", prefix);
+    fd.set("start", start);
+    startRename(async () => {
+      const res = await renameItemsAction(fd);
+      if ("error" in res) return setRenameMsg({ ok: false, text: res.error });
+      if ("conflict" in res) {
+        // The preview is advisory; the action re-checks inside its transaction,
+        // so this is the answer that actually counts. Tagged with the sequence
+        // it was refused for, like the preview's own reply.
+        setFound({ key: renameKey, list: res.collisions });
+        return setRenameMsg({ ok: false, text: "Those names are already taken." });
+      }
+      setRenameMsg({
+        ok: true,
+        text:
+          outcome("Renamed", res.renamed, res.skipped) +
+          (res.unchanged > 0 ? ` ${res.unchanged} already had the right name.` : ""),
+      });
+      router.refresh();
+    });
+  };
 
   /** Post one batch and report its outcome. The selection is deliberately KEPT
    *  — clearing it unmounts the sticky bar this sheet lives in, destroying the
@@ -134,7 +227,7 @@ export function BulkActionsMenu({
   // Nothing this caller may do — render no trigger at all rather than a button
   // that opens onto an empty sheet. Placed after the hooks, which must not sit
   // behind a conditional return.
-  if (!canAudit && !canQueue) return null;
+  if (!canAudit && !canQueue && !canRename) return null;
 
   return (
     <>
@@ -275,6 +368,70 @@ export function BulkActionsMenu({
               {/* See the audit message above: a failure announces as an alert. */}
               {queueMsg && (
                 <span role={queueMsg.ok ? "status" : "alert"} className={queueMsg.ok ? "subtle" : "alert-error"}>{queueMsg.text}</span>
+              )}
+            </div>
+          )}
+
+          {canRename && (
+            <div className="stack" style={{ gap: 6 }}>
+              {/* "Rename — " prefixes the first label because this is the third
+                  section in one panel and a bare "Name prefix" says nothing
+                  about what it is the prefix OF. */}
+              <label className="label" htmlFor="bulk-prefix">Rename — name prefix</label>
+              <input
+                id="bulk-prefix"
+                className="input"
+                value={prefix}
+                disabled={renamePending || none}
+                onChange={(e) => setPrefix(e.target.value)}
+                placeholder="e.g. LAPTOP"
+              />
+              <label className="label" htmlFor="bulk-start">Start at</label>
+              {/* TEXT, with inputMode for the phone keypad — never type="number".
+                  The pad width is inferred from how the start was typed, so a
+                  numeric input stripping the leading zeros would silently turn
+                  "001" into "1" and the whole sequence with it. */}
+              <input
+                id="bulk-start"
+                className="input"
+                inputMode="numeric"
+                value={start}
+                disabled={renamePending || none}
+                onChange={(e) => setStart(e.target.value)}
+              />
+              {/* Instant, from the client-side builder. "in scan order" is the
+                  load-bearing half: the numbers follow the order the batch was
+                  selected or scanned in, which is the order the devices are
+                  physically stacked. */}
+              {range && (
+                <span className="subtle">
+                  {itemIds.length} device{plural(itemIds.length)}, in scan order:{" "}
+                  {range.first} … {range.last}
+                </span>
+              )}
+              {/* Names the offenders and their serials rather than just refusing:
+                  the fix is a different prefix or start, and you cannot pick one
+                  without knowing what is in the way. */}
+              {collisions.length > 0 && (
+                <span role="alert" className="alert-error">
+                  {collisions.length} name{plural(collisions.length)} already taken:{" "}
+                  {collisions.map((c) => `${c.name} (${c.serialNumber})`).join(", ")}
+                </span>
+              )}
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={renamePending || none || !range || collisions.length > 0}
+                onClick={applyRename}
+              >
+                {renamePending ? "Renaming…" : `Rename ${itemIds.length}`}
+              </button>
+              {collisions.length > 0 && (
+                <span className="subtle">Change the prefix or start number to continue.</span>
+              )}
+              {/* See the audit message above: a failure announces as an alert. */}
+              {renameMsg && (
+                <span role={renameMsg.ok ? "status" : "alert"} className={renameMsg.ok ? "subtle" : "alert-error"}>{renameMsg.text}</span>
               )}
             </div>
           )}

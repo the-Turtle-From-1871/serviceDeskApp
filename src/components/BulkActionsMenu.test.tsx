@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { BulkActionsMenu } from "./BulkActionsMenu";
 import { recordAuditsAction } from "@/app/admin/actions/audit";
 
@@ -29,6 +30,15 @@ vi.mock("@/app/admin/actions/queue", () => ({
   flagItemsForServiceAction: vi.fn(),
   completeServiceItemsAction: vi.fn(),
 }));
+// The rename preview is DEBOUNCED and fires on its own once the fields make a
+// valid sequence, so it must resolve a real result shape rather than undefined —
+// a bare vi.fn() returns undefined and `.then` on it rejects inside the effect.
+vi.mock("@/app/admin/actions/items", () => ({
+  previewItemRenameAction: vi.fn(async () => ({
+    ok: true, count: 0, first: "", last: "", skipped: 0, collisions: [],
+  })),
+  renameItemsAction: vi.fn(),
+}));
 
 // This suite runs without vitest `globals: true`, so @testing-library/react's
 // auto-cleanup never registers. Mirrors ItemSelectTable.test.tsx.
@@ -44,7 +54,7 @@ const hidden = { hidden: true } as const;
 
 test("the popover element carries NO class — a layout class would render it while closed", () => {
   const { container } = render(
-    <BulkActionsMenu itemIds={["a1"]} signatures={SIGS} canAudit canQueue />,
+    <BulkActionsMenu itemIds={["a1"]} signatures={SIGS} canAudit canQueue canRename={false} />,
   );
   const popover = container.querySelector("[popover]");
   expect(popover).not.toBeNull();
@@ -61,7 +71,7 @@ test("the popover element carries NO class — a layout class would render it wh
 // wiring is all that can be pinned.
 test("wires the trigger to the panel by id, and the panel is its next sibling", () => {
   const { container } = render(
-    <BulkActionsMenu itemIds={["a1"]} signatures={SIGS} canAudit canQueue />,
+    <BulkActionsMenu itemIds={["a1"]} signatures={SIGS} canAudit canQueue canRename={false} />,
   );
   const trigger = screen.getByRole("button", { name: /More actions/ });
   expect(trigger.getAttribute("popovertarget")).toBe("items-bulkactions");
@@ -75,29 +85,29 @@ test("wires the trigger to the panel by id, and the panel is its next sibling", 
 
 test("audit controls are absent without ADMINISTER", () => {
   const { unmount } = render(
-    <BulkActionsMenu itemIds={["a1"]} signatures={SIGS} canAudit canQueue />,
+    <BulkActionsMenu itemIds={["a1"]} signatures={SIGS} canAudit canQueue canRename={false} />,
   );
   expect(screen.getByLabelText(/sign as/i)).toBeTruthy();
   unmount();
 
-  render(<BulkActionsMenu itemIds={["a1"]} signatures={[]} canAudit={false} canQueue />);
+  render(<BulkActionsMenu itemIds={["a1"]} signatures={[]} canAudit={false} canQueue canRename={false} />);
   expect(screen.queryByLabelText(/sign as/i)).toBeNull();
 });
 
 test("queue controls are absent without MANAGE_QUEUE", () => {
   const { unmount } = render(
-    <BulkActionsMenu itemIds={["a1"]} signatures={SIGS} canAudit canQueue />,
+    <BulkActionsMenu itemIds={["a1"]} signatures={SIGS} canAudit canQueue canRename={false} />,
   );
   expect(screen.getByLabelText(/service type/i)).toBeTruthy();
   unmount();
 
-  render(<BulkActionsMenu itemIds={["a1"]} signatures={SIGS} canAudit canQueue={false} />);
+  render(<BulkActionsMenu itemIds={["a1"]} signatures={SIGS} canAudit canQueue={false} canRename={false} />);
   expect(screen.queryByLabelText(/service type/i)).toBeNull();
 });
 
-test("the whole menu is absent when the caller can do neither", () => {
+test("the whole menu is absent when the caller can do nothing", () => {
   const { container } = render(
-    <BulkActionsMenu itemIds={["a1"]} signatures={[]} canAudit={false} canQueue={false} />,
+    <BulkActionsMenu itemIds={["a1"]} signatures={[]} canAudit={false} canQueue={false} canRename={false} />,
   );
   expect(container.querySelector("[popover]")).toBeNull();
   expect(screen.queryByRole("button", { name: /More actions/ })).toBeNull();
@@ -106,7 +116,7 @@ test("the whole menu is absent when the caller can do neither", () => {
 // The signature list is the one thing that can be empty while the capability is
 // held, and an empty <select> with no explanation reads as a broken control.
 test("says why the audit control is unusable when there are no saved signatures", () => {
-  render(<BulkActionsMenu itemIds={["a1"]} signatures={[]} canAudit canQueue={false} />);
+  render(<BulkActionsMenu itemIds={["a1"]} signatures={[]} canAudit canQueue={false} canRename={false} />);
   expect((screen.getByLabelText(/sign as/i) as HTMLSelectElement).disabled).toBe(true);
   expect(screen.getByText(/No saved signatures/i)).toBeTruthy();
 });
@@ -126,7 +136,7 @@ describe("recording an audit", () => {
 
   const openAudit = () => {
     render(
-      <BulkActionsMenu itemIds={["a1", "a2", "a3"]} signatures={SIGS} canAudit canQueue={false} />,
+      <BulkActionsMenu itemIds={["a1", "a2", "a3"]} signatures={SIGS} canAudit canQueue={false} canRename={false} />,
     );
     fireEvent.change(screen.getByLabelText(/sign as/i), { target: { value: "s1" } });
     return screen.getByRole("button", { name: /^Audit /, ...hidden });
@@ -161,10 +171,41 @@ describe("recording an audit", () => {
 // renders with a selection, but the component is handed the ids directly, so it
 // must not offer a button that would post an empty batch.
 test("disables every control when the selection is empty", () => {
-  render(<BulkActionsMenu itemIds={[]} signatures={SIGS} canAudit canQueue />);
+  render(<BulkActionsMenu itemIds={[]} signatures={SIGS} canAudit canQueue canRename />);
   const trigger = screen.getByRole("button", { name: /More actions/ }) as HTMLButtonElement;
   expect(trigger.disabled).toBe(true);
-  for (const name of [/^Audit /, /^Flag for service$/, /^Complete service$/]) {
+  for (const name of [/^Audit /, /^Flag for service$/, /^Complete service$/, /^Rename /]) {
     expect((screen.getByRole("button", { name, ...hidden }) as HTMLButtonElement).disabled).toBe(true);
   }
+  // The two rename fields too — an empty batch has nothing to number.
+  for (const label of [/name prefix/i, /start at/i]) {
+    expect((screen.getByLabelText(label) as HTMLInputElement).disabled).toBe(true);
+  }
+});
+
+/**
+ * The range line is computed on the CLIENT from `buildRenameSequence` — the same
+ * pure builder the server writes from — so it appears as you type and costs no
+ * round trip. This is the one thing in this file that exercises behaviour rather
+ * than structure, and it is only testable because that builder is pure.
+ *
+ * What it is NOT evidence for: the debounced collision check that runs beside it
+ * reaches a mocked module here, and the panel these fields live in is never
+ * actually openable in jsdom.
+ */
+test("shows the computed range as the fields change", async () => {
+  const user = userEvent.setup();
+  render(<BulkActionsMenu itemIds={["a", "b", "c"]} signatures={[]} canAudit={false} canQueue={false} canRename />);
+  await user.type(screen.getByLabelText(/name prefix/i), "LAPTOP");
+  await user.clear(screen.getByLabelText(/start at/i));
+  await user.type(screen.getByLabelText(/start at/i), "001");
+  // First and last of the sequence, in one line, so three devices read as
+  // LAPTOP-001 … LAPTOP-003.
+  expect(screen.getByText(/LAPTOP-001/)).toBeTruthy();
+  expect(screen.getByText(/LAPTOP-003/)).toBeTruthy();
+});
+
+test("rename controls are absent without MANAGE_ITEMS", () => {
+  render(<BulkActionsMenu itemIds={["a"]} signatures={[]} canAudit canQueue canRename={false} />);
+  expect(screen.queryByLabelText(/name prefix/i)).toBeNull();
 });

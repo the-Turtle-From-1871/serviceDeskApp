@@ -33,6 +33,14 @@ vi.mock("@/app/admin/actions/items", () => ({
   toggleItemStatusAction: vi.fn(),
   deleteItemAction: vi.fn(),
   markItemsReadyAction,
+  // BulkActionsMenu imports these from the same module. A factory mock replaces
+  // the WHOLE module, so an export left out of it throws the moment the
+  // component touches it — they are here for completeness, not because this
+  // suite renames anything (it never passes canRename).
+  previewItemRenameAction: vi.fn(async () => ({
+    ok: true, count: 0, first: "", last: "", skipped: 0, collisions: [],
+  })),
+  renameItemsAction: vi.fn(),
 }));
 
 // This suite runs without vitest `globals: true`, so @testing-library/react's
