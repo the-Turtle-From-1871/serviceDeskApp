@@ -5,7 +5,10 @@ import { renderToString } from "react-dom/server";
 import { LoginForm } from "./LoginForm";
 import { loginAction } from "@/app/actions/auth";
 
-vi.mock("@/app/actions/auth", () => ({ loginAction: vi.fn() }));
+// `resendVerificationAction` is mocked too because the unconfirmed-email alert
+// renders ResendVerificationForm, which passes it to useActionState — an
+// undefined action throws before any assertion runs.
+vi.mock("@/app/actions/auth", () => ({ loginAction: vi.fn(), resendVerificationAction: vi.fn() }));
 
 // The widget skips loading its script when `window.turnstile` already exists,
 // so setting it here exercises the REAL component rather than a stub of it —
@@ -260,5 +263,42 @@ describe("LoginForm post-sign-in navigation", () => {
     );
     expect(document.querySelector('meta[http-equiv="refresh"]')).toBeNull();
     expect(submit().disabled).toBe(false);
+  });
+});
+
+describe("LoginForm unconfirmed-email resend control", () => {
+  // The resend control renders its own <form>. While it lived INSIDE the
+  // sign-in form the markup was invalid: an HTML parser drops a nested <form>,
+  // so the server-rendered page contained no resend control at all and it
+  // existed only because React inserted it after hydration — a server/client
+  // mismatch on exactly the path a blocked user lands on.
+  it("renders the resend form as a SIBLING of the sign-in form, not inside it", async () => {
+    vi.mocked(loginAction).mockResolvedValue({ unverified: true, email: "jane@unit.mil" });
+
+    const { container } = render(<LoginForm turnstileSiteKey={null} />);
+    fillAndSubmit();
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toMatch(/confirm your email address/i),
+    );
+
+    const forms = container.querySelectorAll("form");
+    expect(forms.length).toBe(2);
+    // The invariant. Neither may contain the other — assert BOTH directions so
+    // this cannot pass by the two simply being reordered.
+    expect(forms[0].contains(forms[1])).toBe(false);
+    expect(forms[1].contains(forms[0])).toBe(false);
+  });
+
+  it("names the address the link went to, and offers the resend button", async () => {
+    vi.mocked(loginAction).mockResolvedValue({ unverified: true, email: "jane@unit.mil" });
+
+    render(<LoginForm turnstileSiteKey={null} />);
+    fillAndSubmit();
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain("jane@unit.mil"),
+    );
+    expect(screen.getByRole("button", { name: /resend the confirmation link/i })).toBeDefined();
   });
 });
