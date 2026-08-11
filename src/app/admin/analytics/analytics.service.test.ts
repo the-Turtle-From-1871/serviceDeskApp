@@ -41,6 +41,7 @@ function mkItem(data: {
   lastLogonUserPrincipalName?: string;
   lastLogonAt?: Date | null;
   lastSyncAt?: Date | null;
+  compliance?: string | null;
   deviceName?: string;
   serialNumber?: string;
 }) {
@@ -400,6 +401,7 @@ describe("listStaleDevices — the exported row", () => {
       deviceUIC: "WAAAAA",
       lastLogonUserPrincipalName: "pfc@army.mil",
       lastSyncAt: daysAgo(45),
+      compliance: "noncompliant",
     });
 
     const { rows } = await listStaleDevices(UNSCOPED, NOW);
@@ -416,6 +418,9 @@ describe("listStaleDevices — the exported row", () => {
       // ISO, so a spreadsheet sorts it — and in UTC, so it cannot slip a day.
       "Last sync date": "2026-06-26",
       "Days since sync": 45,
+      // Verbatim from the export, not relabelled: the sheet is cross-checked
+      // against Intune, and the row's colour is picked from this same value.
+      Compliance: "noncompliant",
       // Derived by the same CASE the rest of the app reads, not restated here.
       Readiness: "Deployed",
     });
