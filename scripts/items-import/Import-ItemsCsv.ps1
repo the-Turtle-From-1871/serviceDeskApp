@@ -179,9 +179,12 @@ function Stop-Quietly {
   DPAPI-encrypted file written by Setup-ImportTask.ps1.
 
   DPAPI ties the stored value to this Windows account, so copying secret.txt to
-  another machine or reading it as another user yields nothing. That is also why
-  the Scheduled Task runs with an Interactive logon type rather than S4U -- under
-  S4U the user's DPAPI master key is not reachable and this decrypt fails.
+  another machine or reading it as another user yields nothing.
+
+  This decrypt works under BOTH scheduled-task logon types -- Interactive and S4U
+  (S4U verified 2026-08-11). An earlier comment here claimed S4U could not reach
+  the user's DPAPI master key; that was wrong, and it mattered, because S4U is the
+  only logon type that runs at all on a machine that refuses Interactive tasks.
 #>
 function Resolve-ImportSecret {
     param([string] $Provided)

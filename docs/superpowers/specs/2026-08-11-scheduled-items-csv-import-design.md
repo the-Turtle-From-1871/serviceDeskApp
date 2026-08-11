@@ -107,14 +107,19 @@ milliseconds.
 
 ### Why Interactive logon rather than S4U
 
-S4U would run the task whether or not the user is logged on, with no stored
-password and no console window — attractive, but it is expected to break DPAPI:
-user-scope `CryptUnprotectData` under an S4U logon is not able to reach the
-user's master key, so the secret would fail to decrypt. (**Not verified here** —
-registering an S4U task requires elevation, which this session did not have. It
-is offered as `-LogonType S4U` for anyone who needs it, with the fallback
-documented: set `MDM_IMPORT_SECRET` as a machine environment variable, which the
-worker prefers over the encrypted file.)
+Interactive stores no Windows password, and nothing is lost by "only when logged
+on": the event this reacts to is the user downloading a file, which requires them
+to be logged on anyway. It is therefore the default.
+
+**Corrected 2026-08-11.** This section originally argued that S4U had to be
+avoided because it could not reach the user's DPAPI master key, leaving the
+secret undecryptable. That was a prediction, not a measurement, and it was
+**wrong** — and wrong in the direction that mattered, because on the target
+machine S4U turned out to be the *only* logon type that runs at all (see
+*Verified* below). `-LogonType S4U` is the documented remedy for a machine that
+refuses Interactive tasks; it needs an elevated shell to register, and it still
+stores no Windows password. The machine-level `MDM_IMPORT_SECRET` environment
+variable remains the fallback if some other machine genuinely cannot decrypt.
 
 Interactive keeps DPAPI working and stores no password. Nothing is lost by it:
 the event this whole thing reacts to is *the user downloading a file*, which
@@ -271,28 +276,39 @@ successful POST.
   `SeSecurityPrivilege`, which a non-elevated shell lacks. Now the folder is only
   restricted when it is not already restricted.
 
-### NOT verified — task execution
+### Scheduled execution — refused as Interactive, working as S4U
 
-**No scheduled task can execute in this environment**, so the end-to-end
-"drop a CSV, watch it import and vanish" path is unproven.
+**An Interactive task cannot execute on the target machine.** Every launch
+returns `0x800710E0` ("the operator or administrator has refused the request"),
+on the **natural trigger** as well as on-demand, and a control task created by
+`schtasks.exe` whose only action is `cmd.exe /c echo` is refused identically —
+so it is environmental, not a defect in these scripts. Task Scheduler logs the
+instance as *launched* (event 110) and *queued* (event 325) with no action-start
+(event 200). Every queue-inducing condition was already ruled out:
+`RunOnlyIfIdle`, `RunOnlyIfNetworkAvailable` and both battery flags off,
+`AllowDemandStart` and `Enabled` true, power Online, Schedule service running,
+user interactively logged on over **RDP** (`rdp-tcp#0`, session 3).
 
-Every task launch returns `0x800710E0` ("the operator or administrator has
-refused the request"), including a control task created by `schtasks.exe` whose
-only action is `cmd.exe /c echo`. Task Scheduler logs the instance as *launched*
-(event 110) with no action-start (event 200). Power is Online, the Schedule
-service is running, and the user is interactively logged on — over **RDP**
-(`rdp-tcp#0`, session 3), which is the likeliest cause.
+**Registering the same task as S4U from an elevated prompt fixed it**, and the
+whole chain is now verified live:
 
-This is environmental, not a defect in the scripts: registration produces exactly
-the right task object, and the worker runs correctly when invoked directly and
-through the VBS shim. `Setup-ImportTask.ps1` now runs the task once after
-registering and reports this explicitly rather than assuming success, and the
-README documents the symptom, the control experiment, and the two remedies
-(a non-RDP desktop session, or `-LogonType S4U` from an elevated prompt).
+| Step | Evidence |
+|---|---|
+| Task launches | `LastTaskResult` moved off `0x800710E0`; action ran |
+| Secret decrypts under S4U | reached an authenticated request at all |
+| Request authenticates | server answered **`400`**, not `401` |
+| Bad file refused, not deleted | `FAILED HTTP 400: Missing required column(s): serialNumber.. items.csv was kept.` |
+| Idle poll is silent | next cycle `LastTaskResult=0`, no log line written |
 
-**The user must confirm test 12 themselves**: run setup from their normal
-session, drop a CSV in Downloads, and confirm it is imported and removed within
-5 minutes with no console window.
+The `400` is the load-bearing detail: it can only be produced *after* the bearer
+token was accepted, so it proves DPAPI decryption succeeded under S4U — which is
+the opposite of what this document originally predicted. The probe CSV used for
+this had no `serialNumber` column deliberately, so the run exercised the full
+path while writing nothing to inventory.
+
+`Setup-ImportTask.ps1` runs the task once after registering and reports the
+outcome explicitly rather than assuming success — which is what surfaced all of
+the above.
 
 ## Documentation updated in the same commit
 

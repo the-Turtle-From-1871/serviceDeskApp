@@ -12,11 +12,22 @@
        secret authenticates a WRITE endpoint into the production property book.
     3. Registers a Scheduled Task that polls Downloads every few minutes.
 
-  WHY INTERACTIVE, NOT S4U. The task runs with LogonType Interactive ("only when
-  the user is logged on"), which stores no Windows password. S4U would also store
-  no password AND run while logged off, but it cannot decrypt a user-scope DPAPI
-  blob -- the secret would fail to read. Nothing is lost: the event this reacts to
-  is the user downloading a file, which requires them to be logged on anyway.
+  INTERACTIVE BY DEFAULT, S4U WHEN INTERACTIVE IS REFUSED. Interactive ("only
+  when the user is logged on") stores no Windows password, and nothing is lost by
+  it: the event this reacts to is the user downloading a file, which requires them
+  to be logged on anyway.
+
+  Some machines refuse to launch an Interactive task at all, returning
+  0x800710E0 on both the natural trigger and an on-demand start. There, register
+  with -LogonType S4U from an ELEVATED prompt.
+
+  DPAPI DOES WORK UNDER S4U -- verified 2026-08-11. This script used to claim the
+  opposite (that S4U could not reach the user's DPAPI master key, so the secret
+  would fail to decrypt). That was a prediction and it was wrong: the S4U task
+  launched, decrypted secret.txt, and made an authenticated request. Do not avoid
+  S4U on DPAPI grounds. If some other machine genuinely cannot decrypt, set
+  MDM_IMPORT_SECRET as a machine-level environment variable -- the worker prefers
+  the environment variable over the file.
 
   WHY POLLING. A successful import deletes the CSV, so "an items*.csv exists" is
   itself the new-file signal. A poll that finds nothing makes no network request.
@@ -63,12 +74,10 @@ param(
 
     [string] $TaskName = 'InventoryApp Items CSV Import',
 
-    # Interactive is the default and the one that keeps the DPAPI-encrypted
-    # secret readable. S4U also runs while logged off and still stores no
-    # password, but it REQUIRES an elevated shell to register and may not be able
-    # to decrypt a user-scope DPAPI blob -- if you switch to it and imports start
-    # failing with "Could not decrypt", set MDM_IMPORT_SECRET as a machine
-    # environment variable instead and the worker will prefer that.
+    # Interactive is the default. S4U additionally runs while logged off, still
+    # stores no password, and DOES decrypt the DPAPI secret (verified
+    # 2026-08-11) -- but it REQUIRES an elevated shell to register. Switch to it
+    # when an Interactive task is refused with 0x800710E0.
     [ValidateSet('Interactive', 'S4U')]
     [string] $LogonType = 'Interactive',
 
