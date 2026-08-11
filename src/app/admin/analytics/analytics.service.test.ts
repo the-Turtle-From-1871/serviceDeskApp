@@ -1,7 +1,14 @@
 import { beforeAll, beforeEach, describe, expect, test } from "vitest";
 import prisma from "@/lib/prisma";
 import { resetDb, migrateTestDb } from "../../../../tests/helpers/db";
-import { getUnitAllocations, itemWhere } from "./analytics.service";
+import {
+  countStaleDevices,
+  getUnitAllocations,
+  itemWhere,
+  listStaleDevices,
+  staleLogonWindow,
+} from "./analytics.service";
+import { STALE_MIN_DAYS, STALE_MAX_DAYS } from "./analytics.types";
 
 /* ============================================================
    Unit-allocation grouping.
@@ -32,6 +39,9 @@ function mkItem(data: {
   status?: "ACTIVE" | "RETIRED";
   markedReadyAt?: Date;
   lastLogonUserPrincipalName?: string;
+  lastLogonAt?: Date | null;
+  deviceName?: string;
+  serialNumber?: string;
 }) {
   return prisma.item.create({
     data: {
@@ -222,5 +232,217 @@ describe("itemWhere — the global scope", () => {
     expect(await count({ uic: "WAAAAA", unit: null })).toBe(2);
     expect(await count({ uic: null, unit: "Alpha Co" })).toBe(2);
     expect(await count({ uic: "WAAAAA", unit: "Alpha Co" })).toBe(1);
+  });
+});
+
+/* ============================================================
+   Stale devices — the 30-90 day export.
+
+   DB-backed for the same reason as the allocations above: what is being tested
+   is which rows Postgres returns for a window and a NOT EXISTS over live
+   custody. Asserting on a built query string would only restate the SQL.
+
+   `now` is injected everywhere, so these assert on real boundaries rather than
+   on whatever the wall clock happens to be when CI runs.
+   ============================================================ */
+
+const NOW = new Date("2026-08-10T12:00:00.000Z");
+const DAY_MS = 24 * 60 * 60 * 1000;
+const daysAgo = (n: number) => new Date(NOW.getTime() - n * DAY_MS);
+const UNSCOPED = { uic: null, unit: null };
+
+let receiptSeq = 0;
+/** Put an item into LIVE custody: an OPEN receipt carrying an unreturned line.
+ *  Both halves matter — the export subtracts exactly this shape, and either one
+ *  alone describes a receipt whose custody has already ended. */
+async function issueOnOpenReceipt(
+  itemId: string,
+  serialNumber: string,
+  opts: { status?: "OPEN" | "CLOSED"; returnedAt?: Date | null } = {},
+) {
+  await prisma.transfer.create({
+    data: {
+      receiptNumber: `HR-${String(++receiptSeq).padStart(6, "0")}`,
+      itemSummary: "1 x Dell 5540",
+      senderName: "Sender",
+      receiverName: "Receiver",
+      receiverSignature: "data:image/png;base64,AA==",
+      status: opts.status ?? "OPEN",
+      ...(opts.status === "CLOSED" ? { closedAt: daysAgo(1) } : {}),
+      lines: {
+        create: {
+          lineNo: 1,
+          make: "Dell",
+          model: "5540",
+          qtyAuth: 1,
+          qtyIssued: 1,
+          items: { create: { itemId, serialNumber, returnedAt: opts.returnedAt ?? null } },
+        },
+      },
+    },
+  });
+}
+
+const serialsOf = (rows: Awaited<ReturnType<typeof listStaleDevices>>["rows"]) =>
+  rows.map((r) => r.Serial);
+
+describe("staleLogonWindow", () => {
+  test("spans from 90 days ago to 30 days ago", () => {
+    const { from, to } = staleLogonWindow(NOW);
+    expect(from).toEqual(daysAgo(STALE_MAX_DAYS));
+    expect(to).toEqual(daysAgo(STALE_MIN_DAYS));
+  });
+});
+
+describe("listStaleDevices — what lands in the sheet", () => {
+  test("includes only devices last seen inside the window", async () => {
+    await mkItem({ serialNumber: "FRESH", lastLogonAt: daysAgo(15) });
+    await mkItem({ serialNumber: "STALE", lastLogonAt: daysAgo(45) });
+    // Past 90 days: a different problem, deliberately excluded (the whole point
+    // of the upper bound).
+    await mkItem({ serialNumber: "LOST", lastLogonAt: daysAgo(95) });
+
+    const { rows } = await listStaleDevices(UNSCOPED, NOW);
+    expect(serialsOf(rows)).toEqual(["STALE"]);
+  });
+
+  test("excludes devices MDM has never seen", async () => {
+    // Null covers both "never enrolled" and "the export's date would not parse"
+    // — neither is "last seen 45 days ago", so neither belongs on a chase list.
+    await mkItem({ serialNumber: "NEVER", lastLogonAt: null });
+    await mkItem({ serialNumber: "STALE", lastLogonAt: daysAgo(45) });
+
+    const { rows } = await listStaleDevices(UNSCOPED, NOW);
+    expect(serialsOf(rows)).toEqual(["STALE"]);
+  });
+
+  test("excludes retired kit", async () => {
+    await mkItem({ serialNumber: "RETIRED", lastLogonAt: daysAgo(45), status: "RETIRED" });
+    await mkItem({ serialNumber: "STALE", lastLogonAt: daysAgo(45) });
+
+    const { rows } = await listStaleDevices(UNSCOPED, NOW);
+    expect(serialsOf(rows)).toEqual(["STALE"]);
+  });
+
+  test("excludes a device out on an open hand receipt", async () => {
+    // MDM silence is EXPECTED for kit deliberately issued out, and the receipt
+    // already says who has it.
+    const issued = await mkItem({ serialNumber: "ISSUED", lastLogonAt: daysAgo(45) });
+    await issueOnOpenReceipt(issued.id, issued.serialNumber);
+    await mkItem({ serialNumber: "STALE", lastLogonAt: daysAgo(45) });
+
+    const { rows } = await listStaleDevices(UNSCOPED, NOW);
+    expect(serialsOf(rows)).toEqual(["STALE"]);
+  });
+
+  test("still includes a device whose receipt is closed or whose line came back", async () => {
+    // Custody has ENDED in both shapes, so MDM silence is unexplained again and
+    // the device belongs on the list. Either half of the predicate alone would
+    // wrongly keep one of these out.
+    const returned = await mkItem({ serialNumber: "RETURNED", lastLogonAt: daysAgo(45) });
+    await issueOnOpenReceipt(returned.id, returned.serialNumber, { returnedAt: daysAgo(2) });
+    const closed = await mkItem({ serialNumber: "CLOSED", lastLogonAt: daysAgo(46) });
+    await issueOnOpenReceipt(closed.id, closed.serialNumber, { status: "CLOSED" });
+
+    const { rows } = await listStaleDevices(UNSCOPED, NOW);
+    expect(serialsOf(rows).sort()).toEqual(["CLOSED", "RETURNED"]);
+  });
+
+  test("treats the window as half-open: 90 days in, 30 days out", async () => {
+    await mkItem({ serialNumber: "AT-90", lastLogonAt: daysAgo(STALE_MAX_DAYS) });
+    await mkItem({ serialNumber: "AT-30", lastLogonAt: daysAgo(STALE_MIN_DAYS) });
+
+    // Exactly one boundary claims a device landing on it, so a row can never be
+    // counted by two windows or by neither.
+    const { rows } = await listStaleDevices(UNSCOPED, NOW);
+    expect(serialsOf(rows)).toEqual(["AT-90"]);
+  });
+
+  test("honours the dashboard's unit scope", async () => {
+    await mkItem({ serialNumber: "ALPHA", lastLogonAt: daysAgo(45), deviceUIC: "WAAAAA" });
+    await mkItem({ serialNumber: "BRAVO", lastLogonAt: daysAgo(45), deviceUIC: "WBBBBB" });
+
+    const { rows } = await listStaleDevices({ uic: "WAAAAA", unit: null }, NOW);
+    expect(serialsOf(rows)).toEqual(["ALPHA"]);
+  });
+
+  test("orders stalest first", async () => {
+    await mkItem({ serialNumber: "B-40", lastLogonAt: daysAgo(40) });
+    await mkItem({ serialNumber: "A-80", lastLogonAt: daysAgo(80) });
+    await mkItem({ serialNumber: "C-60", lastLogonAt: daysAgo(60) });
+
+    const { rows } = await listStaleDevices(UNSCOPED, NOW);
+    expect(serialsOf(rows)).toEqual(["A-80", "C-60", "B-40"]);
+  });
+});
+
+describe("listStaleDevices — the exported row", () => {
+  test("carries the identity, the holder and the age of the logon", async () => {
+    await mkItem({
+      serialNumber: "SN-EXPORT",
+      deviceName: "LAPTOP-042",
+      homeUnit: "Alpha Co",
+      deviceUIC: "WAAAAA",
+      lastLogonUserPrincipalName: "pfc@army.mil",
+      lastLogonAt: daysAgo(45),
+    });
+
+    const { rows } = await listStaleDevices(UNSCOPED, NOW);
+    expect(rows[0]).toMatchObject({
+      Serial: "SN-EXPORT",
+      "Device name": "LAPTOP-042",
+      Make: "Dell",
+      Model: "5540",
+      "Home unit": "Alpha Co",
+      UIC: "WAAAAA",
+      "Last logon user": "pfc@army.mil",
+      // ISO, so a spreadsheet sorts it — and in UTC, so it cannot slip a day.
+      "Last logon date": "2026-06-26",
+      "Days since logon": 45,
+      // Derived by the same CASE the rest of the app reads, not restated here.
+      Readiness: "Deployed",
+    });
+  });
+
+  test("renders an absent value as blank rather than dropping the column", async () => {
+    await mkItem({ serialNumber: "SPARSE", lastLogonAt: daysAgo(45) });
+
+    const { rows } = await listStaleDevices(UNSCOPED, NOW);
+    expect(rows[0]).toMatchObject({
+      "Device name": "",
+      Category: "",
+      "Home unit": "",
+      Holder: "",
+      "Storage location": "",
+      "Last logon user": "",
+    });
+  });
+});
+
+describe("countStaleDevices", () => {
+  test("counts exactly the rows the export would carry", async () => {
+    await mkItem({ lastLogonAt: daysAgo(45) });
+    await mkItem({ lastLogonAt: daysAgo(70) });
+    await mkItem({ lastLogonAt: daysAgo(10) });
+    await mkItem({ lastLogonAt: daysAgo(200) });
+    await mkItem({ lastLogonAt: null });
+    const issued = await mkItem({ lastLogonAt: daysAgo(50) });
+    await issueOnOpenReceipt(issued.id, issued.serialNumber);
+
+    // The card shows this number and the button hands over those rows. They are
+    // two round trips through one predicate; if they can disagree, the number
+    // on screen is a lie about the file.
+    const count = await countStaleDevices(UNSCOPED, NOW);
+    const { rows } = await listStaleDevices(UNSCOPED, NOW);
+    expect(count).toBe(2);
+    expect(rows).toHaveLength(count);
+  });
+
+  test("counts within the unit scope", async () => {
+    await mkItem({ lastLogonAt: daysAgo(45), deviceUIC: "WAAAAA" });
+    await mkItem({ lastLogonAt: daysAgo(45), deviceUIC: "WAAAAA" });
+    await mkItem({ lastLogonAt: daysAgo(45), deviceUIC: "WBBBBB" });
+
+    expect(await countStaleDevices({ uic: "WAAAAA", unit: null }, NOW)).toBe(2);
   });
 });

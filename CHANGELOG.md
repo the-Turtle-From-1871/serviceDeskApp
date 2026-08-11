@@ -5,6 +5,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-08-10
 
+### Added
+- **Devices now show when MDM last synced with them, alongside when someone last signed in.** The property book already carried a *Last logon date* — when a **person** last signed in to the device. It now also carries **Last sync** — when **MDM last checked in** with the device. They answer different questions and routinely disagree: a laptop sitting powered on in a cage syncs every night with no logon for months, while one somebody took home may show a recent logon and no sync since. Read together they distinguish a device that is alive but unused from one that has genuinely dropped off the network.
+
+  It is filled from a **`LastSync`** column in the MDM export (`Last Sync`, `last_sync`, `LastSyncDateTime` and `LastSyncDate` are all recognised). A file without that column imports exactly as before and leaves the field blank; a blank cell leaves whatever is already stored untouched, like every other imported column. The downloadable CSV template includes the column and an example value.
+
+  It appears on the device page under *Last sync date*, in the **More** panel on the items list on a phone, and as a **Last sync** column on the items list on a computer — which you can hide from the *Columns* menu like any other. The value is shown exactly as the export wrote it, so it matches what you see in MDM.
+
+  Two deliberate limits. **You cannot sort or filter by it**, because it is stored as the export's own text rather than a real date, and ordering that text would put `10/1/2025` before `7/25/2026` — a wrong answer presented confidently is worse than no sort at all. And a change to it is **not** recorded in a device's edit history: MDM syncs almost every device most nights, so logging it would add about 1,200 history entries a night and bury the custody changes the history exists to show.
+
+  **Note:** adds a nullable `Item.lastSyncDateTime` column (migration `20260810140000_add_last_sync_date_time`). Additive and safe to apply before deploy; no backfill — the field stays blank on every device until the next import carries the column.
+
 ### Changed
 - **When a device appears twice in one import file, the most recently seen record now wins.** A device that is re-imaged and re-enrolled shows up twice in the MDM export under the same serial: the live record, and a stale enrolment nobody removed. The import previously kept whichever copy came first in the file and ignored the rest.
 
@@ -31,6 +42,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   Nothing about the sorting itself changed — the same five columns are sortable, the same "no timer sorts last" rule applies to Due, and your choice is still remembered between visits. The queue offers no "Then by" second sort, unlike the items list, because it sorts on one column.
 
 ### Added
+- **Readiness analytics can now export the devices that have gone quiet — a chase list of everything MDM last saw between 30 and 90 days ago.** A card sits under the unit filter showing how many devices are in that window, with an **Export CSV** button beside it. The sheet opens in Excel and carries what you need to go and find each one: serial, device name, make, model, category, home unit, UIC, current holder and position, storage location, the last user to log on, the date they did, how many days ago that was, and the device's current readiness.
+
+  **Devices unseen for more than 90 days are deliberately left out.** They are a different problem needing a different response, and folding them in would bury the devices still worth chasing under a backlog nobody clears. Two other groups are also excluded, each for a reason: a device MDM has **never** seen — or whose export date could not be read — is not "last seen 45 days ago" but "we cannot say", so it does not belong on a list of devices to go and check; and a device **out on an open hand receipt** is already accounted for by that receipt, where silence from MDM is expected rather than a warning sign. Retired kit is out too, as it is everywhere else on this page. A device whose receipt has been closed, or whose line has come back, counts again.
+
+  The export follows whatever unit filter the page is set to, and the filename says which slice it came from — so `stale-devices-30-90d-alpha-co.csv` is self-describing once it has been mailed on. The count on screen and the rows in the file are produced from one rule, so the number you clicked is the number you get.
+
 - **A fallback way to import the fleet export: collect it from a Google Drive link on a schedule.** This is an **alternative, not a replacement** — posting the CSV straight to the app is still the primary import path and is preferred wherever it works, because the file never leaves the network it was produced on. Use this only where that is impossible: the workstation producing the MDM export cannot reach this application at all — the government network's web filter refuses the domain — so there was no way to get the CSV in from where it is produced. The export can now be published to Drive from that side instead, and the app collects it every morning by itself. Nobody has to carry the file to another computer.
 
   It only imports when the export has actually **changed**. The file's contents are fingerprinted, so re-running against last night's export does nothing at all rather than churning the whole property book — and a run that finds nothing new says so plainly instead of reporting a silent success.

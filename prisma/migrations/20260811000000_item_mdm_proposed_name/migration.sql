@@ -13,9 +13,14 @@
 -- means "no conflict", which is the correct starting state. Filtering on it is
 -- a rare admin action over ~1.2k rows.
 --
--- HAND-WRITTEN, not `migrate diff` output. The shared dev database carries an
--- Item."lastSyncDateTime" column that exists in no schema and no migration, so
--- the generated diff also contained `DROP COLUMN "lastSyncDateTime"` — someone
--- else's un-merged work. Applying that would have destroyed it.
+-- HAND-WRITTEN, not `migrate diff` output. When this was authored the shared
+-- dev database already carried an Item."lastSyncDateTime" column that existed
+-- in no schema and no migration, so the generated diff also contained
+-- `DROP COLUMN "lastSyncDateTime"` and applying it would have destroyed work
+-- that was in flight on another branch. (It has since landed properly as
+-- 20260810140000_add_last_sync_date_time.) The lesson outlives the incident:
+-- in a shared clone, check whether a generated diff mentions YOUR columns
+-- before trusting it -- "the diff is non-empty" is not the same as "my change
+-- needs it".
 -- AlterTable
 ALTER TABLE "Item" ADD COLUMN     "mdmProposedName" TEXT;

@@ -139,6 +139,7 @@ export const importRowSchema = z.object({
   lastLogonDate: optional,
   enrollmentDate: optional,
   compliance: optional,
+  lastSyncDateTime: optional,
 });
 
 export type ImportRowInput = z.infer<typeof importRowSchema>;

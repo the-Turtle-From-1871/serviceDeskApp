@@ -7,13 +7,13 @@ const UNITS = new Map<string, string>([["DCSIM", "DCSIM"], ["487B", "487FA BATTE
 const mk = (row: number, over: Partial<RawRow> = {}): RawRow => ({
   row, make: "M4", model: "Carbine", serialNumber: `S${row}`, deviceName: "Radio",
   homeUnit: "", deviceUIC: "", deviceCategory: "", storageLocation: "", notes: "", assignedUser: "", lastLogonUserPrincipalName: "",
-  lastLogonDate: "", enrollmentDate: "", compliance: "", ...over,
+  lastLogonDate: "", enrollmentDate: "", compliance: "", lastSyncDateTime: "", ...over,
 });
 
 const existing = (over: Partial<ExistingItem> = {}): ExistingItem => ({
   id: "id-1", status: "ACTIVE", make: "M4", model: "Carbine", deviceName: "Radio", homeUnit: null, deviceUIC: null, deviceCategory: null, storageLocation: null, currentUserEmail: null,
   lastLogonUserPrincipalName: null, lastLogonDate: null, enrollmentDate: null, compliance: null,
-  mdmProposedName: null, ...over,
+  lastSyncDateTime: null, mdmProposedName: null, ...over,
 });
 
 const map = (serial: string, item: ExistingItem) => new Map([[serial.toLowerCase(), item]]);
@@ -586,9 +586,66 @@ describe("planImport", () => {
   });
 });
 
+describe("lastSyncDateTime", () => {
+  it("sets it on a newly created item", () => {
+    const plan = planImport([mk(1, { lastSyncDateTime: "8/9/2026 6:02:11 AM" })], new Map(), UNITS);
+    expect(plan.toCreate[0]?.lastSyncDateTime).toBe("8/9/2026 6:02:11 AM");
+  });
+
+  it("updates a matched row SILENTLY — no ItemEdit history", () => {
+    // The load-bearing one. MDM syncs nearly every device nightly, so this
+    // value changes on nearly every row of nearly every import; logging it
+    // would write ~1,200 history rows a night and bury the custody edits the
+    // ItemEdit trail exists to show. It must land in `data` (so the column is
+    // written) while staying out of `loggedChanges`.
+    const before = existing({ lastSyncDateTime: "8/1/2026 1:00:00 AM" });
+    const plan = planImport(
+      [mk(1, { serialNumber: "S1", lastSyncDateTime: "8/9/2026 6:02:11 AM" })],
+      map("S1", before),
+      UNITS,
+    );
+    expect(plan.toUpdate[0]?.data.lastSyncDateTime).toBe("8/9/2026 6:02:11 AM");
+    expect(plan.toUpdate[0]?.loggedChanges.map((c) => c.field)).not.toContain("lastSyncDateTime");
+  });
+
+  it("counts as a real change, so a row whose ONLY difference is the sync time is not 'unchanged'", () => {
+    // Silent is not the same as ignored: the column still has to be written,
+    // which means the row belongs in toUpdate rather than in unchanged.
+    const before = existing({ lastSyncDateTime: "8/1/2026 1:00:00 AM" });
+    const plan = planImport(
+      [mk(1, { serialNumber: "S1", lastSyncDateTime: "8/9/2026 6:02:11 AM" })],
+      map("S1", before),
+      UNITS,
+    );
+    expect(plan.toUpdate).toHaveLength(1);
+    expect(plan.unchanged).toHaveLength(0);
+  });
+
+  it("leaves the stored value untouched when the cell is blank", () => {
+    const before = existing({ lastSyncDateTime: "8/1/2026 1:00:00 AM" });
+    const plan = planImport([mk(1, { serialNumber: "S1", lastSyncDateTime: "" })], map("S1", before), UNITS);
+    expect(plan.unchanged).toHaveLength(1);
+    expect(plan.toUpdate).toHaveLength(0);
+  });
+
+  it("does not disturb lastLogonDate or its parsed twin", () => {
+    // The two are separate facts. A sync-only refresh must not touch the logon
+    // columns — lastLogonAt in particular is what readiness would read.
+    const before = existing({ lastLogonDate: "7/25/2026 1:40:21 AM", lastSyncDateTime: null });
+    const plan = planImport(
+      [mk(1, { serialNumber: "S1", lastLogonDate: "", lastSyncDateTime: "8/9/2026 6:02:11 AM" })],
+      map("S1", before),
+      UNITS,
+    );
+    expect(plan.toUpdate[0]?.data.lastSyncDateTime).toBe("8/9/2026 6:02:11 AM");
+    expect(plan.toUpdate[0]?.data).not.toHaveProperty("lastLogonDate");
+    expect(plan.toUpdate[0]?.data).not.toHaveProperty("lastLogonAt");
+  });
+});
+
 describe("storageLocation", () => {
   it("sets it on a newly created item", () => {
-    const rows = [{ row: 1, make: "Dell", model: "5540", serialNumber: "NEW-1", deviceName: "", homeUnit: "", deviceUIC: "", deviceCategory: "", storageLocation: "Bldg 400 Cage 3", notes: "", assignedUser: "", lastLogonUserPrincipalName: "", lastLogonDate: "", enrollmentDate: "", compliance: "" }];
+    const rows = [{ row: 1, make: "Dell", model: "5540", serialNumber: "NEW-1", deviceName: "", homeUnit: "", deviceUIC: "", deviceCategory: "", storageLocation: "Bldg 400 Cage 3", notes: "", assignedUser: "", lastLogonUserPrincipalName: "", lastLogonDate: "", enrollmentDate: "", compliance: "", lastSyncDateTime: "" }];
     const plan = planImport(rows, new Map(), new Map());
     expect(plan.toCreate[0]?.storageLocation).toBe("Bldg 400 Cage 3");
   });
@@ -598,9 +655,9 @@ describe("storageLocation", () => {
       id: "i1", status: "ACTIVE", make: "Dell", model: "5540", deviceName: "N1",
       homeUnit: null, deviceUIC: null, deviceCategory: null, storageLocation: "Bldg 400",
       currentUserEmail: null, lastLogonUserPrincipalName: null, lastLogonDate: null,
-      enrollmentDate: null, compliance: null, mdmProposedName: null,
+      enrollmentDate: null, compliance: null, lastSyncDateTime: null, mdmProposedName: null,
     }]]);
-    const rows = [{ row: 1, make: "", model: "", serialNumber: "OLD-1", deviceName: "", homeUnit: "", deviceUIC: "", deviceCategory: "", storageLocation: "Bldg 401", notes: "", assignedUser: "", lastLogonUserPrincipalName: "", lastLogonDate: "", enrollmentDate: "", compliance: "" }];
+    const rows = [{ row: 1, make: "", model: "", serialNumber: "OLD-1", deviceName: "", homeUnit: "", deviceUIC: "", deviceCategory: "", storageLocation: "Bldg 401", notes: "", assignedUser: "", lastLogonUserPrincipalName: "", lastLogonDate: "", enrollmentDate: "", compliance: "", lastSyncDateTime: "" }];
     const plan = planImport(rows, existing, new Map());
     expect(plan.toUpdate[0]?.data.storageLocation).toBe("Bldg 401");
     expect(plan.toUpdate[0]?.loggedChanges).toContainEqual({ field: "storageLocation", from: "Bldg 400", to: "Bldg 401" });
@@ -611,9 +668,9 @@ describe("storageLocation", () => {
       id: "i2", status: "ACTIVE", make: "Dell", model: "5540", deviceName: "N2",
       homeUnit: null, deviceUIC: null, deviceCategory: null, storageLocation: "Bldg 400",
       currentUserEmail: null, lastLogonUserPrincipalName: null, lastLogonDate: null,
-      enrollmentDate: null, compliance: null, mdmProposedName: null,
+      enrollmentDate: null, compliance: null, lastSyncDateTime: null, mdmProposedName: null,
     }]]);
-    const rows = [{ row: 1, make: "", model: "", serialNumber: "OLD-2", deviceName: "", homeUnit: "", deviceUIC: "", deviceCategory: "", storageLocation: "", notes: "", assignedUser: "", lastLogonUserPrincipalName: "", lastLogonDate: "", enrollmentDate: "", compliance: "" }];
+    const rows = [{ row: 1, make: "", model: "", serialNumber: "OLD-2", deviceName: "", homeUnit: "", deviceUIC: "", deviceCategory: "", storageLocation: "", notes: "", assignedUser: "", lastLogonUserPrincipalName: "", lastLogonDate: "", enrollmentDate: "", compliance: "", lastSyncDateTime: "" }];
     const plan = planImport(rows, existing, new Map());
     expect(plan.unchanged).toHaveLength(1);
     expect(plan.toUpdate).toHaveLength(0);
@@ -624,9 +681,9 @@ describe("storageLocation", () => {
       id: "i3", status: "RETIRED", make: "Dell", model: "5540", deviceName: "N3",
       homeUnit: null, deviceUIC: null, deviceCategory: null, storageLocation: "Bldg 400",
       currentUserEmail: null, lastLogonUserPrincipalName: null, lastLogonDate: null,
-      enrollmentDate: null, compliance: null, mdmProposedName: null,
+      enrollmentDate: null, compliance: null, lastSyncDateTime: null, mdmProposedName: null,
     }]]);
-    const rows = [{ row: 1, make: "", model: "", serialNumber: "RET-1", deviceName: "", homeUnit: "", deviceUIC: "", deviceCategory: "", storageLocation: "Bldg 401", notes: "", assignedUser: "", lastLogonUserPrincipalName: "", lastLogonDate: "", enrollmentDate: "", compliance: "" }];
+    const rows = [{ row: 1, make: "", model: "", serialNumber: "RET-1", deviceName: "", homeUnit: "", deviceUIC: "", deviceCategory: "", storageLocation: "Bldg 401", notes: "", assignedUser: "", lastLogonUserPrincipalName: "", lastLogonDate: "", enrollmentDate: "", compliance: "", lastSyncDateTime: "" }];
     const plan = planImport(rows, existing, new Map());
     expect(plan.toUpdate[0]?.data.storageLocation).toBe("Bldg 401");
     expect(plan.toUpdate[0]?.loggedChanges).toEqual([]);

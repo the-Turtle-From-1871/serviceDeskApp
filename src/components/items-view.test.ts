@@ -34,6 +34,7 @@ const row = (over: Partial<ItemRow>): ItemRow => ({
   lastLogonUserPrincipalName: over.lastLogonUserPrincipalName ?? null,
   lastLogonDate: over.lastLogonDate ?? null,
   compliance: over.compliance ?? null,
+  lastSyncDateTime: over.lastSyncDateTime ?? null,
 });
 
 describe("sortItemRows", () => {
@@ -101,16 +102,21 @@ describe("columns", () => {
     expect(SORTABLE_COLUMNS.map((c) => c.key)).toContain("readiness");
   });
 
-  it("makes every displayed column sortable except holder", () => {
+  it("makes every displayed column sortable except holder and lastSyncDateTime", () => {
     // The Sort control must not silently omit a column the table renders for
-    // no reason — but `holder` is a deliberate exception (see ColumnKey):
-    // it has no column for Prisma to name, so it is displayed without being
-    // offered as a sort key.
+    // no reason — but there are two deliberate exceptions (see ColumnKey):
+    // `holder` has no column for Prisma to name, and `lastSyncDateTime` has one
+    // that holds the MDM export's raw text, so ordering by it would sort
+    // lexically (10/1/2025 ahead of 7/25/2026) and confidently return the wrong
+    // order. Both are displayed without being offered as a sort key.
+    const unsortable = ["holder", "lastSyncDateTime"];
     expect(SORTABLE_COLUMNS.map((c) => c.key)).toEqual(
-      ITEM_COLUMNS.filter((c) => c.key !== "holder").map((c) => c.key),
+      ITEM_COLUMNS.filter((c) => !unsortable.includes(c.key)).map((c) => c.key),
     );
-    expect(ITEM_COLUMNS.map((c) => c.key)).toContain("holder");
-    expect(SORTABLE_COLUMNS.map((c) => c.key)).not.toContain("holder");
+    for (const key of unsortable) {
+      expect(ITEM_COLUMNS.map((c) => c.key), `${key} should be displayable`).toContain(key);
+      expect(SORTABLE_COLUMNS.map((c) => c.key), `${key} should not be sortable`).not.toContain(key);
+    }
   });
 
   it("offers exactly the sort keys the server accepts", () => {

@@ -9,8 +9,8 @@ import { analyzeImportAction, commitImportAction } from "@/app/admin/actions/ite
 // A second row of examples is included because `deviceType` is new and a blank
 // template gives no hint of what belongs in it.
 export const TEMPLATE =
-  "make,model,serialNumber,deviceName,deviceType,homeUnit,deviceUIC,storageLocation,notes,assignedUser,lastLogonUserPrincipalName,lastLogonDate,enrollmentDate,compliance\n" +
-  "Dell Inc.,Latitude 5540,ABC1234,NGHINB-EXAMPLE-01,Laptop,A CO 1-234 IN,W6BTAA,Bldg 400 Cage 3,,soldier@army.mil,soldier@army.mil,7/25/2026 1:40:21 AM,5/1/2025 2:23:41 AM,compliant\n";
+  "make,model,serialNumber,deviceName,deviceType,homeUnit,deviceUIC,storageLocation,notes,assignedUser,lastLogonUserPrincipalName,lastLogonDate,enrollmentDate,compliance,lastSync\n" +
+  "Dell Inc.,Latitude 5540,ABC1234,NGHINB-EXAMPLE-01,Laptop,A CO 1-234 IN,W6BTAA,Bldg 400 Cage 3,,soldier@army.mil,soldier@army.mil,7/25/2026 1:40:21 AM,5/1/2025 2:23:41 AM,compliant,8/9/2026 6:02:11 AM\n";
 // A CSV of items is small; anything larger is almost certainly a mistake — and the
 // two-step analyze→commit flow uploads the file twice, so bound it up front.
 const MAX_CSV_BYTES = 5 * 1024 * 1024; // 5 MB

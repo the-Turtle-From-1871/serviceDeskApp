@@ -130,6 +130,7 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
               lastLogonDate: item.lastLogonDate,
               enrollmentDate: item.enrollmentDate,
               compliance: item.compliance,
+              lastSyncDateTime: item.lastSyncDateTime,
             }}
             isAdmin={isAdmin}
             units={isAdmin ? units : []}

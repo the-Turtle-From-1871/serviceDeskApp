@@ -6,12 +6,16 @@ import { auditCutoff, type AuditState } from "@/modules/audit/audit.status";
 // The bucket CASE is shared with the /items audit sort so the donut and the
 // table can never disagree about which badge a row carries.
 import { auditCaseSql } from "@/modules/audit/audit.sql";
-import type { ReadinessState } from "@/modules/items/readiness";
+import { READINESS_LABEL, type ReadinessState } from "@/modules/items/readiness";
 import {
   READINESS_CASE,
   READINESS_JOINS,
   itemScopeSql,
 } from "@/modules/items/readiness.sql";
+// THE definition of "in someone's custody right now" — imported, never restated.
+// The stale-device export subtracts live custody from its result set, so it must
+// mean exactly what the Readiness badge means by it.
+import { CUSTODY_FROM, OPEN_CUSTODY_PREDICATE } from "@/modules/transfers/custody.sql";
 
 /* ============================================================
    Analytics aggregation for the readiness dashboard.
@@ -35,11 +39,15 @@ import {
   RANGES,
   UNCATEGORIZED,
   AUDIT_STATE_ORDER,
+  STALE_MIN_DAYS,
+  STALE_MAX_DAYS,
+  STALE_EXPORT_MAX,
   type AuditReadinessSlice,
   type CategoryKpi,
   type GroupByKey,
   type ItemScope,
   type RangeKey,
+  type StaleDeviceRow,
   type UnitAllocation,
   type VelocityPoint,
 } from "./analytics.types";
@@ -391,8 +399,198 @@ export async function getUnitAllocations(
 
 export type DashboardData = Awaited<ReturnType<typeof getDashboard>>;
 
+/* ------------------------------------------------------------
+   Stale devices — the 30-90 day chase list.
+
+   Answers "which devices has MDM not heard from in a month, while there is
+   still a realistic chance of finding them". Not a chart: it is an export, so
+   the dashboard shows only the count and the sheet carries the rows.
+   ------------------------------------------------------------ */
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The window boundaries as instants.
+ *
+ * COMPUTED IN JS AND BOUND AS PARAMETERS — never `now()` inside the SQL. Two
+ * reasons: the count rendered on the card and the rows in the downloaded file
+ * are two separate round trips, and a clock read independently by each would
+ * let a device cross the 30-day boundary between them, so the sheet would not
+ * match the number the operator clicked; and an injected `now` is what makes
+ * the window testable at all without freezing the database's clock.
+ *
+ * Half-open on purpose: `from` is inclusive, `to` exclusive, so exactly one of
+ * the two boundaries can claim a device landing precisely on 30 days.
+ */
+export function staleLogonWindow(now: Date): { from: Date; to: Date } {
+  return {
+    // The OLDEST logon still in scope. Anything before this is past 90 days and
+    // deliberately out of the sheet (see STALE_MAX_DAYS).
+    from: new Date(now.getTime() - STALE_MAX_DAYS * DAY_MS),
+    // The NEWEST logon still counted as stale.
+    to: new Date(now.getTime() - STALE_MIN_DAYS * DAY_MS),
+  };
+}
+
+/**
+ * THE definition of "stale", as one SQL fragment.
+ *
+ * Shared by the count and the row query so the card can never say 47 and then
+ * hand over 52 — the same reason readiness has one CASE rather than one per
+ * surface. Each clause earns its place:
+ *
+ *  - `status = 'ACTIVE'`  retired kit has left the fleet; chasing it is noise,
+ *                         and every other aggregate here scopes the same way.
+ *  - `itemScopeSql`       the page's ?uic=/?unit= filter, through the same twin
+ *                         the charts use, so the sheet covers exactly the slice
+ *                         on screen.
+ *  - `lastLogonAt NOT NULL` a device MDM has never seen — or whose export date
+ *                         would not parse — is not "last seen 45 days ago". It
+ *                         is "we cannot say", which is a different list.
+ *  - the window           see staleLogonWindow.
+ *  - `NOT EXISTS` custody a device issued out on a live hand receipt is
+ *                         accounted for BY THAT RECEIPT. MDM silence is
+ *                         expected there and is not evidence of anything.
+ *
+ * Every value is bound; the only interpolations are pre-built fragments
+ * (CLAUDE.md §2).
+ */
+function staleDeviceWhere(scope: ItemScope, now: Date): Prisma.Sql {
+  const { from, to } = staleLogonWindow(now);
+  return Prisma.sql`
+        i."status" = 'ACTIVE'
+    AND ${itemScopeSql(scope)}
+    AND i."lastLogonAt" IS NOT NULL
+    AND i."lastLogonAt" >= ${from}::timestamptz
+    AND i."lastLogonAt" <  ${to}::timestamptz
+    AND NOT EXISTS (
+      SELECT 1
+      ${CUSTODY_FROM}
+      WHERE ti."itemId" = i."id"
+        AND ${OPEN_CUSTODY_PREDICATE}
+    )
+  `;
+}
+
+/**
+ * How many devices are in the window. One aggregate, no rows fetched — this
+ * runs on every dashboard load, so it must not pull the catalogue back to count
+ * it. Needs no readiness join: nothing in the predicate reads one.
+ */
+export async function countStaleDevices(scope: ItemScope, now: Date = new Date()): Promise<number> {
+  const rows = await prisma.$queryRaw<{ count: number }[]>(Prisma.sql`
+    SELECT COUNT(*)::int AS count
+    FROM "Item" i
+    WHERE ${staleDeviceWhere(scope, now)}
+  `);
+  return Number(rows[0]?.count ?? 0);
+}
+
+type StaleDeviceQueryRow = {
+  serialNumber: string;
+  deviceName: string | null;
+  make: string;
+  model: string;
+  deviceCategory: string | null;
+  homeUnit: string | null;
+  deviceUIC: string | null;
+  currentUserEmail: string | null;
+  currentPosition: string | null;
+  storageLocation: string | null;
+  lastLogonUserPrincipalName: string | null;
+  lastLogonAt: Date;
+  readiness: ReadinessState;
+};
+
+/** `YYYY-MM-DD`, in UTC.
+ *
+ *  UTC and not local time because parseLastLogonAt builds the instant with
+ *  `Date.UTC` from the MDM export's wall-clock date — reading it back in a
+ *  westward local zone would shift the printed day one earlier than the export
+ *  said. And an ISO date rather than the raw `7/25/2026 1:40:21 AM` text
+ *  because a spreadsheet sorts and filters this one correctly; the raw string
+ *  is a display artifact of the import, not a value.
+ */
+function isoDay(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * The rows behind the export.
+ *
+ * ONE query: the readiness column comes from READINESS_CASE in the database
+ * rather than by classifying rows here, which would mean loading the service
+ * queue and the receipt lines per item — the N+1 the data-fetching rules
+ * forbid. Ordered stalest-first, because that is the order someone works the
+ * list in, with `id` as the tie-break so the sheet is stable between runs.
+ *
+ * Bounded by STALE_EXPORT_MAX, taking one extra row purely as an overflow
+ * probe so "is there more?" costs no second COUNT. The probe is trimmed before
+ * it reaches the file.
+ *
+ * `currentUser` is the PHYSICAL column behind `currentUserEmail`
+ * (`@map("currentUser")` in the schema) — raw SQL names physical columns.
+ */
+export async function listStaleDevices(
+  scope: ItemScope,
+  now: Date = new Date(),
+): Promise<{ rows: StaleDeviceRow[]; truncated: boolean }> {
+  const found = await prisma.$queryRaw<StaleDeviceQueryRow[]>(Prisma.sql`
+    SELECT i."serialNumber",
+           i."deviceName",
+           i."make",
+           i."model",
+           i."deviceCategory",
+           i."homeUnit",
+           i."deviceUIC",
+           i."currentUser" AS "currentUserEmail",
+           i."currentPosition",
+           i."storageLocation",
+           i."lastLogonUserPrincipalName",
+           i."lastLogonAt",
+           ${READINESS_CASE} AS readiness
+    FROM "Item" i
+    ${READINESS_JOINS}
+    WHERE ${staleDeviceWhere(scope, now)}
+    ORDER BY i."lastLogonAt" ASC, i."id" ASC
+    LIMIT ${STALE_EXPORT_MAX + 1}
+  `);
+
+  const truncated = found.length > STALE_EXPORT_MAX;
+  const rows = (truncated ? found.slice(0, STALE_EXPORT_MAX) : found).map((r) => ({
+    Serial: r.serialNumber,
+    "Device name": r.deviceName ?? "",
+    Make: r.make,
+    Model: r.model,
+    Category: r.deviceCategory ?? "",
+    "Home unit": r.homeUnit ?? "",
+    UIC: r.deviceUIC ?? "",
+    // Free text, NOT a validated email — the importer copies the MDM export's
+    // assigned-user column into it verbatim, so live rows hold values like
+    // "SGT Smith" (CLAUDE.md §1). Exported as-is.
+    Holder: r.currentUserEmail ?? "",
+    Position: r.currentPosition ?? "",
+    "Storage location": r.storageLocation ?? "",
+    "Last logon user": r.lastLogonUserPrincipalName ?? "",
+    "Last logon date": isoDay(r.lastLogonAt),
+    "Days since logon": Math.floor((now.getTime() - r.lastLogonAt.getTime()) / DAY_MS),
+    Readiness: READINESS_LABEL[r.readiness],
+  }));
+
+  return { rows, truncated };
+}
+
 export async function getDashboard(scope: ItemScope, range: RangeKey, groupBy: GroupByKey) {
-  const [units, auditReadiness, kpis, velocity, allocations, fleetTotal, vocabulary] =
+  const [
+    units,
+    auditReadiness,
+    kpis,
+    velocity,
+    allocations,
+    fleetTotal,
+    staleDeviceCount,
+    vocabulary,
+  ] =
     await Promise.all([
       listUnitOptions(),
       getAuditReadiness(scope),
@@ -400,6 +598,9 @@ export async function getDashboard(scope: ItemScope, range: RangeKey, groupBy: G
       getTransferVelocity(scope, range),
       getUnitAllocations(groupBy),
       prisma.item.count({ where: itemWhere(scope) }),
+      // One aggregate, joining the same Promise.all — the stale-device card
+      // costs the page a query, not a round trip.
+      countStaleDevices(scope),
       // The full category vocabulary, in a stable order. Deliberately NOT
       // scoped by the UIC filter: it is the chart's COLOUR KEY, so it must be
       // identical whichever unit is selected, or series get repainted.
@@ -408,5 +609,14 @@ export async function getDashboard(scope: ItemScope, range: RangeKey, groupBy: G
         .then((rows) => rows.map((r) => r.name)),
     ]);
 
-  return { units, auditReadiness, kpis, velocity, allocations, fleetTotal, vocabulary };
+  return {
+    units,
+    auditReadiness,
+    kpis,
+    velocity,
+    allocations,
+    fleetTotal,
+    staleDeviceCount,
+    vocabulary,
+  };
 }
