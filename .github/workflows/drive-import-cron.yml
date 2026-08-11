@@ -1,0 +1,43 @@
+name: Scheduled Drive import (cron)
+on:
+  schedule:
+    # ~09:17 UTC daily, deliberately off the top of the hour and clear of the
+    # 08:23 purge job. Move this to shortly after the MDM export is published
+    # to Drive — the import is a no-op until the linked file actually changes,
+    # so running early costs one fetch, but running before the export is
+    # refreshed just delays the fleet update by a day.
+    - cron: "17 9 * * *"
+  workflow_dispatch: {}
+concurrency:
+  group: drive-import
+  cancel-in-progress: false
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger the Drive import endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          # Canonical custom domain, so this keeps working if the vercel.app
+          # deploy URL is ever retired.
+          IMPORT_URL: https://www.dcsim.us/api/cron/import-drive
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "::error::CRON_SECRET repository secret is not set."; exit 1
+          fi
+          resp=$(curl -sS --max-time 90 -w $'\n%{http_code}' -H "Authorization: Bearer ${CRON_SECRET}" "${IMPORT_URL}")
+          code=$(printf '%s' "${resp}" | tail -n1); body=$(printf '%s' "${resp}" | sed '$d')
+          echo "HTTP ${code}"; echo "Response: ${body}"
+          [ "${code}" = "200" ] || { echo "::error::Got HTTP ${code} (401 = secret mismatch with Vercel; 502 = the Drive link is unreachable, revoked, or not a CSV)"; exit 1; }
+          # Three success shapes, and one of them is deliberately a FAILURE.
+          # "disabled" means DRIVE_CSV_URL is unset in Vercel, which would
+          # otherwise leave this job green forever while importing nothing —
+          # exactly the silent no-op the whole feature is built to avoid.
+          case "${body}" in
+            *'"status":"imported"'*) echo "Import ran." ;;
+            *'"status":"unchanged"'*) echo "The linked export has not changed since the last import; nothing to do." ;;
+            *'"status":"disabled"'*) echo "::error::DRIVE_CSV_URL is not set in Vercel — the import is doing nothing."; exit 1 ;;
+            *) echo "::error::Unrecognised response body"; exit 1 ;;
+          esac

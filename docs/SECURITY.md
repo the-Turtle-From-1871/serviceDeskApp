@@ -1185,6 +1185,79 @@ ceiling is confirmed.
 **Errors don't leak internals** — generic `"Import failed"` / a specific but
 non-sensitive parse error, plus a server log.
 
+### The scheduled Drive import (pull, not push)
+
+**`GET|POST /api/cron/import-drive`** — `src/app/api/cron/import-drive/route.ts`
+— collects the MDM export from a **public Google Drive link** instead of waiting
+for it to be pushed in.
+
+**Why it exists.** The government workstation that produces the export cannot
+reach this application at all: its web filter refuses the domain outright
+(HTTPS connection refused, HTTP answered by the filter's own block page). The
+export is therefore published to Drive from that side and pulled from here. This
+was an explicit decision by the operator after the direct paths were confirmed
+blocked — see the accepted risk below.
+
+**Authenticated by `CRON_SECRET`**, the same variable and the same
+`hasValidBearerSecret` constant-time compare as the purge cron — not
+`MDM_IMPORT_SECRET`, because this is a scheduled sweep rather than a
+caller-supplied upload. It fails closed on an unset secret. `api/cron` is
+already excluded from the `src/proxy.ts` matcher by segment, so the route needs
+no proxy change.
+
+**The source URL comes from the environment ONLY** (`DRIVE_CSV_URL`), never from
+the request, so there is no SSRF surface: a caller cannot steer the fetch. The
+URL must be `https://`, and redirects are followed because Drive's download link
+bounces to `drive.usercontent.google.com` — safe only because the starting point
+is fixed in configuration. Unset `DRIVE_CSV_URL` makes the sweep a no-op
+(`status: "disabled"`), which the scheduling workflow deliberately treats as a
+**failure** so the misconfiguration cannot sit green and silent.
+
+**A non-CSV body is refused before it is ever parsed** —
+`checkDriveCsvBody` in `src/modules/items/drive-csv.ts`. This is the control that
+matters most here. When a link stops being readable Google answers with an HTML
+page, and handed to the CSV parser that yields zero usable rows —
+indistinguishable from "the fleet did not change" — so the import would report
+success every night while silently importing nothing and the property book would
+go stale with no failure anywhere.
+
+**Status alone does not catch it, which is why the body is classified too.**
+Measured 2026-08-10 against the live endpoint: `uc?export=download` 303-redirects
+to `drive.usercontent.google.com/download`, and a **missing** file returns `404`
+with `text/html` — already rejected by the `res.ok` check. The other unreadable
+states do not all set a failing status: the large-file virus-scan interstitial is
+served as **HTML under HTTP 200**, and a revoked share has historically returned
+a sign-in page the same way (not reproducible here without a real restricted
+file, so treated as still possible rather than assumed away). An HTML body — by
+content-type **or** a leading `<`, whatever the status line claims — an empty
+body, or one over `MAX_CSV_BYTES` is a hard error and a `502`.
+
+**Unchanged exports are skipped by content hash.** `csvSourceHash` (sha256) is
+stored on the new nullable `ImportBatch.sourceHash` column (migration
+`20260810000000_import_batch_source_hash`) and compared against the newest
+non-null value. Content, not Drive's `modifiedTime` — an export regenerated on a
+schedule gets a fresh timestamp nightly even when nothing changed. The column is
+deliberately **not unique**: re-publishing an older export is a legitimate
+rollback, not a duplicate to reject. It is NULL for every hand upload and for
+`POST /api/items/import`, both of which import whatever they are handed.
+
+**Writes as the same service account** (`getImportActor()`,
+`mdm-import@service.invalid`) and reuses the same `commitImport` with
+`resolutions: []` — one import implementation, three front doors.
+
+**Bounded round trip.** The fetch carries its own 10s `AbortSignal.timeout`
+because it is new pre-transaction work inside the same `maxDuration = 60`
+budget documented above (45s of which belongs to `commitImport`'s transaction).
+Failing fast is the intended outcome: tomorrow's run retries, whereas a slow
+fetch that pushes the invocation past 60s gets the function killed
+mid-transaction.
+
+**Error messages name URLs, HTTP statuses and byte counts, never row
+contents**, so no property-book PII travels in the response — which is returned
+in full rather than genericised because the only caller holding `CRON_SECRET` is
+the operator reading the cron log, and "which of these went wrong" is the entire
+diagnostic value.
+
 ---
 
 ## 9. Data retention & minimization
@@ -1688,6 +1761,34 @@ challenge.
 ## Known gaps & accepted risks
 
 Tracked deliberately, so nobody re-discovers them as new findings.
+
+**0g. The MDM export sits on a public "anyone with the link" Google Drive URL.**
+⚠️ *Accepted 2026-08-10, after the direct import paths were confirmed blocked.*
+The scheduled Drive import ([§8](#8-background-jobs-cron)) fetches the fleet CSV
+with **no credential at all**, which means the file it fetches is readable by
+anyone holding that URL. That file is the whole property book in one download:
+serials, device names, home units, UICs, and the `assignedUser` column — real
+names and email addresses. This is materially different from the accepted public
+item surface, which exposes the same data **one device at a time** behind the PIN
+gate; here it is a single bulk export with no gate in front of it.
+
+Chosen because the government workstation that produces the export cannot reach
+this application at all (its web filter refuses the domain, and the operator
+elected to route around it via Drive rather than wait on an allowlist ticket).
+The link is unguessable in practice — a Drive file ID is a long random string —
+but it is a **bearer URL**, and bearer URLs leak: browser history, referrer
+headers, sync clients, DLP and proxy logs on the managed workstation, and
+anywhere the link is pasted to share it. Revocation is manual and happens in
+Drive, not here; nothing in this application can tell that the link has been
+shared onward. Note the app *does* detect revocation in the other direction — a
+share turned off produces an HTML body and a hard `502`, not a silent no-op.
+
+**The levers, in increasing order of effort**, if this stops being acceptable:
+restrict the Drive file to a dedicated Google **service account** and give the
+app that credential (removes the public URL entirely, and was the recommended
+option at the time); or drop the Drive hop altogether by getting `www.dcsim.us`
+allowlisted on the government network and reinstating the direct
+`POST /api/items/import` push, which never exposed the file at all.
 
 **0e. A self-registered, email-verified account bypasses the public PIN gate.**
 ⚠️ *Accepted 2026-08-09, as a consequence of opening registration.*

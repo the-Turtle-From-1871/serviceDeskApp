@@ -117,6 +117,7 @@ $env:SEED_ADMIN_EMAIL="admin@yourorg.com"; $env:SEED_ADMIN_PASSWORD="<strong-pas
    | `SIGNING_PRIVATE_KEY` | Ed25519 PKCS#8 PEM that signs each receipt's tamper-evidence seal. Paste the multi-line PEM as-is into Vercel. Unset means receipts are created **unsealed** — silently, and not retroactively fixable for receipts already written. See [`docs/SECURITY.md` §7](docs/SECURITY.md#7-cryptographic-receipt-seal). |
    | `PUBLIC_ACCESS_PIN_ENABLED` | `"true"` puts an admin-set 8-digit PIN in front of `/i/*` and `/receipts/<n>` for logged-out visitors. `/` stays open (Google's OAuth branding review requires a publicly readable home page). The PIN itself is set in-app at `/admin`, stored bcrypt-hashed. |
    | `MDM_IMPORT_SECRET` | Bearer secret for the machine-driven import endpoint — see §7. |
+   | `DRIVE_CSV_URL` | Direct-download URL of a **public** Google Drive CSV, pulled on a schedule when the exporting workstation cannot reach this app at all — see §8. Unset disables the sweep. ⚠️ Publishing the property book to an "anyone with the link" URL is an accepted risk, not a default: read `docs/SECURITY.md` *Known gaps* 0g first, and prefer §7. |
    | `RATE_LIMIT_DISABLED` | **Never set this in a deployed environment.** It turns off the rate limiter *and* the browser check. Local work only. |
 
 4. **Deploy.** Then point the custom domain at the project and set `APP_URL` to
@@ -371,6 +372,91 @@ unchanged rows is a no-op.
 recorded in that item's edit history, attributed to `MDM Import (automated)`,
 so you can see exactly what a run touched from the item's own page — and
 nothing is ever deleted, so a bad import is a correction, never a loss.
+
+## 8. Scheduled Drive import (optional — for a workstation that cannot reach this app)
+
+Use this **only when §7 is impossible**. §7 pushes the CSV straight in and the
+file never leaves the government network; this section pulls it from a public
+Drive link instead, which means publishing the property book to a URL anyone
+holding it can read. Read `docs/SECURITY.md` *Known gaps* **0g** before setting
+it up, and prefer getting the app's domain allowlisted on that network.
+
+**Why it exists.** A managed government workstation typically routes browser
+traffic through an inspecting proxy while refusing direct sockets, so the §7
+PowerShell/curl push fails with WinSock **10061** ("the target machine actively
+refused it") — and if the domain is filtered outright, the browser upload at
+`/admin/items/import` fails too. The tell that it is the *filter* and not the
+app: this app never serves a 404 over plain HTTP on any path (every HTTP request
+is a 308 to HTTPS), so an HTTP 404 is the filter's own block page.
+
+**Endpoint:** `GET|POST /api/cron/import-drive`, authenticated with the existing
+`Authorization: Bearer <CRON_SECRET>` — the same secret and helper as the purge
+cron in §6, **not** `MDM_IMPORT_SECRET`.
+
+### Setting it up
+
+1. **Publish the export to Drive** from the workstation, and set the file's
+   sharing to *Anyone with the link → Viewer*.
+2. **Replace that file's contents for every subsequent export — never upload a
+   new file.** A new upload mints a new file ID, which breaks the link and
+   silently stops the import: the app keeps fetching the old, now-static file and
+   reports `"unchanged"` every morning forever. This is the one workflow rule
+   that matters, and there are two ways to honour it:
+   - **Automated (preferred):** `scripts/drive-upload/Upload-FleetCsv.ps1` calls
+     `files.update`, which replaces the contents in place and cannot create a new
+     file even by accident. It authenticates as a **service account** (no
+     refresh token to expire, and its reach is limited to files explicitly shared
+     with it), and is verified working on Windows PowerShell 5.1 with a P12 key —
+     no PowerShell 7 needed. Setup is in `scripts/drive-upload/README.md`.
+   - **By hand:** Drive → ⋮ → **Manage versions → Upload new version**, on that
+     same file.
+3. **Set `DRIVE_CSV_URL`** in Vercel to the direct-download form of that link
+   and **redeploy** (the handler reads it from the running instance):
+
+   ```
+   https://drive.google.com/uc?export=download&id=<FILE_ID>
+   ```
+
+   The `<FILE_ID>` is the long string in the share URL
+   (`https://drive.google.com/file/d/<FILE_ID>/view`).
+4. **Confirm `CRON_SECRET` is set** in both Vercel and as a GitHub repository
+   secret — the scheduling workflow reuses the purge cron's secret.
+5. **Run it once by hand** from the Actions tab → *Scheduled Drive import (cron)*
+   → *Run workflow*, and read the response body in the log before trusting the
+   schedule.
+
+**Schedule:** `.github/workflows/drive-import-cron.yml`, 09:17 UTC daily. Move it
+to shortly after the export is regenerated. (Vercel Hobby cron is not used here
+for the same reason the purge job isn't — it never fired.)
+
+### Reading the result
+
+| Response | Meaning |
+|---|---|
+| `{"ok":true,"status":"imported",…}` | The export changed and was imported. Same count fields as §7. |
+| `{"ok":true,"status":"unchanged"}` | Byte-identical to the last import. Nothing was written — this is the normal result on a day nothing changed. |
+| `{"ok":true,"status":"disabled"}` | `DRIVE_CSV_URL` is unset. The workflow treats this as a **failure** on purpose, so it cannot sit green while importing nothing. |
+| `502` + a message | The link is unreachable, revoked, oversized, or **returned a web page instead of a CSV**. |
+| `401` | `CRON_SECRET` mismatch — check Vercel and the GitHub secret, and remember rotation needs a redeploy. |
+| `500` | Unexpected; check the Vercel function log. |
+
+**The `502` cases are the important ones**, and they are what stops a broken
+link from looking like a quiet success. Measured against the live endpoint on
+2026-08-10: `uc?export=download` 303-redirects to
+`drive.usercontent.google.com/download` (followed automatically), and a **missing
+or unreadable file comes back `404` with an HTML body** — reported as
+`The Drive link returned HTTP 404.` The large-file virus-scan interstitial, by
+contrast, is HTML served under a perfectly healthy `200`, so the body is checked
+as well as the status and any HTML is refused as `…returned a web page, not a
+CSV`. Either way nothing is imported. **If you see one of these, check the
+file's sharing setting and that the file ID still matches** — the most common
+cause is someone uploading a *new* file instead of a new version, per step 2.
+
+**Only changed exports are imported**, keyed on a sha256 of the file's contents
+stored in `ImportBatch.sourceHash`. Content rather than Drive's modified time,
+because an export regenerated on a schedule gets a fresh timestamp every night
+even when not one device changed. Re-publishing an *older* export is treated as a
+real change and will import — that is a deliberate rollback, not a duplicate.
 
 ## Notes / caveats
 
