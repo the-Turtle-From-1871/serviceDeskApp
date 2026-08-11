@@ -23,7 +23,7 @@ test("commitImport creates new rows, updates matches, and reports unchanged", as
     ",Carbine,BAD1,Radio,,",                // new row missing make -> skipped
   ].join("\n");
 
-  const res = await commitImport(csv, "items.csv", [], admin);
+  const res = await commitImport(csv, "items.csv", admin);
 
   expect(res.error).toBeUndefined();
   expect(res.added).toBe(2);            // NEW1, DUP1
@@ -46,7 +46,7 @@ test("commitImport updates deviceName + assignedUser (logged) and telemetry (sil
     "UP1,NewName,WABC00,jane@x.mil,2026-07-01,Compliant",
   ].join("\n");
 
-  const res = await commitImport(csv, "items.csv", [], admin);
+  const res = await commitImport(csv, "items.csv", admin);
   expect(res.added).toBe(0);
   expect(res.updated).toBe(1);
 
@@ -68,7 +68,7 @@ test("commitImport updates deviceName + assignedUser (logged) and telemetry (sil
 test("commitImport telemetry-only change writes no ItemEdit", async () => {
   await createItem({ make: "Dell", model: "5540", serialNumber: "UP2", deviceName: "Same", homeUnit: undefined, notes: undefined }, admin.id);
   const csv = "serialNumber,deviceName,compliance\nUP2,Same,Noncompliant\n";
-  const res = await commitImport(csv, "items.csv", [], admin);
+  const res = await commitImport(csv, "items.csv", admin);
   expect(res.updated).toBe(1);
   const item = await prisma.item.findUniqueOrThrow({ where: { serialNumber: "UP2" } });
   expect(item.compliance).toBe("Noncompliant");
@@ -80,7 +80,7 @@ test("commitImport updates a RETIRED item's fields but writes no ItemEdit", asyn
   await prisma.item.update({ where: { serialNumber: "RET1" }, data: { status: "RETIRED" } });
 
   const csv = "serialNumber,deviceName,assignedUser,compliance\nRET1,NewName,jane@x.mil,Compliant\n";
-  const res = await commitImport(csv, "items.csv", [], admin);
+  const res = await commitImport(csv, "items.csv", admin);
   expect(res.updated).toBe(1); // the update still happens
 
   const item = await prisma.item.findUniqueOrThrow({ where: { serialNumber: "RET1" } });
@@ -103,7 +103,7 @@ test("analyzeImport reports mismatches and update counts without writing", async
 });
 
 test("commitImport returns a format error and imports nothing when serial column missing", async () => {
-  const res = await commitImport("make,model\nM4,Carbine\n", "bad.csv", [], admin);
+  const res = await commitImport("make,model\nM4,Carbine\n", "bad.csv", admin);
   expect(res.added).toBe(0);
   expect(res.error).toMatch(/serialNumber/);
   expect(await prisma.item.count()).toBe(0);
@@ -114,7 +114,7 @@ test("commitImport overwrites an existing item's homeUnit from the CSV and logs 
   await createItem({ make: "Dell", model: "5540", serialNumber: "HU1", deviceName: "Radio", homeUnit: "Old Unit", notes: undefined }, admin.id);
 
   const csv = "serialNumber,deviceName,homeUnit\nHU1,Radio,New Unit\n";
-  const res = await commitImport(csv, "items.csv", [], admin);
+  const res = await commitImport(csv, "items.csv", admin);
   expect(res.updated).toBe(1);
 
   const item = await prisma.item.findUniqueOrThrow({ where: { serialNumber: "HU1" } });
@@ -125,34 +125,34 @@ test("commitImport overwrites an existing item's homeUnit from the CSV and logs 
   expect(edits[0].changes).toEqual([{ field: "homeUnit", from: "Old Unit", to: "New Unit" }]);
 });
 
-test("commitImport reports rows whose home unit could not be derived", async () => {
-  // A device name with no segment matching any known unit abbreviation, and no
-  // homeUnit column -> unresolved, but the row still imports.
+// Home units are no longer derived from device names (2026-08-11), so a blank
+// homeUnit column imports as blank whatever the device name looks like — there
+// is nothing to derive, nothing to report as unresolved and nothing to teach.
+test("commitImport leaves homeUnit blank when the CSV column is blank", async () => {
   const csv = [
     "serialNumber,make,model,deviceName",
-    "UNRESOLVED-1,Dell,7440,ZZTOP99-LT-001",
+    // A name that WOULD have decoded before the removal, with a unit seeded
+    // below, so this fails loudly if derivation ever comes back.
+    "NOUNIT-1,Dell,7440,HI-XYZ-LT-001",
   ].join("\n");
+  await prisma.unit.create({ data: { abbreviation: "XYZ", fullName: "456th Signal Co" } });
 
-  const res = await commitImport(csv, "fleet.csv", [], admin);
+  const res = await commitImport(csv, "fleet.csv", admin);
 
   expect(res.added).toBe(1);
-  expect(res.unresolved).toHaveLength(1);
-  expect(res.unresolved[0].deviceName).toBe("ZZTOP99-LT-001");
-
-  const item = await prisma.item.findFirst({ where: { serialNumber: "UNRESOLVED-1" } });
+  const item = await prisma.item.findFirst({ where: { serialNumber: "NOUNIT-1" } });
   expect(item).not.toBeNull();
   expect(item?.homeUnit).toBeNull();
 });
 
-test("commitImport learns a resolution and applies it to every matching new row", async () => {
+test("commitImport takes homeUnit from the CSV column when it is supplied", async () => {
   const csv = [
     "make,model,serialNumber,deviceName,homeUnit,notes",
-    "M4,Carbine,A1,HI-XYZ-LT-001,,",
-    "M4,Carbine,A2,HI-XYZ-DT-002,,",
+    "M4,Carbine,A1,HI-XYZ-LT-001,456th Signal Co,",
+    "M4,Carbine,A2,HI-XYZ-DT-002,456th Signal Co,",
   ].join("\n");
-  const res = await commitImport(csv, "items.csv", [{ abbreviation: "XYZ", fullName: "456th Signal Co" }], admin);
+  const res = await commitImport(csv, "items.csv", admin);
   expect(res.added).toBe(2);
-  expect(res.detected).toBe(2);
   const homeUnits = (await prisma.item.findMany({ select: { homeUnit: true } })).map((i) => i.homeUnit);
   expect(homeUnits).toEqual(["456th Signal Co", "456th Signal Co"]);
 });
@@ -161,7 +161,7 @@ test("commitImport overwrites an existing item's storageLocation from the CSV an
   await createItem({ make: "Dell", model: "5540", serialNumber: "SL1", deviceName: "Radio", homeUnit: undefined, notes: undefined, storageLocation: "Bldg 400" }, admin.id);
 
   const csv = "serialNumber,deviceName,SLoc\nSL1,Radio,Bldg 401\n";
-  const res = await commitImport(csv, "items.csv", [], admin);
+  const res = await commitImport(csv, "items.csv", admin);
   expect(res.updated).toBe(1);
 
   const item = await prisma.item.findUniqueOrThrow({ where: { serialNumber: "SL1" } });

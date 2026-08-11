@@ -90,11 +90,12 @@ export async function POST(req: NextRequest) {
     const actor = await getImportActor();
     const text = await file.text();
 
-    // Empty resolutions is CORRECT, not a shortcut. An unrecognised unit
-    // abbreviation does not block a row: the item imports with a blank
-    // homeUnit and comes back in `unresolved` for an admin to teach later at
-    // /admin/units. See readinessState / planImport for why this is safe.
-    const res = await commitImport(text, file.name, [], actor);
+    // homeUnit comes from the CSV column only — it is never derived from the
+    // device name, so there is no unit vocabulary to consult and nothing for a
+    // caller to resolve (removed 2026-08-11; see planImport). A row whose
+    // homeUnit cell is blank imports with a blank home unit, and
+    // /admin/units lists those devices.
+    const res = await commitImport(text, file.name, actor);
     if (res.error) return NextResponse.json({ error: res.error }, { status: 400 });
 
     revalidatePath("/items");
@@ -107,9 +108,7 @@ export async function POST(req: NextRequest) {
       added: res.added,
       updated: res.updated,
       unchanged: res.unchanged,
-      detected: res.detected,
       skipped: res.skipped,
-      unresolved: res.unresolved,
       mismatches: res.mismatches,
     });
   } catch (e) {

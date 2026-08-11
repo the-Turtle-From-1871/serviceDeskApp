@@ -21,8 +21,7 @@ import {
 import { Prisma } from "@prisma/client";
 import { learnCategories, normalizeCategoryName } from "@/modules/items/categories.service";
 import { z } from "zod";
-import { resolutionSchema, type UnitResolution } from "@/modules/items/units.service";
-import type { SkippedRow, UnresolvedRow } from "@/modules/items/import";
+import type { SkippedRow } from "@/modules/items/import";
 
 export async function createItemAction(_prev: unknown, formData: FormData) {
   const admin = await requireCapability("MANAGE_ITEMS");
@@ -294,7 +293,7 @@ function readCsvFile(formData: FormData): { file: File } | { error: string } {
 
 export async function analyzeImportAction(
   formData: FormData
-): Promise<{ counts: { toImport: number; toUpdate: number; unchanged: number; skipped: number; autoDetected: number }; skipped: SkippedRow[]; unresolved: UnresolvedRow[]; mismatches: { serialNumber: string }[] } | { error: string }> {
+): Promise<{ counts: { toImport: number; toUpdate: number; unchanged: number; skipped: number }; skipped: SkippedRow[]; mismatches: { serialNumber: string }[] } | { error: string }> {
   await requireCapability("MANAGE_ITEMS");
   const f = readCsvFile(formData);
   if ("error" in f) return f;
@@ -302,7 +301,7 @@ export async function analyzeImportAction(
     const text = await f.file.text();
     const res = await analyzeImport(text);
     if (res.error) return { error: res.error };
-    return { counts: res.counts, skipped: res.skipped, unresolved: res.unresolved, mismatches: res.mismatches };
+    return { counts: res.counts, skipped: res.skipped, mismatches: res.mismatches };
   } catch (e) {
     console.error("[analyzeImportAction] unexpected error:", e);
     return { error: "Something went wrong reading the file. Please try again." };
@@ -311,26 +310,18 @@ export async function analyzeImportAction(
 
 export async function commitImportAction(
   formData: FormData
-): Promise<{ added: number; updated: number; skipped: SkippedRow[]; unchanged: number; detected: number; mismatches: { serialNumber: string }[] } | { error: string }> {
+): Promise<{ added: number; updated: number; skipped: SkippedRow[]; unchanged: number; mismatches: { serialNumber: string }[] } | { error: string }> {
   const admin = await requireCapability("MANAGE_ITEMS");
   const f = readCsvFile(formData);
   if ("error" in f) return f;
 
-  let resolutions: UnitResolution[];
-  try {
-    const raw = JSON.parse(String(formData.get("resolutions") ?? "[]"));
-    resolutions = z.array(resolutionSchema).parse(raw);
-  } catch {
-    return { error: "The unit assignments were invalid. Please re-check them and try again." };
-  }
-
   try {
     const text = await f.file.text();
-    const res = await commitImport(text, f.file.name, resolutions, { id: admin.id, name: admin.name });
+    const res = await commitImport(text, f.file.name, { id: admin.id, name: admin.name });
     if (res.error) return { error: res.error };
     revalidatePath("/items");
     revalidatePath("/admin/audit");
-    return { added: res.added, updated: res.updated, skipped: res.skipped, unchanged: res.unchanged, detected: res.detected, mismatches: res.mismatches };
+    return { added: res.added, updated: res.updated, skipped: res.skipped, unchanged: res.unchanged, mismatches: res.mismatches };
   } catch (e) {
     console.error("[commitImportAction] unexpected error:", e);
     return { error: "Something went wrong importing the file. Please try again." };

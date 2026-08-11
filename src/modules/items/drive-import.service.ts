@@ -3,7 +3,7 @@ import prisma from "@/lib/prisma";
 import { commitImport } from "./items.service";
 import { getImportActor } from "./import-actor";
 import { checkDriveCsvBody, MAX_CSV_BYTES } from "./drive-csv";
-import type { SkippedRow, UnresolvedRow } from "./import";
+import type { SkippedRow } from "./import";
 
 /**
  * Scheduled pull of the MDM export from a public Google Drive link.
@@ -26,9 +26,7 @@ export type DriveImportResult =
       added: number;
       updated: number;
       unchanged: number;
-      detected: number;
       skipped: SkippedRow[];
-      unresolved: UnresolvedRow[];
       mismatches: { serialNumber: string }[];
     };
 
@@ -147,10 +145,11 @@ export async function importItemsFromDrive(now: Date = new Date()): Promise<Driv
   const actor = await getImportActor();
   const filename = `drive-import-${now.toISOString().slice(0, 10)}.csv`;
 
-  // Empty resolutions, exactly as POST /api/items/import passes: an unrecognised
-  // unit abbreviation leaves homeUnit blank and comes back in `unresolved` for
-  // an admin to teach later at /admin/units. It never blocks a row.
-  const res = await commitImport(check.text, filename, [], actor, check.hash);
+  // homeUnit comes from the CSV column only and is never derived from the
+  // device name, so an import has no vocabulary to consult and nothing to
+  // resolve (removed 2026-08-11; see planImport). A blank cell leaves the home
+  // unit blank, and /admin/units lists the devices in that state.
+  const res = await commitImport(check.text, filename, actor, check.hash);
   if (res.error) throw new DriveImportError(res.error);
 
   return {
@@ -159,9 +158,7 @@ export async function importItemsFromDrive(now: Date = new Date()): Promise<Driv
     added: res.added,
     updated: res.updated,
     unchanged: res.unchanged,
-    detected: res.detected,
     skipped: res.skipped,
-    unresolved: res.unresolved,
     mismatches: res.mismatches,
   };
 }

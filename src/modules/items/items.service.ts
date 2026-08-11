@@ -8,8 +8,7 @@ import prisma from "@/lib/prisma";
 // or an item's stored string and its vocabulary row drift apart.
 import { newItemSchema, normalizeCategoryName, type NewItemInput } from "./items.schema";
 import { parseItemsCsv } from "./csv";
-import { planImport, type SkippedRow, type UnresolvedRow, type ExistingItem, type ItemUpdate } from "./import";
-import { loadUnitMap, learnUnits, type UnitResolution } from "./units.service";
+import { planImport, type SkippedRow, type ExistingItem, type ItemUpdate } from "./import";
 import { diffItemFields, type ItemLoggedFields } from "./item-diff";
 import { learnCategories } from "./categories.service";
 import { READINESS_JOINS, READINESS_RANK } from "./readiness.sql";
@@ -867,22 +866,19 @@ function collectMismatches(plan: { toUpdate: { serialNumber: string; makeModelMi
 }
 
 export async function analyzeImport(text: string): Promise<{
-  counts: { toImport: number; toUpdate: number; unchanged: number; skipped: number; autoDetected: number };
+  counts: { toImport: number; toUpdate: number; unchanged: number; skipped: number };
   skipped: SkippedRow[];
-  unresolved: UnresolvedRow[];
   mismatches: { serialNumber: string }[];
   error?: string;
 }> {
-  const empty = { toImport: 0, toUpdate: 0, unchanged: 0, skipped: 0, autoDetected: 0 };
+  const empty = { toImport: 0, toUpdate: 0, unchanged: 0, skipped: 0 };
   const { rows, error } = parseItemsCsv(text);
-  if (error) return { counts: empty, skipped: [], unresolved: [], mismatches: [], error };
+  if (error) return { counts: empty, skipped: [], mismatches: [], error };
 
-  // Independent reads — run them together.
-  const [existing, units] = await Promise.all([
-    loadExistingBySerial(rows.map((r) => r.serialNumber)),
-    loadUnitMap(),
-  ]);
-  const plan = planImport(rows, existing, units);
+  // One read now: the Unit vocabulary is no longer consulted, because homeUnit
+  // is never derived from a device name (removed 2026-08-11, see planImport).
+  const existing = await loadExistingBySerial(rows.map((r) => r.serialNumber));
+  const plan = planImport(rows, existing);
 
   return {
     counts: {
@@ -890,10 +886,8 @@ export async function analyzeImport(text: string): Promise<{
       toUpdate: plan.toUpdate.length,
       unchanged: plan.unchanged.length,
       skipped: plan.skipped.length,
-      autoDetected: plan.detected,
     },
     skipped: plan.skipped,
-    unresolved: plan.unresolved,
     mismatches: collectMismatches(plan),
   };
 }
@@ -901,7 +895,6 @@ export async function analyzeImport(text: string): Promise<{
 export async function commitImport(
   text: string,
   filename: string,
-  resolutions: UnitResolution[],
   editor: { id: string; name: string },
   /** sha256 of `text`, recorded on the ImportBatch so the scheduled Drive
    *  import can tell a genuinely new export from last night's unchanged one.
@@ -909,20 +902,16 @@ export async function commitImport(
    *  page and the POST /api/items/import route): both import whatever they are
    *  handed, so a fingerprint would have nothing to compare against. */
   sourceHash?: string | null,
-): Promise<{ added: number; updated: number; skipped: SkippedRow[]; unchanged: number; detected: number; mismatches: { serialNumber: string }[]; unresolved: UnresolvedRow[]; error?: string }> {
+): Promise<{ added: number; updated: number; skipped: SkippedRow[]; unchanged: number; mismatches: { serialNumber: string }[]; error?: string }> {
   const { rows, error } = parseItemsCsv(text);
-  if (error) return { added: 0, updated: 0, skipped: [], unchanged: 0, detected: 0, mismatches: [], unresolved: [], error };
+  if (error) return { added: 0, updated: 0, skipped: [], unchanged: 0, mismatches: [], error };
 
-  // Persist learned units BEFORE planning so detection re-runs with the enriched map.
-  await learnUnits(resolutions);
-
-  // Independent reads — run them together (loadUnitMap must follow learnUnits above).
-  const [existing, units] = await Promise.all([
-    loadExistingBySerial(rows.map((r) => r.serialNumber)),
-    loadUnitMap(),
-  ]);
-  const plan = planImport(rows, existing, units);
-  const { toCreate, toUpdate, unchanged, skipped, detected } = plan;
+  // One read. The Unit vocabulary is no longer consulted and no units are
+  // learned here: homeUnit comes from the CSV column or stays blank, so an
+  // import has nothing to teach and nothing to look up (removed 2026-08-11).
+  const existing = await loadExistingBySerial(rows.map((r) => r.serialNumber));
+  const plan = planImport(rows, existing);
+  const { toCreate, toUpdate, unchanged, skipped } = plan;
 
   const { added, updated, skipped: finalSkipped } = await prisma.$transaction(async (tx) => {
     // Register any category the CSV introduced, the same way units are learned
@@ -1089,7 +1078,7 @@ export async function commitImport(
     // 40s, not 50s: the 60s function budget also has to cover work that happens
     // OUTSIDE this transaction, in the same invocation — reading the uploaded
     // file, resolving the import actor, and (right above, before this
-    // transaction opens) the loadExistingBySerial + loadUnitMap queries, plus a
+    // transaction opens) the loadExistingBySerial query, plus a
     // cold start's Prisma engine init and first pool connect. At 50s that
     // pre-transaction work had only ~5s of headroom under the 60s ceiling, which
     // a slow cold start or a slow pool acquire could plausibly exceed — and if
@@ -1109,9 +1098,5 @@ export async function commitImport(
     console.warn(`[commitImport] ${toCreate.length - added} row(s) skipped by the DB serialNumber unique constraint (concurrent import or casing variant).`);
   }
 
-  // `unresolved` is surfaced (not just counted) because the automated import has
-  // no human at the resolution step — the caller reports it so an admin can teach
-  // the abbreviation later. The browser flow ignores this field; it gets the same
-  // list from analyzeImport before committing.
-  return { added, updated, skipped: finalSkipped, unchanged: unchanged.length, detected, mismatches: collectMismatches(plan), unresolved: plan.unresolved };
+  return { added, updated, skipped: finalSkipped, unchanged: unchanged.length, mismatches: collectMismatches(plan) };
 }
