@@ -105,6 +105,16 @@ beforeEach(() => {
   });
 });
 
+// The grace window and the repeat throttle are both wall-clock comparisons, so
+// these tests move time by hand. `vi.clearAllMocks()` in the beforeEach above
+// only clears call records, not this implementation, so the order is immaterial.
+let nowMs = 1_754_870_000_000;
+beforeEach(() => {
+  nowMs = 1_754_870_000_000;
+  vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+});
+afterEach(() => { vi.mocked(Date.now).mockRestore(); });
+
 describe("ItemsScanButton", () => {
   it("accumulates instead of navigating, and lists what it collected", async () => {
     const user = userEvent.setup();
@@ -420,15 +430,53 @@ describe("ItemsScanButton", () => {
   });
 
   describe("re-scanning an already-listed item", () => {
-    it("shows an 'Already scanned' notice and does not add a second row", async () => {
+    // The success message has to survive the repeat decodes of the code still
+    // sitting under the camera, or the operator never sees what was added.
+    it("says nothing at all for 3 seconds after a successful scan", async () => {
       const user = userEvent.setup();
       setup();
       await open(user);
       await user.click(screen.getByRole("button", { name: "emit-hp" }));
       await screen.findByText("2TK94709FN");
+      vi.mocked(beep).mockClear();
+
+      nowMs += 2_999;
       await user.click(screen.getByRole("button", { name: "emit-hp" }));
-      expect(await screen.findByText(/^Already scanned$/i)).toBeDefined();
+
+      expect(screen.getByTestId("scan-notice").textContent).toMatch(/^Added HP/);
+      expect(beep).not.toHaveBeenCalled();
+    });
+
+    it("names the serial once the grace has expired, and adds no second row", async () => {
+      const user = userEvent.setup();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      await screen.findByText("2TK94709FN");
+
+      nowMs += 3_000;
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+
+      expect(await screen.findByText("2TK94709FN already scanned")).toBeDefined();
+      // Exactly one node holds the bare serial: the list row. The notice reads
+      // "2TK94709FN already scanned", which this exact-match query does not hit.
       expect(screen.getAllByText("2TK94709FN")).toHaveLength(1);
+    });
+
+    // A serial scan registers the item-id key AND the sn: key it resolved from,
+    // so a later sticker scan of the same device arrives on the OTHER one and
+    // must still be able to name it. Both keys carry the serial for this reason.
+    it("names the serial when the repeat arrives on the row's other key", async () => {
+      const user = userEvent.setup();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      await screen.findByText("2TK94709FN");
+
+      nowMs += 3_000;
+      await user.click(screen.getByRole("button", { name: "emit-sticker" }));
+
+      expect(await screen.findByText("2TK94709FN already scanned")).toBeDefined();
     });
 
     it("does not beep on every frame the code sits in view", async () => {
@@ -438,11 +486,16 @@ describe("ItemsScanButton", () => {
       await user.click(screen.getByRole("button", { name: "emit-hp" }));
       await screen.findByText("2TK94709FN");
       vi.mocked(beep).mockClear();
+
+      // Past the 3s grace, so a repeat is reportable at all...
+      nowMs += 3_000;
       await user.click(screen.getByRole("button", { name: "emit-hp" }));
-      await user.click(screen.getByRole("button", { name: "emit-hp" }));
-      await user.click(screen.getByRole("button", { name: "emit-hp" }));
-      // All four "frames" land well inside the 1.5s throttle window, so only
-      // the first repeat should have produced a beep.
+      // ...but these three land inside the 1.5s per-key throttle behind it.
+      for (let i = 0; i < 3; i++) {
+        nowMs += 400;
+        await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      }
+
       expect(beep).toHaveBeenCalledTimes(1);
     });
   });
@@ -478,8 +531,11 @@ describe("ItemsScanButton", () => {
       await open(user);
       await user.click(screen.getByRole("button", { name: "emit-sticker" }));
       await screen.findByText("2TK94709FN");
+
+      nowMs += 3_000;
       await user.click(screen.getByRole("button", { name: "emit-sticker" }));
-      expect(await screen.findByText(/^Already scanned$/i)).toBeDefined();
+
+      expect(await screen.findByText("2TK94709FN already scanned")).toBeDefined();
       expect(screen.getAllByText("2TK94709FN")).toHaveLength(1);
     });
 
