@@ -236,6 +236,53 @@ export function completeServiceItem(id: string): Promise<ServiceQueueItem> {
   );
 }
 
+/**
+ * Complete MANY items' service in one pass — the batched twin of
+ * completeServiceItem, for a cart of finished devices.
+ *
+ * Three queries in one transaction. The findMany replaces the single-item
+ * canComplete guard: a row that is not PENDING simply is not in the set, so a
+ * completed row is SKIPPED rather than erroring the whole batch.
+ *
+ * Steps 2 and 3 stay in one transaction for the reason the single-item version
+ * gives: a queue row that says COMPLETED while the item was never marked on
+ * hand is the inconsistency worth preventing. Like that version it deliberately
+ * LEAVES dueAt/overdueAlertedAt on the finished row — clearing them is the next
+ * round's job (upsertServiceRequests / reopenServiceItem).
+ *
+ * The item update is scoped to ACTIVE: "back on hand" is meaningless for kit
+ * that left the fleet, and readiness reports RETIRED regardless.
+ *
+ * Enforces NO permissions — the calling Server Action owns the guard.
+ */
+export async function completeServiceItems(
+  itemIds: string[],
+): Promise<{ updated: number; skipped: number }> {
+  const ids = [...new Set(itemIds.filter((id) => id.trim() !== ""))];
+  if (ids.length === 0) return { updated: 0, skipped: 0 };
+  if (ids.length > MAX_BULK_ITEMS) throw new ServiceQueueError("TOO_MANY");
+
+  const now = new Date();
+  return prisma.$transaction(async (tx) => {
+    const pending = await tx.serviceQueueItem.findMany({
+      where: { itemId: { in: ids }, status: "PENDING" },
+      select: { id: true, itemId: true },
+    });
+    if (pending.length === 0) return { updated: 0, skipped: ids.length };
+
+    await tx.serviceQueueItem.updateMany({
+      where: { id: { in: pending.map((p) => p.id) } },
+      data: { status: "COMPLETED" },
+    });
+    await tx.item.updateMany({
+      where: { id: { in: pending.map((p) => p.itemId) }, status: "ACTIVE" },
+      data: { markedReadyAt: now },
+    });
+
+    return { updated: pending.length, skipped: ids.length - pending.length };
+  });
+}
+
 // COMPLETED -> PENDING (reopen from the item detail page).
 //
 // Reopen is a NEW ROUND, exactly like re-flagging a completed row, so it follows

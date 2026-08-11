@@ -470,6 +470,27 @@ other than `REIMAGE`/`REPAIR`/`OTHER`) is refused with an error rather than
 silently defaulted to one. Unlike the single-item flag, `transferId` is always
 written `null` — a scanned batch has no hand receipt behind it.
 
+**`completeServiceItemsAction` is the batched twin of `completeServiceAction`,
+added 2026-08-11** (`src/app/admin/actions/queue.ts`), gated on
+`requireCapability("MANAGE_QUEUE")` exactly like the other queue actions on
+this page — `completeServiceItems()`
+(`src/modules/service-queue/service-queue.service.ts`) enforces no permissions
+of its own, so the Server Action is the whole boundary. It takes ITEM ids, not
+queue-row ids — the selection bar on `/items` knows items, and the pending
+queue row for each is resolved server-side by a `findMany` scoped to
+`status: "PENDING"`, so a non-pending or missing row is simply absent from the
+set rather than causing an error. Item ids are client-supplied and bounded at
+`MAX_BULK_ITEMS` (500), both in the action's Zod schema (a readable message)
+and again in `completeServiceItems` itself (the backstop for any other
+caller, throwing `ServiceQueueError("TOO_MANY")`). Non-pending rows are
+excluded and reported back as `skipped`, never refused — the same shape as
+the batched flag and audit actions above. The queue-row status flip and the
+item's `markedReadyAt` stamp happen inside the same transaction (mirroring
+`completeServiceItem`), so a queue row can never read `COMPLETED` while the
+item was never marked back on hand; the item update is scoped to
+`status: "ACTIVE"`, and `dueAt`/`overdueAlertedAt` are deliberately left on
+the finished row, matching the single-item action.
+
 **Permanent item deletion is `requireAdmin()`-gated and has no undo.**
 `deleteItemAction` (`src/app/admin/actions/items.ts`) is the sole caller of
 `deleteItem()` (`src/modules/items/items.service.ts`), which enforces no

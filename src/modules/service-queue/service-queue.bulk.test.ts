@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, describe, it, expect } from "vitest";
 import prisma from "@/lib/prisma";
 import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
-import { upsertServiceRequests } from "./service-queue.service";
+import { upsertServiceRequests, completeServiceItems } from "./service-queue.service";
 
 let adminId: string;
 
@@ -109,5 +109,67 @@ describe("upsertServiceRequests", () => {
     await expect(
       upsertServiceRequests({ itemIds: ids, serviceType: "REPAIR" }),
     ).rejects.toMatchObject({ code: "TOO_MANY" });
+  });
+});
+
+describe("completeServiceItems", () => {
+  it("completes the queue rows AND stamps markedReadyAt on the items", async () => {
+    const items = await Promise.all([mkItem("BULKC1"), mkItem("BULKC2")]);
+    for (const it of items) {
+      await prisma.serviceQueueItem.create({
+        data: { itemId: it.id, serviceType: "REPAIR", status: "PENDING" },
+      });
+    }
+
+    const res = await completeServiceItems(items.map((i) => i.id));
+    expect(res).toEqual({ updated: 2, skipped: 0 });
+
+    const rows = await prisma.serviceQueueItem.findMany({ where: { itemId: { in: items.map((i) => i.id) } } });
+    expect(rows.every((r) => r.status === "COMPLETED")).toBe(true);
+
+    const fresh = await prisma.item.findMany({ where: { id: { in: items.map((i) => i.id) } } });
+    expect(fresh.every((i) => i.markedReadyAt !== null)).toBe(true);
+  });
+
+  it("LEAVES dueAt and overdueAlertedAt on the finished row", async () => {
+    const item = await mkItem("BULKC3");
+    const due = new Date("2026-03-01T00:00:00.000Z");
+    const alerted = new Date("2026-03-02T00:00:00.000Z");
+    await prisma.serviceQueueItem.create({
+      data: { itemId: item.id, serviceType: "REPAIR", status: "PENDING", dueAt: due, overdueAlertedAt: alerted },
+    });
+
+    await completeServiceItems([item.id]);
+
+    const row = await prisma.serviceQueueItem.findUniqueOrThrow({ where: { itemId: item.id } });
+    expect(row.dueAt?.getTime()).toBe(due.getTime());
+    expect(row.overdueAlertedAt?.getTime()).toBe(alerted.getTime());
+  });
+
+  it("skips items with no PENDING row instead of erroring", async () => {
+    const pending = await mkItem("BULKC4");
+    const none = await mkItem("BULKC5");
+    await prisma.serviceQueueItem.create({
+      data: { itemId: pending.id, serviceType: "REPAIR", status: "PENDING" },
+    });
+
+    const res = await completeServiceItems([pending.id, none.id]);
+    expect(res).toEqual({ updated: 1, skipped: 1 });
+  });
+
+  it("does not re-complete an already COMPLETED row", async () => {
+    const item = await mkItem("BULKC6");
+    await prisma.serviceQueueItem.create({
+      data: { itemId: item.id, serviceType: "REPAIR", status: "COMPLETED" },
+    });
+    const res = await completeServiceItems([item.id]);
+    expect(res).toEqual({ updated: 0, skipped: 1 });
+    const fresh = await prisma.item.findUniqueOrThrow({ where: { id: item.id } });
+    expect(fresh.markedReadyAt).toBeNull();
+  });
+
+  it("throws TOO_MANY above the cap", async () => {
+    const ids = Array.from({ length: 501 }, (_, i) => `id-${i}`);
+    await expect(completeServiceItems(ids)).rejects.toMatchObject({ code: "TOO_MANY" });
   });
 });

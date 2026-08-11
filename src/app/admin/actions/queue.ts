@@ -7,6 +7,7 @@ import {
   upsertServiceRequests,
   clearServiceRequest,
   completeServiceItem,
+  completeServiceItems,
   reopenServiceItem,
   setServiceDeadline,
 } from "@/modules/service-queue/service-queue.service";
@@ -20,6 +21,13 @@ const setSchema = z.object({
   itemId: z.string().min(1),
   serviceType: z.enum(["REIMAGE", "REPAIR", "OTHER"]),
   note: z.string().optional(),
+});
+
+const bulkIdsSchema = z.object({
+  itemIds: z
+    .array(z.string().min(1))
+    .min(1, "Select at least one item.")
+    .max(MAX_BULK_ITEMS, `Too many items selected. The limit is ${MAX_BULK_ITEMS} per action.`),
 });
 
 const bulkFlagSchema = z.object({
@@ -198,5 +206,32 @@ export async function flagItemsForServiceAction(formData: FormData): Promise<Bul
     }
     console.error("[flagItemsForServiceAction] unexpected error:", e);
     return { error: "Something went wrong flagging those items. Please try again." };
+  }
+}
+
+/**
+ * Complete service on every selected item — the /items selection-bar twin of
+ * completeServiceAction. Takes ITEM ids, not queue-row ids: the selection knows
+ * items, and the queue row is resolved server-side.
+ */
+export async function completeServiceItemsAction(formData: FormData): Promise<BulkQueueResult> {
+  await requireCapability("MANAGE_QUEUE");
+
+  const parsed = bulkIdsSchema.safeParse({ itemIds: bulkIds(formData) });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+
+  try {
+    const { updated, skipped } = await completeServiceItems(parsed.data.itemIds);
+    revalidatePath("/items");
+    revalidatePath("/admin/queue");
+    // Completing stamps markedReadyAt, which moves the fleet buckets.
+    revalidatePath("/admin/analytics");
+    return { ok: true, updated, skipped };
+  } catch (e) {
+    if (e instanceof ServiceQueueError && e.code === "TOO_MANY") {
+      return { error: `Too many items selected. The limit is ${MAX_BULK_ITEMS} per action.` };
+    }
+    console.error("[completeServiceItemsAction] unexpected error:", e);
+    return { error: "Something went wrong completing those items. Please try again." };
   }
 }

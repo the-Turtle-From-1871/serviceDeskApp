@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const requireCapability = vi.fn();
 const upsertServiceRequest = vi.fn();
 const upsertServiceRequests = vi.fn();
+const completeServiceItems = vi.fn();
 const reopenServiceItem = vi.fn();
 const setServiceDeadline = vi.fn();
 const getCurrentOpenTransferId = vi.fn();
@@ -21,6 +22,7 @@ vi.mock("@/modules/service-queue/service-queue.service", () => ({
   upsertServiceRequests: (i: unknown) => upsertServiceRequests(i),
   clearServiceRequest: vi.fn(),
   completeServiceItem: vi.fn(),
+  completeServiceItems: (ids: unknown) => completeServiceItems(ids),
   reopenServiceItem: (id: string, days?: unknown) => reopenServiceItem(id, days),
   setServiceDeadline: (itemId: string, days: number | null) => setServiceDeadline(itemId, days),
 }));
@@ -29,7 +31,13 @@ vi.mock("@/modules/transfers/transfers.service", () => ({
 }));
 vi.mock("next/cache", () => ({ revalidatePath: (p: string) => revalidatePath(p) }));
 
-import { setServiceAction, reopenServiceAction, setServiceDeadlineAction, flagItemsForServiceAction } from "./queue";
+import {
+  setServiceAction,
+  reopenServiceAction,
+  setServiceDeadlineAction,
+  flagItemsForServiceAction,
+  completeServiceItemsAction,
+} from "./queue";
 import { ServiceQueueError } from "@/modules/service-queue/service-queue.errors";
 import { AuthError } from "@/lib/authz";
 
@@ -47,6 +55,7 @@ beforeEach(() => {
   getCurrentOpenTransferId.mockResolvedValue(null);
   upsertServiceRequest.mockResolvedValue({ id: "sq1" });
   upsertServiceRequests.mockResolvedValue({ updated: 0, skipped: 0 });
+  completeServiceItems.mockResolvedValue({ updated: 0, skipped: 0 });
   reopenServiceItem.mockResolvedValue({ id: "sq1", status: "PENDING" });
   setServiceDeadline.mockResolvedValue(undefined);
 });
@@ -224,5 +233,21 @@ describe("flagItemsForServiceAction", () => {
     f.set("serviceType", "REPAIR");
     const res = await flagItemsForServiceAction(f);
     expect(res).toEqual({ error: "Something went wrong flagging those items. Please try again." });
+  });
+});
+
+describe("completeServiceItemsAction", () => {
+  it("refuses a caller without MANAGE_QUEUE", async () => {
+    requireCapability.mockRejectedValueOnce(new AuthError("FORBIDDEN"));
+    const f = new FormData();
+    f.set("itemIds", "a1,a2");
+    await expect(completeServiceItemsAction(f)).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("refuses an empty selection", async () => {
+    const f = new FormData();
+    f.set("itemIds", "");
+    const res = await completeServiceItemsAction(f);
+    expect(res).toEqual({ error: "Select at least one item." });
   });
 });
