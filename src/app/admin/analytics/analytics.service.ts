@@ -400,11 +400,21 @@ export async function getUnitAllocations(
 export type DashboardData = Awaited<ReturnType<typeof getDashboard>>;
 
 /* ------------------------------------------------------------
-   Stale devices — the 30-90 day chase list.
+   Dormant devices — the 30-90 day chase list.
 
-   Answers "which devices has MDM not heard from in a month, while there is
+   Answers "which devices has nobody SIGNED IN TO for a month, while there is
    still a realistic chance of finding them". Not a chart: it is an export, so
    the dashboard shows only the count and the sheet carries the rows.
+
+   READ THE COLUMN CAREFULLY. `Item.lastLogonAt` is the parsed `lastLogonDate`
+   — when a PERSON last signed in. It is NOT when MDM last checked in, which is
+   `lastSyncDateTime` (see csv.ts, which says so at the alias). The two
+   routinely disagree, which is why both exist: a device powered on in a cage
+   syncs every night with no sign-in for months, and one somebody took home can
+   show a recent sign-in and no sync at all. This list shipped describing itself
+   as MDM silence; that was wrong and is corrected throughout. If "dropped off
+   the network" is ever wanted, it is a DIFFERENT query over the sync column,
+   not a reinterpretation of this one.
    ------------------------------------------------------------ */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -444,13 +454,13 @@ export function staleLogonWindow(now: Date): { from: Date; to: Date } {
  *  - `itemScopeSql`       the page's ?uic=/?unit= filter, through the same twin
  *                         the charts use, so the sheet covers exactly the slice
  *                         on screen.
- *  - `lastLogonAt NOT NULL` a device MDM has never seen — or whose export date
- *                         would not parse — is not "last seen 45 days ago". It
- *                         is "we cannot say", which is a different list.
+ *  - `lastLogonAt NOT NULL` a device nobody has ever signed in to — or whose
+ *                         export date would not parse — is not "last used 45
+ *                         days ago". It is "we cannot say", a different list.
  *  - the window           see staleLogonWindow.
  *  - `NOT EXISTS` custody a device issued out on a live hand receipt is
- *                         accounted for BY THAT RECEIPT. MDM silence is
- *                         expected there and is not evidence of anything.
+ *                         accounted for BY THAT RECEIPT. Nobody signing in to
+ *                         it is expected there and is not evidence of anything.
  *
  * Every value is bound; the only interpolations are pre-built fragments
  * (CLAUDE.md §2).

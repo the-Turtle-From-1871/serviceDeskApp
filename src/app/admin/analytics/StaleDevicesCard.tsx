@@ -15,7 +15,14 @@ import {
 } from "./analytics.types";
 
 /**
- * The stale-device chase list, as a count and a download.
+ * The dormant-device chase list, as a count and a download.
+ *
+ * WHAT "DORMANT" MEANS HERE: no USER SIGN-IN for 30-90 days (`Item.lastLogonAt`).
+ * It is NOT "MDM has not checked in" — that is `lastSyncDateTime`, a different
+ * column answering a different question, and the two routinely disagree (a
+ * device powered on in a cage syncs nightly with nobody signing in for months).
+ * This card shipped describing itself as MDM silence, which was simply wrong;
+ * the wording here, in the changelog and in the rules doc all say sign-in now.
  *
  * NOT a ChartCard: there is no chart. A list of individual devices is a
  * spreadsheet, not a plot — bucketing it would hide the one thing it is for,
@@ -35,7 +42,20 @@ export function StaleDevicesCard({ count, scope }: { count: number; scope: ItemS
   function handleExport() {
     setMessage(null);
     startTransition(async () => {
-      const res = await exportStaleDevicesAction(scope);
+      // The action converts an AuthError and a failed query into `{ error }`,
+      // but it cannot convert a failure to REACH it: offline, a platform 5xx,
+      // or a stale action id after a redeploy all reject the promise. React
+      // rethrows a rejected async transition to the nearest error boundary, so
+      // without this the whole dashboard unmounts because a download failed —
+      // the exact "a 500 from a download button reads as 'the export is
+      // broken'" outcome the AuthError branch exists to avoid.
+      let res: Awaited<ReturnType<typeof exportStaleDevicesAction>>;
+      try {
+        res = await exportStaleDevicesAction(scope);
+      } catch {
+        setMessage("Could not reach the server. Check your connection and try again.");
+        return;
+      }
       if ("error" in res) {
         setMessage(res.error);
         return;
@@ -71,12 +91,14 @@ export function StaleDevicesCard({ count, scope }: { count: number; scope: ItemS
       <CardContent className="flex flex-wrap items-center gap-x-4 gap-y-3 p-4">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-foreground">
-            {count.toLocaleString()} stale device{count === 1 ? "" : "s"}
+            {count.toLocaleString()} device{count === 1 ? "" : "s"} with no recent sign-in
           </p>
           <p className="text-xs text-muted-foreground">
-            Last seen by MDM {STALE_MIN_DAYS}–{STALE_MAX_DAYS} days ago · {scopeLabel(scope)}.
-            Devices unseen for over {STALE_MAX_DAYS} days, devices MDM has never seen, and devices
-            out on an open hand receipt are not counted.
+            Nobody has signed in for {STALE_MIN_DAYS}–{STALE_MAX_DAYS} days · {scopeLabel(scope)}.
+            This is the last <em>user sign-in</em>, not the last MDM check-in — a device can sync
+            nightly with nobody using it. Devices with no sign-in for over {STALE_MAX_DAYS} days,
+            devices nobody has ever signed in to, and devices out on an open hand receipt are not
+            counted.
           </p>
           {/* aria-live so the outcome reaches a screen reader: the visible
               evidence of success is a file landing outside the page. */}

@@ -34,10 +34,15 @@ export const isRangeKey = (v: string): v is RangeKey => v in RANGES;
  *  label so they stay visible instead of vanishing from the breakdown. */
 export const UNCATEGORIZED = "Uncategorized";
 
-/* ---------- Stale-device export (30-90 days since last MDM logon) ---------- */
+/* ------- Dormant-device export (30-90 days since the last USER sign-in) ------- */
 
 /**
- * The staleness window, in days since `Item.lastLogonAt`.
+ * The dormancy window, in days since `Item.lastLogonAt`.
+ *
+ * `lastLogonAt` is the parsed `lastLogonDate` — when a PERSON last signed in,
+ * NOT when MDM last checked in (that is `lastSyncDateTime`). The two answer
+ * different questions and routinely disagree; do not swap one for the other
+ * here without changing every label that reads from these constants.
  *
  * BOTH ENDS ARE DELIBERATE. A device seen inside 30 days is not stale. A device
  * unseen for MORE than 90 days is excluded too — that is a different problem
