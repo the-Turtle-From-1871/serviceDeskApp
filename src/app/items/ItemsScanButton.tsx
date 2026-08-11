@@ -11,6 +11,13 @@ import { ScannedCreateForm } from "./ScannedCreateForm";
 import type { ScannedEntry, NewEntry } from "./scan-session";
 import { beep } from "@/lib/beep";
 
+/** How long a successful scan's message is protected from an "already scanned"
+ *  notice. A linear barcode re-decodes on EVERY camera frame, so without this
+ *  the frame right after a hit overwrites "Added HP ProBook 650 G5" before
+ *  anyone can read it — and on a shelf sweep the operator needs those seconds
+ *  to move the camera off the label it just read. */
+const NOTICE_GRACE_MS = 3000;
+
 /**
  * Scan a batch of codes into the /items selection.
  *
@@ -48,7 +55,7 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
   // resolved from). Removing a row has to release both, or the label that was
   // just removed from the list still reads as "already scanned".
   const linkedKey = useRef(new Map<string, string>());
-  // Throttles the "Already scanned" notice — `seen` itself dedupes forever,
+  // Throttles the repeat notice — `seen` itself dedupes forever,
   // but a linear barcode re-decodes on every camera frame, and without this a
   // code still sitting under the camera would beep continuously instead of
   // once every so often. Same 1.5s window ReceiptBuilderForm uses for its own
@@ -60,10 +67,32 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
   // re-rendered, so reading `scanned` here would let two scans through a cap
   // with one slot left.
   const willSelect = useRef(0);
+  // Epoch ms of the last row actually APPENDED — see sayAlreadyScanned. Set in
+  // push() only on a genuine append: push returns false for a repeat, and that
+  // path must not re-open the window that is suppressing it.
+  const lastAddedAt = useRef(0);
+  // seen key -> the serial to NAME in an "already scanned" notice. BOTH keys an
+  // entry may register are recorded, because a repeat can arrive on either: a
+  // serial scan registers `id:<item>` AND the `sn:<serial>` it resolved from, so
+  // a later sticker scan of that device lands on the first and a later
+  // raw-serial scan on the second.
+  const seenSerial = useRef(new Map<string, string>());
 
   const say = (kind: "ok" | "err", text: string) => { setNotice({ kind, text }); beep(kind); };
 
   const noticeThrottled = (key: string) => {
+    // react-hooks/purity flags Date.now() anywhere it can reach from a
+    // component body, and it cannot tell that this closure runs only from
+    // onDecode — a camera-frame callback, never render. Its exemption
+    // heuristic recognises DOM event props only, and QrScanner takes onDecode
+    // as an ordinary prop. This line linted clean on its own and started
+    // erroring only when a second local caller was added below
+    // (facebook/react#34046 is the same shape). Suppressed per line rather
+    // than hoisting these helpers to module scope and threading the refs
+    // through as arguments, which would rewrite refuseIfFull to dodge a rule
+    // that is wrong about this code. The React Compiler transform is not
+    // enabled in this repo, so nothing here changes at runtime.
+    // eslint-disable-next-line react-hooks/purity -- event-handler only; never called during render
     const now = Date.now();
     if (lastNotice.current.key === key && now - lastNotice.current.at < 1500) return false;
     lastNotice.current = { key, at: now };
@@ -82,6 +111,30 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
     return true;
   };
 
+  /**
+   * Report a repeat — unless the grace window or the per-key throttle says not
+   * to. All three call sites share it so the rule cannot drift between them.
+   *
+   * The grace is checked FIRST and deliberately leaves `lastNotice` untouched:
+   * recording a suppressed notice would open a 1.5s throttle window the operator
+   * never saw, delaying the first repeat that IS worth reporting.
+   *
+   * refuseIfFull above is deliberately NOT routed through here. It reports a
+   * scan that was REFUSED rather than appended, and silencing it would let
+   * someone keep scanning into a selection that cannot take the devices.
+   *
+   * Naming the device is the point: on a batch of thirty, a bare "Already
+   * scanned" says nothing about which label the camera is stuck on.
+   */
+  const sayAlreadyScanned = (key: string) => {
+    // Same false positive as noticeThrottled above — see the note there.
+    // eslint-disable-next-line react-hooks/purity -- event-handler only; never called during render
+    if (Date.now() - lastAddedAt.current < NOTICE_GRACE_MS) return;
+    if (!noticeThrottled(key)) return;
+    const serial = seenSerial.current.get(key);
+    say("err", serial ? `${serial} already scanned` : "Already scanned");
+  };
+
   // The single place `entry.key` (and, when it differs, the pre-check key it
   // was found under) gets registered in `seen`. Callers must NOT add either
   // key beforehand — for an item-kind scan `entry.key` and `preKey` are
@@ -90,15 +143,22 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
   // scanned on the very first look-up.
   const push = (entry: ScannedEntry, linkedSeenKey?: string) => {
     if (seen.current.has(entry.key)) return false;
+    const serial = entry.kind === "new" ? entry.serial : entry.item.serialNumber;
     seen.current.add(entry.key);
+    seenSerial.current.set(entry.key, serial);
     if (linkedSeenKey) {
       seen.current.add(linkedSeenKey);
+      seenSerial.current.set(linkedSeenKey, serial);
       linkedKey.current.set(entry.key, linkedSeenKey);
     }
     // A retired row is listed but never selected (addMany refuses it), so it
     // costs no slot against the cap.
     if (entry.kind !== "retired") willSelect.current += 1;
     setScanned((prev) => [...prev, entry]);
+    // Opens the grace window. A row that is LISTED rather than selected — a
+    // retired device, a serial not in the book — counts: those messages matter
+    // more than a repeat notice does, and each marks a row to act on.
+    lastAddedAt.current = Date.now();
     return true;
   };
 
@@ -110,9 +170,11 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
     setScanned((prev) => prev.filter((e) => e.key !== key));
     if (kind !== "retired") willSelect.current = Math.max(0, willSelect.current - 1);
     seen.current.delete(key);
+    seenSerial.current.delete(key);
     const linked = linkedKey.current.get(key);
     if (linked) {
       seen.current.delete(linked);
+      seenSerial.current.delete(linked);
       linkedKey.current.delete(key);
     }
   };
@@ -125,7 +187,7 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
     // Cheap pre-check so a code still under the camera costs no round trip.
     const preKey = intent.kind === "item" ? `id:${intent.id}` : `sn:${intent.serial.toLowerCase()}`;
     if (seen.current.has(preKey)) {
-      if (noticeThrottled(preKey)) say("err", "Already scanned");
+      sayAlreadyScanned(preKey);
       return;
     }
 
@@ -151,8 +213,8 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
             kind === "found"
               ? `Added ${res.item.make} ${res.item.model}`
               : `${res.item.serialNumber} is retired — not added to the selection`);
-        } else if (noticeThrottled(entry.key)) {
-          say("err", "Already scanned");
+        } else {
+          sayAlreadyScanned(entry.key);
         }
         return;
       }
@@ -185,8 +247,8 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
         const newSerial = intent.altSerial ?? intent.serial;
         if (push({ key: preKey, kind: "new", serial: newSerial, label: intent.label })) {
           say("err", `${newSerial} is not in the book`);
-        } else if (noticeThrottled(preKey)) {
-          say("err", "Already scanned");
+        } else {
+          sayAlreadyScanned(preKey);
         }
         return;
       }
@@ -251,8 +313,10 @@ export function ItemsScanButton({ canCreate }: { canCreate: boolean }) {
     setScanned([]);
     willSelect.current = 0;
     seen.current = new Set();
+    seenSerial.current = new Map();
     linkedKey.current = new Map();
     lastNotice.current = { key: "", at: 0 };
+    lastAddedAt.current = 0;
     setNotice(null);
     setResult(null);
     setPhase("scanning");
