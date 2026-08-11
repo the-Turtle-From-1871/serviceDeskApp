@@ -427,6 +427,30 @@ as narrow as it was. `markItemsReadyAction` ("Mark as on hand",
 (`src/app/admin/actions/readiness.ts`) back the `/items` selection-bar controls
 and the item page; both `requireAdmin()` first.
 
+**`renameItemsAction` and `previewItemRenameAction` are the bulk rename, gated
+on `requireCapability("MANAGE_ITEMS")`** (`src/app/admin/actions/items.ts`),
+beside `markItemsReadyAction` above. Item ids are client-supplied and bounded
+at `MAX_BULK_ITEMS` (500), both in the actions' shared Zod schema (a readable
+message) and again in `renameItems`/`previewRename`
+(`src/modules/items/items.service.ts`, the backstop for any other caller,
+throwing `ItemError("TOO_MANY")`) — both service functions enforce no
+permissions of their own, so the Server Action is the whole boundary. The
+posted id list is **order-significant**: the action does not sort or
+re-order it, only drops blanks, because selection order is the numbering.
+**The written names are recomputed server-side from `(prefix, start)`** via
+the pure `buildRenameSequence` (`src/modules/items/rename-sequence.ts`) — the
+client never posts a name list. `renameItemsAction`'s Zod schema has no
+`names` field, so `z.object()` strips one if a crafted POST includes it, and
+`renameItemsAction`'s test asserts the service is called with `(prefix,
+start)` regardless. Accepting a client-posted name would turn an
+admin-gated action into "write any string to any item" — `deviceName` is
+kept out of `editableItemFields` for the same reason. Retired items are
+excluded from the write and reported back as `skipped`, matching the other
+bulk item actions above; a name collision (case-insensitive, against every
+OTHER item) is reported as `{ conflict: true, collisions }` rather than a
+generic error string, so the UI can show which serials are blocking the
+rename.
+
 **Readiness is derived, so there is no stored state a POST could assert.** The
 readiness selector writes only the underlying signals — `markedReadyAt` (set or
 clear) and the `Item.status` lifecycle column. Its Zod target enum is an

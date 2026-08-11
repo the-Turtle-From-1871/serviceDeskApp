@@ -10,13 +10,17 @@ import {
   analyzeImport,
   commitImport,
   markItemsReady,
-  MAX_BULK_ITEMS,
+  previewRename,
+  renameItems,
+  type RenameCollision,
 } from "@/modules/items/items.service";
 import { ItemError } from "@/modules/items/items.errors";
+import { MAX_RENAME_PREFIX, RenameSequenceError } from "@/modules/items/rename-sequence";
 import {
   newItemSchema,
   adminItemEditSchema,
   itemIdentitySchema,
+  MAX_BULK_ITEMS,
 } from "@/modules/items/items.schema";
 import { Prisma } from "@prisma/client";
 import { learnCategories, normalizeCategoryName } from "@/modules/items/categories.service";
@@ -243,6 +247,88 @@ export async function markItemsReadyAction(formData: FormData) {
     }
     console.error("[markItemsReadyAction] unexpected error:", e);
     return { error: "Something went wrong updating those items. Please try again." };
+  }
+}
+
+/** Shared shape for both rename actions. `itemIds` order IS the numbering, so
+ *  this must NOT sort or re-order — only drop blanks. */
+const renameSchema = z.object({
+  itemIds: z
+    .array(z.string().min(1))
+    .min(1, "Select at least one item.")
+    .max(MAX_BULK_ITEMS, `Too many items selected. The limit is ${MAX_BULK_ITEMS} per action.`),
+  prefix: z
+    .string()
+    .trim()
+    .min(1, "Enter a name prefix.")
+    .max(MAX_RENAME_PREFIX, `Prefixes are limited to ${MAX_RENAME_PREFIX} characters.`),
+  start: z.string().regex(/^\d+$/, "Start must be a whole number, like 001."),
+});
+
+function renameInput(formData: FormData) {
+  return {
+    itemIds: String(formData.get("itemIds") ?? "").split(",").filter(Boolean),
+    prefix: String(formData.get("prefix") ?? ""),
+    start: String(formData.get("start") ?? ""),
+  };
+}
+
+type RenamePreviewResult =
+  | { error: string }
+  | { ok: true; count: number; first: string; last: string; skipped: number; collisions: RenameCollision[] };
+
+type RenameActionResult =
+  | { error: string }
+  | { conflict: true; collisions: RenameCollision[] }
+  | { ok: true; renamed: number; unchanged: number; skipped: number };
+
+/** What the rename WOULD do — drives the sheet's range line and collision list.
+ *  Advisory: renameItemsAction re-checks inside its transaction. */
+export async function previewItemRenameAction(formData: FormData): Promise<RenamePreviewResult> {
+  await requireCapability("MANAGE_ITEMS");
+
+  const parsed = renameSchema.safeParse(renameInput(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+
+  try {
+    const out = await previewRename(parsed.data.itemIds, parsed.data.prefix, parsed.data.start);
+    return { ok: true, ...out };
+  } catch (e) {
+    if (e instanceof RenameSequenceError) return { error: "Check the prefix and start number." };
+    console.error("[previewItemRenameAction] unexpected error:", e);
+    return { error: "Couldn't work out those names. Please try again." };
+  }
+}
+
+/**
+ * Rename every selected item to a consecutive PREFIX-NNN sequence.
+ *
+ * The client posts ONLY ids, a prefix and a start. Any `names` field it sends is
+ * ignored — `z.object()` strips it and the service rebuilds the sequence itself.
+ * Accepting a name list would turn this into "write any string to any item".
+ */
+export async function renameItemsAction(formData: FormData): Promise<RenameActionResult> {
+  const admin = await requireCapability("MANAGE_ITEMS");
+
+  const parsed = renameSchema.safeParse(renameInput(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+
+  try {
+    const res = await renameItems(parsed.data.itemIds, parsed.data.prefix, parsed.data.start, {
+      id: admin.id,
+      name: admin.name,
+    });
+    if (!res.ok) return { conflict: true, collisions: res.collisions };
+
+    revalidatePath("/items");
+    return { ok: true, renamed: res.renamed, unchanged: res.unchanged, skipped: res.skipped };
+  } catch (e) {
+    if (e instanceof ItemError && e.code === "TOO_MANY") {
+      return { error: `Too many items selected. The limit is ${MAX_BULK_ITEMS} per action.` };
+    }
+    if (e instanceof RenameSequenceError) return { error: "Check the prefix and start number." };
+    console.error("[renameItemsAction] unexpected error:", e);
+    return { error: "Something went wrong renaming those items. Please try again." };
   }
 }
 
