@@ -30,10 +30,23 @@ function outcome(verb: string, updated: number, skipped: number): string {
  * table, so every line of height hides another row of what you are selecting
  * from — stacked inline, these three covered a phone viewport entirely.
  *
- * Rendered only for the capabilities the caller actually holds, but that is
- * PRESENTATION: `recordAuditsAction` re-checks `ADMINISTER` and both queue
- * actions re-check `MANAGE_QUEUE`, which is the real boundary. The batch is
- * client-supplied ids, so the server guard is the whole of it.
+ * THIS COMPONENT honours `canAudit` and `canQueue` independently — each group
+ * renders only when its flag is set, and neither means no trigger at all.
+ * ITS ONE CALLER CURRENTLY DOES NOT EXERCISE THAT. `/items` mounts the whole
+ * bulk row behind `isAdmin` (`user.role === "ADMIN"`), and the ADMIN baseline is
+ * all nine capabilities, so the only combination that ever reaches this
+ * component today is `(true, true)`. A `USER` granted `MANAGE_QUEUE`
+ * individually does NOT see the service actions here — see the note at the
+ * mount site in ItemSelectTable. The independent gating is kept because it is
+ * real, it is what a second caller or a widened wrapper would need, and it
+ * costs nothing.
+ *
+ * Either way this is PRESENTATION, never a boundary: `recordAuditsAction` calls
+ * `requireAdmin()` (= `requireCapability("ADMINISTER")`) and both queue actions
+ * call `requireCapability("MANAGE_QUEUE")`, re-read from the DB per request. The
+ * batch is client-supplied ids, so that server guard is the whole of it — the
+ * `isAdmin` wrapper above is a VISIBILITY gap, not a security one, and nothing
+ * is over-exposed by it.
  *
  * Only ids are posted. For the audit, the signer's name and image are re-read
  * server-side scoped to the acting admin — the browser is handed signature

@@ -96,8 +96,12 @@ export function ItemSelectTable({
    *  acting admin. Empty for anyone without ADMINISTER. */
   signatures?: { id: string; name: string }[];
   /** Capability gates for the "More actions" sheet — ADMINISTER for the bulk
-   *  audit, MANAGE_QUEUE for the two service actions. Presentation only: all
-   *  three actions re-check server-side. Defaulted off so a caller that forgets
+   *  audit, MANAGE_QUEUE for the two service actions. BulkActionsMenu honours
+   *  them independently, but note the bulk row below is still wrapped in
+   *  `isAdmin`, so on `/items` both arrive true or the sheet is not mounted at
+   *  all; these do not currently let a non-admin through. Presentation either
+   *  way — `requireAdmin()` / `requireCapability("MANAGE_QUEUE")` inside the
+   *  three actions is the real boundary. Defaulted off so a caller that forgets
    *  to pass them offers nothing rather than something it cannot do. */
   canAudit?: boolean;
   canQueue?: boolean;
@@ -778,7 +782,18 @@ export function ItemSelectTable({
               {/* Audit / flag for service / complete service, behind ONE button.
                   Two of the three need inputs of their own, and this bar is
                   sticky over the table — inline they covered a phone viewport.
-                  It renders nothing for a caller holding neither capability. */}
+
+                  READ THE `isAdmin &&` ON THE ROW ABOVE. It gates this row along
+                  with MarkReadyButton and ReadinessControls, and `isAdmin` is
+                  `user.role === "ADMIN"` — so although BulkActionsMenu honours
+                  canAudit/canQueue separately (and renders nothing when both are
+                  false), the ADMIN baseline carries all nine capabilities and the
+                  only pair that reaches it here is (true, true). A USER granted
+                  MANAGE_QUEUE individually gets no bulk controls at all on this
+                  page. That is a known VISIBILITY gap, deliberately left alone:
+                  the wrapper is shared with the two components above it and
+                  widening it is a separate decision. It is not a security gap —
+                  every action re-checks its capability server-side. */}
               <BulkActionsMenu
                 itemIds={[...selected.keys()]}
                 signatures={signatures}
