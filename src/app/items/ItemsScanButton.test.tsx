@@ -2,148 +2,314 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-
-const push = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+import { ItemSelectionProvider, useItemSelection } from "@/components/ItemSelection";
 
 const resolveScannedSerial = vi.fn();
+const resolveScannedItemId = vi.fn();
 vi.mock("@/app/actions/scan", () => ({
   resolveScannedSerial: (sn: string, alt?: string) => resolveScannedSerial(sn, alt),
+  resolveScannedItemId: (id: string) => resolveScannedItemId(id),
+}));
+vi.mock("@/lib/beep", () => ({ beep: vi.fn() }));
+const createScannedItemsAction = vi.fn();
+vi.mock("@/app/admin/actions/scanned-items", () => ({
+  createScannedItemsAction: (rows: unknown) => createScannedItemsAction(rows),
 }));
 
-vi.mock("@/lib/beep", () => ({ beep: vi.fn() }));
-
-// The real component owns a camera and a wasm decoder, neither of which exists
-// here. This stand-in emits one decoded FRAME per button, matching the idiom
-// ReceiptBuilderForm.test.tsx already uses for the same component. A frame is
-// an array because a service label is several codes at once.
 vi.mock("@/components/QrScanner", () => ({
   SCAN_FORMATS: ["qr_code"],
-  QrScanner: ({ onDecode, onClose, notice }: {
-    onDecode: (t: string[]) => void;
-    onClose: () => void;
-    notice?: { kind: "ok" | "err"; text: string } | null;
+  QrScanner: ({ onDecode, onClose, notice, children }: {
+    onDecode: (t: string[]) => void; onClose: () => void;
+    notice?: { kind: "ok" | "err"; text: string } | null; children?: React.ReactNode;
   }) => (
     <div data-testid="scanner">
-      <button type="button" onClick={() => onDecode(["https://x.example/i/abc123"])}>emit-sticker</button>
-      <button type="button" onClick={() => onDecode(["5CD1234ABC"])}>emit-serial</button>
-      <button type="button" onClick={() => onDecode(["17237164935"])}>emit-express</button>
-      <button type="button" onClick={() => onDecode(["CN-0ABCDE-12345-ABC-1234-A00"])}>emit-ppid</button>
-      {/* An HP service label as the camera actually sees it: the product-number
-          barcode decodes alongside the QR, and the decoder puts it first. */}
-      <button type="button" onClick={() => onDecode(["CN-0ABCDE-1", "SN:5CD1234ABC;PN:1AB23AV"])}>emit-hp-label</button>
-      <button type="button" onClick={onClose}>emit-close</button>
+      <button onClick={() => onDecode(["2TK94709FN, HP ProBook 650 G5, ProdID 5PF3"])}>emit-hp</button>
+      <button onClick={() => onDecode(["7X2K9L3"])}>emit-dell</button>
+      <button onClick={() => onDecode(["NOSUCH123"])}>emit-unknown</button>
+      <button onClick={() => onDecode(["https://x.example/i/i1"])}>emit-sticker</button>
+      {/* A Dell Express Service Code barcode. parseScan carries the raw
+          11-digit value as `serial` and the 7-char Service Tag it converts to
+          as `altSerial` — 17237164935 -> 7X2K9L3. Neither is in the book here. */}
+      <button onClick={() => onDecode(["17237164935"])}>emit-express-unknown</button>
+      {/* Named literally "Done" to match the real QrScanner's footer button —
+          this test asserts against /^Done/, which Task 7 later suffixes with
+          a count. */}
+      <button onClick={onClose}>Done</button>
       {notice && <p data-testid="scan-notice">{notice.text}</p>}
+      {children}
     </div>
   ),
 }));
 
 import { ItemsScanButton } from "./ItemsScanButton";
+import { beep } from "@/lib/beep";
 
-afterEach(cleanup);
-beforeEach(() => {
-  vi.clearAllMocks();
-  resolveScannedSerial.mockResolvedValue({ ok: true, itemId: "i9" });
-});
+const HP = { id: "i1", make: "HP", model: "HP ProBook 650 G5", serialNumber: "2TK94709FN", status: "ACTIVE" as const };
+const DELL_RETIRED = { id: "i2", make: "Dell", model: "Latitude", serialNumber: "7X2K9L3", status: "RETIRED" as const };
+
+function Selection() {
+  const { selected } = useItemSelection();
+  return <span data-testid="sel">{[...selected.keys()].join(",")}</span>;
+}
+
+const setup = (canCreate = true) =>
+  render(<ItemSelectionProvider><ItemsScanButton canCreate={canCreate} /><Selection /></ItemSelectionProvider>);
 
 const open = async (user: ReturnType<typeof userEvent.setup>) => {
   await user.click(screen.getByRole("button", { name: /^Scan$/i }));
   await screen.findByTestId("scanner");
 };
 
+afterEach(cleanup);
+beforeEach(() => {
+  vi.clearAllMocks();
+  resolveScannedSerial.mockImplementation(async (sn: string) =>
+    sn === "2TK94709FN" ? { ok: true, item: HP }
+    : sn === "7X2K9L3" ? { ok: true, item: DELL_RETIRED }
+    : { ok: false, code: "NOT_FOUND" });
+  resolveScannedItemId.mockImplementation(async (id: string) =>
+    id === "i1" ? { ok: true, item: HP } : { ok: false, code: "NOT_FOUND" });
+  createScannedItemsAction.mockResolvedValue({
+    ok: true,
+    items: [{ id: "i3", make: "Acme", model: "Widget", serialNumber: "NOSUCH123", status: "ACTIVE" }],
+    created: 1,
+    existed: 0,
+  });
+});
+
 describe("ItemsScanButton", () => {
-  it("opens the item when our own sticker is scanned, without a round trip", async () => {
+  it("accumulates instead of navigating, and lists what it collected", async () => {
     const user = userEvent.setup();
-    render(<ItemsScanButton />);
+    setup();
     await open(user);
-    await user.click(screen.getByRole("button", { name: "emit-sticker" }));
-
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/i/abc123"));
-    expect(resolveScannedSerial).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "emit-hp" }));
+    expect(await screen.findByText(/2TK94709FN/)).toBeDefined();
+    expect(screen.getByTestId("scanner")).toBeDefined(); // still open
   });
 
-  it("opens the item a scanned serial resolves to", async () => {
+  it("does not add the same item twice", async () => {
     const user = userEvent.setup();
-    render(<ItemsScanButton />);
+    setup();
     await open(user);
-    await user.click(screen.getByRole("button", { name: "emit-serial" }));
-
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/i/i9"));
-    expect(resolveScannedSerial).toHaveBeenCalledWith("5CD1234ABC", undefined);
+    await user.click(screen.getByRole("button", { name: "emit-hp" }));
+    await waitFor(() => expect(resolveScannedSerial).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("button", { name: "emit-hp" }));
+    expect(screen.getAllByText(/2TK94709FN/)).toHaveLength(1);
   });
 
-  // The create-from-search flow already lives on /items: the empty state offers
-  // an admin "+ Create <serial> as a new item". Landing there reuses it rather
-  // than growing a second create path with its own admin gate.
-  it("lands on the filtered list when the serial is in no item", async () => {
-    resolveScannedSerial.mockResolvedValue({ ok: false, code: "NOT_FOUND" });
+  it("commits found items to the selection on Done", async () => {
     const user = userEvent.setup();
-    render(<ItemsScanButton />);
+    setup();
     await open(user);
-    await user.click(screen.getByRole("button", { name: "emit-serial" }));
-
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/items?q=5CD1234ABC"));
+    await user.click(screen.getByRole("button", { name: "emit-hp" }));
+    await screen.findByText(/2TK94709FN/);
+    await user.click(screen.getByRole("button", { name: /^Done/ }));
+    await waitFor(() => expect(screen.getByTestId("sel").textContent).toBe("i1"));
   });
 
-  it("passes the converted express service code as the alternate", async () => {
+  it("lists a retired item but keeps it out of the selection", async () => {
     const user = userEvent.setup();
-    render(<ItemsScanButton />);
+    setup();
     await open(user);
-    await user.click(screen.getByRole("button", { name: "emit-express" }));
+    await user.click(screen.getByRole("button", { name: "emit-dell" }));
+    // Anchored: the scan notice ALSO reads "...is retired — not added..." at
+    // the same moment, and an unanchored match would hit both elements.
+    expect(await screen.findByText(/^Retired$/i)).toBeDefined();
+    await user.click(screen.getByRole("button", { name: /^Done/ }));
+    await waitFor(() => expect(screen.getByTestId("sel").textContent).toBe(""));
+  });
+
+  it("flags a serial that is in no item", async () => {
+    const user = userEvent.setup();
+    setup();
+    await open(user);
+    await user.click(screen.getByRole("button", { name: "emit-unknown" }));
+    // Anchored for the same reason as above: the scan notice reads
+    // "NOSUCH123 is not in the book", which an unanchored match also hits.
+    expect(await screen.findByText(/^Not in the book$/i)).toBeDefined();
+  });
+
+  // A Dell label prints the Express Service Code and the Service Tag a
+  // centimetre apart — the same value in base 10 and base 36. The TAG is what
+  // Dell calls the serial and what the MDM export carries, so creating under
+  // the raw express code would produce a row no import can ever match, and the
+  // next import would create a SECOND row for the same laptop.
+  it("creates an unknown express service code under its 7-character service tag", async () => {
+    const user = userEvent.setup();
+    setup(true);
+    await open(user);
+    await user.click(screen.getByRole("button", { name: "emit-express-unknown" }));
+
+    // The list shows the tag, not the 11-digit code that was scanned.
+    expect(await screen.findByText("7X2K9L3")).toBeDefined();
+    expect(screen.queryByText("17237164935")).toBeNull();
+  });
+
+  it("sends the service tag, not the express code, to the create action", async () => {
+    const user = userEvent.setup();
+    setup(true);
+    await open(user);
+    await user.click(screen.getByRole("button", { name: "emit-express-unknown" }));
+    await screen.findByText("7X2K9L3");
+    await user.click(screen.getByRole("button", { name: /^Done/ }));
+
+    await user.type(await screen.findByLabelText(/Make for 7X2K9L3/i), "Dell");
+    await user.type(screen.getByLabelText(/Model for 7X2K9L3/i), "Latitude 5420");
+    await user.click(screen.getByRole("button", { name: /^Create 1/ }));
+
+    await waitFor(() => expect(createScannedItemsAction).toHaveBeenCalledWith([
+      { serialNumber: "7X2K9L3", make: "Dell", model: "Latitude 5420" },
+    ]));
+  });
+
+  // The lookup order is unchanged and must stay raw-first: preferring the
+  // conversion when RESOLVING could rewrite a genuinely numeric serial into a
+  // tag naming a different machine. Only the create path prefers the tag, and
+  // only because the lookup already tried both and neither named an item.
+  it("still looks up the raw value first, with the tag as the alternate", async () => {
+    const user = userEvent.setup();
+    setup(true);
+    await open(user);
+    await user.click(screen.getByRole("button", { name: "emit-express-unknown" }));
 
     await waitFor(() => expect(resolveScannedSerial).toHaveBeenCalledWith("17237164935", "7X2K9L3"));
   });
 
-  // The decoder returns every code in the frame and decides their order, so the
-  // one we can use is routinely not the first.
-  it("uses the usable code in a frame that also holds unusable ones", async () => {
+  it("offers the create form on Done when a serial was unknown", async () => {
     const user = userEvent.setup();
-    render(<ItemsScanButton />);
+    setup(true);
     await open(user);
-    await user.click(screen.getByRole("button", { name: "emit-hp-label" }));
-
-    await waitFor(() => expect(resolveScannedSerial).toHaveBeenCalledWith("5CD1234ABC", undefined));
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/i/i9"));
+    await user.click(screen.getByRole("button", { name: "emit-unknown" }));
+    // Anchored for the same reason as the earlier test in this file: the scan
+    // notice also reads "...is not in the book" and an unanchored match hits both.
+    await screen.findByText(/^Not in the book$/i);
+    await user.click(screen.getByRole("button", { name: /^Done/ }));
+    expect(await screen.findByRole("button", { name: /^Create 1/ })).toBeDefined();
   });
 
-  // "Not an item code" alone is a dead end: the operator cannot report a label
-  // nobody can read. The notice names what the camera actually decoded.
-  it("names what it read when nothing in the frame parses", async () => {
+  it("shows no create path without MANAGE_ITEMS", async () => {
     const user = userEvent.setup();
-    render(<ItemsScanButton />);
+    setup(false);
     await open(user);
-    await user.click(screen.getByRole("button", { name: "emit-ppid" }));
-
-    const notice = await screen.findByTestId("scan-notice");
-    expect(notice.textContent).toContain("CN-0ABCDE-12345-ABC-1234-A00");
+    await user.click(screen.getByRole("button", { name: "emit-unknown" }));
+    // Anchored for the same reason as the earlier test in this file: the scan
+    // notice also reads "...is not in the book" and an unanchored match hits both.
+    await screen.findByText(/^Not in the book$/i);
+    await user.click(screen.getByRole("button", { name: /^Done/ }));
+    expect(screen.queryByRole("button", { name: /^Create/ })).toBeNull();
   });
 
-  it("keeps scanning after an unreadable code", async () => {
-    const user = userEvent.setup();
-    render(<ItemsScanButton />);
-    await open(user);
-    await user.click(screen.getByRole("button", { name: "emit-ppid" }));
+  describe("removing a mis-scanned row", () => {
+    it("drops the row from the list and out of the Done selection", async () => {
+      const user = userEvent.setup();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      await screen.findByText(/2TK94709FN/);
+      await user.click(screen.getByRole("button", { name: "Remove 2TK94709FN" }));
+      expect(screen.queryByText(/2TK94709FN/)).toBeNull();
+      await user.click(screen.getByRole("button", { name: /^Done/ }));
+      await waitFor(() => expect(screen.getByTestId("sel").textContent).toBe(""));
+    });
 
-    expect(await screen.findByTestId("scan-notice")).toBeDefined();
-    expect(screen.getByTestId("scanner")).toBeDefined();
-    expect(push).not.toHaveBeenCalled();
-    expect(resolveScannedSerial).not.toHaveBeenCalled();
+    it("lets the same label be scanned again afterward", async () => {
+      const user = userEvent.setup();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      await screen.findByText(/2TK94709FN/);
+      await user.click(screen.getByRole("button", { name: "Remove 2TK94709FN" }));
+      resolveScannedSerial.mockClear();
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      await screen.findByText(/2TK94709FN/);
+      expect(resolveScannedSerial).toHaveBeenCalledTimes(1);
+    });
   });
 
-  // A recoverable failure must not latch the sheet shut — the operator can try
-  // the same label again.
-  it("stays open and says so when the lookup fails", async () => {
-    resolveScannedSerial.mockResolvedValue({ ok: false, code: "FAILED" });
+  describe("re-scanning an already-listed item", () => {
+    it("shows an 'Already scanned' notice and does not add a second row", async () => {
+      const user = userEvent.setup();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      await screen.findByText(/2TK94709FN/);
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      expect(await screen.findByText(/^Already scanned$/i)).toBeDefined();
+      expect(screen.getAllByText(/2TK94709FN/)).toHaveLength(1);
+    });
+
+    it("does not beep on every frame the code sits in view", async () => {
+      const user = userEvent.setup();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      await screen.findByText(/2TK94709FN/);
+      vi.mocked(beep).mockClear();
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      // All four "frames" land well inside the 1.5s throttle window, so only
+      // the first repeat should have produced a beep.
+      expect(beep).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("scanning our own printed sticker (/i/<id>)", () => {
+    it("adds the item to the list on the very first scan", async () => {
+      const user = userEvent.setup();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-sticker" }));
+      expect(await screen.findByText(/2TK94709FN/)).toBeDefined();
+      expect(screen.queryByText(/^Already scanned$/i)).toBeNull();
+    });
+
+    it("commits the sticker-scanned item to the selection on Done", async () => {
+      const user = userEvent.setup();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-sticker" }));
+      await screen.findByText(/2TK94709FN/);
+      await user.click(screen.getByRole("button", { name: /^Done/ }));
+      await waitFor(() => expect(screen.getByTestId("sel").textContent).toBe("i1"));
+    });
+
+    it("scanning the same sticker twice adds exactly one row and flags the repeat", async () => {
+      const user = userEvent.setup();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-sticker" }));
+      await screen.findByText(/2TK94709FN/);
+      await user.click(screen.getByRole("button", { name: "emit-sticker" }));
+      expect(await screen.findByText(/^Already scanned$/i)).toBeDefined();
+      expect(screen.getAllByText(/2TK94709FN/)).toHaveLength(1);
+    });
+
+    it("lets the same sticker be scanned again after its row is removed", async () => {
+      const user = userEvent.setup();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-sticker" }));
+      await screen.findByText(/2TK94709FN/);
+      await user.click(screen.getByRole("button", { name: "Remove 2TK94709FN" }));
+      expect(screen.queryByText(/2TK94709FN/)).toBeNull();
+      resolveScannedItemId.mockClear();
+      await user.click(screen.getByRole("button", { name: "emit-sticker" }));
+      expect(await screen.findByText(/2TK94709FN/)).toBeDefined();
+      expect(resolveScannedItemId).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("reports how many were created (and how many already existed) after the create form is submitted", async () => {
     const user = userEvent.setup();
-    render(<ItemsScanButton />);
+    setup(true);
     await open(user);
-    await user.click(screen.getByRole("button", { name: "emit-serial" }));
-
-    expect(await screen.findByTestId("scan-notice")).toBeDefined();
-    expect(push).not.toHaveBeenCalled();
-
-    resolveScannedSerial.mockResolvedValue({ ok: true, itemId: "i9" });
-    await user.click(screen.getByRole("button", { name: "emit-serial" }));
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/i/i9"));
+    await user.click(screen.getByRole("button", { name: "emit-unknown" }));
+    await screen.findByText(/^Not in the book$/i);
+    await user.click(screen.getByRole("button", { name: /^Done/ }));
+    await user.type(await screen.findByLabelText(/Make for NOSUCH123/i), "Acme");
+    await user.type(screen.getByLabelText(/Model for NOSUCH123/i), "Widget");
+    await user.click(screen.getByRole("button", { name: /^Create 1/ }));
+    expect(await screen.findByText(/1 item created\./i)).toBeDefined();
   });
 });

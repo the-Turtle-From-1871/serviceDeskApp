@@ -102,6 +102,24 @@ export const newItemSchema = z.object({
 export type NewItemInput = z.infer<typeof newItemSchema>;
 
 /**
+ * Creating an item from a SCAN. Identical to newItemSchema except that
+ * `deviceName` is optional: a device scanned off a shelf may have no known
+ * hostname, and requiring one blocks the create at the moment it is most
+ * useful.
+ *
+ * Built with .extend() and NEVER restated — a second field list is a second
+ * answer to "what is an item", and the two would drift. Same pattern as
+ * registerSchema (newUserSchema minus role).
+ *
+ * KNOWN CONSEQUENCE: detectHomeUnit reads the device name, so items created
+ * this way carry NO home unit until someone edits them or an import fills it
+ * in. The create form says so.
+ */
+export const scannedItemSchema = newItemSchema.extend({ deviceName: optional });
+
+export type ScannedItemInput = z.infer<typeof scannedItemSchema>;
+
+/**
  * The admin edit page's IDENTITY-CORRECTION form (`updateItemIdentityAction`).
  *
  * Deliberately its OWN schema, and deliberately NOT merged into

@@ -4,6 +4,7 @@ import {
   adminItemEditSchema,
   userItemDetailsSchema,
   newItemSchema,
+  scannedItemSchema,
   MAX_CATEGORY_NAME,
 } from "./items.schema";
 
@@ -242,5 +243,27 @@ describe("storageLocation across the three schemas", () => {
   it("trims a real value on every one of them", () => {
     expect(importRowSchema.parse({ serialNumber: "A", storageLocation: " Bldg 400 " }).storageLocation).toBe("Bldg 400");
     expect(newItemSchema.parse({ make: "D", model: "5", serialNumber: "A", deviceName: "N", storageLocation: " Bldg 400 " }).storageLocation).toBe("Bldg 400");
+  });
+});
+
+describe("scannedItemSchema", () => {
+  const base = { make: "HP", model: "HP ProBook 650 G5", serialNumber: "2TK94709FN" };
+
+  it("accepts a scanned item with no device name", () => {
+    expect(scannedItemSchema.parse(base)).toMatchObject(base);
+  });
+
+  it("still requires make, model and serial", () => {
+    expect(scannedItemSchema.safeParse({ ...base, make: "" }).success).toBe(false);
+    expect(scannedItemSchema.safeParse({ ...base, serialNumber: "" }).success).toBe(false);
+  });
+
+  // The ONLY difference from newItemSchema. Derived with .extend(), never
+  // restated — a restated field list is exactly the drift CLAUDE.md warns of.
+  it("differs from newItemSchema in deviceName alone", () => {
+    expect(newItemSchema.safeParse(base).success).toBe(false);          // needs deviceName
+    expect(newItemSchema.safeParse({ ...base, deviceName: "X" }).success).toBe(true);
+    expect(Object.keys(scannedItemSchema.shape).sort())
+      .toEqual(Object.keys(newItemSchema.shape).sort());
   });
 });

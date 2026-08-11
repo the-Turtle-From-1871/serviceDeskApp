@@ -18,6 +18,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-08-10
 
+### Added
+- **Scanning now collects items instead of jumping to one.** The Scan button on the items list used to open the first device it read and close the camera. It now keeps the camera open and lists everything you scan at the bottom of the screen, so you can work down a shelf with the kit in your hands. Tap **Done** and everything you scanned comes back **selected** in the list — ready for Create receipt, Print QR codes, Mark as on hand or Set category, exactly as if you had ticked each row.
+
+  A **retired** device is listed and clearly marked but is not selected, matching the list itself, where retired rows can never be part of a bulk action.
+
+  A serial that **is not in the book** is flagged as you scan it rather than ending the session. On Done, anyone who can manage items gets one form to create them all at once, with make and model already filled in from the label where the code carries them. These are created without a device name, so **they have no home unit until one is added** — the form says so. Once you submit, the sheet tells you how many were actually created and how many already existed under that serial, before it closes — it no longer just vanishes.
+
+  Caught a neighbouring label by mistake? Each row in the list has its own **Remove** button, so you can drop it without losing anything else you scanned or clearing the whole session. The label can be scanned again right after.
+
+  Scanning the same item twice now says so — **"Already scanned"** — instead of silently doing nothing, so a re-scan reads as acknowledged rather than as a broken scanner.
+
+  A category typed while creating an unknown serial now joins the managed category list, exactly like every other place an item's category can be set.
+
+  **Scanning a Dell's Express Service Code barcode creates the item under its Service Tag.** The two barcodes sit a centimetre apart on the same label and hold the same value written two ways — the 11-digit express code, and the 7-character tag Dell actually calls the serial. The tag is what the fleet export carries, so an item created under the express code would match nothing on the next import, and that import would add a *second* entry for the same laptop. Whichever of the two barcodes you scan, the item is now created under the tag. Looking a device up is unchanged: both forms still find it.
+
+  Looking up a single device now takes one extra tap: scan it, tap Done, tap the row. That is the trade for having one behaviour instead of a mode to get wrong.
+
 ### Changed
 - **When a device appears twice in one import file, the most recently seen record now wins.** A device that is re-imaged and re-enrolled shows up twice in the MDM export under the same serial: the live record, and a stale enrolment nobody removed. The import previously kept whichever copy came first in the file and ignored the rest.
 

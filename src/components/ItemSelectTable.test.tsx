@@ -1,9 +1,18 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import type { ReactElement } from "react";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { ItemSelectTable } from "./ItemSelectTable";
+import { ItemSelectionProvider } from "./ItemSelection";
 import { SORTABLE_COLUMNS, estimateTextEm } from "./items-view";
 import { LONG_PRESS_MS, LONG_PRESS_SLOP_PX, CARD_LAYOUT_QUERY, DRAWER_WIDTH, AXIS_LOCK_PX } from "./swipe-row";
+
+// Selection now lives in ItemSelectionProvider (see ItemSelection.tsx), not in
+// ItemSelectTable's own state — the /items Scan sheet is a SIBLING client
+// component that has to commit into the same selection. Every render in this
+// file goes through the provider so the table can reach useItemSelection().
+const renderTable = (ui: ReactElement) =>
+  render(<ItemSelectionProvider>{ui}</ItemSelectionProvider>);
 
 // One shared spy rather than a fresh vi.fn() per useRouter() call, so the
 // sort/filter suite can assert the URL a menu choice pushes. Hoisted because
@@ -23,7 +32,7 @@ vi.mock("@/app/admin/actions/items", () => ({ toggleItemStatusAction: vi.fn(), d
 afterEach(cleanup);
 
 function renderEmpty(props: Partial<Parameters<typeof ItemSelectTable>[0]> = {}) {
-  return render(
+  return renderTable(
     <ItemSelectTable
       items={[]}
       isAdmin
@@ -110,7 +119,7 @@ describe("ItemSelectTable — delete dialog structure (closed-dialog layout regr
   };
 
   function renderRow() {
-    return render(
+    return renderTable(
       <ItemSelectTable
         items={[ROW]}
         isAdmin
@@ -190,7 +199,7 @@ describe("ItemSelectTable — mobile card structure", () => {
   const RETIRED = { ...ROW, id: "item-2", serialNumber: "SN2", status: "RETIRED" as const };
 
   function renderRows(props: Partial<Parameters<typeof ItemSelectTable>[0]> = {}) {
-    return render(
+    return renderTable(
       <ItemSelectTable
         items={[ROW, RETIRED]}
         isAdmin
@@ -534,7 +543,7 @@ describe("ItemSelectTable — long-press selection", () => {
   });
 
   function renderRows(items = [ROW, RETIRED]) {
-    return render(
+    return renderTable(
       <ItemSelectTable
         items={items}
         isAdmin
@@ -796,7 +805,7 @@ describe("ItemSelectTable — Sort & filter menu", () => {
   beforeEach(() => push.mockClear());
 
   function renderMenu(props: Partial<Parameters<typeof ItemSelectTable>[0]> = {}) {
-    return render(
+    return renderTable(
       <ItemSelectTable
         items={[]}
         isAdmin

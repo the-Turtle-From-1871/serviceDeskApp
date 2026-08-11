@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const requireUser = vi.fn();
 const getItem = vi.fn();
 const getItemBySerialForScan = vi.fn();
+const getItemForScan = vi.fn();
 const getLastReceiver = vi.fn();
 
 vi.mock("@/lib/authz", () => ({
@@ -12,12 +13,13 @@ vi.mock("@/lib/authz", () => ({
 vi.mock("@/modules/items/items.service", () => ({
   getItem: (id: string) => getItem(id),
   getItemBySerialForScan: (sn: string) => getItemBySerialForScan(sn),
+  getItemForScan: (id: string) => getItemForScan(id),
 }));
 vi.mock("@/modules/transfers/transfers.service", () => ({
   getLastReceiver: (id: string) => getLastReceiver(id),
 }));
 
-import { lookupScannedItem, lookupScannedSerial, resolveScannedSerial } from "./scan";
+import { lookupScannedItem, lookupScannedSerial, resolveScannedSerial, resolveScannedItemId } from "./scan";
 import { AuthError } from "@/lib/authz";
 
 const ITEM = {
@@ -174,20 +176,36 @@ describe("lookupScannedSerial", () => {
 });
 
 describe("resolveScannedSerial", () => {
-  it("returns the item id", async () => {
-    expect(await resolveScannedSerial("SN1")).toEqual({ ok: true, itemId: "i1" });
+  it("returns the whole selectable item, not just an id", async () => {
+    getItemBySerialForScan.mockResolvedValue({
+      id: "i1", make: "HP", model: "HP ProBook 650 G5", serialNumber: "2TK94709FN", status: "ACTIVE",
+    });
+    expect(await resolveScannedSerial("2TK94709FN")).toEqual({
+      ok: true,
+      item: { id: "i1", make: "HP", model: "HP ProBook 650 G5", serialNumber: "2TK94709FN", status: "ACTIVE" },
+    });
   });
 
-  // Deliberately UNLIKE lookupScannedSerial: /items is a lookup surface, not a
-  // transfer surface, and a retired item has a perfectly good page to open.
-  it("resolves a retired item too", async () => {
-    getItemBySerialForScan.mockResolvedValue({ ...ITEM, status: "RETIRED" });
-    expect(await resolveScannedSerial("SN1")).toEqual({ ok: true, itemId: "i1" });
+  // Deliberately UNLIKE lookupScannedSerial: /items is a lookup surface, and a
+  // retired device on a shelf is exactly what someone scans to ask why.
+  it("returns a RETIRED item rather than refusing it", async () => {
+    getItemBySerialForScan.mockResolvedValue({
+      id: "i2", make: "Dell", model: "Latitude", serialNumber: "7X2K9L3", status: "RETIRED",
+    });
+    const res = await resolveScannedSerial("7X2K9L3");
+    expect(res).toEqual({
+      ok: true,
+      item: { id: "i2", make: "Dell", model: "Latitude", serialNumber: "7X2K9L3", status: "RETIRED" },
+    });
   });
 
   it("falls back to the alternate serial", async () => {
-    getItemBySerialForScan.mockResolvedValueOnce(null).mockResolvedValueOnce(ITEM);
-    expect(await resolveScannedSerial("17237164935", "7X2K9L3")).toEqual({ ok: true, itemId: "i1" });
+    const scanItem = { id: "i1", make: "Dell", model: "L5420", serialNumber: "SN1", status: "ACTIVE" };
+    getItemBySerialForScan.mockResolvedValueOnce(null).mockResolvedValueOnce(scanItem);
+    expect(await resolveScannedSerial("17237164935", "7X2K9L3")).toEqual({
+      ok: true,
+      item: scanItem,
+    });
   });
 
   it("refuses an unknown serial", async () => {
@@ -199,5 +217,27 @@ describe("resolveScannedSerial", () => {
     requireUser.mockRejectedValue(new AuthError("UNAUTHENTICATED"));
     expect(await resolveScannedSerial("SN1")).toEqual({ ok: false, code: "UNAUTHORIZED" });
     expect(getItemBySerialForScan).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveScannedItemId", () => {
+  it("resolves our own sticker to the same shape", async () => {
+    getItemForScan.mockResolvedValue({
+      id: "i1", make: "HP", model: "G5", serialNumber: "SN1", status: "ACTIVE",
+    });
+    expect(await resolveScannedItemId("i1")).toEqual({
+      ok: true,
+      item: { id: "i1", make: "HP", model: "G5", serialNumber: "SN1", status: "ACTIVE" },
+    });
+  });
+
+  it("is NOT_FOUND for an unknown id", async () => {
+    getItemForScan.mockResolvedValue(null);
+    expect(await resolveScannedItemId("nope")).toEqual({ ok: false, code: "NOT_FOUND" });
+  });
+
+  it("is UNAUTHORIZED when the session is gone", async () => {
+    requireUser.mockRejectedValue(new AuthError("UNAUTHENTICATED"));
+    expect(await resolveScannedItemId("i1")).toEqual({ ok: false, code: "UNAUTHORIZED" });
   });
 });

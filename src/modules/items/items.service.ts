@@ -6,7 +6,8 @@ import prisma from "@/lib/prisma";
 // normalizeCategoryName comes from the PURE schema module, not categories.service
 // (which is `server-only`): every write path must apply the same canonical form
 // or an item's stored string and its vocabulary row drift apart.
-import { newItemSchema, normalizeCategoryName, type NewItemInput } from "./items.schema";
+import { newItemSchema, normalizeCategoryName, type NewItemInput, type ScannedItemInput } from "./items.schema";
+import type { SelectedItem } from "@/components/items-view";
 import { parseItemsCsv } from "./csv";
 import { planImport, type SkippedRow, type UnresolvedRow, type ExistingItem, type ItemUpdate } from "./import";
 import { loadUnitMap, learnUnits, type UnitResolution } from "./units.service";
@@ -52,6 +53,17 @@ export function getItemBySerial(serialNumber: string) {
 export function getItemBySerialForScan(serialNumber: string) {
   return prisma.item.findUnique({
     where: { serialNumber },
+    select: { id: true, make: true, model: true, serialNumber: true, status: true },
+  });
+}
+
+/** The columns a scan needs, by id. Mirrors getItemBySerialForScan — identity
+ *  for display, status so the caller can flag a retired device without a second
+ *  query. Deliberately NOT the whole row: the result crosses to a client
+ *  component, and `notes` is admin-only. */
+export function getItemForScan(id: string) {
+  return prisma.item.findUnique({
+    where: { id },
     select: { id: true, make: true, model: true, serialNumber: true, status: true },
   });
 }
@@ -581,6 +593,38 @@ const UPDATE_CHUNK_ROWS = 500;
 /** Hard cap on one bulk action. The UI selects at most a page at a time, but
  *  the action is reachable by POST, so the server bounds it too. */
 export const MAX_BULK_ITEMS = 500;
+
+/**
+ * Create items from a scan session, in TWO queries for N rows.
+ *
+ * createMany + skipDuplicates leans on the citext-unique serial constraint as
+ * the race-safe backstop — exactly as the CSV importer does — so a serial
+ * created elsewhere between the scan and this call is absorbed rather than
+ * throwing. The follow-up findMany recovers ids for everything in the batch,
+ * created or pre-existing, because a pre-existing one was still physically
+ * scanned and belongs in the caller's selection.
+ *
+ * Enforces NO permissions — the calling Server Action owns the capability gate.
+ */
+export async function createScannedItems(
+  rows: ScannedItemInput[],
+  createdById: string,
+): Promise<{ items: SelectedItem[]; created: number; existed: number }> {
+  if (rows.length === 0) return { items: [], created: 0, existed: 0 };
+  if (rows.length > MAX_BULK_ITEMS) throw new ItemError("TOO_MANY");
+
+  const res = await prisma.item.createMany({
+    data: rows.map((r) => ({ ...r, createdById })),
+    skipDuplicates: true,
+  });
+
+  const items = await prisma.item.findMany({
+    where: { serialNumber: { in: rows.map((r) => r.serialNumber) } },
+    select: { id: true, make: true, model: true, serialNumber: true, status: true },
+  });
+
+  return { items, created: res.count, existed: items.length - res.count };
+}
 
 /**
  * Mark items as back in our possession.

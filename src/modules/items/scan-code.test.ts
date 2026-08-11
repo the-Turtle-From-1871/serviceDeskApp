@@ -93,10 +93,14 @@ describe("parseScan", () => {
 
   // The real payload, read off an HP ProBook 650 G5's label (serial 2TK94709FN,
   // a live item). Not a KEY:VALUE string at all — a comma-separated list whose
-  // first field is the bare serial.
+  // first field is the bare serial. Also carries the device description.
   it("reads the serial out of HP's comma-separated label QR", () => {
     expect(parseScan("2TK94709FN, HP ProBook 650 G5, ProdID 5PF3AB#ABA"))
-      .toEqual({ kind: "serial", serial: "2TK94709FN" });
+      .toEqual({
+        kind: "serial",
+        serial: "2TK94709FN",
+        label: { make: "HP", model: "HP ProBook 650 G5" },
+      });
   });
 
   // Only a WHOLE comma-separated field can be the serial, so a descriptive
@@ -141,5 +145,28 @@ describe("parseScan", () => {
 
   it("trims surrounding whitespace", () => {
     expect(parseScan("  7X2K9L3  ")).toEqual({ kind: "serial", serial: "7X2K9L3" });
+  });
+
+  // HP's comma list carries a description in its second field, and the stored
+  // row for this serial is make "HP" / model "HP ProBook 650 G5" — so the model
+  // is the WHOLE field and the make is its first token.
+  it("offers make and model from the label as a create hint", () => {
+    expect(parseScan("2TK94709FN, HP ProBook 650 G5, ProdID 5PF3AB#ABA")).toEqual({
+      kind: "serial",
+      serial: "2TK94709FN",
+      label: { make: "HP", model: "HP ProBook 650 G5" },
+    });
+  });
+
+  // A hint is only ever a prefill. Nothing else may depend on it, so the shapes
+  // that carry no description must not invent one.
+  it("offers no hint for a bare serial or a keyed field string", () => {
+    expect(parseScan("5CD1234ABC")).toEqual({ kind: "serial", serial: "5CD1234ABC" });
+    expect(parseScan("SN:2TK44202X4;PN:1AB23AV")).toEqual({ kind: "serial", serial: "2TK44202X4" });
+  });
+
+  it("offers no hint when the description field is not a description", () => {
+    // Second field is itself a serial, so there is no device description here.
+    expect(parseScan("2TK94709FN, 5CD1234ABC")).toEqual({ kind: "serial", serial: "2TK94709FN" });
   });
 });
