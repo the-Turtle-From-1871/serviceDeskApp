@@ -93,6 +93,10 @@ export const STALE_DEVICE_COLUMNS = [
   "Last logon user",
   "Last sync date",
   "Days since sync",
+  // Added 2026-08-11 with the colour-coded export. It is not decoration: a
+  // non-compliant row is RED regardless of age, so without this column the
+  // sheet colours rows for a reason the reader cannot see.
+  "Compliance",
   "Readiness",
 ] as const;
 

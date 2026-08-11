@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { requireCapability, AuthError } from "@/lib/authz";
 import { listStaleDevices } from "@/app/admin/analytics/analytics.service";
-import { STALE_DEVICE_COLUMNS, type StaleDeviceRow } from "@/app/admin/analytics/analytics.types";
+import { buildStaleDevicesWorkbook } from "@/app/admin/analytics/stale-workbook";
 
 /* ============================================================
    Export actions for the readiness dashboard.
@@ -41,15 +41,22 @@ const scopeSchema = z.object({
    discriminated union the client can narrow with `"error" in res`. */
 type StaleExportResult =
   | { error: string }
-  | { ok: true; columns: string[]; rows: StaleDeviceRow[]; truncated: boolean };
+  | { ok: true; base64: string; rowCount: number; truncated: boolean };
 
 /**
- * The 30-90 day stale-device chase list, as spreadsheet rows.
+ * The 30-90 day stale-device chase list, as a colour-coded .xlsx.
  *
- * The rows are built server-side and the file is written in the browser: that
- * keeps ONE CSV writer in the app — the client one, whose formula-injection
- * guard matters more on this sheet than on any other, because Device name,
- * Holder and Last logon user all arrive verbatim from the MDM CSV import.
+ * THE WHOLE FILE IS BUILT HERE and handed back as base64 — unlike every other
+ * export on this dashboard, which returns rows for the browser's shared CSV
+ * writer. The rows carry a colour per device (red not compliant, orange 60-90
+ * days, yellow 30-59), and CSV cannot express one; see `stale-workbook.ts` for
+ * why the writer lives on the server and why formula injection stops being a
+ * concern once the format is xlsx rather than CSV.
+ *
+ * Base64 rather than a download route so this stays a Server Action: the
+ * capability re-check below, the "you no longer have access" sentence and the
+ * truncation notice all survive, where a route would answer a revoked grant
+ * with a bare 403 in a new tab. The payload is bounded by STALE_EXPORT_MAX.
  */
 export async function exportStaleDevicesAction(input: unknown): Promise<StaleExportResult> {
   try {
@@ -73,7 +80,11 @@ export async function exportStaleDevicesAction(input: unknown): Promise<StaleExp
 
   try {
     const { rows, truncated } = await listStaleDevices(parsed.data);
-    return { ok: true, columns: [...STALE_DEVICE_COLUMNS], rows, truncated };
+    // An empty window is not an error, and the caller says so in a sentence
+    // rather than handing over a workbook of headers and a legend.
+    if (rows.length === 0) return { ok: true, base64: "", rowCount: 0, truncated: false };
+    const workbook = await buildStaleDevicesWorkbook(rows, parsed.data, truncated);
+    return { ok: true, base64: workbook.toString("base64"), rowCount: rows.length, truncated };
   } catch (e) {
     // Generic to the client, detail to the server log (CLAUDE.md §5).
     console.error("[exportStaleDevicesAction] unexpected error:", e);

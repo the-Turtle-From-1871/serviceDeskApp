@@ -234,14 +234,38 @@ reads the value at request time from the deployed instance, but a stale
 scheduled job holding the old secret will simply start getting `401`s until
 it's updated too.
 
+**On a Windows workstation, prefer the script over a hand-rolled command.**
+`scripts/items-import/` finds the newest `items*.csv` in the Downloads folder,
+imports it, deletes it, and can register itself as a Scheduled Task. It already
+handles everything in the two warnings below. See
+`scripts/items-import/README.md`.
+
 **Example (PowerShell, reading the secret from an environment variable rather
-than hardcoding it — this is what a scheduled task should run):**
+than hardcoding it):**
 
 ```powershell
+# PowerShell 7+ ONLY — see the warning below before copying this.
 $headers = @{ Authorization = "Bearer $env:MDM_IMPORT_SECRET" }
 $form = @{ file = Get-Item .\fleet.csv }
 Invoke-RestMethod -Uri "https://<APP_URL>/api/items/import" -Method Post -Headers $headers -Form $form
 ```
+
+> ⚠️ **`-Form` does not exist on Windows PowerShell 5.1.** It was added in
+> PowerShell **6.1**, and 5.1 is still the `powershell.exe` on a stock Windows 11
+> — there the line above fails with *"A parameter cannot be found that matches
+> parameter name 'Form'"*. On 5.1 the `multipart/form-data` body must be built by
+> hand from bytes; `Import-ItemsCsv.ps1` does exactly that (see its
+> `Invoke-ImportPost`) rather than reproducing it inline here.
+
+> ⚠️ **Do not let the client follow redirects, and do not treat a bare `200` as
+> proof of an import.** `/api/items/import` is excluded from the proxy matcher
+> (`src/proxy.ts`) precisely so this POST is never redirected to `/login`. If
+> that exclusion regresses, `Invoke-RestMethod` — which follows redirects by
+> default — turns the 302 into a **`200` carrying login-page HTML**, and a job
+> checking only the status code reports success while importing nothing. Pass
+> `-MaximumRedirection 0`, and confirm the body has integer `added`/`updated`/
+> `unchanged` before believing it. This matters most for a job that *deletes*
+> the export afterwards.
 
 **Responses:**
 - `200` — the import ran, with a JSON summary. `added`, `updated` and
@@ -326,12 +350,20 @@ instant, the real import will be fine; see the note below on why.
 
 **Step 2 — run it manually once, not on a schedule.**
 
+On Windows, this is what `scripts/items-import/Setup-ImportTask.ps1 -Test` is
+for: it runs exactly one import, keeps the CSV, and registers nothing. Run it
+twice to also cover step 3 below.
+
+By hand (**PowerShell 7+ only** — `-Form` does not exist on Windows PowerShell
+5.1, see the warning in §7):
+
 ```powershell
 $env:MDM_IMPORT_SECRET = "<the value you set in Vercel>"
 
 Invoke-RestMethod -Uri "https://www.dcsim.us/api/items/import" `
   -Method Post `
   -Headers @{ Authorization = "Bearer $env:MDM_IMPORT_SECRET" } `
+  -MaximumRedirection 0 `
   -Form @{ file = Get-Item .\fleet.csv }
 ```
 

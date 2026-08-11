@@ -5,7 +5,7 @@ import { Download } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { exportStaleDevicesAction } from "@/app/admin/actions/analytics";
-import { downloadCsv, exportName } from "./export";
+import { downloadBase64, exportName, XLSX_MIME } from "./export";
 import {
   STALE_MIN_DAYS,
   STALE_MAX_DAYS,
@@ -13,6 +13,7 @@ import {
   scopeLabel,
   type ItemScope,
 } from "./analytics.types";
+import { STALE_ESCALATE_DAYS } from "./stale-severity";
 
 /**
  * The dormant-device chase list, as a count and a download.
@@ -66,28 +67,28 @@ export function StaleDevicesCard({ count, scope }: { count: number; scope: ItemS
         setMessage(res.error);
         return;
       }
-      if (res.rows.length === 0) {
+      if (res.rowCount === 0) {
         // Reachable without anything being wrong: an import can land between the
         // page render and the click. Say so rather than handing over a file with
         // nothing but headers in it.
         setMessage("No devices are in that window any more. Reload for the current count.");
         return;
       }
-      downloadCsv(
+      downloadBase64(
         // The filename carries the window and the active unit, like every other
         // export here, so a sheet mailed on is self-describing.
         exportName(
           "stale-devices",
           [`${STALE_MIN_DAYS}-${STALE_MAX_DAYS}d`, scope.unit, scope.uic],
-          "csv",
+          "xlsx",
         ),
-        res.columns,
-        res.rows,
+        res.base64,
+        XLSX_MIME,
       );
       setMessage(
         res.truncated
           ? `Exported the first ${STALE_EXPORT_MAX.toLocaleString()} devices — there are more. Filter by unit to cover the rest.`
-          : `Exported ${res.rows.length.toLocaleString()} device${res.rows.length === 1 ? "" : "s"}.`,
+          : `Exported ${res.rowCount.toLocaleString()} device${res.rowCount === 1 ? "" : "s"}.`,
       );
     });
   }
@@ -105,6 +106,13 @@ export function StaleDevicesCard({ count, scope }: { count: number; scope: ItemS
             and still sync nightly. Devices unseen for over {STALE_MAX_DAYS} days, devices with no
             sync time recorded yet, and devices out on an open hand receipt are not counted.
           </p>
+          <p className="text-xs text-muted-foreground">
+            The export is an Excel file, one row per device, coloured{" "}
+            <strong>red</strong> if the device is not compliant, otherwise{" "}
+            <strong>orange</strong> at {STALE_ESCALATE_DAYS}–{STALE_MAX_DAYS} days and{" "}
+            <strong>yellow</strong> at {STALE_MIN_DAYS}–{STALE_ESCALATE_DAYS - 1}. Non-compliance
+            wins, so a device out of policy is red however recently it synced.
+          </p>
           {/* aria-live so the outcome reaches a screen reader: the visible
               evidence of success is a file landing outside the page. */}
           <p className="mt-1 text-xs text-muted-foreground" role="status" aria-live="polite">
@@ -120,7 +128,7 @@ export function StaleDevicesCard({ count, scope }: { count: number; scope: ItemS
           disabled={pending || count === 0}
         >
           <Download aria-hidden="true" />
-          {pending ? "Building…" : "Export CSV"}
+          {pending ? "Building…" : "Export Excel"}
         </Button>
       </CardContent>
     </Card>

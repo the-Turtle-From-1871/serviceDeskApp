@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## 2026-08-11
 
 ### Added
+- **The fleet export can now import itself.** Dropping the MDM export in the Downloads folder is all that is needed — a scheduled job picks up the newest `items*.csv`, imports it, and deletes it. The browser's `items (1).csv`, `items (2).csv` naming is handled: the newest one wins. Nothing changes about what an import does, only about who has to click through it; the interactive *Import items* page is untouched and still there.
+
+  It refuses to send a file that is still downloading, and it **only deletes an export the server confirmed it imported** — a rejected or failed import leaves the file where it is and tries again a few minutes later. Everything it does is written to a log, since the CSV itself is gone afterwards.
+
+  **This is the direct push (`POST /api/items/import`), not the Google Drive relay.** The relay exists only for the workstation whose web filter blocks the app; where the app is reachable, this is the shorter path and puts nothing on a public link.
+
+  #### Notes
+  - New scripts in **`scripts/items-import/`** (worker, one-time setup, and a shim that keeps the recurring task from flashing a console window). `scripts/items-import/README.md` covers setup and troubleshooting.
+  - Requires **`MDM_IMPORT_SECRET`** to already be set in Vercel and the app redeployed since; unset, every import returns `401`. Setup stores that value **DPAPI-encrypted in `C:\ops\items-import\`** — never in the repository, because it authenticates a write endpoint into the production property book. The run log lives beside it.
+  - **`DEPLOY.md` §7 corrected:** its `Invoke-RestMethod -Form` example is **PowerShell 7 only** (`-Form` arrived in 6.1 and does not exist in Windows PowerShell 5.1, still the default shell on Windows 11). Also documented there: never let the client follow redirects, and never treat a bare `200` as proof of an import.
+  - **Worth knowing before enabling it:** the import treats the CSV as the source of truth for a known device's name, home unit, category and assigned user, so an automatic import silently reverts hand edits made in the app since the previous one.
 - Bulk actions for a selected or scanned batch: record an audit for every item under one signature, flag them all for service, or complete service on them all at once. Retired devices are passed over and reported rather than failing the batch.
 
   They live behind a **More actions** button on the selection bar at the bottom of the items list, and each one says what it did — *"Audited 47 items. Skipped 2 (retired or not applicable)."* The selection is deliberately kept afterwards, so the result stays on screen and a second action can be applied to the same batch. Recording an audit needs Administrator; the two service actions need the service-queue permission, and you only see what you can use.
@@ -17,6 +28,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Two confirmations before something irreversible.** *Record audit* now asks first, naming how many devices and which signature it will sign as — it writes an accountability record for every device and cannot be undone. *Clear selection* asks before discarding a batch of more than 20, which now takes a re-scan to rebuild rather than a moment.
 
 ### Changed
+- **The dormant-device export is now a colour-coded Excel file instead of a CSV.** Every row is shaded so the sheet can be worked down without reading a single date: **red** if the device is not compliant, otherwise **orange** at 60–90 days since its last MDM check-in and **yellow** at 30–59. Non-compliance wins, so a device out of policy is red however recently it synced — on the current fleet that is 82 of the 86 devices listed, which is rather the point: those are the ones to pick up first.
+
+  The sheet gains a **Compliance** column showing the value exactly as MDM reports it (`compliant`, `noncompliant`, `inGracePeriod`), so a red row says why it is red. A legend under the data names each colour, and the header row stays frozen while you scroll. A device **in a grace period is not red** — Intune means "out of policy but not yet enforced" by that, so it keeps its age colour; likewise a device the export says nothing about.
+
+  Everything else is unchanged: the same devices, the same 30–90 day window, the same exclusions, the same cap and the same warning when it binds — except that a capped sheet now says so **inside the file** as well as on screen, since the file is what gets mailed on. The button reads **Export Excel**; every other chart on the dashboard still exports CSV.
+
+  #### Notes
+  - Adds `write-excel-file` (MIT). The workbook is built on the server, so nothing new reaches the browser bundle.
+
 - **Marking devices on hand no longer clears the selection.** It used to empty the batch on success, which was harmless when the selection vanished on reload and is not now — a scanned sweep is worth keeping, and clearing it also took away the *"Marked 47 items on hand."* message before it could be read. Every control in the selection bar now keeps the batch; *Clear selection* is the one way out.
 
 - **The Import items page now documents the lastSync column, and says what happens without it.** The downloadable template has carried `lastSync` since the column shipped, but the on-page column list stopped at `compliance`, so nobody building an export had any reason to include it. It is now listed with its accepted spellings (`lastSync`, `Last Sync`, `lastSyncDate`, `lastSyncDateTime`), alongside a note that it is *when MDM last checked in* rather than *when a person last signed in*, that the two routinely disagree, and that the dashboard's "devices MDM has not seen recently" list stays empty until the file carries it.
@@ -61,6 +81,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   #### Notes
   - Migration `20260811000000_item_mdm_proposed_name` adds the nullable `Item.mdmProposedName` column. No backfill — every existing row means "no conflict", which is the correct starting state. **Apply it to Supabase before merging**, per migrate-before-push: Prisma enumerates every column in its SELECT, so until the column exists *every* item read fails, not just the new feature.
   - The junk `Unit` row named `BE` was deleted and the 18 contaminated home units cleared in the same pass. That deletion is what stops the contamination recurring for devices whose stored name is *already* autogenerated — the rename guard alone does not cover them.
+
+- **"Already scanned" now waits three seconds and says which device.** A barcode is re-read many times a second while it sits under the camera, so the message confirming what you just added — *Added HP ProBook 650 G5* — was replaced almost immediately by a bare *Already scanned* that named nothing. A successful scan's message now holds for three seconds before any repeat notice can replace it, and a repeat reads **"2TK94709FN already scanned"** so you can see which label the camera is still pointed at.
+
+  During those three seconds a repeat of a *different* device is silenced too. That is deliberate: on a sweep the camera is moving from one label to the next, not revisiting a third. The "Selection is full" refusal is not affected — it still speaks immediately, because a scan it refuses is one that would otherwise be lost.
 
 ## 2026-08-10
 

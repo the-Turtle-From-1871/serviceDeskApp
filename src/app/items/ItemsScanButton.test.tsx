@@ -105,6 +105,19 @@ beforeEach(() => {
   });
 });
 
+// The grace window and the repeat throttle are both wall-clock comparisons, so
+// these tests move time by hand. `vi.clearAllMocks()` in the beforeEach above
+// only clears call records, not this implementation, so the order is immaterial.
+// The value matters: it equals the startedAt fillSelection() writes into the
+// persisted selection, so freezing the clock here cannot age a batch out from
+// under the cap tests.
+let nowMs = 1_754_870_000_000;
+beforeEach(() => {
+  nowMs = 1_754_870_000_000;
+  vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+});
+afterEach(() => { vi.mocked(Date.now).mockRestore(); });
+
 describe("ItemsScanButton", () => {
   it("accumulates instead of navigating, and lists what it collected", async () => {
     const user = userEvent.setup();
@@ -420,15 +433,74 @@ describe("ItemsScanButton", () => {
   });
 
   describe("re-scanning an already-listed item", () => {
-    it("shows an 'Already scanned' notice and does not add a second row", async () => {
+    // The success message has to survive the repeat decodes of the code still
+    // sitting under the camera, or the operator never sees what was added.
+    it("says nothing at all for 3 seconds after a successful scan", async () => {
       const user = userEvent.setup();
       setup();
       await open(user);
       await user.click(screen.getByRole("button", { name: "emit-hp" }));
       await screen.findByText("2TK94709FN");
+      vi.mocked(beep).mockClear();
+
+      nowMs += 2_999;
       await user.click(screen.getByRole("button", { name: "emit-hp" }));
-      expect(await screen.findByText(/^Already scanned$/i)).toBeDefined();
+
+      expect(screen.getByTestId("scan-notice").textContent).toMatch(/^Added HP/);
+      expect(beep).not.toHaveBeenCalled();
+    });
+
+    // The grace must SUPPRESS, not throttle. sayAlreadyScanned checks the grace
+    // and returns BEFORE noticeThrottled, so a silenced repeat leaves lastNotice
+    // alone — and the first repeat past the window speaks at once. Swap those two
+    // guards and the +2,999ms repeat below stamps lastNotice instead, which would
+    // hold this one silent until +4,499ms. Every other test in this file still
+    // passes with the guards swapped; this is the one that does not.
+    it("a suppressed repeat does not open a throttle window", async () => {
+      const user = userEvent.setup();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      await screen.findByText("2TK94709FN");
+
+      nowMs += 2_999;
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+
+      nowMs += 2;
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      expect(await screen.findByText("2TK94709FN already scanned")).toBeDefined();
+    });
+
+    it("names the serial once the grace has expired, and adds no second row", async () => {
+      const user = userEvent.setup();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      await screen.findByText("2TK94709FN");
+
+      nowMs += 3_000;
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+
+      expect(await screen.findByText("2TK94709FN already scanned")).toBeDefined();
+      // Exactly one node holds the bare serial: the list row. The notice reads
+      // "2TK94709FN already scanned", which this exact-match query does not hit.
       expect(screen.getAllByText("2TK94709FN")).toHaveLength(1);
+    });
+
+    // A serial scan registers the item-id key AND the sn: key it resolved from,
+    // so a later sticker scan of the same device arrives on the OTHER one and
+    // must still be able to name it. Both keys carry the serial for this reason.
+    it("names the serial when the repeat arrives on the row's other key", async () => {
+      const user = userEvent.setup();
+      setup();
+      await open(user);
+      await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      await screen.findByText("2TK94709FN");
+
+      nowMs += 3_000;
+      await user.click(screen.getByRole("button", { name: "emit-sticker" }));
+
+      expect(await screen.findByText("2TK94709FN already scanned")).toBeDefined();
     });
 
     it("does not beep on every frame the code sits in view", async () => {
@@ -438,11 +510,16 @@ describe("ItemsScanButton", () => {
       await user.click(screen.getByRole("button", { name: "emit-hp" }));
       await screen.findByText("2TK94709FN");
       vi.mocked(beep).mockClear();
+
+      // Past the 3s grace, so a repeat is reportable at all...
+      nowMs += 3_000;
       await user.click(screen.getByRole("button", { name: "emit-hp" }));
-      await user.click(screen.getByRole("button", { name: "emit-hp" }));
-      await user.click(screen.getByRole("button", { name: "emit-hp" }));
-      // All four "frames" land well inside the 1.5s throttle window, so only
-      // the first repeat should have produced a beep.
+      // ...but these three land inside the 1.5s per-key throttle behind it.
+      for (let i = 0; i < 3; i++) {
+        nowMs += 400;
+        await user.click(screen.getByRole("button", { name: "emit-hp" }));
+      }
+
       expect(beep).toHaveBeenCalledTimes(1);
     });
   });
@@ -478,8 +555,11 @@ describe("ItemsScanButton", () => {
       await open(user);
       await user.click(screen.getByRole("button", { name: "emit-sticker" }));
       await screen.findByText("2TK94709FN");
+
+      nowMs += 3_000;
       await user.click(screen.getByRole("button", { name: "emit-sticker" }));
-      expect(await screen.findByText(/^Already scanned$/i)).toBeDefined();
+
+      expect(await screen.findByText("2TK94709FN already scanned")).toBeDefined();
       expect(screen.getAllByText("2TK94709FN")).toHaveLength(1);
     });
 
@@ -509,5 +589,36 @@ describe("ItemsScanButton", () => {
     await user.type(screen.getByLabelText(/Model for NOSUCH123/i), "Widget");
     await user.click(screen.getByRole("button", { name: /^Create 1/ }));
     expect(await screen.findByText(/1 item created\./i)).toBeDefined();
+  });
+
+  // Both halves of a mixed batch must survive the create step: the in-book
+  // devices committed by Done, and the serials created from the form. Losing
+  // either means re-selecting a shelf by hand before any bulk action can run.
+  //
+  // TWO devices, deliberately — the found HP (i1) and the unknown serial the
+  // create mock returns as i3 — so the assertion tells "kept the found half"
+  // apart from "kept the created half".
+  //
+  // SCOPE: this pins the CLIENT logic only. The bug reported against this flow
+  // was the page refresh from createScannedItemsAction's revalidatePath("/items")
+  // destroying an in-memory selection; jsdom models neither, and the selection
+  // is localStorage-backed now anyway. Read a pass here as "the sheet commits
+  // both halves", never as "the reported bug is fixed" — that is a device check.
+  it("keeps the in-book items AND the created ones selected after the create form", async () => {
+    const user = userEvent.setup();
+    setup(true);
+    await open(user);
+    await user.click(screen.getByRole("button", { name: "emit-hp" }));
+    await screen.findByText("2TK94709FN");
+    await user.click(screen.getByRole("button", { name: "emit-unknown" }));
+    await screen.findByText(/^Not in the book$/i);
+
+    await user.click(screen.getByRole("button", { name: /^Done/ }));
+    await user.type(await screen.findByLabelText(/Make for NOSUCH123/i), "Acme");
+    await user.type(screen.getByLabelText(/Model for NOSUCH123/i), "Widget");
+    await user.click(screen.getByRole("button", { name: /^Create 1/ }));
+    await screen.findByText(/1 item created\./i);
+
+    await waitFor(() => expect(screen.getByTestId("sel").textContent).toBe("i1,i3"));
   });
 });

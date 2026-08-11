@@ -45,6 +45,29 @@ function triggerDownload(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+export const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+/**
+ * Download a file the SERVER built, handed over as base64.
+ *
+ * The dormant-device export is the only one that works this way, and only
+ * because its rows carry a colour: CSV cannot express one, so that sheet is a
+ * real .xlsx written by `stale-workbook.ts`. Everything else on this dashboard
+ * still returns rows to `downloadCsv` below, which is the shared writer and
+ * should stay the default — a format is worth its weight only where the format
+ * itself carries meaning.
+ *
+ * `atob` gives one character per byte, so the values are already 0-255 and the
+ * Uint8Array copy is exact; decoding through a string is fine at this size,
+ * bounded by STALE_EXPORT_MAX.
+ */
+export function downloadBase64(filename: string, base64: string, mime: string) {
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  triggerDownload(new Blob([bytes], { type: mime }), filename);
+}
+
 export function downloadCsv(filename: string, columns: string[], rows: Array<Record<string, unknown>>) {
   // BOM so Excel reads UTF-8 rather than the local ANSI codepage.
   const blob = new Blob(["﻿" + toCsv(columns, rows)], { type: "text/csv;charset=utf-8;" });
