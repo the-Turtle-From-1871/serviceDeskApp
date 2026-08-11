@@ -1130,6 +1130,55 @@ boundary is crossed. Nothing in the tool requires or acquires elevation.
 through Google sign-in would require the account password and a 2FA bypass on
 disk, and breaches Google's ToS.
 
+### Workstation-held import credential (`scripts/items-import/`)
+
+Local Windows tooling that imports the MDM fleet export by POSTing it to
+`POST /api/items/import` (§ above). Like the rotation tooling, it is **not** part
+of the deployed app and runs on one technician workstation, but it holds a
+credential that can write production.
+
+**What it stores, and where.** `C:\ops\items-import\secret.txt` holds
+`MDM_IMPORT_SECRET` as a DPAPI-encrypted `SecureString`
+(`ConvertFrom-SecureString`), bound to that Windows user on that machine, so the
+file is inert if copied elsewhere. Nothing is stored in the repository — and that
+is the point: `scripts/` is committed and pushed to GitHub, so the secret is
+deliberately not a script constant. The state folder's inherited ACEs are
+stripped to owner + SYSTEM + Administrators, but that is best-effort — a failure
+warns and does not abort, so **DPAPI is the control being relied on, not the
+ACL**, exactly as above.
+
+**Its blast radius is the property book, not the account.** The secret
+authenticates one endpoint, which only ever calls `commitImport` and writes as
+the non-loginable import service account. It reads nothing, reaches no other
+route, and grants nothing in Vercel — unlike the project-scoped Vercel token held
+by the rotation tooling.
+
+**Vercel stores it write-only.** `MDM_IMPORT_SECRET` is a `sensitive`-type Vercel
+variable, so its value cannot be read back by the API, the dashboard, or
+`vercel env pull`. The workstation copy and whatever copy the operator keeps are
+the only copies in existence; losing both means rotating it — which needs a
+redeploy, per the rotation note above.
+
+**The log is asserted secret-free.** `C:\ops\items-import\import.log` records
+filenames, byte counts, row counts, and the serials of skipped or mismatched
+rows — never the bearer token and never a CSV row's field values. The token is
+never echoed even inside an error: a failed call reports the HTTP status and the
+server's own message only.
+
+**Deleting the export is gated on a *verified* import, not on a status code.**
+The tool deletes the CSV after a successful import, and only when the response
+parsed as JSON with integer `added`/`updated`/`unchanged`. That check is
+security-relevant rather than cosmetic: `/api/items/import` is excluded from the
+`src/proxy.ts` matcher precisely so this POST is never redirected to `/login`,
+and a followed redirect comes back as **200 carrying login-page HTML**. Treating
+that as success would destroy an export that was never imported. The client also
+sends `-MaximumRedirection 0` so a 3xx raises instead of being chased.
+
+**No elevation, and no unattended deploy.** It never writes to Vercel and never
+triggers a deployment — it only POSTs a CSV. The scheduled task runs with an
+Interactive logon type, which stores no Windows password, and nothing in the tool
+requires or acquires elevation.
+
 ---
 
 ## 7. Cryptographic receipt seal
