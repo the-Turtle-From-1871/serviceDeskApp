@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## 2026-08-10
 
 ### Changed
+- **When a device appears twice in one import file, the most recently seen record now wins.** A device that is re-imaged and re-enrolled shows up twice in the MDM export under the same serial: the live record, and a stale enrolment nobody removed. The import previously kept whichever copy came first in the file and ignored the rest.
+
+  That was only ever right by luck. The export happens to be sorted newest-first, so "first" and "newest" were the same row — but nothing checked that, and nothing would have told you if it changed. A different export tool, or someone sorting by device name, and the import would have quietly started writing **months-old** device names and last-logon users into the property book, with no error anywhere. On the current fleet export there are **29 such devices**, every pair disagreeing, the two records between 4 and 208 days apart.
+
+  The import now picks the copy with the newest last-logon date, whatever order the file is in, and the device is renamed to that record's device name — recorded in the item's history like any other name change. Where the export gives no usable date, or the dates are identical, it keeps the first copy exactly as before. A copy that could not be used at all — a *new* serial whose newest row is missing make or model — never wins, so this can't drop a device that would previously have been created.
+
+  On today's export this changes nothing: the same 29 rows are skipped and the same records are kept. It is a guard against tomorrow's export, not a correction to this one. The skipped list now says which case applied, and comes back ordered by row number so it reads against the source file.
+
 - **Approving *Grant Administrator* now makes the person an administrator.** The permission was called *Administer the application* and behaved like the eight beside it: approving it added one permission to whatever the account already had. So approving it for a viewer produced someone who could manage users and change the access PIN but could **not** create a hand receipt, manage items or open analytics — and the Users page still listed them as a plain user, because that page shows the role. It now changes their role to Admin, which confers everything, and the Users page shows **Admin** straight away.
 
   The permission is renamed **Grant Administrator** on both the request form and the approval page, and both now say plainly that it changes the person's role rather than granting one more permission. Nothing else about deciding changed: it still starts unticked so granting it is deliberate, an administrator still cannot decide their own request, and denying it leaves the account exactly as it was.

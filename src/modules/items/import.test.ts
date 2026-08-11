@@ -266,6 +266,169 @@ describe("planImport", () => {
     expect(skipped).toEqual([{ row: 2, serialNumber: "abc123", reason: "duplicate in file" }]);
   });
 
+  // A device re-imaged and re-enrolled appears TWICE in the MDM export under the
+  // same serial: the live record, and a stale enrollment nobody purged. Measured
+  // on the real fleet export (2026-08-11): 29 such serials, every pair
+  // disagreeing, the two records 4-208 days apart (median 41). Keeping the first
+  // occurrence was only correct because that export happened to be sorted
+  // newest-first; nothing enforced that, so a change of export sort order would
+  // have silently started writing months-old device names and holders into the
+  // property book with no error anywhere.
+  describe("duplicate serials in one file", () => {
+    const logon = (row: number, serial: string, date: string, over: Partial<RawRow> = {}) =>
+      mk(row, { serialNumber: serial, lastLogonDate: date, ...over });
+
+    it("keeps the row MDM saw most recently, not the first one", () => {
+      const { toUpdate, skipped } = planImport(
+        [
+          logon(1, "DUP", "5/14/2026 3:27:36 PM", { deviceName: "OLD-NAME" }),
+          logon(2, "DUP", "8/10/2026 9:19:17 PM", { deviceName: "NEW-NAME" }),
+        ],
+        map("DUP", existing({ deviceName: "OLD-NAME" })),
+        UNITS,
+      );
+      expect(toUpdate).toHaveLength(1);
+      expect(toUpdate[0].data.deviceName).toBe("NEW-NAME");
+      expect(skipped).toEqual([
+        { row: 1, serialNumber: "DUP", reason: "duplicate in file (a row with a newer last logon was used)" },
+      ]);
+    });
+
+    it("still keeps the newest when it comes first", () => {
+      const { toUpdate, skipped } = planImport(
+        [
+          logon(1, "DUP", "8/10/2026 9:19:17 PM", { deviceName: "NEW-NAME" }),
+          logon(2, "DUP", "5/14/2026 3:27:36 PM", { deviceName: "OLD-NAME" }),
+        ],
+        map("DUP", existing({ deviceName: "OLD-NAME" })),
+        UNITS,
+      );
+      expect(toUpdate[0].data.deviceName).toBe("NEW-NAME");
+      expect(skipped[0].row).toBe(2);
+    });
+
+    it("renames the device to the newest record's name and logs the change", () => {
+      const { toUpdate } = planImport(
+        [
+          logon(1, "DUP", "1/02/2026 1:00:00 AM", { deviceName: "BE-UV2ZGBPHR0FL" }),
+          logon(2, "DUP", "8/10/2026 1:00:00 AM", { deviceName: "NGHINBPMTEL274" }),
+        ],
+        map("DUP", existing({ deviceName: "BE-UV2ZGBPHR0FL" })),
+        UNITS,
+      );
+      expect(toUpdate[0].data.deviceName).toBe("NGHINBPMTEL274");
+      expect(toUpdate[0].loggedChanges).toEqual(
+        expect.arrayContaining([expect.objectContaining({ field: "deviceName" })]),
+      );
+    });
+
+    it("prefers a row that HAS a last-logon date over one that has none", () => {
+      const { toUpdate, skipped } = planImport(
+        [
+          mk(1, { serialNumber: "DUP", deviceName: "NO-DATE", lastLogonDate: "" }),
+          logon(2, "DUP", "8/10/2026 9:19:17 PM", { deviceName: "HAS-DATE" }),
+        ],
+        map("DUP", existing()),
+        UNITS,
+      );
+      expect(toUpdate[0].data.deviceName).toBe("HAS-DATE");
+      expect(skipped[0].row).toBe(1);
+    });
+
+    // Unchanged from the original behaviour, and the reason string stays the
+    // plain one so it still reads correctly: nothing "newer" was chosen.
+    it("falls back to first-wins when neither row has a usable date", () => {
+      const { toCreate, skipped } = planImport(
+        [mk(1, { serialNumber: "AbC123" }), mk(2, { serialNumber: "abc123" })],
+        new Map(), UNITS,
+      );
+      expect(toCreate).toHaveLength(1);
+      expect(skipped).toEqual([{ row: 2, serialNumber: "abc123", reason: "duplicate in file" }]);
+    });
+
+    it("breaks an exact date tie on the earlier row, so a re-run is stable", () => {
+      const { skipped } = planImport(
+        [logon(1, "DUP", "8/10/2026 9:19:17 PM"), logon(2, "DUP", "8/10/2026 9:19:17 PM")],
+        map("DUP", existing()),
+        UNITS,
+      );
+      expect(skipped[0].row).toBe(2);
+    });
+
+    it("matches duplicates case-insensitively, like the citext serial column", () => {
+      const { toUpdate, skipped } = planImport(
+        [
+          logon(1, "abc123", "1/02/2026 1:00:00 AM", { deviceName: "OLD" }),
+          logon(2, "ABC123", "8/10/2026 1:00:00 AM", { deviceName: "NEW" }),
+        ],
+        map("abc123", existing()),
+        UNITS,
+      );
+      expect(toUpdate).toHaveLength(1);
+      expect(toUpdate[0].data.deviceName).toBe("NEW");
+      expect(skipped).toHaveLength(1);
+    });
+
+    // Without this, a newest-wins rule could DROP A DEVICE the old first-wins
+    // rule would have created: make/model are required to create, so crowning a
+    // fresher row that lacks them loses the only usable record for that serial.
+    it("does not let a fresher row without make/model lose a NEW serial entirely", () => {
+      const { toCreate, skipped } = planImport(
+        [
+          logon(1, "NEWSN", "1/02/2026 1:00:00 AM", { make: "Dell", model: "5540" }),
+          logon(2, "NEWSN", "8/10/2026 1:00:00 AM", { make: "", model: "" }),
+        ],
+        new Map(),
+        UNITS,
+      );
+      expect(toCreate).toHaveLength(1);
+      expect(toCreate[0]).toMatchObject({ serialNumber: "NEWSN", make: "Dell", model: "5540" });
+      expect(skipped).toHaveLength(1);
+    });
+
+    // For a serial that ALREADY exists, make/model are not required, so the
+    // freshest row wins even when it carries neither.
+    it("still takes the freshest row for an EXISTING serial without make/model", () => {
+      const { toUpdate } = planImport(
+        [
+          logon(1, "DUP", "1/02/2026 1:00:00 AM", { deviceName: "OLD", make: "Dell", model: "5540" }),
+          logon(2, "DUP", "8/10/2026 1:00:00 AM", { deviceName: "NEW", make: "", model: "" }),
+        ],
+        map("DUP", existing({ deviceName: "OLD" })),
+        UNITS,
+      );
+      expect(toUpdate[0].data.deviceName).toBe("NEW");
+    });
+
+    it("reports skipped rows sorted by row number", () => {
+      const { skipped } = planImport(
+        [
+          logon(1, "A", "8/10/2026 1:00:00 AM"),
+          mk(2, { serialNumber: "" }),
+          logon(3, "A", "1/02/2026 1:00:00 AM"),
+        ],
+        map("a", existing()),
+        UNITS,
+      );
+      expect(skipped.map((s) => s.row)).toEqual([2, 3]);
+    });
+
+    it("handles three copies of one serial, keeping only the newest", () => {
+      const { toUpdate, skipped } = planImport(
+        [
+          logon(1, "DUP", "1/02/2026 1:00:00 AM", { deviceName: "A" }),
+          logon(2, "DUP", "8/10/2026 1:00:00 AM", { deviceName: "B" }),
+          logon(3, "DUP", "4/01/2026 1:00:00 AM", { deviceName: "C" }),
+        ],
+        map("DUP", existing()),
+        UNITS,
+      );
+      expect(toUpdate).toHaveLength(1);
+      expect(toUpdate[0].data.deviceName).toBe("B");
+      expect(skipped.map((s) => s.row)).toEqual([1, 3]);
+    });
+  });
+
   it("auto-fills homeUnit from the device name on create when blank", () => {
     const { toCreate, detected } = planImport(
       [mk(1, { deviceName: "HI-DCSIM-LT-001", homeUnit: "" })], new Map(), UNITS,

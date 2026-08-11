@@ -75,9 +75,59 @@ export type PlanResult = {
   detected: number;
 };
 
-// Pure planning: validate each row (serial required), dedup within the file
-// (first occurrence wins), then either UPDATE a matching existing item's changed
-// tracked fields, mark it unchanged, or CREATE a new item (make/model required).
+type ParsedImportRow = ReturnType<typeof importRowSchema.parse>;
+
+/** One validated row, competing for its serial. */
+type Candidate = {
+  row: number;
+  d: ParsedImportRow;
+  sn: string;
+  snKey: string;
+  /** Parsed once here, reused by the winner. `null` when the export gave no
+   *  usable date — which is a real state, not an error. */
+  lastLogonAt: Date | null;
+};
+
+/**
+ * Decide which of two rows carrying the SAME serial survives.
+ *
+ * A device that is re-imaged and re-enrolled appears twice in an MDM export:
+ * the live record, and a stale enrollment nobody purged. This used to keep
+ * whichever came first, which was correct only because the export happened to
+ * be sorted newest-first — an incidental property of the exporting tool that
+ * nothing here enforced or checked. A change of sort order would have started
+ * writing months-old device names and holders into the property book silently.
+ */
+function preferredCandidate(a: Candidate, b: Candidate, serialIsNew: boolean): Candidate {
+  // 1. USABILITY FIRST. Creating a new item requires make + model, so a fresher
+  //    row missing them must not win: it would be rejected at the create branch
+  //    below and take the only usable record for that serial down with it,
+  //    dropping a device the old first-wins rule would have kept. A serial that
+  //    already exists needs neither field, so this rule does not apply there.
+  if (serialIsNew) {
+    const aUsable = Boolean(a.d.make) && Boolean(a.d.model);
+    const bUsable = Boolean(b.d.make) && Boolean(b.d.model);
+    if (aUsable !== bUsable) return aUsable ? a : b;
+  }
+  // 2. A row MDM actually dated beats one it did not.
+  if ((a.lastLogonAt === null) !== (b.lastLogonAt === null)) {
+    return a.lastLogonAt !== null ? a : b;
+  }
+  // 3. Most recently seen wins.
+  if (a.lastLogonAt && b.lastLogonAt && a.lastLogonAt.getTime() !== b.lastLogonAt.getTime()) {
+    return a.lastLogonAt.getTime() > b.lastLogonAt.getTime() ? a : b;
+  }
+  // 4. Stable tie-break on the earlier row. Determinism matters beyond
+  //    tidiness: the scheduled Drive import skips a byte-identical file by
+  //    content hash, so a plan that varied between runs on the same input would
+  //    make "unchanged" mean nothing.
+  return a.row <= b.row ? a : b;
+}
+
+// Pure planning: validate each row (serial required), resolve duplicate serials
+// within the file (the row MDM saw most recently wins — see preferredCandidate),
+// then either UPDATE a matching existing item's changed tracked fields, mark it
+// unchanged, or CREATE a new item (make/model required).
 // Only when homeUnit is blank on a create is it derived from the device name.
 export function planImport(
   rows: RawRow[],
@@ -90,9 +140,12 @@ export function planImport(
   const unchanged: UnchangedRow[] = [];
   const skipped: SkippedRow[] = [];
   const unresolved: UnresolvedRow[] = [];
-  const seen = new Set<string>();
   let detected = 0;
 
+  // PHASE 1 — validate every row exactly once, in row order. Invalid rows are
+  // rejected here, BEFORE any duplicate contest, so a malformed row can never
+  // win one and take a usable duplicate of the same serial down with it.
+  const candidates: Candidate[] = [];
   for (const r of rows) {
     const parsed = importRowSchema.safeParse({
       make: r.make,
@@ -116,13 +169,53 @@ export function planImport(
     }
     const d = parsed.data;
     const sn = d.serialNumber;
-    const snKey = sn.toLowerCase();
+    candidates.push({
+      row: r.row,
+      d,
+      sn,
+      snKey: sn.toLowerCase(),
+      lastLogonAt: parseLastLogonAt(d.lastLogonDate) ?? null,
+    });
+  }
 
-    if (seen.has(snKey)) {
-      skipped.push({ row: r.row, serialNumber: sn, reason: "duplicate in file" });
+  // PHASE 2 — one winner per serial. Grouping preserves row order, so
+  // `group[0]` is the first occurrence and the tie-break in preferredCandidate
+  // reproduces the old first-wins behaviour whenever no row is demonstrably
+  // fresher.
+  const bySerial = new Map<string, Candidate[]>();
+  for (const c of candidates) {
+    const group = bySerial.get(c.snKey);
+    if (group) group.push(c);
+    else bySerial.set(c.snKey, [c]);
+  }
+
+  const winners = new Set<number>();
+  for (const [snKey, group] of bySerial) {
+    if (group.length === 1) {
+      winners.add(group[0].row);
       continue;
     }
-    seen.add(snKey);
+    const serialIsNew = !existingBySerial.has(snKey);
+    const best = group.reduce((a, b) => preferredCandidate(a, b, serialIsNew));
+    winners.add(best.row);
+
+    // Name WHY the row lost. When the first occurrence won, nothing was chosen
+    // on recency and the original wording is still the honest one.
+    const reason = best.row === group[0].row
+      ? "duplicate in file"
+      : "duplicate in file (a row with a newer last logon was used)";
+    for (const loser of group) {
+      if (loser.row === best.row) continue;
+      skipped.push({ row: loser.row, serialNumber: loser.sn, reason });
+    }
+  }
+
+  // PHASE 3 — plan the winners, still in row order.
+  for (const c of candidates) {
+    if (!winners.has(c.row)) continue;
+    const d = c.d;
+    const sn = c.sn;
+    const snKey = c.snKey;
 
     const match = existingBySerial.get(snKey);
     if (match) {
@@ -174,7 +267,7 @@ export function planImport(
           // CREATE branch does, for the admin panel to surface. A row that
           // already carries a home unit is not "unresolved" — it just isn't
           // being changed this import, per the "leave it alone" rule above.
-          unresolved.push({ row: r.row, deviceName: effectiveDeviceName, segments: splitSegments(effectiveDeviceName) });
+          unresolved.push({ row: c.row, deviceName: effectiveDeviceName, segments: splitSegments(effectiveDeviceName) });
         }
       }
       // Otherwise (no CSV value, no effective device name): leave it alone —
@@ -202,7 +295,7 @@ export function planImport(
 
       const allChanges = [...loggedChanges, ...silentChanges];
       if (allChanges.length === 0) {
-        unchanged.push({ row: r.row, serialNumber: sn, makeModelMismatch });
+        unchanged.push({ row: c.row, serialNumber: sn, makeModelMismatch });
         continue;
       }
       const data: Record<string, string | Date | null> = {};
@@ -218,13 +311,13 @@ export function planImport(
       // Retired items still get their fields updated (data holds every change),
       // but emit no loggedChanges so commitImport writes no ItemEdit for them.
       const emittedLogged = match.status === "RETIRED" ? [] : loggedChanges;
-      toUpdate.push({ row: r.row, itemId: match.id, serialNumber: sn, data, loggedChanges: emittedLogged, makeModelMismatch });
+      toUpdate.push({ row: c.row, itemId: match.id, serialNumber: sn, data, loggedChanges: emittedLogged, makeModelMismatch });
       continue;
     }
 
     // CREATE path — make and model are required for a new item.
     if (!d.make || !d.model) {
-      skipped.push({ row: r.row, serialNumber: sn, reason: "make and model are required for new items" });
+      skipped.push({ row: c.row, serialNumber: sn, reason: "make and model are required for new items" });
       continue;
     }
     const item: NewItemImport = {
@@ -240,7 +333,9 @@ export function planImport(
       currentUserEmail: d.assignedUser,
       lastLogonUserPrincipalName: d.lastLogonUserPrincipalName,
       lastLogonDate: d.lastLogonDate,
-      lastLogonAt: parseLastLogonAt(d.lastLogonDate) ?? undefined,
+      // Already parsed in phase 1 to decide duplicates; reused rather than
+      // re-derived so the two can never disagree about the same row.
+      lastLogonAt: c.lastLogonAt ?? undefined,
       enrollmentDate: d.enrollmentDate,
       compliance: d.compliance,
     };
@@ -250,11 +345,17 @@ export function planImport(
         item.homeUnit = full;
         detected++;
       } else {
-        unresolved.push({ row: r.row, deviceName: item.deviceName, segments: splitSegments(item.deviceName) });
+        unresolved.push({ row: c.row, deviceName: item.deviceName, segments: splitSegments(item.deviceName) });
       }
     }
     toCreate.push(item);
   }
+
+  // Duplicate losers are found in phase 2, before the winners are planned in
+  // phase 3, so without this the report would list them out of order. Sorting
+  // by row keeps it readable against the source file — which is how the 29
+  // stale enrolments in the real export were actually tracked down.
+  skipped.sort((a, b) => a.row - b.row);
 
   return { toCreate, toUpdate, unchanged, skipped, unresolved, detected };
 }
