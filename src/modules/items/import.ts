@@ -264,6 +264,28 @@ export function planImport(
       // "not submitted": the column is not written and no history row is
       // produced for a rename that did not happen.
       if (d.deviceName !== undefined && !withholdRename) loggedAfter.deviceName = d.deviceName;
+      // The rename flag is LOGGED, not silent.
+      //
+      // It shipped silent, on the reasoning that it is the importer's note to a
+      // human rather than a custody fact. That was reversed deliberately
+      // (2026-08-11): the item page offers the previous names behind a
+      // disclosure, and `ItemEdit` is the only place a previous value of
+      // anything is kept — a column overwritten in place remembers nothing. So
+      // "MDM wanted to rename this and we refused" is recorded like any other
+      // change to the device's identity.
+      //
+      // This is NOT the churn the telemetry fields are kept out of history to
+      // avoid: `diffItemFields` emits only on an actual change, and this value
+      // changes on three transitions only — flag raised, proposal superseded by
+      // a different one, flag cleared. A steady state writes nothing.
+      //
+      // Written on EVERY matched row that supplied a name, not just withheld
+      // ones, because the flag has to retract itself: `null` here clears a flag
+      // left by an earlier import once MDM's name stops disagreeing. Absent
+      // when the CSV carried no name at all, which is a "leave it alone".
+      if (d.deviceName !== undefined) {
+        loggedAfter.mdmProposedName = withholdRename ? d.deviceName : null;
+      }
       if (d.deviceUIC !== undefined) loggedAfter.deviceUIC = d.deviceUIC;
       if (d.deviceCategory !== undefined) loggedAfter.deviceCategory = d.deviceCategory;
       if (d.storageLocation !== undefined) loggedAfter.storageLocation = d.storageLocation;
@@ -299,18 +321,6 @@ export function planImport(
       // the custody edits the history exists to show.
       if (d.lastSyncDateTime !== undefined) silentAfter.lastSyncDateTime = d.lastSyncDateTime;
 
-      // The rename flag rides with the SILENT fields for a related reason. It
-      // is the importer's note to a human ("this device needs renaming in
-      // Intune"), not a custody fact, so it must never appear in the item's
-      // edit history.
-      //
-      // Written on EVERY matched row that supplied a name, not just withheld
-      // ones, because the flag has to retract itself: `null` here clears a flag
-      // left by an earlier import once MDM's name stops disagreeing. Absent
-      // when the CSV carried no name at all, which is a "leave it alone".
-      if (d.deviceName !== undefined) {
-        silentAfter.mdmProposedName = withholdRename ? d.deviceName : null;
-      }
       const silentChanges = diffItemFields(match, silentAfter);
 
       const allChanges = [...loggedChanges, ...silentChanges];
