@@ -531,7 +531,12 @@ the next click. It is **read-only** — no write, no revalidation. The
 caller-supplied unit scope is **re-validated with Zod and bound as query
 parameters**, never spliced (§5). And the result set is **capped with an
 overflow probe** rather than unbounded. It writes **no audit row** — see Known
-gaps #7, which this adds to rather than resolves. *Last reviewed: 2026-08-10.*
+gaps #7, which this adds to rather than resolves. **2026-08-11: the window moved
+from the sign-in column to the MDM sync column** (`lastLogonAt` → `lastSyncAt`)
+and two date headers changed with it. That changes WHICH devices are listed, not
+what a row exposes: the same three PII fields, the same cap, the same gate, and
+the sheet still carries `lastLogonUserPrincipalName`. No posture change.
+*Last reviewed: 2026-08-11.*
 
 **Admin-only capabilities:** returns, user management, named signatures,
 service-queue mutations, receipt timers, **recording** an audit, analytics,
@@ -1470,6 +1475,18 @@ was removed on 2026-08-08. Keeping this document current is now a convention. Se
 **Dependencies are vetted before install** — `npm view <package>` first, to catch
 hallucinated or unhealthy packages.
 
+**`npm audit` is clean as of 2026-08-11** — production *and* dev, 0 vulnerabilities.
+It had not been: `next` sat on `16.2.9` carrying nine high-severity advisories, two
+of which named this app's own architecture — **middleware/proxy bypass in App Router**
+(and `src/proxy.ts` is the login + PIN gate) and **unauthenticated disclosure of
+internal Server Function endpoints** (Server Actions are the primary write path).
+That upgrade had been deferred as "breaking" on 2026-07-27 and stayed deferred for
+two weeks. `next` is now pinned exactly at `16.3.0`; the deferred `nodemailer` 7→9
+item closed itself when the dependency was deleted on 2026-08-04.
+**Note the pin is exact, like `react`** — a caret would let a minor land unreviewed,
+and this app's guide opens by warning that its Next is not the one you remember.
+Re-run `npm audit --omit=dev` when touching dependencies; there is no CI job for it.
+
 **Migrate before push** — `next build` never runs `migrate deploy`, so a prod
 migration must be applied *before* the merge deploys. See [`../DEPLOY.md`](../DEPLOY.md).
 
@@ -2171,7 +2188,37 @@ everything else `requireUser()` gates. The owner scoping in
 user's drafts; it does not add a second factor on top of the session that
 already can.
 
-**14. The persisted `/items` selection outlives a sign-out, so a shared browser
+**14. `/items` ships one `@army.mil` address per row, whether or not anyone
+looks at it.** *Accepted 2026-08-11.* The phone card's **More** panel renders
+`lastLogonUserPrincipalName`, so every `/items` response carries up to
+`ITEMS_PAGE_SIZE` personal addresses in its RSC payload — a closed `<details>`
+still ships its contents (see `.claude/rules/ui-styling.md`), so the data is on
+the wire even for a user who never expands a single card.
+
+**It is not a new disclosure.** The route is `requireUser()`-gated, and
+`/i/<id>` has rendered the same field to any signed-in user since the MDM
+telemetry import landed (2026-07-23), where showing it to non-admins was an
+explicit product decision, not an oversight. Nothing here is readable by anyone
+who could not already read it one device at a time.
+
+**What changed is AGGREGATION, and that is why it is written down.** `CLAUDE.md`
+says plainly: *never pull PII into list/search/type-ahead queries.* This is that
+pattern — a list route now carries a page of real people's addresses in one
+response — so the rule is being knowingly bent rather than quietly broken. The
+practical difference is what one captured response is worth: a page of the
+duty roster instead of a single device's last user. It raises the value of a
+stolen session ([0d](#known-gaps--accepted-risks)) and of anything that logs
+response bodies.
+
+Accepted because the field is the point of the panel: the technician holding the
+device needs to know who last signed in to it, and making them open each item
+individually to learn that would defeat the card. The cheap mitigation, if this
+is ever reconsidered, is to drop that one row from the More panel and leave it
+on `/i/<id>` — the aggregation goes away and the fact stays reachable. Widening
+it further — a column in the desktop table, an export, a search over it — should
+not happen without revisiting this entry.
+
+**15. The persisted `/items` selection outlives a sign-out, so a shared browser
 hands the next technician the previous one's batch.** ⚠️ *Accepted 2026-08-11,
 with the persistence it documents.* `items:selection:v1` in **localStorage**
 (`src/components/item-selection-store.ts`) holds the selected devices —

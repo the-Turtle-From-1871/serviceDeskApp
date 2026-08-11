@@ -34,15 +34,17 @@ export const isRangeKey = (v: string): v is RangeKey => v in RANGES;
  *  label so they stay visible instead of vanishing from the breakdown. */
 export const UNCATEGORIZED = "Uncategorized";
 
-/* ------- Dormant-device export (30-90 days since the last USER sign-in) ------- */
+/* ------- Dormant-device export (30-90 days since the last MDM SYNC) ------- */
 
 /**
- * The dormancy window, in days since `Item.lastLogonAt`.
+ * The dormancy window, in days since `Item.lastSyncAt`.
  *
- * `lastLogonAt` is the parsed `lastLogonDate` — when a PERSON last signed in,
- * NOT when MDM last checked in (that is `lastSyncDateTime`). The two answer
- * different questions and routinely disagree; do not swap one for the other
- * here without changing every label that reads from these constants.
+ * `lastSyncAt` is the parsed `lastSyncDateTime` — when MDM last CHECKED IN with
+ * the device, NOT when a person last signed in (that is `lastLogonAt`). The two
+ * answer different questions and routinely disagree; do not swap one for the
+ * other here without changing every label that reads from these constants. This
+ * list measured the SIGN-IN column until 2026-08-11 and was moved deliberately:
+ * "we have not heard from this device" is the question the desk chases.
  *
  * BOTH ENDS ARE DELIBERATE. A device seen inside 30 days is not stale. A device
  * unseen for MORE than 90 days is excluded too — that is a different problem
@@ -84,9 +86,13 @@ export const STALE_DEVICE_COLUMNS = [
   "Holder",
   "Position",
   "Storage location",
+  // WHO MDM last saw signed in — kept because it is who to ask about the
+  // device. The two date columns beside it are the SYNC, which is what the
+  // window measures; they are not the same fact and must not be relabelled
+  // into each other.
   "Last logon user",
-  "Last logon date",
-  "Days since logon",
+  "Last sync date",
+  "Days since sync",
   "Readiness",
 ] as const;
 

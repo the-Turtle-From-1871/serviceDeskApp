@@ -26,8 +26,18 @@ export type ScanIntent =
 // no round trip. The DB is the authority on whether a serial names an item,
 // exactly as scan-url.ts says of its own regex.
 //
-// Grounded in the fleet: of 1,204 ACTIVE items, ZERO carry a non-alphanumeric
-// character and lengths run 4-14 (Dell 7, HP 10, Surface 14, Getac 10).
+// Grounded in the fleet, re-censused 2026-08-11 across all 1,204 items and
+// every make in the book — HP 731, Dell 413, Microsoft 35, Getac 24:
+//   * ZERO carry a non-alphanumeric character;
+//   * ZERO fall outside 4-20 characters (lengths are Dell 7, HP 10, Getac 10,
+//     Surface 14 — each make uniform to the character);
+//   * ZERO are all digits.
+// So this filter accepts 100% of the property book: it can never be the reason
+// a real device fails to scan. That last line is also what makes the Dell
+// express-code conversion below safe — a scan of pure digits cannot be a
+// genuine numeric serial, because the fleet contains none.
+// `scan-code.test.ts` pins one serial per make so narrowing this range would
+// fail loudly rather than silently stranding a vendor.
 const SERIAL_SHAPE = /^[A-Za-z0-9]{4,20}$/;
 
 // A 7-char service tag is 36^6 .. 36^7-1, i.e. 10 or 11 digits. A tag starting

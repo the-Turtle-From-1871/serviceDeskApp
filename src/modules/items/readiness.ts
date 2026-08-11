@@ -45,7 +45,7 @@ export type ReadinessSignals = {
   flaggedForService: boolean;
   /** True when the item sits on an OPEN hand receipt with an unreturned line. */
   onOpenReceipt: boolean;
-  /** Parsed MDM last-logon instant (see parseLastLogonAt). Null when the raw
+  /** Parsed MDM last-logon instant (see parseMdmDateTime). Null when the raw
    *  string was absent or unparseable.
    *
    *  NOT used by readinessState any more — see the precedence note about the
@@ -108,21 +108,26 @@ export function readinessState(s: ReadinessSignals): ReadinessState {
 }
 
 /**
- * Parse the MDM export's free-text last-logon into an instant.
+ * Parse one of the MDM export's free-text timestamps into an instant.
  *
- * `Item.lastLogonDate` is stored verbatim as text ("7/25/2026 1:40:21 AM")
- * because the export's format is not ours to guarantee. Readiness no longer
- * compares it to markedReadyAt (see the removed rule above), but analytics and
- * any reinstatement of that rule need it as an instant across the whole fleet
- * in SQL — so the parse happens once, here, on import, into the denormalized
- * `lastLogonAt` column. Parsing in Postgres instead would abort a
- * whole import on the first unexpected format.
+ * ONE parser, TWO columns. `Item.lastLogonDate` and `Item.lastSyncDateTime` are
+ * both stored verbatim as text ("7/25/2026 1:40:21 AM") because the export's
+ * format is not ours to guarantee, and both have a denormalized instant twin
+ * (`lastLogonAt`, `lastSyncAt`) written on import. They come out of the same
+ * export in the same format, so a second parser would be a second answer to the
+ * same question — this was called `parseLastLogonAt` until the dormant-device
+ * list started measuring sync silence (2026-08-11) and needed the sync column as
+ * an instant too.
+ *
+ * WHY PARSE ON IMPORT AND NOT IN SQL: both twins exist so analytics can compare
+ * them across the whole fleet in one query; parsing the text inside Postgres
+ * instead would abort a whole import on the first unexpected format.
  *
  * Returns null rather than throwing on anything unrecognised: an unparseable
  * date must degrade to "we don't know when", never fail the import. The raw
  * string is always kept for display.
  */
-export function parseLastLogonAt(raw: string | null | undefined): Date | null {
+export function parseMdmDateTime(raw: string | null | undefined): Date | null {
   const text = (raw ?? "").trim();
   if (!text) return null;
 

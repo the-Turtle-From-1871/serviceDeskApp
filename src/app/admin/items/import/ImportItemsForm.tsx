@@ -7,7 +7,10 @@ import { analyzeImportAction, commitImportAction } from "@/app/admin/actions/ite
 // each column; the parser also accepts the fleet export's own names (e.g.
 // DeviceOwnershipUIC for deviceUIC) — see HEADER_MAP in modules/items/csv.ts.
 // A second row of examples is included because `deviceType` is new and a blank
-// template gives no hint of what belongs in it.
+// template gives no hint of what belongs in it. The same now goes double for
+// `lastSync`: production carries that header on zero rows, so this row is the
+// only place the expected date format is written down for whoever builds the
+// export. template.test.ts round-trips both through the real parser.
 export const TEMPLATE =
   "make,model,serialNumber,deviceName,deviceType,homeUnit,deviceUIC,storageLocation,notes,assignedUser,lastLogonUserPrincipalName,lastLogonDate,enrollmentDate,compliance,lastSync\n" +
   "Dell Inc.,Latitude 5540,ABC1234,NGHINB-EXAMPLE-01,Laptop,A CO 1-234 IN,W6BTAA,Bldg 400 Cage 3,,soldier@army.mil,soldier@army.mil,7/25/2026 1:40:21 AM,5/1/2025 2:23:41 AM,compliant,8/9/2026 6:02:11 AM\n";
@@ -178,7 +181,19 @@ export function ImportItemsForm() {
               name for it),{" "}
               <strong>storageLocation</strong> (where the device is stored; also
               accepts <code>SLoc</code> or <code>storageLoc</code>), notes, assignedUser,
-              lastLogonUserPrincipalName, lastLogonDate, enrollmentDate, compliance.
+              lastLogonUserPrincipalName, lastLogonDate, enrollmentDate, compliance,{" "}
+              <strong>lastSync</strong> (also accepts <code>Last Sync</code>,{" "}
+              <code>lastSyncDate</code> or <code>lastSyncDateTime</code>).
+            </p>
+            <p>
+              <strong>lastSync is not lastLogonDate.</strong> lastSync is when MDM last
+              checked in with the device; lastLogonDate is when a <em>person</em> last
+              signed in. A device powered on in a cage syncs nightly with nobody using it
+              for months, so the two routinely disagree — and the dashboard&apos;s
+              &ldquo;devices MDM has not seen recently&rdquo; list reads lastSync. Without
+              that column in the file, that list stays empty. A generic <code>sync</code>{" "}
+              column is ignored, because exports sometimes use it for a status
+              (&ldquo;Succeeded&rdquo;) rather than a date.
             </p>
             <p>
               A row whose serial already exists <strong>updates</strong> that item; a new

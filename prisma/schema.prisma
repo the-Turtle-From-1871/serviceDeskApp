@@ -233,7 +233,7 @@ model Item {
   // leaves the stored value untouched. Not editable from the UI.
   lastLogonUserPrincipalName String?
   lastLogonDate              String?
-  // `lastLogonDate` parsed to an instant at import time (parseLastLogonAt).
+  // `lastLogonDate` parsed to an instant at import time (parseMdmDateTime).
   // Denormalized for the same reason as lastAuditedAt: readiness compares the
   // last logon to markedReadyAt, and the dashboard has to make that comparison
   // across the whole fleet in SQL. Parsing the free-text column inside Postgres
@@ -245,12 +245,22 @@ model Item {
   // When MDM last CHECKED IN with the device — a different question from
   // lastLogonDate, which is when a PERSON last signed in. A device sitting
   // powered-on in a cage syncs nightly with no logon for months; a device
-  // someone took home syncs only when it sees the network. Deliberately has NO
-  // parsed twin: nothing computes over it (readiness reads lastLogonAt), so a
-  // second column would be a denormalisation with no reader. Stored verbatim
-  // like enrollmentDate/compliance above and rendered as-is, so it matches the
-  // MDM export people cross-check against.
+  // someone took home syncs only when it sees the network. Stored verbatim like
+  // enrollmentDate/compliance above and rendered as-is, so it matches the MDM
+  // export people cross-check against.
   lastSyncDateTime           String?
+  // `lastSyncDateTime` parsed to an instant at import time, by the SAME parser
+  // as lastLogonAt (parseMdmDateTime — one parser, two columns, because the
+  // export writes both in one format).
+  //
+  // It shipped 2026-08-10 WITHOUT this twin, on the reasoning that nothing
+  // computed over the sync time. That stopped being true on 2026-08-11: the
+  // dormant-device chase list now measures MDM silence rather than sign-in
+  // silence, and it buckets 1,200 items in SQL, which raw text cannot do
+  // (`ORDER BY`/`BETWEEN` on '10/1/2025' vs '7/25/2026' compares strings).
+  // Null = absent or unparseable — a real and COMMON state here, because the
+  // column is newer than most rows; the export fills it in on the next import.
+  lastSyncAt                 DateTime?
   status                     ItemStatus        @default(ACTIVE)
   // READINESS IS DERIVED, NOT STORED — see modules/items/readiness.ts.
   //
@@ -305,6 +315,10 @@ model Item {
   // plain B-tree is the right shape.
   @@index([markedReadyAt])
   @@index([lastLogonAt])
+  // The dormant-device window (`lastSyncAt >= from AND < to`) is a range scan
+  // over a mostly-null column on every dashboard load — the same shape as
+  // lastLogonAt above, and the same plain B-tree.
+  @@index([lastSyncAt])
   // Trigram GIN for the public, per-keystroke serial search (searchItemsBySerial),
   // which is `ILIKE '%q%'` — a leading wildcard a B-tree can't serve. Needs pg_trgm.
   @@index([serialNumber(ops: raw("gin_trgm_ops"))], type: Gin, map: "Item_serialNumber_trgm_idx")

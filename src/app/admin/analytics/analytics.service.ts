@@ -402,19 +402,27 @@ export type DashboardData = Awaited<ReturnType<typeof getDashboard>>;
 /* ------------------------------------------------------------
    Dormant devices — the 30-90 day chase list.
 
-   Answers "which devices has nobody SIGNED IN TO for a month, while there is
-   still a realistic chance of finding them". Not a chart: it is an export, so
-   the dashboard shows only the count and the sheet carries the rows.
+   Answers "which devices has MDM NOT SEEN for a month, while there is still a
+   realistic chance of finding them". Not a chart: it is an export, so the
+   dashboard shows only the count and the sheet carries the rows.
 
-   READ THE COLUMN CAREFULLY. `Item.lastLogonAt` is the parsed `lastLogonDate`
-   — when a PERSON last signed in. It is NOT when MDM last checked in, which is
-   `lastSyncDateTime` (see csv.ts, which says so at the alias). The two
-   routinely disagree, which is why both exist: a device powered on in a cage
-   syncs every night with no sign-in for months, and one somebody took home can
-   show a recent sign-in and no sync at all. This list shipped describing itself
-   as MDM silence; that was wrong and is corrected throughout. If "dropped off
-   the network" is ever wanted, it is a DIFFERENT query over the sync column,
-   not a reinterpretation of this one.
+   READ THE COLUMN CAREFULLY. `Item.lastSyncAt` is the parsed `lastSyncDateTime`
+   — when MDM last CHECKED IN with the device. It is NOT when a person last
+   signed in, which is `lastLogonDate`/`lastLogonAt` (see csv.ts, which says so
+   at the alias). The two routinely disagree, which is why both exist: a device
+   powered on in a cage syncs every night with no sign-in for months, and one
+   somebody took home can show a recent sign-in and no sync at all.
+
+   IT MEASURED THE OTHER COLUMN UNTIL 2026-08-11. The list shipped (2026-08-10)
+   over `lastLogonAt` while describing itself as MDM silence; the wording was
+   corrected first, and then — by request — the column was, because "we have not
+   heard from this device" is the question the desk actually works from. Sign-in
+   silence is the DIFFERENT query now: a device can be demonstrably online and
+   simply unused, which is a utilisation question, not a chase list.
+
+   The move needed the parsed twin (`lastSyncAt`, migration
+   20260811150000_item_last_sync_at). It cannot be done over the raw text: a
+   string comparison sorts '10/1/2025' ahead of '7/25/2026'.
    ------------------------------------------------------------ */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -443,12 +451,12 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * Half-open on purpose: `from` is inclusive, `to` exclusive, so exactly one of
  * the two boundaries can claim a device landing precisely on 30 days.
  */
-export function staleLogonWindow(now: Date): { from: Date; to: Date } {
+export function staleSyncWindow(now: Date): { from: Date; to: Date } {
   return {
-    // The OLDEST logon still in scope. Anything before this is past 90 days and
+    // The OLDEST sync still in scope. Anything before this is past 90 days and
     // deliberately out of the sheet (see STALE_MAX_DAYS).
     from: new Date(now.getTime() - STALE_MAX_DAYS * DAY_MS),
-    // The NEWEST logon still counted as stale.
+    // The NEWEST sync still counted as stale.
     to: new Date(now.getTime() - STALE_MIN_DAYS * DAY_MS),
   };
 }
@@ -465,25 +473,28 @@ export function staleLogonWindow(now: Date): { from: Date; to: Date } {
  *  - `itemScopeSql`       the page's ?uic=/?unit= filter, through the same twin
  *                         the charts use, so the sheet covers exactly the slice
  *                         on screen.
- *  - `lastLogonAt NOT NULL` a device nobody has ever signed in to — or whose
- *                         export date would not parse — is not "last used 45
- *                         days ago". It is "we cannot say", a different list.
- *  - the window           see staleLogonWindow.
+ *  - `lastSyncAt NOT NULL`  a device MDM has never reported a sync for — or
+ *                         whose export date would not parse — is not "last seen
+ *                         45 days ago". It is "we cannot say", a different list.
+ *                         EXPECT THIS TO EXCLUDE A LOT at first: the sync column
+ *                         is newer than most rows, so a device only carries an
+ *                         instant once an import has covered it.
+ *  - the window           see staleSyncWindow.
  *  - `NOT EXISTS` custody a device issued out on a live hand receipt is
- *                         accounted for BY THAT RECEIPT. Nobody signing in to
- *                         it is expected there and is not evidence of anything.
+ *                         accounted for BY THAT RECEIPT. Silence from it is
+ *                         expected there and is not evidence of anything.
  *
  * Every value is bound; the only interpolations are pre-built fragments
  * (CLAUDE.md §2).
  */
 function staleDeviceWhere(scope: ItemScope, now: Date): Prisma.Sql {
-  const { from, to } = staleLogonWindow(now);
+  const { from, to } = staleSyncWindow(now);
   return Prisma.sql`
         i."status" = 'ACTIVE'
     AND ${itemScopeSql(scope)}
-    AND i."lastLogonAt" IS NOT NULL
-    AND i."lastLogonAt" >= ${from}::timestamptz
-    AND i."lastLogonAt" <  ${to}::timestamptz
+    AND i."lastSyncAt" IS NOT NULL
+    AND i."lastSyncAt" >= ${from}::timestamptz
+    AND i."lastSyncAt" <  ${to}::timestamptz
     AND NOT EXISTS (
       SELECT 1
       ${CUSTODY_FROM}
@@ -519,13 +530,13 @@ type StaleDeviceQueryRow = {
   currentPosition: string | null;
   storageLocation: string | null;
   lastLogonUserPrincipalName: string | null;
-  lastLogonAt: Date;
+  lastSyncAt: Date;
   readiness: ReadinessState;
 };
 
 /** `YYYY-MM-DD`, in UTC.
  *
- *  UTC and not local time because parseLastLogonAt builds the instant with
+ *  UTC and not local time because parseMdmDateTime builds the instant with
  *  `Date.UTC` from the MDM export's wall-clock date — reading it back in a
  *  westward local zone would shift the printed day one earlier than the export
  *  said. And an ISO date rather than the raw `7/25/2026 1:40:21 AM` text
@@ -568,12 +579,12 @@ export async function listStaleDevices(
            i."currentPosition",
            i."storageLocation",
            i."lastLogonUserPrincipalName",
-           i."lastLogonAt",
+           i."lastSyncAt",
            ${READINESS_CASE} AS readiness
     FROM "Item" i
     ${READINESS_JOINS}
     WHERE ${staleDeviceWhere(scope, now)}
-    ORDER BY i."lastLogonAt" ASC, i."id" ASC
+    ORDER BY i."lastSyncAt" ASC, i."id" ASC
     LIMIT ${STALE_EXPORT_MAX + 1}
   `);
 
@@ -592,9 +603,12 @@ export async function listStaleDevices(
     Holder: r.currentUserEmail ?? "",
     Position: r.currentPosition ?? "",
     "Storage location": r.storageLocation ?? "",
+    // Kept even though the window no longer reads it: the person MDM last saw
+    // on the device is who to ask about it, which is exactly what a chase list
+    // is for. It is who, not when — nothing here compares it to the window.
     "Last logon user": r.lastLogonUserPrincipalName ?? "",
-    "Last logon date": isoDay(r.lastLogonAt),
-    "Days since logon": Math.floor((now.getTime() - r.lastLogonAt.getTime()) / DAY_MS),
+    "Last sync date": isoDay(r.lastSyncAt),
+    "Days since sync": Math.floor((now.getTime() - r.lastSyncAt.getTime()) / DAY_MS),
     Readiness: READINESS_LABEL[r.readiness],
   }));
 
