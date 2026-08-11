@@ -164,18 +164,30 @@ the production property book. `Setup-ImportTask.ps1` stores it DPAPI-encrypted
 under `C:\ops\`, so you set it once and never touch it again — and a copied
 `secret.txt` is useless on another machine or under another account.
 
-**The task runs Interactive, not S4U.** S4U would also run while logged off with
-no stored password, but it needs an elevated shell to register and is not
-expected to reach the user's DPAPI master key — which would leave the secret
-undecryptable. Interactive stores no password either, and nothing is lost: the
-event this reacts to is *you downloading a file*, which requires you to be logged
-on anyway.
+**Interactive is the default; S4U is the fix when Interactive is refused.**
+Interactive stores no Windows password and keeps the DPAPI secret readable, and
+nothing is lost by "only when logged on" — the event this reacts to is *you
+downloading a file*, which requires you to be logged on anyway.
 
-`-LogonType S4U` is available as an escape hatch if Interactive tasks are refused
-on your machine. It must be registered from an **elevated** prompt, and if
-imports then fail with *"Could not decrypt"*, set `MDM_IMPORT_SECRET` as a
-machine environment variable instead — the worker prefers the environment
-variable over the encrypted file.
+But **some machines refuse to launch an Interactive task at all** (see
+`0x800710E0` in [Troubleshooting](#troubleshooting)). There, register as S4U from
+an **elevated** prompt:
+
+```powershell
+.\Setup-ImportTask.ps1 -LogonType S4U
+```
+
+> **DPAPI does work under S4U — verified, 2026-08-11.** An earlier version of this
+> README claimed S4U could not reach the user's DPAPI master key and would leave
+> the secret undecryptable. That was a prediction, and it was **wrong**: on a
+> machine where Interactive was refused, the S4U task launched, decrypted
+> `secret.txt`, and made an authenticated request (the server answered `400` on a
+> deliberately malformed CSV — an authentication failure would have been `401`).
+> Do not avoid S4U on DPAPI grounds.
+>
+> If a *different* machine ever does fail with **"Could not decrypt"**, set
+> `MDM_IMPORT_SECRET` as a machine-level environment variable — the worker prefers
+> the environment variable over the encrypted file.
 
 **Two triggers, not one.** An `-AtLogOn` trigger does not fire when the task is
 registered — it fires at the *next* logon, and its repetition only starts when
@@ -216,7 +228,7 @@ left untouched, not retired — absence from the CSV is not a signal.
 | `400` naming a row | The server's own message — a bad row, no `serialNumber` column, or over 2000 rows. The file is kept. |
 | `The server redirected (302)` | `/api/items/import` lost its exclusion in `src/proxy.ts`'s matcher. |
 | `200 but not an import summary` | Same root cause, one step further along — login-page HTML came back as a 200. The file is kept. |
-| Setup warns **`0x800710E0`** ("the operator or administrator has refused the request") | The task is configured correctly but Windows will not launch a process for it in your session. Seen on **RDP sessions**, and caused by endpoint security / Group Policy or a denied *Log on as a batch job* right. Task Scheduler's history shows the instance *launched* (event 110) with no action-start (event 200). Confirm it is environmental by creating a throwaway task that just runs `cmd.exe /c echo hi > C:\temp\x.txt` — if that is refused too, nothing is wrong with these scripts. Fix: run from a normal desktop session, or `-LogonType S4U` from an elevated prompt. `Import-ItemsCsv.ps1` still works by hand regardless. |
+| **`0x800710E0`** ("the operator or administrator has refused the request") | Windows will not launch a process for an **Interactive** task in this session, even though the task itself is correct. **Observed on an RDP session, 2026-08-11**, and the confirmed fix there was **`-LogonType S4U` from an elevated prompt**. Diagnosis: Task Scheduler history shows the instance *launched* (event 110) and *queued* (event 325) with no action-start (event 200); it happens on the natural trigger as well as on-demand, and a throwaway `schtasks` task running only `cmd.exe /c echo` is refused identically — which proves it is environmental, not these scripts. Every queue-inducing setting (`RunOnlyIfIdle`, `RunOnlyIfNetworkAvailable`, both battery flags) was already off, and `AllowDemandStart` was true, so none of those are worth re-checking. `Import-ItemsCsv.ps1` works by hand regardless. |
 | `NextRunTime` is blank | The task has only the logon trigger, so the repetition never started. Re-run setup. |
 | Task never runs on battery | `AllowStartIfOnBatteries` / `DontStopIfGoingOnBatteries` were not applied. Re-run setup. |
 | Task shows Last Run Result `0` but nothing imported | Normal — that's a poll that found no file. Check `import.log` for actual runs. |
