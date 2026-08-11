@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
+import { useItemSelection } from "./ItemSelection";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronDown } from "lucide-react";
@@ -86,33 +87,24 @@ export function ItemSelectTable({
   const router = useRouter();
   const secondarySort = sortKeys[1] ?? null;
 
-  // Selection is a Map (id -> row), not a Set of ids, so it survives paging: the
-  // receipt-group validation below needs each selected item's make/model, and an
-  // item selected on page 1 is no longer in `items` once you page forward. You can
-  // only ever select a row you can see, so its details are captured at select time.
-  const [selected, setSelected] = useState<Map<string, ItemRow>>(new Map());
+  // Selection lives in ItemSelectionProvider, not here: the /items Scan sheet
+  // is a SIBLING client component and has to commit into the same selection.
+  // It is a Map (id -> item), not a Set of ids, so it survives paging — the
+  // receipt-group validation below needs each selected item's make/model, and
+  // an item selected on page 1 is no longer in `items` once you page forward.
+  const { selected, toggle, addMany, removeMany, clear } = useItemSelection();
   const selectedIds = useMemo(() => new Set(selected.keys()), [selected]);
-  const toggle = (row: ItemRow) =>
-    setSelected((prev) => {
-      const n = new Map(prev);
-      if (n.has(row.id)) n.delete(row.id);
-      else n.set(row.id, row);
-      return n;
-    });
 
   const allState = useMemo(() => selectAllState(items, selectedIds), [items, selectedIds]);
   const selectableCount = useMemo(() => selectableIds(items).length, [items]);
   // "Select all" acts on the CURRENT page's selectable rows, leaving off-page
   // selections untouched.
-  const toggleAll = () =>
-    setSelected((prev) => {
-      const n = new Map(prev);
-      const pageActive = items.filter((it) => it.status === "ACTIVE");
-      const allOnPage = pageActive.length > 0 && pageActive.every((it) => n.has(it.id));
-      if (allOnPage) for (const it of pageActive) n.delete(it.id);
-      else for (const it of pageActive) n.set(it.id, it);
-      return n;
-    });
+  const toggleAll = () => {
+    const pageActive = items.filter((it) => it.status === "ACTIVE");
+    const allOnPage = pageActive.length > 0 && pageActive.every((it) => selected.has(it.id));
+    if (allOnPage) removeMany(pageActive.map((it) => it.id));
+    else addMany(pageActive);
+  };
 
   // View preferences (column visibility) persist to localStorage. Sort + paging are
   // URL-driven (server-side), so they are NOT stored here.
@@ -710,7 +702,7 @@ export function ItemSelectTable({
               <button
                 type="button"
                 className="btn btn-secondary"
-                onClick={() => setSelected(new Map())}
+                onClick={() => clear()}
               >
                 Clear selection
               </button>
@@ -735,7 +727,7 @@ export function ItemSelectTable({
             <div className="row" style={{ gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
               <MarkReadyButton
                 itemIds={[...selected.keys()]}
-                onDone={() => setSelected(new Map())}
+                onDone={() => clear()}
               />
               {/* No onDone: unlike "Mark as on hand", these controls keep the
                   selection so their outcome message survives (clearing it

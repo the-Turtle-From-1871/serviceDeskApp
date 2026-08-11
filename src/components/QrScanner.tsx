@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 // TYPE-ONLY, so it is erased at build and does NOT pull the runtime module into
 // this bundle — the dynamic import below is what keeps zxing-wasm out of the
 // builder's initial payload, and a value import here would undo that.
@@ -24,6 +24,13 @@ type Props = {
   notice?: Notice;
   /** Defaults to QR only, so an existing caller is unchanged. */
   formats?: readonly BarcodeFormat[];
+  /** Rendered between the video and the Done button. The sheet stays ignorant
+   *  of items and schema — the caller passes whatever it has collected, exactly
+   *  as it already does for `notice`. */
+  children?: ReactNode;
+  /** Defaults to "Done". A caller with a running count (e.g. items collected
+   *  so far) can pass its own label without the sheet knowing what it means. */
+  doneLabel?: string;
 };
 
 type Status = "starting" | "running" | "denied" | "unavailable" | "loadfailed";
@@ -37,7 +44,7 @@ type Status = "starting" | "running" | "denied" | "unavailable" | "loadfailed";
 //
 // `notice` is rendered ON TOP of the sheet: the sheet is opaque and full-screen,
 // so scan feedback left in the form behind it is invisible when it fires.
-export function QrScanner({ onDecode, onClose, notice, formats = ["qr_code"] }: Props) {
+export function QrScanner({ onDecode, onClose, notice, formats = ["qr_code"], children, doneLabel = "Done" }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [status, setStatus] = useState<Status>("starting");
   // Kept in a ref so the effect below subscribes ONCE and never re-binds on an
@@ -182,8 +189,9 @@ export function QrScanner({ onDecode, onClose, notice, formats = ["qr_code"] }: 
           </p>
         )}
       </div>
+      {children}
       <div className="row">
-        <button type="button" className="btn btn-secondary" onClick={onClose}>Done</button>
+        <button type="button" className="btn btn-secondary" onClick={onClose}>{doneLabel}</button>
       </div>
     </div>
   );

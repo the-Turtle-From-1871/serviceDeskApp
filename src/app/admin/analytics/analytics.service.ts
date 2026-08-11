@@ -423,11 +423,22 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * The window boundaries as instants.
  *
  * COMPUTED IN JS AND BOUND AS PARAMETERS — never `now()` inside the SQL. Two
- * reasons: the count rendered on the card and the rows in the downloaded file
- * are two separate round trips, and a clock read independently by each would
- * let a device cross the 30-day boundary between them, so the sheet would not
- * match the number the operator clicked; and an injected `now` is what makes
- * the window testable at all without freezing the database's clock.
+ * reasons: `from` and `to` are then derived from ONE instant, so a query can
+ * never straddle two different readings of the clock and return a window that
+ * is not exactly 60 days wide; and an injected `now` is what makes the window
+ * testable at all without freezing the database's clock.
+ *
+ * WHAT THIS DOES NOT GUARANTEE, because the wording here used to overclaim it:
+ * the count on the card and the rows in the file are fetched by two SEPARATE
+ * round trips — a page render and, later, a click — and each defaults its own
+ * `now`. So a dashboard left open long enough for a device to cross the 30- or
+ * 90-day line can export a set one row different from the number on screen.
+ * That is accepted rather than engineered away: closing it means either passing
+ * a client-supplied timestamp into the export (letting a caller choose the
+ * window is a worse property than an off-by-one after an hour idle) or caching
+ * the render's clock server-side per session, which is a lot of machinery for a
+ * boundary crossing nobody has hit. Do not restore the stronger claim without
+ * actually threading one instant through both calls.
  *
  * Half-open on purpose: `from` is inclusive, `to` exclusive, so exactly one of
  * the two boundaries can claim a device landing precisely on 30 days.
