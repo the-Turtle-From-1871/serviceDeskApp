@@ -37,6 +37,12 @@ describe("import CSV template", () => {
       lastLogonDate: r.lastLogonDate,
       enrollmentDate: r.enrollmentDate,
       compliance: r.compliance,
+      // The template has carried a lastSync example since the column shipped,
+      // but this list did not — so dropping the value would have failed
+      // nothing. It matters more than the others: prod carries the header on
+      // zero rows today, and the dormant-device list is empty until an export
+      // supplies it, so the template is the one place that teaches the format.
+      lastSyncDateTime: r.lastSyncDateTime,
     };
     const blank = Object.entries(populated).filter(([, v]) => !v || v.trim() === "");
     expect(blank.map(([k]) => k)).toEqual([]);
@@ -48,11 +54,24 @@ describe("import CSV template", () => {
     expect(rows[0].deviceCategory).toBe("Laptop");
   });
 
-  it("carries a lastLogonDate the readiness parser understands", async () => {
-    // Readiness compares the parsed instant to markedReadyAt. A template whose
-    // example date does not parse would teach the wrong format.
+  it("carries dates the MDM parser understands", async () => {
+    // Both columns have a parsed twin written on import, and a template whose
+    // example does not parse teaches the wrong format. lastSync is the one that
+    // would fail quietly: an unparseable value still stores its raw text and
+    // still renders on the item page, so the only visible symptom would be the
+    // device never reaching the dormant-device list.
     const { parseMdmDateTime } = await import("@/modules/items/readiness");
     expect(parseMdmDateTime(rows[0].lastLogonDate)).toBeInstanceOf(Date);
+    expect(parseMdmDateTime(rows[0].lastSyncDateTime)).toBeInstanceOf(Date);
+  });
+
+  it("maps the lastSync header the export actually uses", () => {
+    // The template advertises `lastSync`, which is the fleet export's own
+    // spelling. If that alias were dropped the header would parse as an unknown
+    // column and import nothing — the failure that leaves the dormant-device
+    // list permanently empty while every import reports success.
+    expect(TEMPLATE.split("\n")[0]).toContain("lastSync");
+    expect(rows[0].lastSyncDateTime).toBe("8/9/2026 6:02:11 AM");
   });
 
   it("lists serialNumber, the only required column", () => {

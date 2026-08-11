@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## 2026-08-11
 
 ### Changed
+- **The Import items page now documents the lastSync column, and says what happens without it.** The downloadable template has carried `lastSync` since the column shipped, but the on-page column list stopped at `compliance`, so nobody building an export had any reason to include it. It is now listed with its accepted spellings (`lastSync`, `Last Sync`, `lastSyncDate`, `lastSyncDateTime`), alongside a note that it is *when MDM last checked in* rather than *when a person last signed in*, that the two routinely disagree, and that the dashboard's "devices MDM has not seen recently" list stays empty until the file carries it.
+
 - **The dormant-device list on the dashboard now measures the last MDM check-in instead of the last sign-in.** It used to ask *who has nobody signed in to for 30–90 days*; it now asks *what has MDM not heard from for 30–90 days*, which is the question you chase a missing device with. A machine sitting unused on a shelf still syncs every night, so it no longer clutters the list — and a machine that has genuinely dropped off the network shows up even if the last person to use it signed in yesterday.
 
   The card and the exported spreadsheet say so throughout: *N devices MDM has not seen recently*, and the sheet's **Last logon date** / **Days since logon** columns are now **Last sync date** / **Days since sync**. **Last logon user** stays — the person MDM last saw on the device is still who to ask about it.
