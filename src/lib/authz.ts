@@ -1,6 +1,7 @@
 import "server-only"; // authorization logic is server-only
 import type { Capability, Role } from "@prisma/client";
 import { effectiveCapabilities } from "@/modules/users/capabilities";
+import { isReadOnlyDemo } from "@/lib/read-only-demo";
 
 // `capabilities` is the RESOLVED effective set (role baseline ∪ grants), not the
 // raw grant rows. Resolving it in exactly one place — defaultGetSession, below —
@@ -12,6 +13,15 @@ export type SessionUser = {
   name: string;
   email: string;
   capabilities: Capability[];
+  // Whether this session may WRITE at all. Resolved in defaultGetSession from
+  // the DB email, never from the JWT, and re-evaluated per request exactly like
+  // role/isActive — so un-marking a demo account takes effect on the next
+  // request. Deliberately NOT a Capability: see src/lib/read-only-demo.ts.
+  //
+  // Required, not optional. An optional flag would default to "may write" at
+  // every write site, so a call site that forgets to set it should be a compile
+  // error rather than a silent write grant.
+  isReadOnly: boolean;
 };
 
 export class AuthError extends Error {
@@ -50,6 +60,9 @@ const defaultGetSession: GetSession = async () => {
     select: {
       role: true,
       isActive: true,
+      // Read for the read-only demo check below. Rides along on the query that
+      // already re-reads role/isActive — no extra round trip.
+      email: true,
       capabilities: { select: { capability: true } },
     },
   });
@@ -62,6 +75,10 @@ const defaultGetSession: GetSession = async () => {
         fresh.role,
         fresh.capabilities.map((c) => c.capability),
       ),
+      // From the DB row, not the JWT. The token is signed so it could not be
+      // forged either way, but the DB is what every other freshness check here
+      // reads, and it costs nothing on a query we were already making.
+      isReadOnly: isReadOnlyDemo(fresh.email),
     },
   };
 };
@@ -101,4 +118,37 @@ export async function requireAdmin(
   getSession: GetSession = defaultGetSession
 ): Promise<SessionUser> {
   return requireCapability("ADMINISTER", getSession);
+}
+
+/**
+ * The one refusal a demo account ever sees. Shaped as `{ error }` because that
+ * is what every `useActionState` form in this app already renders.
+ */
+export const DEMO_REFUSAL = {
+  error: "Demo account — changes are not saved.",
+} as const;
+
+/**
+ * The WRITE gate for demo accounts. Returns null when the caller may write, or
+ * the refusal when they may not.
+ *
+ * Deliberately NOT a throwing `requireWrite()`: a thrown AuthError escalates to
+ * the error boundary and replaces the form with a digest, where returning the
+ * refusal lands the sentence in the form the person is looking at (CLAUDE.md §5).
+ *
+ * Call it AFTER the existing requireUser/requireCapability/requireAdmin line —
+ * authorization first, then "may this session write at all":
+ *
+ *   const user = await requireCapability("MANAGE_ITEMS");
+ *   const denied = denyReadOnly(user);
+ *   if (denied) return denied;
+ *
+ * It CANNOT cover an unauthenticated write path, because there is no session to
+ * test — `requestPasswordResetAction` carries its own block for that reason.
+ *
+ * Every mutating Server Action must call it. `read-only-coverage.test.ts` fails
+ * when one does not, though that check is advisory in CI rather than required.
+ */
+export function denyReadOnly(user: SessionUser): typeof DEMO_REFUSAL | null {
+  return user.isReadOnly ? DEMO_REFUSAL : null;
 }
