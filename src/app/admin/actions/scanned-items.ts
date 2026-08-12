@@ -1,6 +1,6 @@
 "use server";
 import { revalidatePath } from "next/cache";
-import { requireCapability, AuthError } from "@/lib/authz";
+import { requireCapability, denyReadOnly, AuthError } from "@/lib/authz";
 import { createScannedItems, MAX_BULK_ITEMS } from "@/modules/items/items.service";
 import { ItemError } from "@/modules/items/items.errors";
 import { scannedItemSchema, type ScannedItemInput } from "@/modules/items/items.schema";
@@ -35,6 +35,8 @@ export async function createScannedItemsAction(rows: ScannedItemInput[]): Promis
     console.error("[createScannedItemsAction] auth check failed:", e);
     return { error: "Something went wrong. Please try again." };
   }
+  const denied = denyReadOnly(user);
+  if (denied) return denied;
 
   const parsed = batchSchema.safeParse(rows);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };

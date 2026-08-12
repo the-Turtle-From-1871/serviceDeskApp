@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { requireAdmin } from "@/lib/authz";
+import { requireAdmin, denyReadOnly } from "@/lib/authz";
 import { setPin } from "@/lib/public-access";
 
 const schema = z
@@ -13,6 +13,8 @@ const schema = z
 
 export async function setPublicAccessPinAction(_prev: unknown, formData: FormData) {
   const admin = await requireAdmin();
+  const denied = denyReadOnly(admin);
+  if (denied) return denied;
   const parsed = schema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
   await setPin(parsed.data.pin, admin.id);

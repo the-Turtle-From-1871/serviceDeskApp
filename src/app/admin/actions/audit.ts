@@ -1,7 +1,7 @@
 "use server";
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { requireAdmin } from "@/lib/authz";
+import { requireAdmin, denyReadOnly } from "@/lib/authz";
 import { getItem } from "@/modules/items/items.service";
 import { getOwnedSignature } from "@/modules/signatures/signatures.service";
 import { recordAudit, recordAudits } from "@/modules/audit/audit.service";
@@ -18,6 +18,8 @@ const schema = z.object({
 // acting admin, so a client cannot forge a signer or use another admin's signature.
 export async function markAuditedAction(_prev: unknown, formData: FormData): Promise<{ error?: string; ok?: true }> {
   const user = await requireAdmin();
+  const denied = denyReadOnly(user);
+  if (denied) return denied;
   const parsed = schema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: "Invalid input." };
   const { itemId, signatureId } = parsed.data;
@@ -67,6 +69,8 @@ type BulkAuditResult =
  */
 export async function recordAuditsAction(formData: FormData): Promise<BulkAuditResult> {
   const user = await requireAdmin();
+  const denied = denyReadOnly(user);
+  if (denied) return denied;
 
   const parsed = bulkAuditSchema.safeParse({
     itemIds: String(formData.get("itemIds") ?? "").split(",").filter(Boolean),

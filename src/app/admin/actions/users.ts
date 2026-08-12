@@ -1,11 +1,13 @@
 "use server";
 import { revalidatePath } from "next/cache";
-import { requireAdmin } from "@/lib/authz";
+import { requireAdmin, denyReadOnly } from "@/lib/authz";
 import { createUser, setUserActive, setUserRole } from "@/modules/users/users.service";
 import { newUserSchema } from "@/modules/users/users.schema";
 
 export async function createUserAction(_prev: unknown, formData: FormData) {
-  await requireAdmin();
+  const actor = await requireAdmin();
+  const denied = denyReadOnly(actor);
+  if (denied) return denied;
   const parsed = newUserSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
   try {
@@ -19,6 +21,9 @@ export async function createUserAction(_prev: unknown, formData: FormData) {
 
 export async function toggleUserActiveAction(formData: FormData) {
   const admin = await requireAdmin();
+  // void return: nowhere to render the refusal — the read-only
+  // banner in the admin layout is what stops this reading as a bug.
+  if (denyReadOnly(admin)) return;
   const id = String(formData.get("id"));
   const active = formData.get("active") === "true";
   // Guard against self-lockout: deactivating yourself now takes effect
@@ -30,6 +35,9 @@ export async function toggleUserActiveAction(formData: FormData) {
 
 export async function setUserRoleAction(formData: FormData) {
   const admin = await requireAdmin();
+  // void return: nowhere to render the refusal — the read-only
+  // banner in the admin layout is what stops this reading as a bug.
+  if (denyReadOnly(admin)) return;
   const id = String(formData.get("id"));
   const role = formData.get("role") === "ADMIN" ? "ADMIN" : "USER";
   // Guard against self-demotion: role changes are now live, so demoting

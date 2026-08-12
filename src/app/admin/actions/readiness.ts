@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { requireCapability } from "@/lib/authz";
+import { requireCapability, denyReadOnly } from "@/lib/authz";
 import {
   markItemsReady,
   clearItemsReady,
@@ -93,7 +93,9 @@ type CategoryResult =
   | { ok: true; updated: number; unchanged: number; category: string };
 
 export async function setReadinessAction(formData: FormData): Promise<ReadinessResult> {
-  await requireCapability("MANAGE_QUEUE");
+  const actor = await requireCapability("MANAGE_QUEUE");
+  const denied = denyReadOnly(actor);
+  if (denied) return denied;
 
   const parsed = setReadinessSchema.safeParse({
     itemIds: idsFrom(formData),
@@ -130,6 +132,8 @@ export async function setItemsCategoryAction(formData: FormData): Promise<Catego
   // part of the item vocabulary, and only lives in this file for historical
   // reasons.
   const admin = await requireCapability("MANAGE_ITEMS");
+  const denied = denyReadOnly(admin);
+  if (denied) return denied;
 
   const parsed = setCategorySchema.safeParse({
     itemIds: idsFrom(formData),

@@ -1,6 +1,6 @@
 "use server";
 import { revalidatePath } from "next/cache";
-import { requireCapability } from "@/lib/authz";
+import { requireCapability, denyReadOnly } from "@/lib/authz";
 import {
   createItem,
   getItemBySerial,
@@ -30,6 +30,8 @@ import type { SkippedRow } from "@/modules/items/import";
 
 export async function createItemAction(_prev: unknown, formData: FormData) {
   const admin = await requireCapability("MANAGE_ITEMS");
+  const denied = denyReadOnly(admin);
+  if (denied) return denied;
   // Read off formData, NOT parsed.data: newItemSchema is a z.object() and
   // strips unknown keys, so these would silently vanish from the parsed result.
   const fromSearch = formData.get("fromSearch") === "1";
@@ -111,6 +113,8 @@ export async function createItemAction(_prev: unknown, formData: FormData) {
 // than bypassing it.
 export async function updateItemAction(_prev: unknown, formData: FormData) {
   const admin = await requireCapability("MANAGE_ITEMS");
+  const denied = denyReadOnly(admin);
+  if (denied) return denied;
   const id = String(formData.get("id"));
   const parsed = adminItemEditSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
@@ -165,6 +169,8 @@ export async function updateItemAction(_prev: unknown, formData: FormData) {
 // is diffed and recorded in ItemEdit history rather than bypassing it.
 export async function updateItemIdentityAction(_prev: unknown, formData: FormData) {
   const admin = await requireCapability("MANAGE_ITEMS");
+  const denied = denyReadOnly(admin);
+  if (denied) return denied;
   const id = String(formData.get("id") ?? "").trim();
   if (!id) return { error: "Missing item." };
 
@@ -228,7 +234,9 @@ const markReadySchema = z.object({
 });
 
 export async function markItemsReadyAction(formData: FormData) {
-  await requireCapability("MANAGE_ITEMS");
+  const actor = await requireCapability("MANAGE_ITEMS");
+  const denied = denyReadOnly(actor);
+  if (denied) return denied;
 
   const parsed = markReadySchema.safeParse({
     itemIds: String(formData.get("itemIds") ?? "").split(",").filter(Boolean),
@@ -277,7 +285,9 @@ type LoanerResult =
  * precedent, and the item page picks the badge up on its next render.
  */
 export async function setItemsLoanerAction(formData: FormData): Promise<LoanerResult> {
-  await requireCapability("MANAGE_ITEMS");
+  const actor = await requireCapability("MANAGE_ITEMS");
+  const denied = denyReadOnly(actor);
+  if (denied) return denied;
 
   const parsed = setLoanerSchema.safeParse({
     itemIds: String(formData.get("itemIds") ?? "").split(",").filter(Boolean),
@@ -359,6 +369,8 @@ export async function previewItemRenameAction(formData: FormData): Promise<Renam
  */
 export async function renameItemsAction(formData: FormData): Promise<RenameActionResult> {
   const admin = await requireCapability("MANAGE_ITEMS");
+  const denied = denyReadOnly(admin);
+  if (denied) return denied;
 
   const parsed = renameSchema.safeParse(renameInput(formData));
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -383,7 +395,10 @@ export async function renameItemsAction(formData: FormData): Promise<RenameActio
 }
 
 export async function toggleItemStatusAction(formData: FormData) {
-  await requireCapability("MANAGE_ITEMS");
+  const actor = await requireCapability("MANAGE_ITEMS");
+  // void return: nowhere to render the refusal — the read-only
+  // banner in the admin layout is what stops this reading as a bug.
+  if (denyReadOnly(actor)) return;
   const id = String(formData.get("id"));
   const next = formData.get("status") === "RETIRED" ? "RETIRED" : "ACTIVE";
   await setItemStatus(id, next);
@@ -401,7 +416,9 @@ export async function toggleItemStatusAction(formData: FormData) {
 // keeps its own snapshot (serialNumber/make/model on the line, signatures on
 // the transfer) exactly as issued.
 export async function deleteItemAction(formData: FormData) {
-  await requireCapability("MANAGE_ITEMS");
+  const actor = await requireCapability("MANAGE_ITEMS");
+  const denied = denyReadOnly(actor);
+  if (denied) return denied;
   const id = String(formData.get("id") ?? "");
   if (!id) return { error: "No item was specified." };
   try {
@@ -448,6 +465,8 @@ export async function commitImportAction(
   formData: FormData
 ): Promise<{ added: number; updated: number; skipped: SkippedRow[]; unchanged: number; mismatches: { serialNumber: string }[] } | { error: string }> {
   const admin = await requireCapability("MANAGE_ITEMS");
+  const denied = denyReadOnly(admin);
+  if (denied) return denied;
   const f = readCsvFile(formData);
   if ("error" in f) return f;
 
