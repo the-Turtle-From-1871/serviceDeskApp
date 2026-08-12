@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("@/lib/authz", () => ({ requireAdmin: vi.fn(async () => ({ id: "u1", role: "ADMIN" })) }));
+vi.mock("@/lib/authz", () => ({ denyReadOnly: () => null, requireAdmin: vi.fn(async () => ({ id: "u1", role: "ADMIN" })) }));
 vi.mock("@/lib/prisma", () => ({
   default: { transfer: { findUnique: vi.fn(), update: vi.fn(async () => ({})) } },
 }));

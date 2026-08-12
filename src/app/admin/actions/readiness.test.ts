@@ -9,7 +9,7 @@ const revalidatePath = vi.fn();
 
 // items.schema is NOT mocked — the real Zod constraints run, so this proves the
 // server refuses a forged target rather than merely hiding it in the UI.
-vi.mock("@/lib/authz", () => ({ requireCapability: () => requireCapability() }));
+vi.mock("@/lib/authz", () => ({ denyReadOnly: () => null, requireCapability: () => requireCapability() }));
 vi.mock("@/modules/items/items.service", () => ({
   MAX_BULK_ITEMS: 500,
   markItemsReady: (ids: string[]) => markItemsReady(ids),

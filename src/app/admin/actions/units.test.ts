@@ -7,6 +7,10 @@ const deleteUnit = vi.fn();
 const revalidatePath = vi.fn();
 
 vi.mock("@/lib/authz", () => ({
+  // Not a read-only demo account. The real denyReadOnly is unit-tested in
+  // src/lib/authz.test.ts; here it only has to exist, because this mock
+  // replaces the whole module.
+  denyReadOnly: () => null,
   requireCapability: () => requireCapability(),
   AuthError: class extends Error {},
 }));

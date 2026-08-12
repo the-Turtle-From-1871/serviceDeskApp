@@ -22,7 +22,7 @@ const { ContactError } = vi.hoisted(() => {
   return { ContactError };
 });
 
-vi.mock("@/lib/authz", () => ({ requireAdmin: () => requireAdmin() }));
+vi.mock("@/lib/authz", () => ({ denyReadOnly: () => null, requireAdmin: () => requireAdmin() }));
 vi.mock("@/modules/contacts/contacts.service", () => ({
   createContact: (i: unknown, by: string) => createContact(i, by),
   updateContact: (i: unknown) => updateContact(i),

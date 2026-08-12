@@ -13,6 +13,10 @@ const revalidatePath = vi.fn();
 // Note: items.schema is NOT mocked — the real Zod schemas run, so this proves the
 // server actually strips admin-only fields from a USER's submission.
 vi.mock("@/lib/authz", () => ({
+  // Not a read-only demo account. The real denyReadOnly is unit-tested in
+  // src/lib/authz.test.ts; here it only has to exist, because this mock
+  // replaces the whole module.
+  denyReadOnly: () => null,
   requireUser: () => requireUser(),
   requireCapability: (c: string) => requireCapability(c),
 }));

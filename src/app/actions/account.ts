@@ -1,7 +1,7 @@
 "use server";
 import { z } from "zod";
 import { signOut } from "@/auth";
-import { requireUser } from "@/lib/authz";
+import { requireUser, denyReadOnly } from "@/lib/authz";
 import { changeUserPassword, updateUserSignature } from "@/modules/users/users.service";
 import { PasswordChangeError } from "@/modules/users/users.errors";
 import { signatureError } from "@/lib/signature";
@@ -14,6 +14,11 @@ const schema = z.object({
 
 export async function changePasswordAction(_prev: unknown, formData: FormData) {
   const user = await requireUser();
+  // A demo account's credentials are shared, so it must not be able to lock
+  // everyone else out by changing them. The reset-by-email route into the same
+  // outcome is blocked separately, in requestPasswordResetAction.
+  const denied = denyReadOnly(user);
+  if (denied) return denied;
   const parsed = schema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
 
@@ -48,6 +53,8 @@ export async function changePasswordAction(_prev: unknown, formData: FormData) {
 
 export async function saveSignatureAction(_prev: unknown, formData: FormData) {
   const user = await requireUser();
+  const denied = denyReadOnly(user);
+  if (denied) return denied;
   const raw = String(formData.get("signature") ?? "");
   const clear = formData.get("clear") === "1";
 

@@ -4,7 +4,7 @@ const requireAdmin = vi.fn();
 const setPin = vi.fn();
 const revalidatePath = vi.fn();
 
-vi.mock("@/lib/authz", () => ({ requireAdmin: () => requireAdmin() }));
+vi.mock("@/lib/authz", () => ({ denyReadOnly: () => null, requireAdmin: () => requireAdmin() }));
 vi.mock("@/lib/public-access", () => ({ setPin: (p: string, u: string) => setPin(p, u) }));
 vi.mock("next/cache", () => ({ revalidatePath: (p: string) => revalidatePath(p) }));
 

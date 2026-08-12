@@ -24,7 +24,7 @@ const { AuthError } = vi.hoisted(() => {
 
 // items.schema is NOT mocked — the real Zod constraints run, so this proves the
 // server refuses a forged target rather than merely hiding it in the UI.
-vi.mock("@/lib/authz", () => ({ requireCapability: () => requireCapability(), AuthError }));
+vi.mock("@/lib/authz", () => ({ denyReadOnly: () => null, requireCapability: () => requireCapability(), AuthError }));
 const setItemsLoaner = vi.fn();
 
 vi.mock("@/modules/items/items.service", () => ({

@@ -1,6 +1,6 @@
 "use server";
 import { Prisma } from "@prisma/client";
-import { requireUser, AuthError } from "@/lib/authz";
+import { requireUser, denyReadOnly, AuthError } from "@/lib/authz";
 import { createTransfer, getTransferByReceiptNumber } from "@/modules/transfers/transfers.service";
 import { receiptSchema } from "@/modules/transfers/transfers.schema";
 import { TransferError } from "@/modules/transfers/transfers.errors";
@@ -19,6 +19,8 @@ import { deleteDraft } from "@/modules/receipts/drafts.service";
 
 export async function createReceiptAction(_prev: unknown, formData: FormData) {
   const user = await requireUser();
+  const denied = denyReadOnly(user);
+  if (denied) return denied;
   const raw = parseReceiptForm(formData);
 
   // A picked saved signature posts ONLY its id. Resolve the signer's name and
@@ -181,12 +183,17 @@ export async function createReceiptAction(_prev: unknown, formData: FormData) {
 // Staff-initiated: email the customer (non-DCSIM party) that the items on this
 // hand receipt are ready for pickup. Returns { ok } or { error } for the UI.
 export async function notifyPickupAction(_prev: unknown, formData: FormData) {
+  let user;
   try {
-    await requireUser();
+    user = await requireUser();
   } catch (e) {
     if (e instanceof AuthError) return { error: "You are not authorized to send notifications." };
     throw e;
   }
+  // Sending the pickup email also stamps the receipt, and it puts real mail in
+  // a real person's inbox — not something a demo should be able to do.
+  const denied = denyReadOnly(user);
+  if (denied) return denied;
 
   const receiptNumber = String(formData.get("receiptNumber") ?? "").trim();
   if (!receiptNumber) return { error: "Missing receipt." };

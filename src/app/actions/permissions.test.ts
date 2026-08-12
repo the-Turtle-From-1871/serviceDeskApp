@@ -3,6 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const requireCapability = vi.hoisted(() => vi.fn());
 const requireAdmin = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/authz", () => ({
+  // Not a read-only demo account. The real denyReadOnly is unit-tested in
+  // src/lib/authz.test.ts; here it only has to exist, because this mock
+  // replaces the whole module.
+  denyReadOnly: () => null,
   requireCapability: (...a: unknown[]) => requireCapability(...a),
   requireAdmin: () => requireAdmin(),
 }));
