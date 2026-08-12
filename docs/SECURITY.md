@@ -753,6 +753,90 @@ document when you change it for exactly this reason — it is the only file wher
 boundary lives, and it must not widen again without a doc change.
 *Last reviewed: 2026-08-08.*
 
+### Read-only demo accounts (`READ_ONLY_DEMO_EMAILS`)
+
+An account named in the comma-separated `READ_ONLY_DEMO_EMAILS` environment
+variable may **read the whole application and write none of it**. It exists so
+the app can be demonstrated against the live property book without a viewer's
+click changing anything.
+
+**It is deliberately NOT a capability, and must never become one.** Capability
+grants in this repo are additive with **no negative grant** ([§2 above](#2-authorization)) —
+that is the property that keeps the effective set independent of read order.
+Expressing "reads but never writes" as a capability would reintroduce exactly
+the subtractive model that rule bans. Read-only sits *beside* the capability
+model and answers a different question: *may this session write at all*. For the
+same reason the demo account keeps the **`ADMIN` role** — `/admin/*` is gated on
+`ADMINISTER`, and that is the only way the portal renders in the first place.
+
+**Resolved per request, from the DB, on the path that already re-reads role and
+`isActive`.** `SessionUser` carries a required `isReadOnly: boolean`, set in
+`defaultGetSession` (`src/lib/authz.ts`) by passing the row's `email` — added to
+the existing `select`, so this costs **no extra query** — to `isReadOnlyDemo()`.
+Nothing about it lives in the JWT, so it is re-evaluated on every protected
+request exactly like the role and the grants.
+
+**`src/lib/read-only-demo.ts` is pure** — no Prisma, no `server-only`, no
+`next/*` — for the same reasons `capabilities.ts` is: it unit-tests without a
+database, and it has to be importable from `src/app/actions/auth.ts`, which runs
+on the unauthenticated password-reset path.
+
+**The refusal is a second line in each mutating Server Action, after its
+existing gate.** `src/lib/authz.ts` exports `DEMO_REFUSAL`
+(`{ error: "Demo account — changes are not saved." }`) and `denyReadOnly(user)`,
+which returns that object or `null`. All 47 mutating actions across
+`src/app/actions/*` and `src/app/admin/actions/*` call it immediately after
+their `requireUser()` / `requireCapability()` / `requireAdmin()` line and return
+its result. Authorization is unchanged and still runs first; this only ever
+subtracts.
+
+**`denyReadOnly` RETURNS rather than throws, and that is deliberate.** A thrown
+`AuthError` escalates to the error boundary and replaces the form the user is
+looking at with a digest — the refusal has to arrive as an action result the
+form can render.
+
+**Nine `void` actions no-op silently**, because they have nowhere to render a
+message: `toggleUserActiveAction`, `setUserRoleAction`, `clearServiceAction`,
+`completeServiceAction`, `reopenServiceAction`, `toggleItemStatusAction`,
+`deleteContactAction`, `deleteDraftAction`, `deleteSignatureAction`. **The
+admin banner is what covers them** — see below.
+
+**The unauthenticated reset path carries its own block.** `denyReadOnly` needs a
+session, so it cannot reach `requestPasswordResetAction`; that action returns
+early for a demo address **inside its existing `after()` block**, beside the
+anti-enumeration no-ops, so it is indistinguishable in timing and response from
+every other outcome ([§4](#4-password-reset)) and **no reset token is ever
+minted**. `resetPasswordAction` needed no change: a token that was never issued
+cannot be redeemed.
+
+**`analyzeImportAction` is deliberately unguarded; `commitImportAction` is
+guarded.** Analysis parses and plans and writes nothing, so the import preview
+can still be demonstrated. The commit is a write like any other.
+
+**A banner renders on every admin page for a read-only session** — and it is a
+**control, not decoration**: it is the only visible signal that the environment
+variable is actually set (see the fail-open gap below), and it is what makes the
+nine silent actions comprehensible rather than looking like a broken app.
+
+**Marking an account is configuration — there is no migration and no toggle.**
+No `User` column, no admin control, so there is nothing an errant click can flip
+and nothing to hand-apply to production. The cost of that choice is the
+fail-open behaviour recorded under Known gaps.
+
+**Email verification for the demo account was handled in the DATA, not the
+code** — `emailVerifiedAt` stamped on that row. `checkCredentials` was
+deliberately left untouched: its password-before-verification ordering is
+load-bearing ([§1](#1-authentication)), and adding a demo branch there is how
+that ordering gets broken.
+
+`src/lib/read-only-demo.ts` is security-sensitive: update this document when you
+change it — it is the entire definition of which accounts are write-refused, and
+`src/lib/authz.ts` (already on the watch list) is the only place it is applied.
+Guard coverage is enumerated by `src/app/actions/read-only-coverage.test.ts`,
+which is **advisory in CI** — only `Semgrep SAST` and `Build (next build)` are
+required to merge ([§11](#11-supply-chain--cicd)) — so a forgotten guard is
+reported, not blocked. *Last reviewed: 2026-08-11.*
+
 ---
 
 ## 3. Public surface & the PIN gate
@@ -2347,6 +2431,48 @@ lever, if it stops being acceptable, is clearing the key on sign-out (and
 ideally on a change of `session.user.id`), which costs a batch that survives a
 re-login — the case the persistence was added for.
 
+**16. The read-only demo guard FAILS OPEN — if `READ_ONLY_DEMO_EMAILS` is unset,
+the demo account is a full production administrator.** ⚠️ *Accepted 2026-08-11.*
+The account marked read-only ([§2](#2-authorization)) keeps the **`ADMIN` role**,
+because that is what makes `/admin/*` render at all; the only thing standing
+between it and every privileged write in the application is one environment
+variable being present and spelled correctly. Unset it, typo the address, or
+stand up a new environment (a preview deploy, a restored project, a fresh
+Vercel scope) without carrying it across, and `isReadOnlyDemo()` returns `false`
+for everyone, every `denyReadOnly` call returns `null`, and the account writes
+freely — with **no refusal anywhere, no error, and nothing in a log to say the
+protection stopped applying**. It is a single point of failure with nothing
+behind it.
+**A `User.isReadOnly` column would fail closed**, which is the stronger design
+and was not chosen: a column means a hand-applied production migration
+(`DEPLOY.md`, migrate-before-push) and, if it were made settable, an admin
+toggle that could be unticked by accident or by anyone who reaches the user
+edit form. The env var trades a fail-closed default for a value that no
+in-app action can change. **The admin banner is the visible tell** and is
+therefore load-bearing rather than cosmetic: if it is not on the screen, the
+guard is not running. Confirm it before demonstrating anything, and re-confirm
+after any deploy or environment change. If this stops being acceptable, the
+lever is the column — fail closed, defaulting to read-only until an
+administrator says otherwise.
+
+**17. The read-only demo account reads real production data, and whoever is
+watching the screen reads it too.** ⚠️ *Accepted 2026-08-11.* Read-only blocks
+writes, not reads: a demo session sees the live property book — real serial
+numbers, real holder email addresses (`currentUserEmail`,
+`lastLogonUserPrincipalName`), the full user list with roles and capability
+grants, the contact book of outside parties, audit history, and stored
+signature images on receipts and audits. Everything the app shows an
+administrator is shown to the room the demo is given in, including the bulk
+analytics exports ([§2](#2-authorization)) if they are run — those are reads,
+so nothing refuses them, and they leave the application as a file.
+Chosen deliberately over a seeded demo database: a demo against fabricated
+inventory does not answer the questions people actually ask, and a second
+database is a second thing to keep current. The mitigation is procedural rather
+than technical — **treat a demo as a disclosure of the property book to the
+audience**, and do not demonstrate to an audience who should not see it. The
+exit, if that stops being acceptable, is a separate seeded environment, not a
+change to this guard.
+
 ---
 
 ## Keeping this current
@@ -2368,7 +2494,9 @@ That makes the list below the thing to read rather than a red check to wait for.
 ever reinstated.) By area:
 
 - **authn / session** — `auth.ts`, `lib/authz.ts`, `lib/session-freshness.ts`,
-  `modules/users/users.service.ts`, `lib/password.ts`, `app/actions/auth.ts`
+  `modules/users/users.service.ts`, `lib/password.ts`, `app/actions/auth.ts`,
+  `lib/read-only-demo.ts` (which accounts are write-refused — see the read-only
+  demo entry in §2 and Known gaps 16/17)
 - **password reset** — `lib/password-reset.ts`, `lib/reset-token.ts`
 - **the public PIN gate** — `src/proxy.ts`, `lib/public-access*.ts` (including
   `-cookie` and `-guard`), `app/actions/search.ts`, `app/actions/unlock.ts`,

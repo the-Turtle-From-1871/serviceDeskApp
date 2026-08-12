@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## 2026-08-11
 
 ### Added
+- **An account can now be marked read-only, so the app can be shown to someone without anything being changed.** A read-only account signs in normally and sees exactly what an administrator sees — the property book, the dashboard, receipts, the user list, the contact book, audit history — but anything that would write is refused with *"Demo account — changes are not saved."* Nothing is hidden and no button is greyed out: the point is to walk through the real screens and press the real controls, and leave the data exactly as it was.
+
+  **Every admin page carries a banner saying the session is read-only**, so nobody wonders why a save appeared to do nothing — and so anyone watching the screen can see the protection is switched on.
+
+  **A handful of controls fail silently rather than saying so.** Activating or deactivating a user, changing a role, retiring a device, clearing, completing or reopening a service ticket, deleting a contact, a saved draft or a stored signature — those buttons have nowhere to show a message, so they simply do nothing at all. The banner is what covers them.
+
+  **Password reset is blocked for a demo account too.** That request is made before anyone is signed in, so it is refused on its own: the form still answers exactly as it does for every other address — it never reveals whether an account exists — but no reset link is ever created, so the demo account's password cannot be changed out from under the person demonstrating with it.
+
+  **The import preview still works.** Uploading a CSV on *Import items* and seeing what it would do is deliberately still allowed, because that step only reads and plans. Committing the import is refused like every other write.
+
+  #### Notes
+  - New environment variable **`READ_ONLY_DEMO_EMAILS`** — comma-separated addresses, **blank by default**. There is no database migration and no admin toggle: marking an account is configuration. Set it in Vercel and redeploy before the account is used.
+  - **It fails open.** If the variable is unset, misspelled, or missed on a new deploy, the account it was meant to name is a full production administrator with no refusal anywhere — nothing else stands behind it. The admin banner is the only visible tell, so confirm it is on the screen before demonstrating anything.
+
 - **A device named `NGHINB-LOAN-###` is now marked as a loaner automatically.** Naming is how loaner stock is already tracked, so it no longer has to be recorded twice. Rename a device *into* that pattern — in Intune, on the edit page, on the item card, or with the bulk rename — and it becomes a loaner on the spot. Rename it *out* of the pattern and the mark is removed. New devices arriving with that name are marked as they are created, and **the 51 devices already named that way have been marked**.
 
   **The tick box still works, and an unrelated rename will not undo it.** A device marked by hand whose name does not follow the convention keeps its mark through any edit and any rename — only a name moving into or out of `NGHINB-LOAN-###` changes anything. The pattern ignores capitalisation and accepts any number of digits, so `nghinb-loan-7` and `NGHINB-LOAN-1000` both count; a name that merely contains the word, like `NGHINB-LOANER-DEPOT`, does not.
@@ -122,6 +136,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **"Already scanned" now waits three seconds and says which device.** A barcode is re-read many times a second while it sits under the camera, so the message confirming what you just added — *Added HP ProBook 650 G5* — was replaced almost immediately by a bare *Already scanned* that named nothing. A successful scan's message now holds for three seconds before any repeat notice can replace it, and a repeat reads **"2TK94709FN already scanned"** so you can see which label the camera is still pointed at.
 
   During those three seconds a repeat of a *different* device is silenced too. That is deliberate: on a sweep the camera is moving from one label to the next, not revisiting a third. The "Selection is full" refusal is not affected — it still speaks immediately, because a scan it refuses is one that would otherwise be lost.
+
+### Security
+- **A read-only demo account reads live production data.** Real serial numbers, real holder email addresses, the full user list, the contact book, audit history and stored signature images are all on screen in front of whoever is being shown the app. Only the writes are blocked, never the reads. This was chosen deliberately over maintaining a separate seeded demo database — the demo is worth having because it is the real property book — so treat the session as if the data were being shown to the room, because it is.
+- **The refusal is a guard added to each mutating action, and nothing blocks a merge that forgets one.** A test enumerates the actions and reports any that are unguarded, but it is advisory in CI — only *Semgrep SAST* and *Build* are required to merge — so a new action that skips the guard is reported rather than stopped. Both this and the fail-open behaviour above are recorded in `docs/SECURITY.md` under *Known gaps & accepted risks*.
 
 ## 2026-08-10
 
