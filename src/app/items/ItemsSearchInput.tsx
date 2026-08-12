@@ -15,6 +15,7 @@ export function ItemsSearchInput({
   uic,
   needsRename,
   loaner,
+  showUnnamed,
 }: {
   q: string;
   /** The FULL compound sort, not just the first key — rebuilding the URL from
@@ -23,6 +24,10 @@ export function ItemsSearchInput({
   uic: string | null;
   needsRename: boolean;
   loaner: boolean;
+  /** The URL flag, not whether the hide is in effect. A search lifts the hide
+   *  server-side, but typing must not rewrite the URL to claim the user asked
+   *  for that — clearing the box has to land back on the filtered view. */
+  showUnnamed: boolean;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState(q);
@@ -40,11 +45,13 @@ export function ItemsSearchInput({
   const uicRef = useRef(uic);
   const needsRenameRef = useRef(needsRename);
   const loanerRef = useRef(loaner);
+  const showUnnamedRef = useRef(showUnnamed);
   useEffect(() => {
     sortRef.current = sortKeys;
     uicRef.current = uic;
     needsRenameRef.current = needsRename;
     loanerRef.current = loaner;
+    showUnnamedRef.current = showUnnamed;
   });
 
   useEffect(() => {
@@ -66,6 +73,7 @@ export function ItemsSearchInput({
       if (uicRef.current) params.set("uic", uicRef.current);
       if (needsRenameRef.current) params.set("needsRename", "1");
       if (loanerRef.current) params.set("loaner", "1");
+      if (showUnnamedRef.current) params.set("showUnnamed", "1");
       // Changing the query resets to page 1 (omitted = page 1): a narrower
       // result set could otherwise strand the user on a now-empty page.
       const s = params.toString();

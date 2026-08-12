@@ -5,6 +5,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-08-11
 
+### Changed
+- **The Items list no longer shows devices with nothing to identify them.** Devices with **no name at all**, and the `BE-…` names an MDM re-enrolment invents, are hidden from `/items` by default. On the current fleet that is roughly 160 rows of the 1,200 — pages of entries that could not be told apart at a glance and were rarely what anyone was scrolling for.
+
+  **Searching still finds them.** Type any part of a name, make, model, serial, storage location or the recipient on an open receipt and the hide lifts for that search, so a hidden device is never reported as missing from the property book. Clearing the search box puts the filter back.
+
+  **The count says what was left out.** The line under the heading reads *"1,050 items · 158 hidden"* rather than a total that quietly omits them, and **Sort & filter** has a **Show unnamed / BE- devices** tick box that turns the hide off for good. While it is off — or while a search has lifted it — the closed menu reads `· Unnamed`, so the view you are looking at is legible without opening anything.
+
+  **What counts as a `BE-` name here is broader than on the rename worklist**: any name starting with `BE-`, not only the exact 12-character shape the importer refuses. On the current fleet both rules pick the same 91 devices, and the consequence of the wider net is only that a row is hidden from one view that a search or the tick box brings straight back.
+
 ### Added
 - **An account can now be marked read-only, so the app can be shown to someone without anything being changed.** A read-only account signs in normally and sees exactly what an administrator sees — the property book, the dashboard, receipts, the user list, the contact book, audit history — but anything that would write is refused with *"Demo account — changes are not saved."* Nothing is hidden and no button is greyed out: the point is to walk through the real screens and press the real controls, and leave the data exactly as it was.
 

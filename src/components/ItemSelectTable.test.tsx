@@ -70,6 +70,8 @@ function renderEmpty(props: Partial<Parameters<typeof ItemSelectTable>[0]> = {})
       uics={[]}
       needsRename={false}
       loaner={false}
+      showUnnamed={false}
+      unnamedHidden={true}
       categories={[]}
       {...props}
     />,
@@ -157,6 +159,8 @@ describe("ItemSelectTable — delete dialog structure (closed-dialog layout regr
         sortKeys={[]}
         uic="" needsRename={false}
         loaner={false}
+        showUnnamed={false}
+        unnamedHidden={true}
         uics={[]}
         categories={[]}
       />,
@@ -239,6 +243,8 @@ describe("ItemSelectTable — mobile card structure", () => {
         sortKeys={[]}
         uic="" needsRename={false}
         loaner={false}
+        showUnnamed={false}
+        unnamedHidden={true}
         uics={[]}
         categories={[]}
         {...props}
@@ -609,6 +615,8 @@ describe("ItemSelectTable — long-press selection", () => {
         sortKeys={[]}
         uic="" needsRename={false}
         loaner={false}
+        showUnnamed={false}
+        unnamedHidden={true}
         uics={[]}
         categories={[]}
       />,
@@ -872,6 +880,8 @@ describe("ItemSelectTable — Sort & filter menu", () => {
         sortKeys={[{ key: "make", dir: "asc" }]}
         uic="" needsRename={false}
         loaner={false}
+        showUnnamed={false}
+        unnamedHidden={true}
         uics={["WABC01", "WXYZ99"]}
         categories={[]}
         {...props}

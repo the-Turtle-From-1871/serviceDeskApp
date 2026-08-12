@@ -251,6 +251,25 @@ describe("sortFilterSummary", () => {
     expect(sortFilterSummary("make", "asc", null, false, false)).toBe("Make ▲");
   });
 
+  // The INVERSE of the two worklist filters: unnamed and `BE-…` devices are
+  // hidden by DEFAULT, so the state that needs reading back with the menu shut
+  // is the one where they are showing.
+  it("appends Unnamed when the hide has been lifted", () => {
+    expect(sortFilterSummary("make", "asc", null, false, false, true)).toBe("Make ▲ · Unnamed");
+    expect(sortFilterSummary(null, "asc", null, false, false, true)).toBe("Newest · Unnamed");
+  });
+
+  it("says nothing in the DEFAULT view, where the hide is on", () => {
+    // A chip on every ordinary page load is how a summary stops being read.
+    expect(sortFilterSummary("make", "asc", null, false, false, false)).toBe("Make ▲");
+  });
+
+  it("orders the three filters Rename, Loaner, Unnamed after the unit", () => {
+    expect(sortFilterSummary("make", "asc", "2/6 IN", true, true, true)).toBe(
+      "Make ▲ · 2/6 IN · Rename · Loaner · Unnamed",
+    );
+  });
+
   // Both worklist filters can be active together — Rename first, Loaner second,
   // matching the order the two are checked in.
   it("combines the rename and loaner filters in order", () => {

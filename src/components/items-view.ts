@@ -173,6 +173,7 @@ export function sortFilterSummary(
   uic: string | null,
   needsRename = false,
   loaner = false,
+  showingUnnamed = false,
 ): string {
   const label = sort ? SORT_LABEL.get(sort) : undefined;
   const sortPart = label ? `${label} ${dir === "asc" ? "▲" : "▼"}` : "Newest";
@@ -191,6 +192,12 @@ export function sortFilterSummary(
   // shut — a list silently showing 40 loaners out of 1,204 devices is the same
   // confident wrong answer.
   if (loaner) parts.push("Loaner");
+  // The INVERSE of the two above: unnamed and `BE-…` devices are hidden by
+  // default, so the state worth reading back with the menu shut is the one where
+  // they are showing — either because the checkbox lifted the hide or because a
+  // search did. Marking the default instead would put a chip on the trigger of
+  // every ordinary page load, which is how a summary stops being read at all.
+  if (showingUnnamed) parts.push("Unnamed");
   return parts.join(" · ");
 }
 
