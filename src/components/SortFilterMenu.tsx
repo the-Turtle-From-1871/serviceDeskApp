@@ -143,6 +143,15 @@ export type MenuToggle = {
   label: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
+  /** Inert because something else already decides this filter — `/items`
+   *  disables the unnamed toggle while a search is running, because a search
+   *  lifts that hide regardless of the box. A control that re-renders an
+   *  identical list reads as a failed click, so it must not stay live and
+   *  silent. Optional: a toggle with nothing overriding it omits both fields. */
+  disabled?: boolean;
+  /** Why it is inert, rendered beneath the label. Meaningless without
+   *  `disabled` — a disabled control with no reason is just a dead one. */
+  disabledNote?: string;
 };
 
 export function SortFilterMenu({
@@ -239,9 +248,15 @@ export function SortFilterMenu({
               <input
                 type="checkbox"
                 checked={t.checked}
+                disabled={t.disabled}
                 onChange={(e) => t.onChange(e.target.checked)}
               />
-              <span>{t.label}</span>
+              <span>
+                {t.label}
+                {t.disabled && t.disabledNote && (
+                  <span className="subtle popup-menu__check-note">{t.disabledNote}</span>
+                )}
+              </span>
             </label>
           ))}
 

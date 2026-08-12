@@ -628,7 +628,18 @@ export function ItemSelectTable({
             // "Hide unnamed devices" box that started checked would describe the
             // resting state of every page load, and the one-way shape the other
             // two rely on ("unchecked = no filter") does not hold here.
-            { label: "Show unnamed / BE- devices", checked: showUnnamed, onChange: setShowUnnamed },
+            {
+              label: "Show unnamed / BE- devices",
+              // Shows the box as ticked while a search has lifted the hide, so
+              // the panel agrees with both the list and the `· Unnamed` chip.
+              // It is the URL flag everywhere else.
+              checked: showUnnamed || !unnamedHidden,
+              onChange: setShowUnnamed,
+              // A search lifts the hide whatever this says, so leaving it live
+              // would let someone untick it and watch the list not change.
+              disabled: q.trim() !== "",
+              disabledNote: "Always shown while searching",
+            },
           ]}
           onPrimary={setPrimary}
           onDir={setPrimaryDir}
@@ -693,6 +704,16 @@ export function ItemSelectTable({
             {(uic || needsRename || loaner) && q.trim() ? " and " : ""}
             {q.trim() ? "your search" : ""}
             {!uic && !needsRename && !loaner && !q.trim() ? "the current view" : ""}.
+            {/* The unnamed hide is ON by default, so it is the ONE filter that
+                can empty this list without anybody having touched a control —
+                filter to a unit whose devices are all unnamed and the sentence
+                above otherwise blames the unit for rows the hide removed. It
+                names the escape hatch because there is nothing on screen to
+                suggest one exists. */}
+            {unnamedHidden && (
+              <> Unnamed and <code>BE-</code> devices are hidden — tick{" "}
+                <strong>Show unnamed / BE- devices</strong> in Sort &amp; filter to include them.</>
+            )}
           </div>
           {/* Admin-only because creation is admin-only (createItemAction calls
               requireAdmin) — the server check is the authority, this is
