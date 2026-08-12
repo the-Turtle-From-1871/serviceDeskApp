@@ -206,10 +206,12 @@ test("a URL with no preview flag is unchanged", () => {
   expect(downloadHref("/i/abc123/qr/pdf")).toBe("/i/abc123/qr/pdf");
 });
 
-// Pure: no `window`, so it is safe to call during a server render and testable
-// without jsdom.
-test("does not depend on the page's own origin", () => {
-  expect(downloadHref("/receipts/HR-000002/pdf?preview=1")).toBe("/receipts/HR-000002/pdf");
+// Only the exact `preview` key goes. A prefix match would be a silent bug: the
+// route reads `searchParams.has("preview")`, so dropping a merely similar param
+// would change a request nobody asked to change.
+test("removes only the exact preview key", () => {
+  expect(downloadHref("/receipts/HR-000001/pdf?previewMode=wide&preview=1"))
+    .toBe("/receipts/HR-000001/pdf?previewMode=wide");
 });
 ```
 
