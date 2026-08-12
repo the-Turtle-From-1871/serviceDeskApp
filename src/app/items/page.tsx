@@ -28,6 +28,9 @@ export default async function ItemsListPage({
     needsRename?: string | string[];
     /** `?loaner=1` — the loaner-pool worklist. Any other value is "off". */
     loaner?: string | string[];
+    /** `?showUnnamed=1` — lift the default hide on unnamed / `BE-…` devices.
+     *  The INVERSE of the two above: absent means the filter is ON. */
+    showUnnamed?: string | string[];
   }>;
 }) {
   const user = await requireUser();
@@ -35,6 +38,10 @@ export default async function ItemsListPage({
   const sp = await searchParams;
   const q = firstParam(sp.q);
   const pageParam = firstParam(sp.page);
+  // Exactly "1" is on, matching the other two flags — but this one lifts a
+  // filter rather than applying one, so the DEFAULT view is the narrow one and
+  // `/items` with no querystring hides the unnamed and `BE-…` devices.
+  const showUnnamed = firstParam(sp.showUnnamed) === "1";
   // Gated on the CAPABILITY, not the role — a USER granted MANAGE_QUEUE
   // individually can work the service queue without being made an admin. Both
   // are presentation: recordAuditsAction re-checks ADMINISTER and the two queue
@@ -68,6 +75,10 @@ export default async function ItemsListPage({
       // Exactly "1" is on, matching needsRename. A permissive check would make
       // `?loaner=0` mean the opposite of what it says.
       loaner: firstParam(sp.loaner) === "1",
+      // The view default lives here, not in the service: listItems defaults the
+      // hide OFF so no other caller silently loses rows, and lifts it itself
+      // when a search is running.
+      hideUnnamed: !showUnnamed,
     }),
     listItemUics(),
     isAdmin ? listCategoryNames() : Promise.resolve<string[]>([]),
@@ -95,7 +106,15 @@ export default async function ItemsListPage({
         <div className="row">
           <div>
             <h1 className="page-title">Items</h1>
-            <p className="subtle">{result.total} item{result.total === 1 ? "" : "s"}</p>
+            {/* The hidden count is not decoration: without it "1,050 items" is
+                a confident wrong answer about the property book, since the
+                default view drops every unnamed and `BE-…` device. Rendered
+                only when the hide actually ran and actually removed something —
+                "· 0 hidden" would be noise. */}
+            <p className="subtle">
+              {result.total} item{result.total === 1 ? "" : "s"}
+              {result.hidden > 0 && ` · ${result.hidden} hidden`}
+            </p>
           </div>
           {/* `spacer` (margin-left:auto) belongs on the FIRST button only. On both,
               flexbox splits the free space between them and drifts them apart
@@ -118,6 +137,7 @@ export default async function ItemsListPage({
             uic={result.uic}
             needsRename={result.needsRename}
             loaner={result.loaner}
+            showUnnamed={showUnnamed}
           />
           {/* Gated on the CAPABILITY, not `isAdmin`: a USER granted MANAGE_ITEMS
               individually may create scanned serials, a VIEWER may not. */}
@@ -165,6 +185,8 @@ export default async function ItemsListPage({
             uics={uics}
             needsRename={result.needsRename}
             loaner={result.loaner}
+            showUnnamed={showUnnamed}
+            unnamedHidden={result.hideUnnamed}
             categories={categoryNames.map((name) => ({ name }))}
             signatures={signatures}
             canAudit={canAudit}

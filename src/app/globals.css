@@ -866,6 +866,24 @@ input[type="file"].input {
   padding: 6px 8px;
   cursor: pointer;
 }
+/* A disabled toggle has to say WHY, or it reads as a broken control. The note
+   sits under its label rather than beside it: the row is already at the 44px tap
+   floor and the panel is a bottom sheet on a phone, where a second inline clause
+   would wrap the label instead. `--text-muted`, never `--muted` — that one is a
+   surface tint and renders at 1.08:1 here. */
+.popup-menu__check-note {
+  display: block;
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--text-muted);
+}
+.popup-menu__check:has(input:disabled) {
+  /* The label follows the box: a live-looking label over a dead checkbox is the
+     same wrong signal the note exists to remove. Not `opacity` on the row — that
+     would fade the note that explains it. */
+  cursor: default;
+  color: var(--text-muted);
+}
 .popup-menu__check input {
   /* Preflight is absent here, so the UA checkbox survives and is what we want —
      only the size needs asserting, since the browser default is ~13px and is

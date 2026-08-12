@@ -77,6 +77,8 @@ export function ItemSelectTable({
   uics,
   needsRename,
   loaner,
+  showUnnamed,
+  unnamedHidden,
   categories = [],
   signatures = [],
   canAudit = false,
@@ -98,6 +100,14 @@ export function ItemSelectTable({
    *  needsRename: false means "no filter", never "only devices that are not
    *  loaners". */
   loaner: boolean;
+  /** What the URL ASKED for (`?showUnnamed=1`) — drives the checkbox and every
+   *  link this component builds. */
+  showUnnamed: boolean;
+  /** Whether the hide was actually APPLIED (`listItems` lifts it for a search).
+   *  Separate from the flag above on purpose: the checkbox has to keep showing
+   *  what the user set, while the summary has to describe what the list is
+   *  really doing, and during a search those two disagree. */
+  unnamedHidden: boolean;
   /** The managed DeviceCategory vocabulary, fetched ONCE server-side by the page
    *  and passed down — never a per-row lookup. Only used by the admin bulk
    *  controls in the selection bar. */
@@ -519,6 +529,7 @@ export function ItemSelectTable({
     uic?: string | null;
     needsRename?: boolean;
     loaner?: boolean;
+    showUnnamed?: boolean;
   }) => {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
@@ -542,6 +553,13 @@ export function ItemSelectTable({
     // the moment someone pages or re-sorts.
     const nextLoaner = over.loaner !== undefined ? over.loaner : loaner;
     if (nextLoaner) params.set("loaner", "1");
+
+    // Written only when ON like the two above — but here ON is the NON-default
+    // state (unnamed and `BE-…` devices are hidden unless asked for), so an
+    // ordinary URL stays clean and `/items` with no querystring still means the
+    // filtered view rather than a different one.
+    const nextShowUnnamed = over.showUnnamed !== undefined ? over.showUnnamed : showUnnamed;
+    if (nextShowUnnamed) params.set("showUnnamed", "1");
 
     const nextPage = over.page ?? page;
     if (nextPage > 1) params.set("page", String(nextPage));
@@ -573,6 +591,7 @@ export function ItemSelectTable({
   const setUic = (next: string | null) => navigate({ uic: next, page: 1 });
   const setNeedsRename = (next: boolean) => navigate({ needsRename: next, page: 1 });
   const setLoaner = (next: boolean) => navigate({ loaner: next, page: 1 });
+  const setShowUnnamed = (next: boolean) => navigate({ showUnnamed: next, page: 1 });
 
   return (
     <>
@@ -586,7 +605,7 @@ export function ItemSelectTable({
         <SortFilterMenu
           idPrefix="items"
           columns={SORTABLE_COLUMNS}
-          summary={sortFilterSummary(sort, dir, uic, needsRename, loaner)}
+          summary={sortFilterSummary(sort, dir, uic, needsRename, loaner, !unnamedHidden)}
           sort={sort}
           dir={dir}
           secondary={secondarySort?.key ?? null}
@@ -605,6 +624,22 @@ export function ItemSelectTable({
           toggles={[
             { label: "Needs rename in Intune", checked: needsRename, onChange: setNeedsRename },
             { label: "Loaners only", checked: loaner, onChange: setLoaner },
+            // Reads as the POSITIVE act because the hide is the default: a
+            // "Hide unnamed devices" box that started checked would describe the
+            // resting state of every page load, and the one-way shape the other
+            // two rely on ("unchecked = no filter") does not hold here.
+            {
+              label: "Show unnamed / BE- devices",
+              // Shows the box as ticked while a search has lifted the hide, so
+              // the panel agrees with both the list and the `· Unnamed` chip.
+              // It is the URL flag everywhere else.
+              checked: showUnnamed || !unnamedHidden,
+              onChange: setShowUnnamed,
+              // A search lifts the hide whatever this says, so leaving it live
+              // would let someone untick it and watch the list not change.
+              disabled: q.trim() !== "",
+              disabledNote: "Always shown while searching",
+            },
           ]}
           onPrimary={setPrimary}
           onDir={setPrimaryDir}
@@ -669,6 +704,16 @@ export function ItemSelectTable({
             {(uic || needsRename || loaner) && q.trim() ? " and " : ""}
             {q.trim() ? "your search" : ""}
             {!uic && !needsRename && !loaner && !q.trim() ? "the current view" : ""}.
+            {/* The unnamed hide is ON by default, so it is the ONE filter that
+                can empty this list without anybody having touched a control —
+                filter to a unit whose devices are all unnamed and the sentence
+                above otherwise blames the unit for rows the hide removed. It
+                names the escape hatch because there is nothing on screen to
+                suggest one exists. */}
+            {unnamedHidden && (
+              <> Unnamed and <code>BE-</code> devices are hidden — tick{" "}
+                <strong>Show unnamed / BE- devices</strong> in Sort &amp; filter to include them.</>
+            )}
           </div>
           {/* Admin-only because creation is admin-only (createItemAction calls
               requireAdmin) — the server check is the authority, this is

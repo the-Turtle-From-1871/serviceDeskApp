@@ -82,6 +82,71 @@ describe("listItems", () => {
     expect(whereOf()).toBeUndefined();
   });
 
+  /* ── The unnamed / BE- hide ──────────────────────────────────────────────
+   *
+   * The `/items` default view. Pinned here rather than only in the parity test
+   * because three of its properties are not about the two paths agreeing: that
+   * it is OFF by default, that a search lifts it, and that the hidden count is
+   * a real second query rather than a number someone made up. */
+
+  it("applies no hide unless the caller asks for one, so no other caller silently loses rows", async () => {
+    const page = await listItems();
+    expect(whereOf()).toBeUndefined();
+    expect([page.hideUnnamed, page.hidden]).toEqual([false, 0]);
+    // And it costs nothing: the second count is skipped entirely.
+    expect(vi.mocked(prisma.item.count)).toHaveBeenCalledTimes(1);
+  });
+
+  it("excludes a null, empty or BE- prefixed device name when asked", async () => {
+    await listItems({ hideUnnamed: true });
+    // A PREFIX rule, not the importer's anchored `^BE-[A-Z0-9]{12}$` — Prisma
+    // has no regex operator, and the raw twin must be able to say the same
+    // thing. Asserted as the whole clause so a dropped conjunct is a failure:
+    // without the `not: null` guard, `NOT (deviceName LIKE …)` is NULL for an
+    // unnamed row and the hide would depend on three-valued logic instead of
+    // saying what it means.
+    expect(whereOf()).toEqual({
+      AND: [
+        { deviceName: { not: null } },
+        { deviceName: { not: "" } },
+        { NOT: { deviceName: { startsWith: "BE-" } } },
+      ],
+    });
+  });
+
+  it("is LIFTED by a search, and reports the lift rather than the request", async () => {
+    const page = await listItems({ hideUnnamed: true, search: "BE-2AD6890X7IOL" });
+    // Someone typing the name of a hidden device must be shown it, not told the
+    // property book has no such row.
+    expect(page.hideUnnamed).toBe(false);
+    expect(Object.keys(whereOf()!)).toEqual(["OR"]);
+    expect(page.hidden).toBe(0);
+  });
+
+  it("counts what it hid from a second count over the same filters, minus the hide", async () => {
+    vi.mocked(prisma.item.count).mockResolvedValueOnce(1050).mockResolvedValueOnce(1208);
+    const page = await listItems({ hideUnnamed: true, uic: "W1AAAA" });
+    expect([page.total, page.hidden]).toEqual([1050, 158]);
+    const [withHide, withoutHide] = vi.mocked(prisma.item.count).mock.calls;
+    // The two differ by EXACTLY the hide clause — a second count carrying its
+    // own idea of the other filters would report a difference that is not the
+    // number of rows this filter removed.
+    expect(withoutHide[0]).toEqual({ where: { deviceUIC: "W1AAAA" } });
+    expect((withHide[0]!.where as { AND: unknown[] }).AND).toHaveLength(2);
+  });
+
+  it("carries the same rule into the raw path, as a bound flag", async () => {
+    vi.mocked(prisma.item.count).mockResolvedValueOnce(100).mockResolvedValueOnce(120);
+    await listItems({ hideUnnamed: true, sort: "readiness", dir: "asc" });
+    const arg = vi.mocked(prisma.$queryRaw).mock.calls[0][0] as unknown as {
+      sql: string;
+      values: unknown[];
+    };
+    expect(arg.sql).toMatch(/NOT LIKE 'BE-%'/);
+    expect(arg.sql).toMatch(/"deviceName" IS NOT NULL/);
+    expect(arg.values).toContain(true);
+  });
+
   const orderOf = () => vi.mocked(prisma.item.findMany).mock.calls[0][0]!.orderBy;
 
   it("paginates with skip/take and a stable default order (createdAt desc, id asc)", async () => {
