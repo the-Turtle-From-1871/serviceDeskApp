@@ -133,7 +133,7 @@ import { createHash } from "node:crypto";
 /** Worker slots to provision. Override with VITEST_MAX_WORKERS when measuring
  *  whether fewer workers beat more — the DB tests all contend on one Postgres,
  *  so more is not automatically faster. */
-export const MAX_TEST_WORKERS = Number(process.env.VITEST_MAX_WORKERS ?? 8);
+export const MAX_TEST_WORKERS = Number(process.env.VITEST_MAX_WORKERS ?? Math.min(8, cpus().length));
 
 /** Load-bearing: `resetDb()` refuses to TRUNCATE unless DATABASE_URL contains
  *  this exact substring. Every name below keeps it. */

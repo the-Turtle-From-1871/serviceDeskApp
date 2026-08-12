@@ -95,9 +95,9 @@ instead of a migration each — the difference between ~5s of provisioning and ~
 16), so a lingering connection cannot turn cleanup into a spurious failure. It swallows
 errors: cleanup must never fail an otherwise-green run.
 
-**Skipped entirely for `test:ui`.** That script runs 22 jsdom files, none of which touch the
+**Skipped entirely for `test:ui`.** That script runs 21 jsdom files, none of which touch the
 database, and it is the tight inner loop during component work. It would otherwise pay ~5s to
-build eight databases it never opens. Gate on an env var the script sets.
+build `MAX_TEST_WORKERS` databases it never opens. Gate on an env var the script sets.
 
 ### 3. `tests/helpers/setup-env.ts` — per-worker URL
 
@@ -179,8 +179,8 @@ Three steps, so we know which change bought what:
 | --- | --- |
 | Baseline | 332s (measured) |
 | Fix 1 only (migrate once) | ~245s expected |
-| Fix 2, 8 workers | to measure |
-| Fix 2, 4 workers | to measure |
+| Fix 2, 8 workers | 80.73s / 79.73s (measured, 8-core dev box) |
+| Fix 2, 4 workers | 122.75s / 104.85s (measured, 8-core dev box) |
 
 The last comparison is the point. Pure tests scale with cores, but the 46 DB files all
 contend on one Postgres instance, so **eight workers may lose to four**. Ship whichever wins;

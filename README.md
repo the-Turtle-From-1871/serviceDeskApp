@@ -170,10 +170,15 @@ Vitest runs against a **real migrated Postgres**, not mocks — services and
 custody invariants are covered with behavior. `tests/helpers/global-setup.ts`
 provisions the databases itself, once per run: it migrates one template
 (`handreceipt_test_<hash-of-checkout-path>_tmpl`) and clones it into one
-database per worker (`..._1` … `..._8`, 8 workers by default — `MAX_TEST_WORKERS`,
-overridable with the `VITEST_MAX_WORKERS` env var), then drops all of them at
-the end. `npm test` runs the whole suite in parallel across those workers (166
-files / ~2019 tests, ~65-75s on an 8-core machine — 63.32s in CI). Component tests (`*.test.tsx`,
+database per worker (`..._1` … `..._N`, where N is `MAX_TEST_WORKERS` —
+`min(8, cores)`, not a bare 8: capped at 8 because that beat 4 workers on an
+8-core dev box (122.75s/104.85s vs 80.73s/79.73s), capped by the machine's own
+core count because a smaller runner can't afford 8 — a bare 8 oversubscribed a
+4-core CI runner and blew a CPU-bound test's timeout. Override with the
+`VITEST_MAX_WORKERS` env var), then drops all of them at the end. `npm test`
+runs the whole suite in parallel across those workers (166 files / ~2019
+tests): **63.71s in CI** (4-core runner) / **77.53s locally** (8-core dev box).
+Component tests (`*.test.tsx`,
 `npm run test:ui`) opt into jsdom per file and skip database provisioning
 entirely; jsdom has no layout engine, so neither they nor `npm run build` are
 evidence for a CSS or mobile change — verify visual work in a real browser.
