@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
   **The count says what was left out.** The line under the heading reads *"1,050 items · 158 hidden"* rather than a total that quietly omits them, and **Sort & filter** has a **Show unnamed / BE- devices** tick box that turns the hide off for that view. (It travels in the address bar rather than being remembered, so opening *Items* fresh from the nav starts filtered again.) While it is off — or while a search has lifted it — the closed menu reads `· Unnamed`, so the view you are looking at is legible without opening anything.
 
+  **Devices created by scanning are hidden too, and that is worth knowing before you go looking for them.** The scan-to-create form asks only for a make and a model, so a device added that way has no name until someone gives it one — which means a freshly scanned batch does not appear in the Items list. Nothing is lost: the batch stays selected as soon as it is created, so receipts and QR labels work straight away; searching a serial finds it; and the tick box lists them all. Name a device and it takes its place in the list.
+
   **What counts as a `BE-` name here is broader than on the rename worklist**: any name starting with `BE-`, not only the exact 12-character shape the importer refuses. On the current fleet both rules pick the same 91 devices, and the consequence of the wider net is only that a row is hidden from one view that a search or the tick box brings straight back.
 
 ### Added
