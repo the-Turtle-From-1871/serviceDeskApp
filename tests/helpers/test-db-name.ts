@@ -22,7 +22,18 @@ import { cpus } from "node:os";
  *  Override with VITEST_MAX_WORKERS when measuring whether fewer workers beat
  *  more — the DB tests all contend on one Postgres, so more is not
  *  automatically faster even when cores allow it. */
-export const MAX_TEST_WORKERS = Number(process.env.VITEST_MAX_WORKERS ?? Math.min(8, cpus().length));
+// `|| ... || 1`, not `??`: Vitest's own `resolveMaxWorkers` uses a truthiness
+// check, so `maxWorkers: 0` is silently DISCARDED and Vitest falls back to its
+// own core-derived count — the result isn't a hang, it's a full worker set
+// running against zero provisioned databases, exactly the failure bcf5205
+// exists to make unrepresentable. Two ways to reach 0 here: `cpus()` returning
+// `[]` (rare, containerised hosts — Vitest itself uses `availableParallelism()`,
+// which is never 0, so the two can disagree in the dangerous direction), and
+// `VITEST_MAX_WORKERS=""`, which `??` does NOT catch (`Number("") === 0`) and
+// which the docs advertise as the override lever. Same trap, same fix, as
+// `setup-env.ts`'s `VITEST_POOL_ID` fallback (see its comment) — guarded there
+// and, until now, not here.
+export const MAX_TEST_WORKERS = Math.max(1, Number(process.env.VITEST_MAX_WORKERS || Math.min(8, cpus().length)) || 1);
 
 /** Load-bearing: `resetDb()` refuses to TRUNCATE unless DATABASE_URL contains
  *  this exact substring. Every name below keeps it. */
@@ -54,4 +65,16 @@ export function templateDbName(root: string = process.cwd()): string {
 
 export function workerDbName(worker: number, root: string = process.cwd()): string {
   return assertSafe(`${PREFIX}_${repoHash(root)}_${worker}`);
+}
+
+/** The LIKE-pattern-safe prefix shared by every database (template + every
+ *  worker) belonging to THIS checkout. `teardown()` drops by this pattern
+ *  rather than by iterating `1..MAX_TEST_WORKERS`, so a run whose worker
+ *  count shrinks between invocations (8 locally, then 4 on a smaller host —
+ *  see MAX_TEST_WORKERS above) doesn't leave the slots it no longer visits
+ *  orphaned. Scoped to this checkout's hash, so the pattern can never match
+ *  another checkout's databases, the shared `handreceipt_test`, or the
+ *  pre-existing `handreceipt_test_units`. */
+export function checkoutDbPrefix(root: string = process.cwd()): string {
+  return assertSafe(`${PREFIX}_${repoHash(root)}_`);
 }

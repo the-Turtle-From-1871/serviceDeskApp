@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import { Client } from "pg";
 import { config } from "dotenv";
-import { MAX_TEST_WORKERS, templateDbName, workerDbName } from "./test-db-name";
+import { MAX_TEST_WORKERS, checkoutDbPrefix, templateDbName, workerDbName } from "./test-db-name";
 
 // Runs ONCE per `vitest` invocation, before any worker starts.
 //
@@ -47,6 +47,20 @@ async function withMaintenance<T>(fn: (client: Client) => Promise<T>): Promise<T
 export async function setup(): Promise<void> {
   if (process.env.SKIP_TEST_DB === "1") return;
 
+  // Ahead of withMaintenance's connect()-failure wrapper below on purpose: on
+  // a fresh clone .env.test doesn't exist yet (it's gitignored, per-clone), so
+  // DATABASE_URL is unset and `new URL("")` throws a bare
+  // `TypeError [ERR_INVALID_URL]` with no mention of .env.test — exactly the
+  // "error that looks unrelated to its cause" withMaintenance exists to
+  // prevent, just one step earlier than it can catch.
+  if (!process.env.DATABASE_URL) {
+    throw new Error(
+      "DATABASE_URL is not set — .env.test is missing or empty.\n" +
+        "Create it: copy .env.example to .env.test (or copy .env.test from the main clone) " +
+        "and fill in a DATABASE_URL pointing at your local Postgres.",
+    );
+  }
+
   const template = templateDbName();
 
   await withMaintenance(async (client) => {
@@ -87,10 +101,27 @@ export async function teardown(): Promise<void> {
   if (process.env.SKIP_TEST_DB === "1") return;
   try {
     await withMaintenance(async (client) => {
-      for (let worker = 1; worker <= MAX_TEST_WORKERS; worker++) {
-        await client.query(`DROP DATABASE IF EXISTS "${workerDbName(worker)}" WITH (FORCE)`);
+      // Drop by PATTERN, not by iterating 1..MAX_TEST_WORKERS: a run at 8
+      // workers followed by a run at 4 (which now happens automatically on
+      // any host with fewer than 8 cores, and happened during this branch's
+      // own measurement) never revisits slots 5-8, so they'd be orphaned
+      // forever under the old index loop. `checkoutDbPrefix()` is scoped to
+      // this checkout's hash, and the query is further scoped to `pg_database`
+      // rows actually matching it — so this can never touch another
+      // checkout's databases, the shared `handreceipt_test`, or the
+      // pre-existing `handreceipt_test_units`.
+      const prefix = checkoutDbPrefix();
+      const { rows } = await client.query<{ datname: string }>(
+        `SELECT datname FROM pg_database WHERE datname LIKE $1`,
+        [`${prefix}%`],
+      );
+      for (const { datname } of rows) {
+        // Defense in depth: datname came back from Postgres itself (already
+        // constrained by the LIKE above), but it's about to be spliced into
+        // DDL, so re-check the same shape assertSafe() enforces elsewhere.
+        if (!datname.startsWith(prefix) || !/^[a-z0-9_]+$/.test(datname)) continue;
+        await client.query(`DROP DATABASE IF EXISTS "${datname}" WITH (FORCE)`);
       }
-      await client.query(`DROP DATABASE IF EXISTS "${templateDbName()}" WITH (FORCE)`);
     });
   } catch {
     // Cleanup must never fail an otherwise-green run. A killed run skips this
