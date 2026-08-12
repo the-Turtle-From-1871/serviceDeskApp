@@ -240,3 +240,51 @@ test("deleteItem cascades the item's own history", async () => {
   await deleteItem(item.id);
   expect(await prisma.itemEdit.count()).toBe(0);
 });
+
+test("updateItemFields moves the loaner flag when the device name changes", async () => {
+  // Both the admin edit page and the item detail card funnel through this one
+  // function, so the rule lives here rather than in two Server Actions.
+  const item = await createItem(
+    { make: "Dell", model: "5540", serialNumber: "EDIT-LOANER", deviceName: "NGHINB-PMACN128", homeUnit: undefined, notes: undefined },
+    adminId,
+  );
+  expect(item.isLoaner).toBe(false);
+
+  const into = await updateItemFields(item.id, { deviceName: "NGHINB-LOAN-300" }, { id: adminId, name: "Admin" });
+  expect(into.isLoaner).toBe(true);
+
+  const outOf = await updateItemFields(item.id, { deviceName: "NGHINB-PMACN129" }, { id: adminId, name: "Admin" });
+  expect(outOf.isLoaner).toBe(false);
+});
+
+test("updateItemFields leaves a hand-set loaner flag alone on an unrelated edit", async () => {
+  const item = await createItem(
+    { make: "Dell", model: "5540", serialNumber: "HANDSET-LOANER", deviceName: "NGHINB-SWITCH-01", homeUnit: undefined, notes: undefined },
+    adminId,
+  );
+  await prisma.item.update({ where: { id: item.id }, data: { isLoaner: true } });
+
+  // Editing another field entirely must not touch it...
+  const afterNote = await updateItemFields(item.id, { notes: "on the shelf" }, { id: adminId, name: "Admin" });
+  expect(afterNote.isLoaner).toBe(true);
+
+  // ...and neither must a rename between two names the convention says nothing
+  // about. Only moving INTO or OUT OF the convention is evidence.
+  const afterRename = await updateItemFields(item.id, { deviceName: "NGHINB-SWITCH-02" }, { id: adminId, name: "Admin" });
+  expect(afterRename.isLoaner).toBe(true);
+});
+
+test("the loaner flag is NOT written to the edit history", async () => {
+  // The rename that caused it IS recorded, and the flag is derivable from that
+  // name — logging both would record the same fact twice.
+  const item = await createItem(
+    { make: "Dell", model: "5540", serialNumber: "HISTORY-LOANER", deviceName: "NGHINB-PMACN400", homeUnit: undefined, notes: undefined },
+    adminId,
+  );
+  await updateItemFields(item.id, { deviceName: "NGHINB-LOAN-400" }, { id: adminId, name: "Admin" });
+
+  const edits = await prisma.itemEdit.findMany({ where: { itemId: item.id } });
+  const fields = edits.flatMap((e) => (e.changes as { field: string }[]).map((c) => c.field));
+  expect(fields).toContain("deviceName");
+  expect(fields).not.toContain("isLoaner");
+});

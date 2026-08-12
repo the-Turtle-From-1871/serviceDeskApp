@@ -222,17 +222,30 @@ model Item {
   storageLocation            String?
   /// Pool stock: a device kept to lend out temporarily, over and over.
   ///
-  /// STORED rather than derived, unlike readiness and accountability — and the
-  /// distinction is the reason this column is allowed to exist. Those two were
-  /// dropped because they stored answers the data already knew. NOTHING here can
-  /// infer loaner-ness: no signal separates a laptop kept for lending from an
-  /// identical one issued permanently. It is a standing decision by the property
-  /// manager, so a person is the only possible source.
+  /// STORED rather than derived, unlike readiness and accountability. Those two
+  /// were dropped because they stored answers the data already knew; this one is
+  /// kept because a device can be a loaner without its name saying so, and the
+  /// admin toggle on /items is a real write.
   ///
-  /// DELIBERATELY NOT IMPORTABLE. The CSV importer writes a named column set
-  /// (see import.ts), and this is not in it — which is the entire reason it is a
-  /// new column rather than a reused deviceCategory/homeUnit/storageLocation.
-  /// Any of those would be reverted by the nightly Drive import within a day.
+  /// BUT IT NOW FOLLOWS THE DEVICE NAME — reversed 2026-08-11, hours after this
+  /// column shipped, by explicit decision. The text below this paragraph used to
+  /// read "a person is the only possible source" and "DELIBERATELY NOT
+  /// IMPORTABLE", and both are now false: the property manager already encodes
+  /// loaner status in the name (51 devices are `NGHINB-LOAN-###`), and keeping
+  /// the same fact in Intune and here guarantees the two disagree. Every path
+  /// that writes `deviceName` — import, admin edit, item card, bulk rename,
+  /// create — moves this flag with it via `modules/items/loaner-name.ts`.
+  ///
+  /// WHAT THAT COSTS, stated because it was the original objection and it was
+  /// real: MDM owns `deviceName`, so MDM now indirectly owns this flag for any
+  /// device whose name enters or leaves the convention. A device renamed in
+  /// Intune out of `NGHINB-LOAN-###` loses the flag on the next import with
+  /// nobody here deciding that.
+  ///
+  /// WHAT IS PRESERVED: a name change moves the flag ONLY when one of the two
+  /// names follows the convention. A hand-set flag on a device the convention
+  /// says nothing about survives every unrelated rename and edit — see
+  /// `loanerUpdateForRename`, whose three-way return exists for exactly that.
   isLoaner                   Boolean           @default(false)
   notes                      String?
   // The email of the person actually using the device. Distinct from the
