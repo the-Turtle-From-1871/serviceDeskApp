@@ -1,6 +1,6 @@
-import { beforeAll, beforeEach, expect, test } from "vitest";
+import { beforeEach, expect, test } from "vitest";
 import prisma from "@/lib/prisma";
-import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
+import { resetDb } from "../../../tests/helpers/db";
 import {
   loadUnitMap,
   learnUnits,
@@ -20,7 +20,6 @@ function createAdmin() {
   });
 }
 
-beforeAll(() => migrateTestDb());
 beforeEach(() => resetDb());
 
 test("loadUnitMap keys by uppercase abbreviation", async () => {

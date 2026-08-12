@@ -1,6 +1,6 @@
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import prisma from "@/lib/prisma";
-import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
+import { resetDb } from "../../../tests/helpers/db";
 import { createItem } from "@/modules/items/items.service";
 import { processReturn } from "@/modules/returns/returns.service";
 import {
@@ -19,7 +19,6 @@ import {
 const SIG = "data:image/png;base64,iVBORw0KGgo=";
 
 let adminId: string;
-beforeAll(() => migrateTestDb());
 beforeEach(async () => {
   await resetDb();
   const admin = await prisma.user.create({

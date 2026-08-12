@@ -1,6 +1,6 @@
-import { beforeAll, beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test } from "vitest";
 import prisma from "@/lib/prisma";
-import { resetDb, migrateTestDb } from "../../../../tests/helpers/db";
+import { resetDb } from "../../../../tests/helpers/db";
 import {
   countDroppedDevices,
   countStaleDevices,
@@ -23,7 +23,6 @@ import { STALE_MIN_DAYS, STALE_MAX_DAYS } from "./analytics.types";
 
 let adminId: string;
 
-beforeAll(() => migrateTestDb());
 beforeEach(async () => {
   await resetDb();
   const admin = await prisma.user.create({

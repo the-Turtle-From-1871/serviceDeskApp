@@ -1,6 +1,6 @@
-import { beforeAll, beforeEach, expect, test } from "vitest";
+import { beforeEach, expect, test } from "vitest";
 import prisma from "@/lib/prisma";
-import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
+import { resetDb } from "../../../tests/helpers/db";
 import {
   createItem,
   markItemsReady,
@@ -21,7 +21,6 @@ let adminId: string;
 const base = { deviceName: "Radio", homeUnit: undefined, notes: undefined } as const;
 const editor = () => ({ id: adminId, name: "Admin" });
 
-beforeAll(() => migrateTestDb());
 beforeEach(async () => {
   await resetDb();
   const admin = await prisma.user.create({

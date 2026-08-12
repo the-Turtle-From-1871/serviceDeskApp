@@ -1,12 +1,11 @@
-import { beforeAll, beforeEach, expect, test } from "vitest";
+import { beforeEach, expect, test } from "vitest";
 import prisma from "@/lib/prisma";
-import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
+import { resetDb } from "../../../tests/helpers/db";
 import { listContacts, searchContacts, createContact, updateContact, deleteContact, upsertContactFromParty } from "./contacts.service";
 import { ContactError } from "./contacts.errors";
 
 let adminId: string;
 
-beforeAll(() => migrateTestDb());
 beforeEach(async () => {
   await resetDb();
   const a = await prisma.user.create({

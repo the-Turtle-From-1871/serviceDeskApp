@@ -360,6 +360,10 @@ The integration suite needs a **second database on the same server**, created on
 CREATE DATABASE handreceipt_test;
 ```
 
+> Superseded 2026-08-11 — see README § Testing. `npm test` now provisions its
+> own per-worker databases against the `postgres` maintenance database; there
+> is nothing to create by hand.
+
 | Command | What it does |
 |---|---|
 | `npm run dev` | Dev server (Turbopack), after staging the wasm assets (`scripts/copy-wasm.mjs`). |
@@ -376,6 +380,7 @@ Four things that will bite you in the first week:
 1. **Only one person or agent may run the test suite at a time.** It truncates a shared
    `handreceipt_test` database; two concurrent runs corrupt each other and the failures look
    like unrelated flakes in files you did not touch.
+   *Superseded 2026-08-11 — see README § Testing. Each worker/checkout now gets its own database.*
 2. **`prisma migrate dev` may not run in every shell here.** The project's convention when it
    cannot is to author migrations with `prisma migrate diff --from-config-datasource
    --to-schema --script` and then `migrate deploy`. Prisma 7 rejects the older
@@ -1053,7 +1058,7 @@ a rule stick.
 | 23 | **Public receipts and item pages are enumerable BY DESIGN.** | Do not gate `/receipts/*`, `/receipts/*/pdf`, `/i/*` or the public search behind auth, and do not make receipt identifiers unguessable, when re-auditing. It is an accepted team requirement, boxed in `CLAUDE.md`. Hardening it is a deliberate feature change requiring an explicit request, not a security bug to auto-remediate. |
 | 24 | **Do not extend the receipt-link token to `/i/*` or any broader grant** without an explicit decision. | `receipt-link-token.ts` is security-sensitive for exactly that reason. |
 | 25 | **Docs are part of the change, not a follow-up.** | Any commit that alters behavior, UI, data, an endpoint, a command, an env var, or an architectural rule MUST update the affected documentation **in the same commit**. Any `feat:`/`fix:` MUST add a `CHANGELOG.md` entry under today's date. Any change to authn/authz, crypto/tokens/cookies/secrets, the public surface, retention windows, or CI security posture MUST update `docs/SECURITY.md` and bump its *Last reviewed* date — and that one is enforced by CI. **When you add a new security-relevant file, add it to the watch list at the top of `scripts/check-security-docs.mjs`**, or it silently escapes the guardrail. |
-| 26 | **Only one agent or developer runs `npm test` at a time.** | It truncates a shared `handreceipt_test` database. Two concurrent runs corrupt each other and masquerade as flaky tests in unrelated files. |
+| 26 | **Only one agent or developer runs `npm test` at a time.** | It truncates a shared `handreceipt_test` database. Two concurrent runs corrupt each other and masquerade as flaky tests in unrelated files. *Superseded 2026-08-11 — see README § Testing; each worker/checkout now gets its own database.* |
 | 27 | **Turnstile refuses automated browsers, including Playwright.** | `playwright.config.ts` pins Cloudflare's always-pass test keys. With real keys the e2e sign-in hangs at "Checking your browser…" and looks like a broken login. Never respond to that by weakening the challenge. |
 
 ---

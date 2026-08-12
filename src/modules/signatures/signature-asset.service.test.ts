@@ -1,13 +1,12 @@
-import { beforeAll, beforeEach, expect, test } from "vitest";
+import { beforeEach, expect, test } from "vitest";
 import prisma from "@/lib/prisma";
-import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
+import { resetDb } from "../../../tests/helpers/db";
 import { putSignatureAsset, getSignatureAssetImage } from "./signature-asset.service";
 import { signatureSha256 } from "@/lib/signature-hash";
 
 const IMG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA";
 const OTHER = "data:image/png;base64,ZZZZZZZZZZZZZZZZZZZZZZZZ";
 
-beforeAll(() => migrateTestDb());
 beforeEach(() => resetDb());
 
 const put = (image: string) => prisma.$transaction((tx) => putSignatureAsset(tx, image));

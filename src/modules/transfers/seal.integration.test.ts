@@ -1,7 +1,7 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { generateKeyPairSync } from "node:crypto";
 import prisma from "@/lib/prisma";
-import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
+import { resetDb } from "../../../tests/helpers/db";
 import { createItem } from "@/modules/items/items.service";
 import { createTransfer, getTransferByReceiptNumber } from "./transfers.service";
 import { manifestFromTransfer } from "./seal";
@@ -19,8 +19,6 @@ const SIG = "data:image/png;base64,iVBORw0KGgo=";
 
 let adminId: string;
 const savedKey = process.env.SIGNING_PRIVATE_KEY;
-
-beforeAll(() => migrateTestDb());
 
 beforeEach(async () => {
   await resetDb();
