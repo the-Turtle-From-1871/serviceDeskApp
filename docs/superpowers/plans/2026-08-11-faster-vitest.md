@@ -120,6 +120,7 @@ Create `tests/helpers/test-db-name.ts`:
 
 ```ts
 import { createHash } from "node:crypto";
+import { cpus } from "node:os";
 
 // Pure derivation of the per-checkout, per-worker test database names. No I/O
 // and no Prisma, so it unit-tests directly.
@@ -132,8 +133,12 @@ import { createHash } from "node:crypto";
 
 /** Worker slots to provision. Override with VITEST_MAX_WORKERS when measuring
  *  whether fewer workers beat more — the DB tests all contend on one Postgres,
- *  so more is not automatically faster. */
-export const MAX_TEST_WORKERS = Number(process.env.VITEST_MAX_WORKERS ?? Math.min(8, cpus().length));
+ *  so more is not automatically faster. Floors at 1: `??` alone would let
+ *  `VITEST_MAX_WORKERS=""` or `cpus()` returning `[]` resolve to 0, which
+ *  Vitest's own maxWorkers option silently discards (falling back to its
+ *  core-derived default) rather than erroring — running a full worker set
+ *  against zero provisioned databases. */
+export const MAX_TEST_WORKERS = Math.max(1, Number(process.env.VITEST_MAX_WORKERS || Math.min(8, cpus().length)) || 1);
 
 /** Load-bearing: `resetDb()` refuses to TRUNCATE unless DATABASE_URL contains
  *  this exact substring. Every name below keeps it. */
@@ -439,7 +444,7 @@ git commit -m "test: migrate once per run instead of once per file"
 
 - [ ] **Step 1: Add `cross-env`**
 
-`test:ui` runs 22 jsdom files that touch no database, and it is the tight loop during component work — it should not pay ~5s to build nine databases it never opens. Setting an env var inline is not portable on Windows, and `cross-env` is not yet a dependency.
+`test:ui` runs 21 jsdom files that touch no database, and it is the tight loop during component work — it should not pay ~5s to build `MAX_TEST_WORKERS` databases it never opens. Setting an env var inline is not portable on Windows, and `cross-env` is not yet a dependency.
 
 Validate it exists before installing (repo rule — never install an unverified package):
 

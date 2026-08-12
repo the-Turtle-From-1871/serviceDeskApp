@@ -172,7 +172,7 @@ provisions the databases itself, once per run: it migrates one template
 (`handreceipt_test_<hash-of-checkout-path>_tmpl`) and clones it into one
 database per worker (`..._1` … `..._N`, where N is `MAX_TEST_WORKERS` —
 `min(8, cores)`, not a bare 8: capped at 8 because that beat 4 workers on an
-8-core dev box (122.75s/104.85s vs 80.73s/79.73s), capped by the machine's own
+8-core dev box (80.73s/79.73s at 8 vs 122.75s/104.85s at 4), capped by the machine's own
 core count because a smaller runner can't afford 8 — a bare 8 oversubscribed a
 4-core CI runner and blew a CPU-bound test's timeout. Override with the
 `VITEST_MAX_WORKERS` env var), then drops all of them at the end. `npm test`
