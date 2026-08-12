@@ -691,6 +691,16 @@ function droppedDeviceWhere(scope: ItemScope): Prisma.Sql {
     AND ${itemScopeSql(scope)}
     AND i."deviceName" IS NOT NULL
     AND btrim(i."deviceName") <> ''
+    -- LOANERS ARE OUT, by explicit decision (2026-08-11). Pool stock sits on a
+    -- shelf between loans and is not expected to be checking in, so an absent
+    -- device there is the normal state rather than something to chase — the
+    -- same reasoning that keeps kit on an open receipt off the dormant list.
+    -- isLoaner is a standing decision by the property manager and is
+    -- deliberately NOT importable (see schema.prisma), so nothing an MDM export
+    -- says can flip a device on or off this list behind someone's back.
+    -- (No backticks in here: this is inside a Prisma.sql template literal.)
+    -- 7 of the 164 listed the day this landed.
+    AND i."isLoaner" = false
     AND (
       -- MDM has never told us when it last spoke to this device.
       i."lastSyncAt" IS NULL

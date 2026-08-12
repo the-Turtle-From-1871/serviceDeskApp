@@ -124,6 +124,11 @@ export type StaleDeviceRow = Record<(typeof STALE_DEVICE_COLUMNS)[number], strin
  * makes the list self-maintaining: a device that reappears in a later export
  * leaves on its own.
  *
+ * LOANER-POOL STOCK IS EXCLUDED, by explicit decision (2026-08-11): a loaner
+ * sits on a shelf between loans and is not expected to be checking in, so its
+ * absence is the normal state rather than something to chase. 7 of the 164
+ * listed the day it landed.
+ *
  * IT REQUIRES A DEVICE NAME, by explicit decision (2026-08-11). A row with no
  * name and no MDM record is a hand-created or scanned stub, not a machine that
  * fell off the network — on the live fleet that excluded 5 rows, including one

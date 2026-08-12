@@ -74,8 +74,8 @@ export function DroppedDevicesCard({ count, scope }: { count: number; scope: Ite
           <p className="text-xs text-muted-foreground">
             The MDM export has stopped listing these, or has never reported a sync time for them ·{" "}
             {scopeLabel(scope)}. Neither can appear on the list above at any age, because there is no
-            sync date to measure — this is the only place they show up. Devices with no device name
-            are not listed.
+            sync date to measure — this is the only place they show up. Loaner-pool stock and devices
+            with no device name are not listed.
           </p>
           <p className="text-xs text-muted-foreground">
             The export marks each one <strong>Missing from import</strong> (the latest export did not

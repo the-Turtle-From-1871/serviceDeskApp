@@ -68,7 +68,7 @@ export async function buildDroppedDevicesWorkbook(
           `Devices the MDM export has stopped listing, or has never reported a sync time for · ` +
           `${scopeLabel(scope)}. Neither can appear on the dormant-device list at any age, because ` +
           `there is no sync date to measure — this is the only place they are visible. Devices with ` +
-          `no device name are not listed.`,
+          `no device name, and loaner-pool stock, are not listed.`,
       },
     ],
     [

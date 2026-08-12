@@ -47,6 +47,7 @@ function mkItem(data: {
   enrollmentDate?: string | null;
   lastLogonDate?: string | null;
   lastImportedAt?: Date | null;
+  isLoaner?: boolean;
   deviceName?: string;
   serialNumber?: string;
 }) {
@@ -520,6 +521,31 @@ describe("listDroppedDevices", () => {
 
     const { rows } = await listDroppedDevices(UNSCOPED);
     expect(rows.map((r) => r.Serial)).toEqual(["ACTIVE"]);
+  });
+
+  test("excludes loaner-pool stock", async () => {
+    // Pool stock sits on a shelf between loans, so it is not expected to be
+    // checking in — an absent loaner is the normal state, not something to
+    // chase. Same reasoning as kit on an open receipt being off the dormant
+    // list. 7 of the 164 listed the day this landed.
+    await mkItem({ serialNumber: "LOANER", deviceName: "LAPTOP-1", isLoaner: true });
+    await mkItem({ serialNumber: "NOT-LOANER", deviceName: "LAPTOP-2", isLoaner: false });
+
+    const { rows } = await listDroppedDevices(UNSCOPED);
+    expect(rows.map((r) => r.Serial)).toEqual(["NOT-LOANER"]);
+  });
+
+  test("the count excludes loaners too, so card and file agree", async () => {
+    // The card renders a number and the button fetches the sheet in a separate
+    // round trip; a filter applied to one and not the other makes the number
+    // on screen a lie about the file.
+    await mkItem({ deviceName: "LAPTOP-1", isLoaner: true });
+    await mkItem({ deviceName: "LAPTOP-2", isLoaner: false });
+
+    const count = await countDroppedDevices(UNSCOPED);
+    const { rows } = await listDroppedDevices(UNSCOPED);
+    expect(count).toBe(1);
+    expect(rows).toHaveLength(count);
   });
 
   test("STILL lists a device out on an open hand receipt — unlike the dormant list", async () => {

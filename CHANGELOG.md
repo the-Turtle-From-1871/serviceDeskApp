@@ -16,7 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
   #### Notes
   - Migration `20260811210000_item_last_imported_at` adds the nullable `Item.lastImportedAt` column plus two indexes. **Apply it to Supabase before merging**, per migrate-before-push. No backfill — the only honest value for a device nobody has stamped yet is "unknown", and that is what suppresses the flag until the first scheduled import.
-  - Loaner devices are **not** excluded from this list yet; that waits on the loaner field being built separately.
+  - **Loaner-pool stock is excluded from the list.** A loaner sits on a shelf between loans, so its absence is the normal state rather than something to chase — the same reason kit out on an open hand receipt stays off the dormant list. 7 devices on the current list are loaners. The dormant list still includes them; say so if you want that changed too.
 
 - **A second dashboard list: devices that dropped off the network.** The dormant list only ever showed devices MDM *has* seen — one it has never heard from has no date to measure, so it was excluded as "we cannot say" and appeared nowhere at all. There is now a card and an Excel export for exactly those: **no MDM sync time, but a device name** (a row with no name is a hand-made or scanned stub, not a machine that fell off the network).
 
