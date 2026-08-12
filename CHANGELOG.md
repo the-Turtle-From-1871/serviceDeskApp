@@ -61,6 +61,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   - Migration `20260811210000_item_is_loaner` adds the `Item.isLoaner` column (NOT NULL, default false) and its index. **Apply it to Supabase before merging**, per migrate-before-push: Prisma enumerates every column in its SELECT, so until the column exists *every* item read fails, not just the new control.
 
 ### Changed
+- **Loaner-pool stock no longer appears on the dormant-device list either.** It was already left off the dropped-off-network list; both now ignore loaners, so a device in the lending pool never shows up on a chase list. 6 devices come off the dormant count, taking it from 87 to 81.
+
 - **The dormant-device export is now a colour-coded Excel file instead of a CSV.** Every row is shaded so the sheet can be worked down without reading a single date: **red** if the device is not compliant, otherwise **orange** at 60–90 days since its last MDM check-in and **yellow** at 30–59. Non-compliance wins, so a device out of policy is red however recently it synced — on the current fleet that is 82 of the 86 devices listed, which is rather the point: those are the ones to pick up first.
 
   The sheet gains a **Compliance** column showing the value exactly as MDM reports it (`compliant`, `noncompliant`, `inGracePeriod`), so a red row says why it is red. A legend under the data names each colour, and the header row stays frozen while you scroll. A device **in a grace period is not red** — Intune means "out of policy but not yet enforced" by that, so it keeps its age colour; likewise a device the export says nothing about.
