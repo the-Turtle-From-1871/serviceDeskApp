@@ -1,10 +1,12 @@
 import { redirect } from "next/navigation";
 import { requireAdmin, AuthError } from "@/lib/authz";
 import { SiteHeader } from "@/components/SiteHeader";
+import { ReadOnlyBanner } from "@/components/ReadOnlyBanner";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+  let isReadOnly = false;
   try {
-    await requireAdmin();
+    ({ isReadOnly } = await requireAdmin());
   } catch (e) {
     if (e instanceof AuthError) redirect(e.code === "FORBIDDEN" ? "/" : "/login");
     throw e;
@@ -12,7 +14,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   return (
     <>
       <SiteHeader />
-      <main className="container">{children}</main>
+      <main className="container">
+        {isReadOnly && <ReadOnlyBanner />}
+        {children}
+      </main>
     </>
   );
 }
