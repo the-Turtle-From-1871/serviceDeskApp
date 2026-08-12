@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useItemSelection } from "./ItemSelection";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -33,6 +33,8 @@ import { SortFilterMenu } from "@/components/SortFilterMenu";
 import { makeStore, usePersistedPref } from "@/components/persisted-pref";
 import { useRowGestures } from "@/components/useRowGestures";
 import { isCardLayout } from "@/components/swipe-row";
+import { isStandaloneDisplay } from "@/lib/standalone";
+import { PdfPreviewOverlay } from "@/components/PdfPreviewOverlay";
 import type { SortKey } from "@/modules/items/items.service";
 
 export type { ItemRow };
@@ -133,6 +135,9 @@ export function ItemSelectTable({
 }) {
   const router = useRouter();
   const secondarySort = sortKeys[1] ?? null;
+
+  // The bulk QR sheet, while the in-app overlay is showing it. Null otherwise.
+  const [qrSheetSrc, setQrSheetSrc] = useState<string | null>(null);
 
   // Selection lives in ItemSelectionProvider, not here: the /items Scan sheet
   // is a SIBLING client component and has to commit into the same selection.
@@ -515,7 +520,16 @@ export function ItemSelectTable({
 
   const selectedKeys = () => [...selected.keys()].join(",");
   const create = () => { if (selected.size && !tooMany && !tooManyPerRow) router.push(`/receipts/new?items=${selectedKeys()}`); };
-  const printQr = () => { if (selected.size) window.open(`/admin/items/qr-sheet/pdf?items=${selectedKeys()}&preview=1`, "_blank", "noopener"); };
+  // In an INSTALLED app a new window collapses into the standalone one, which
+  // has no tab strip and no back button — so the sheet would take the app over
+  // with no way back. Show it in the overlay there, and leave a browser tab
+  // exactly as it was.
+  const printQr = () => {
+    if (!selected.size) return;
+    const url = `/admin/items/qr-sheet/pdf?items=${selectedKeys()}&preview=1`;
+    if (isStandaloneDisplay()) { setQrSheetSrc(url); return; }
+    window.open(url, "_blank", "noopener");
+  };
 
   // Build a /items URL preserving the current query, overriding only what changes.
   // Changing the sort/filter resets to page 1; paging keeps them.
@@ -905,6 +919,15 @@ export function ItemSelectTable({
           )}
         </div>
       )}
+
+      {/* offerNativeViewer: a QR sheet exists to be PRINTED, and Share -> Print
+          lives in the native viewer, which an iframe has no route to. */}
+      <PdfPreviewOverlay
+        src={qrSheetSrc}
+        title="QR labels"
+        offerNativeViewer
+        onClose={() => setQrSheetSrc(null)}
+      />
     </>
   );
 }

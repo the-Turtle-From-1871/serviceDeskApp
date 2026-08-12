@@ -15,6 +15,7 @@ import { getCurrentUser } from "@/lib/session";
 import { getServiceRequestForItem } from "@/modules/service-queue/service-queue.service";
 import { serviceTypeLabel } from "@/modules/service-queue/service-queue.status";
 import { ServiceControls } from "./ServiceControls";
+import { PdfPreviewButton } from "@/components/PdfPreviewButton";
 import prisma from "@/lib/prisma";
 import { listUnits } from "@/modules/items/units.service";
 import { listCategoryNames } from "@/modules/items/categories.service";
@@ -290,9 +291,18 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
                 sheet). A PDF — not window.print() — because iOS/WKWebView silently
                 ignores window.print(); a PDF opens in the native viewer for
                 Share -> Print / Save on mobile, and prints on desktop. */}
-            <a className="btn btn-primary no-print" href={`/i/${item.id}/qr/pdf`} target="_blank" rel="noopener">
-              Print QR
-            </a>
+            {/* offerNativeViewer, unlike the receipt preview: this PDF exists
+                *because* iOS ignores window.print(), so the native viewer's
+                Share -> Print is the whole point and the overlay has to keep a
+                route to it. */}
+            <PdfPreviewButton
+              href={`/i/${item.id}/qr/pdf`}
+              title={`QR label · ${item.serialNumber}`}
+              label="Print QR"
+              className="btn btn-primary no-print"
+              rel="noopener"
+              offerNativeViewer
+            />
           </div>
         )}
 

@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - **Previewing a hand receipt's PDF no longer strands you in the installed app.** On an iPhone home-screen install there is no tab strip and no back button, so opening the PDF left no way back to the receipt short of closing the app. The preview now opens inside the app, over the receipt, with its own Back button and a Download link. In an ordinary browser tab nothing changes — the PDF still opens in a new tab with the browser's own controls.
+- **Printing QR labels no longer strands you either.** Print QR on an item, and Print QR codes for a selection, both open the label sheet inside the app with a Back button. Both keep an **Open in viewer** link, because the phone's own PDF viewer is where Share → Print lives — that is why these are PDFs rather than a print button in the first place.
 
 ## 2026-08-11
 
