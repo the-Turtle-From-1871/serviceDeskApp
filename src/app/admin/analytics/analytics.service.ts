@@ -493,6 +493,15 @@ function staleDeviceWhere(scope: ItemScope, now: Date): Prisma.Sql {
   return Prisma.sql`
         i."status" = 'ACTIVE'
     AND ${itemScopeSql(scope)}
+    -- LOANER-POOL STOCK IS OUT, matching its sibling list (2026-08-11).
+    -- Added a few hours later than there, and the reasoning is genuinely
+    -- weaker on this list rather than identical: a pool loaner is SUPPOSED to
+    -- be going out and coming back, so two months of MDM silence about one
+    -- could be a real signal rather than the expected quiet of shelf stock.
+    -- Excluded anyway, by explicit decision — the desk does not chase loaners
+    -- off either list, and one rule across both beats a per-list nuance nobody
+    -- can remember. 6 of the 87 listed the day it landed.
+    AND i."isLoaner" = false
     AND i."lastSyncAt" IS NOT NULL
     AND i."lastSyncAt" >= ${from}::timestamptz
     AND i."lastSyncAt" <  ${to}::timestamptz

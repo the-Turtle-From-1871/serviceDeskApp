@@ -104,7 +104,8 @@ export function StaleDevicesCard({ count, scope }: { count: number; scope: ItemS
             MDM has not checked in for {STALE_MIN_DAYS}–{STALE_MAX_DAYS} days · {scopeLabel(scope)}.
             This is the last <em>MDM sync</em>, not the last user sign-in — a device can sit unused
             and still sync nightly. Devices unseen for over {STALE_MAX_DAYS} days, devices with no
-            sync time recorded yet, and devices out on an open hand receipt are not counted.
+            sync time recorded yet, loaner-pool stock, and devices out on an open hand receipt are
+            not counted.
           </p>
           <p className="text-xs text-muted-foreground">
             The export is an Excel file, one row per device, coloured{" "}

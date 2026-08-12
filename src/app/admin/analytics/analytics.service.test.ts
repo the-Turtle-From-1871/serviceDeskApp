@@ -346,6 +346,26 @@ describe("listStaleDevices — what lands in the sheet", () => {
     expect(serialsOf(rows)).toEqual(["STALE"]);
   });
 
+  test("excludes loaner-pool stock, like its sibling list", async () => {
+    // 6 of the 87 listed the day this landed. The desk does not chase loaners
+    // off either list, and one rule across both beats a per-list nuance.
+    await mkItem({ serialNumber: "LOANER", lastSyncAt: daysAgo(45), isLoaner: true });
+    await mkItem({ serialNumber: "NOT-LOANER", lastSyncAt: daysAgo(45), isLoaner: false });
+
+    const { rows } = await listStaleDevices(UNSCOPED, NOW);
+    expect(serialsOf(rows)).toEqual(["NOT-LOANER"]);
+  });
+
+  test("the dormant COUNT excludes loaners too, so card and file agree", async () => {
+    await mkItem({ lastSyncAt: daysAgo(45), isLoaner: true });
+    await mkItem({ lastSyncAt: daysAgo(45), isLoaner: false });
+
+    const count = await countStaleDevices(UNSCOPED, NOW);
+    const { rows } = await listStaleDevices(UNSCOPED, NOW);
+    expect(count).toBe(1);
+    expect(rows).toHaveLength(count);
+  });
+
   test("excludes a device out on an open hand receipt", async () => {
     // MDM silence is EXPECTED for kit deliberately issued out, and the receipt
     // already says who has it.
