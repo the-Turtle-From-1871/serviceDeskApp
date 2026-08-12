@@ -5,6 +5,7 @@ import { getClosingReturn } from "@/modules/returns/returns.service";
 import { formatParty } from "@/modules/transfers/party";
 import { formatDateTimeHST } from "@/lib/datetime";
 import { SiteHeader } from "@/components/SiteHeader";
+import { PdfPreviewButton } from "@/components/PdfPreviewButton";
 import { getCurrentUser } from "@/lib/session";
 import { NotifyPickupButton } from "./NotifyPickupButton";
 import { DueBadge } from "@/components/DueBadge";
@@ -102,7 +103,11 @@ export default async function ReceiptPage({ params }: { params: Promise<{ receip
             <a className="btn btn-primary" href={`/receipts/${t.receiptNumber}/return`}>Process return</a>
           )}
           {showNotify && <NotifyPickupButton receiptNumber={t.receiptNumber} hasCustomerEmail={!!customerEmail} />}
-          <a className="btn btn-secondary" href={`/receipts/${t.receiptNumber}/pdf?preview=1`} target="_blank" rel="noopener noreferrer">Preview PDF</a>
+          <PdfPreviewButton
+            href={`/receipts/${t.receiptNumber}/pdf?preview=1`}
+            title={t.receiptNumber}
+            label="Preview PDF"
+          />
           <a className="btn btn-secondary" href={`/receipts/${t.receiptNumber}/pdf`}>Download PDF</a>
           <Link className="btn btn-ghost" href="/">Search another</Link>
         </div>

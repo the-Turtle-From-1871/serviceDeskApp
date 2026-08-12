@@ -553,6 +553,79 @@ describe("ItemSelectTable — mobile card structure", () => {
     // one action the drawer hides.
     expect(drawer!.querySelector("a.action-view")).not.toBeNull();
   });
+
+  /**
+   * The bulk QR sheet is the one PDF surface reached by a HANDLER rather than an
+   * anchor, so it cannot use PdfPreviewButton and carries the standalone branch
+   * itself. jsdom implements no Popover API, so the overlay never visibly opens
+   * here — what is pinned is the branch and the mounted iframe.
+   */
+  describe("ItemSelectTable — the bulk QR sheet in an installed app", () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    function renderRows() {
+      return renderTable(
+        <ItemSelectTable
+          items={[ROW, RETIRED]}
+          isAdmin
+          q=""
+          sort={null}
+          dir="asc"
+          page={1}
+          totalPages={1}
+          sortKeys={[]}
+          uic="" needsRename={false}
+          loaner={false}
+          showUnnamed={false}
+          unnamedHidden={true}
+          uics={[]}
+          categories={[]}
+        />,
+      );
+    }
+
+    // Select one row and press the toolbar's Print QR button, the way the
+    // existing card-structure suite does it.
+    const selectAndPrint = (container: HTMLElement) => {
+      const box = container.querySelector('tbody input[type="checkbox"]') as HTMLInputElement;
+      act(() => { fireEvent.click(box); });
+      const btn = [...container.querySelectorAll("button")].find((b) =>
+        b.textContent!.trim().startsWith("Print QR"),
+      )!;
+      act(() => { fireEvent.click(btn); });
+    };
+
+    it("still opens a new window in an ordinary browser tab", () => {
+      vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false })));
+      const open = vi.fn();
+      vi.stubGlobal("open", open);
+
+      const { container } = renderRows();
+      selectAndPrint(container);
+
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(String(open.mock.calls[0][0])).toContain("/admin/items/qr-sheet/pdf?items=");
+      expect(container.querySelector("iframe")).toBeNull();
+    });
+
+    /**
+     * In an INSTALLED app `window.open` collapses into the standalone window,
+     * which has no tab strip and no back button — so the sheet would take the app
+     * over with no way out. It has to render in the overlay instead.
+     */
+    it("shows the sheet in the in-app overlay instead", () => {
+      vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true })));
+      const open = vi.fn();
+      vi.stubGlobal("open", open);
+
+      const { container } = renderRows();
+      selectAndPrint(container);
+
+      expect(open).not.toHaveBeenCalled();
+      expect(container.querySelector("iframe")!.getAttribute("src"))
+        .toContain("/admin/items/qr-sheet/pdf?items=");
+    });
+  });
 });
 
 describe("ItemSelectTable — long-press selection", () => {
