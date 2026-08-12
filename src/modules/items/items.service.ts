@@ -23,6 +23,10 @@ import { CUSTODY_FROM, OPEN_CUSTODY_PREDICATE } from "@/modules/transfers/custod
 import { ItemError } from "./items.errors";
 import { recipientTokens } from "./recipient-search";
 import { buildRenameSequence } from "./rename-sequence";
+// The loaner naming convention. Imported by every path that writes a device
+// name, never restated — a second copy is a second answer to "is this a
+// loaner", and they drift (same rule as normalizeCategoryName).
+import { isLoanerName, loanerUpdateForRename } from "./loaner-name";
 
 export async function createItem(input: NewItemInput, createdById: string): Promise<Item> {
   const data = newItemSchema.parse(input);
@@ -30,7 +34,11 @@ export async function createItem(input: NewItemInput, createdById: string): Prom
   // live signals (service queue, open receipts, MDM last-logon, markedReadyAt),
   // so a brand-new item has nothing to record. It simply reads "Untriaged"
   // until one of those signals appears.
-  return prisma.item.create({ data: { ...data, createdById } });
+  // A device created already following the loaner convention IS a loaner —
+  // otherwise the flag would only ever arrive on a later rename.
+  return prisma.item.create({
+    data: { ...data, createdById, isLoaner: isLoanerName(data.deviceName) },
+  });
 }
 
 export function getItem(id: string) {
@@ -592,6 +600,10 @@ const UPDATABLE_ITEM_COLUMNS = new Set<string>([
   // raised or retracted the flag — this allowlist guards the identifier splice
   // in the batched UPDATE, so a column planImport can emit MUST appear.
   "mdmProposedName",
+  // Follows deviceName through the importer: a device renamed INTO the loaner
+  // convention by MDM is marked, one renamed out of it is cleared. planImport
+  // emits it only alongside a name change.
+  "isLoaner",
 ]);
 
 /** Prisma FIELD name -> physical COLUMN name, for fields that differ.
@@ -611,7 +623,12 @@ const columnFor = (field: string) => FIELD_TO_COLUMN[field] ?? field;
  *  in a given chunk. Everything the importer writes is text EXCEPT the two
  *  derived instants — casting one of those to text would store a string in a
  *  timestamp column and fail the statement. */
-const COLUMN_CAST: Record<string, string> = { lastLogonAt: "timestamptz", lastSyncAt: "timestamptz" };
+const COLUMN_CAST: Record<string, string> = {
+  lastLogonAt: "timestamptz",
+  lastSyncAt: "timestamptz",
+  // The one non-text, non-timestamp column the importer writes.
+  isLoaner: "boolean",
+};
 const castFor = (column: string) => COLUMN_CAST[column] ?? "text";
 
 /** Rows per batched UPDATE statement. Keeps bind parameters well under
@@ -644,7 +661,9 @@ export async function createScannedItems(
   if (rows.length > MAX_BULK_ITEMS) throw new ItemError("TOO_MANY");
 
   const res = await prisma.item.createMany({
-    data: rows.map((r) => ({ ...r, createdById })),
+    // Same convention as every other create path. A scanned row's deviceName is
+    // optional (scannedItemSchema), and an absent one simply does not match.
+    data: rows.map((r) => ({ ...r, createdById, isLoaner: isLoanerName(r.deviceName) })),
     skipDuplicates: true,
   });
 
@@ -1012,6 +1031,11 @@ export async function renameItems(
       .map((id, i) => ({
         id,
         name: names[i],
+        // The bulk rename is a deviceName writer like any other, so it moves the
+        // loaner flag too — renaming a batch INTO the convention marks them, and
+        // renaming them out clears them. `null` when the name transition says
+        // nothing, which COALESCE below leaves untouched.
+        loaner: loanerUpdateForRename(before.get(id) ?? null, names[i]).isLoaner ?? null,
         changes: diffItemFields({ deviceName: before.get(id) ?? null }, { deviceName: names[i] }),
       }))
       .filter((e) => e.changes.length > 0);
@@ -1021,6 +1045,9 @@ export async function renameItems(
 
     await tx.$executeRaw(Prisma.sql`
       UPDATE "Item" SET "deviceName" = v.name,
+          -- COALESCE so a NULL means "leave the flag alone" — the same
+          -- three-way outcome loanerUpdateForRename returns, expressed in SQL.
+          "isLoaner" = COALESCE(v.loaner, "Item"."isLoaner"),
           -- Raw SQL bypasses Prisma's @updatedAt, so it is set explicitly.
           -- Without this, a renamed row would keep its old updatedAt and claim
           -- it had not changed. Same reason the importer's batched UPDATE
@@ -1028,8 +1055,8 @@ export async function renameItems(
           -- Prisma does not stamp for us.
           "updatedAt" = NOW()
       FROM (VALUES ${Prisma.join(
-        edits.map((e) => Prisma.sql`(${e.id}::text, ${e.name}::text)`),
-      )}) AS v(id, name)
+        edits.map((e) => Prisma.sql`(${e.id}::text, ${e.name}::text, ${e.loaner}::boolean)`),
+      )}) AS v(id, name, loaner)
       WHERE "Item"."id" = v.id
     `);
 
@@ -1063,9 +1090,23 @@ export async function updateItemFields(
     const changes = diffItemFields(before, data);
     if (changes.length === 0) return before;
 
+    // The loaner flag follows the device NAME. Applied here rather than in the
+    // two calling actions because both the admin edit page and the item card
+    // funnel through this one function — putting it in the actions would be two
+    // copies of the rule, and a third the next caller would forget.
+    //
+    // NOT part of `changes`, deliberately: `isLoaner` is not an ItemLoggedFields
+    // key, so it stays out of the ItemEdit history. The rename that caused it IS
+    // recorded, and the flag is derivable from that name, so logging it too
+    // would be recording the same fact twice.
+    const renamed = changes.find((c) => c.field === "deviceName");
+    const loaner = renamed
+      ? loanerUpdateForRename(before.deviceName, renamed.to as string | null)
+      : {};
+
     const updated = await tx.item.update({
       where: { id: itemId },
-      data: Object.fromEntries(changes.map((c) => [c.field, c.to])),
+      data: { ...Object.fromEntries(changes.map((c) => [c.field, c.to])), ...loaner },
     });
     await tx.itemEdit.create({
       data: {
@@ -1203,6 +1244,13 @@ export async function commitImport(
   const plan = planImport(rows, existing);
   const { toCreate, toUpdate, unchanged, skipped } = plan;
 
+  // ONE instant for the whole import, taken before the transaction opens.
+  // Every row this file carried is stamped with the same value, so "seen in
+  // the same import" is an exact equality rather than a range — and a device
+  // cannot appear to have been seen a few milliseconds after its neighbours
+  // just because the batch took time to write.
+  const importedAt = new Date();
+
   const { added, updated, skipped: finalSkipped } = await prisma.$transaction(async (tx) => {
     // Register any category the CSV introduced, the same way units are learned
     // above. The import is deliberately NOT blocked by an unknown category —
@@ -1226,7 +1274,10 @@ export async function commitImport(
     const created = await tx.item.createMany({
       // The DB unique(serialNumber, citext) is the race-safe backstop: skip rather
       // than throw on a serial a concurrent import inserted after loadExistingBySerial.
-      data: toCreate.map((d) => ({ ...d, createdById: editor.id })),
+      // `lastImportedAt` rides along on the insert rather than needing a second
+      // pass: this file carried the serial, which is exactly what the column
+      // records, and createMany returns no ids to stamp afterwards.
+      data: toCreate.map((d) => ({ ...d, createdById: editor.id, lastImportedAt: importedAt })),
       skipDuplicates: true,
     });
 
@@ -1341,9 +1392,41 @@ export async function commitImport(
     const updatedCount = updatedIds.size;
     if (edits.length > 0) await tx.itemEdit.createMany({ data: edits });
 
+    // STAMP EVERY MATCHED ROW AS SEEN — including the ones nothing changed on.
+    //
+    // This is the half that is easy to miss and the half that matters most: on
+    // a steady fleet most rows land in `unchanged`, which writes nothing at all,
+    // so stamping only the updates would mark ~1,000 devices as missing from an
+    // import that listed every one of them.
+    //
+    // Raw SQL rather than `updateMany`, for the same reason the batched update
+    // above is raw: Prisma's `@updatedAt` fires on updateMany, and bumping
+    // `updatedAt` on a thousand untouched rows every night would destroy the
+    // one signal that means "something about this device actually changed".
+    // One statement regardless of fleet size.
+    const seenIds = [
+      ...toUpdate.map((u) => u.itemId),
+      ...unchanged.map((u) => existing.get(u.serialNumber.toLowerCase())?.id),
+    ].filter((id): id is string => Boolean(id));
+    if (seenIds.length > 0) {
+      await tx.$executeRaw`
+        UPDATE "Item" SET "lastImportedAt" = ${importedAt}
+        WHERE "id" IN (${Prisma.join(seenIds)})`;
+    }
+
     const allSkipped = vanished.length > 0 ? [...skipped, ...vanished] : skipped;
     await tx.importBatch.create({
       data: {
+        // STAMPED WITH THE SAME INSTANT the rows were, not `now()`.
+        //
+        // Load-bearing, not tidiness. A device is "missing from the newest
+        // census" when `lastImportedAt < ImportBatch.createdAt`, and
+        // `importedAt` is taken BEFORE this transaction opens — so with the
+        // column default, every device this very import listed would be stamped
+        // a few milliseconds EARLIER than the batch recording it, and the whole
+        // fleet would read as missing from the import that had just carried it.
+        // Equal timestamps make `<` false, which is the correct answer.
+        createdAt: importedAt,
         createdById: editor.id,
         filename,
         addedCount: created.count,
