@@ -4,7 +4,7 @@ const requireUser = vi.fn();
 const createTransfer = vi.fn();
 const deleteDraft = vi.fn();
 
-vi.mock("@/lib/authz", () => ({ requireUser: () => requireUser(), AuthError: class extends Error {} }));
+vi.mock("@/lib/authz", () => ({ denyReadOnly: () => null, requireUser: () => requireUser(), AuthError: class extends Error {} }));
 vi.mock("@/modules/transfers/transfers.service", () => ({
   createTransfer: (...a: unknown[]) => createTransfer(...a),
   getTransferByReceiptNumber: vi.fn().mockResolvedValue({ lines: [] }),

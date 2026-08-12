@@ -1,6 +1,6 @@
 "use server";
 import { revalidatePath } from "next/cache";
-import { requireAdmin } from "@/lib/authz";
+import { requireAdmin, denyReadOnly } from "@/lib/authz";
 import { createContact, updateContact, deleteContact } from "@/modules/contacts/contacts.service";
 import { newContactSchema, updateContactSchema } from "@/modules/contacts/contacts.schema";
 import { ContactError } from "@/modules/contacts/contacts.errors";
@@ -17,6 +17,8 @@ const GENERIC = "Something went wrong.";
 
 export async function createContactAction(_prev: unknown, formData: FormData) {
   const admin = await requireAdmin();
+  const denied = denyReadOnly(admin);
+  if (denied) return denied;
   const parsed = newContactSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
   try {
@@ -32,7 +34,9 @@ export async function createContactAction(_prev: unknown, formData: FormData) {
 }
 
 export async function updateContactAction(_prev: unknown, formData: FormData) {
-  await requireAdmin();
+  const actor = await requireAdmin();
+  const denied = denyReadOnly(actor);
+  if (denied) return denied;
   const parsed = updateContactSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
   try {
@@ -48,7 +52,10 @@ export async function updateContactAction(_prev: unknown, formData: FormData) {
 }
 
 export async function deleteContactAction(formData: FormData) {
-  await requireAdmin();
+  const actor = await requireAdmin();
+  // void return: nowhere to render the refusal — the read-only
+  // banner in the admin layout is what stops this reading as a bug.
+  if (denyReadOnly(actor)) return;
   const id = String(formData.get("id") ?? "").trim();
   if (!id) return;
   try {

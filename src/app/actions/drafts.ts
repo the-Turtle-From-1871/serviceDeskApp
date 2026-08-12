@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireUser } from "@/lib/authz";
+import { requireUser, denyReadOnly } from "@/lib/authz";
 import { saveDraft, deleteDraft, MAX_DRAFTS_PER_USER } from "@/modules/receipts/drafts.service";
 import { DraftError } from "@/modules/receipts/drafts.errors";
 import { receiptDraftSchema } from "@/modules/receipts/drafts.schema";
@@ -9,6 +9,8 @@ import { draftPayloadFromForm } from "@/modules/receipts/drafts.form";
 
 export async function saveDraftAction(_prev: unknown, formData: FormData) {
   const user = await requireUser();
+  const denied = denyReadOnly(user);
+  if (denied) return denied;
 
   const parsed = receiptDraftSchema.safeParse(draftPayloadFromForm(formData));
   if (!parsed.success) {
@@ -34,6 +36,9 @@ export async function saveDraftAction(_prev: unknown, formData: FormData) {
 
 export async function deleteDraftAction(formData: FormData): Promise<void> {
   const user = await requireUser();
+  // Returns void, so there is nowhere to render the refusal — the read-only
+  // banner in the admin layout is what keeps this from looking like a bug.
+  if (denyReadOnly(user)) return;
   const id = String(formData.get("id") ?? "").trim();
   if (!id) return;
   try {

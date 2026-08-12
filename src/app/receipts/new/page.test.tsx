@@ -10,7 +10,7 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
-vi.mock("@/lib/authz", () => ({ requireUser: vi.fn(async () => ({ id: "u1", role: "USER", isActive: true })) }));
+vi.mock("@/lib/authz", () => ({ denyReadOnly: () => null, requireUser: vi.fn(async () => ({ id: "u1", role: "USER", isActive: true })) }));
 const getItem = vi.fn();
 vi.mock("@/modules/items/items.service", () => ({ getItem: (id: string) => getItem(id) }));
 vi.mock("@/modules/transfers/transfers.service", () => ({ getLastReceiver: vi.fn(async () => null) }));

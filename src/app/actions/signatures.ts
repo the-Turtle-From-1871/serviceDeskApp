@@ -1,6 +1,6 @@
 "use server";
 import { revalidatePath } from "next/cache";
-import { requireAdmin } from "@/lib/authz";
+import { requireAdmin, denyReadOnly } from "@/lib/authz";
 import { createSignature, deleteSignature, getOwnedSignature } from "@/modules/signatures/signatures.service";
 import { newSignatureSchema } from "@/modules/signatures/signatures.schema";
 import { SignatureError } from "@/modules/signatures/signatures.errors";
@@ -10,6 +10,8 @@ import { SignatureError } from "@/modules/signatures/signatures.errors";
 // authenticated admin — a userId is never accepted from the client.
 export async function createSignatureAction(_prev: unknown, formData: FormData) {
   const admin = await requireAdmin();
+  const denied = denyReadOnly(admin);
+  if (denied) return denied;
   const parsed = newSignatureSchema.safeParse({
     name: String(formData.get("name") ?? ""),
     image: String(formData.get("image") ?? ""),
@@ -42,6 +44,9 @@ export async function revealOwnSignatureAction(signatureId: string): Promise<str
 
 export async function deleteSignatureAction(formData: FormData): Promise<void> {
   const admin = await requireAdmin();
+  // void return: nowhere to render the refusal, so the admin-layout banner is
+  // what stops this reading as a bug.
+  if (denyReadOnly(admin)) return;
   const id = String(formData.get("id") ?? "").trim();
   if (!id) return;
   try {

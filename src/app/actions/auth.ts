@@ -13,6 +13,7 @@ import { sendVerificationEmail } from "@/modules/auth/send-verification-email";
 import { createPasswordResetToken, resetPasswordWithToken } from "@/lib/password-reset";
 import { sendPasswordResetEmail } from "@/modules/auth/send-password-reset-email";
 import { defaultBaseUrl } from "@/lib/base-url";
+import { isReadOnlyDemo } from "@/lib/read-only-demo";
 import { authVelocityElevated, recordAuthFailure } from "@/lib/auth-velocity";
 import { TURNSTILE_FIELD, turnstileConfigured, verifyTurnstile } from "@/lib/turnstile";
 import { THROTTLED } from "@/app/actions/throttled";
@@ -348,6 +349,18 @@ export async function requestPasswordResetAction(_prev: unknown, formData: FormD
       const user = await prisma.user.findUnique({ where: { email } });
       // Silently no-op for unknown/inactive accounts (anti-enumeration).
       if (!user || !user.isActive) return;
+
+      // A DEMO account's credentials are handed out on purpose, and the account
+      // holds the ADMIN role so the portal renders for it. A reset link is
+      // therefore an account-takeover path for anyone who can read that inbox —
+      // and it is one `denyReadOnly` cannot cover, because this action is
+      // unauthenticated and there is no session to test.
+      //
+      // Blocked at the MINT, which is why resetPasswordAction needs no change:
+      // a token that is never issued cannot be redeemed. Placed here beside the
+      // other silent no-ops, inside the deferred block, so the action still
+      // returns its one generic success and reveals nothing about the address.
+      if (isReadOnlyDemo(user.email)) return;
 
       // FIX #1 (per-account cooldown): if a still-usable reset was created for
       // this account within the cooldown window, skip sending another one.

@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { requireCapability } from "@/lib/authz";
+import { requireCapability, denyReadOnly } from "@/lib/authz";
 import { createCategory, deleteCategory, MAX_CATEGORY_NAME } from "@/modules/items/categories.service";
 import { ItemError } from "@/modules/items/items.errors";
 
@@ -16,6 +16,8 @@ const nameSchema = z.object({
 
 export async function createCategoryAction(_prev: unknown, formData: FormData) {
   const admin = await requireCapability("MANAGE_ITEMS");
+  const denied = denyReadOnly(admin);
+  if (denied) return denied;
 
   const parsed = nameSchema.safeParse({ name: formData.get("name") });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -36,7 +38,9 @@ export async function createCategoryAction(_prev: unknown, formData: FormData) {
 }
 
 export async function deleteCategoryAction(_prev: unknown, formData: FormData) {
-  await requireCapability("MANAGE_ITEMS");
+  const actor = await requireCapability("MANAGE_ITEMS");
+  const denied = denyReadOnly(actor);
+  if (denied) return denied;
 
   const id = String(formData.get("id") ?? "");
   if (!id) return { error: "Invalid input" };

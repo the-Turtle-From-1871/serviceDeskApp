@@ -2,6 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { generateKeyPairSync } from "node:crypto";
 
 vi.mock("@/lib/authz", () => ({
+  // Not a read-only demo account. The real denyReadOnly is unit-tested in
+  // src/lib/authz.test.ts; here it only has to exist, because this mock
+  // replaces the whole module.
+  denyReadOnly: () => null,
   requireAdmin: vi.fn(async () => ({ id: "u1", role: "ADMIN" })),
   AuthError: class AuthError extends Error {},
 }));

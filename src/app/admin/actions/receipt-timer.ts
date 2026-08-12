@@ -1,7 +1,7 @@
 "use server";
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { requireAdmin } from "@/lib/authz";
+import { requireAdmin, denyReadOnly } from "@/lib/authz";
 import prisma from "@/lib/prisma";
 import { setTransferDueAt } from "@/modules/transfers/transfers.service";
 import { assertTransferOpen } from "@/modules/transfers/lifecycle";
@@ -15,7 +15,9 @@ const schema = z.object({
 });
 
 export async function setReceiptDueAtAction(_prev: unknown, formData: FormData): Promise<{ error?: string; ok?: true }> {
-  await requireAdmin();
+  const actor = await requireAdmin();
+  const denied = denyReadOnly(actor);
+  if (denied) return denied;
   const parsed = schema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: "Invalid input." };
 

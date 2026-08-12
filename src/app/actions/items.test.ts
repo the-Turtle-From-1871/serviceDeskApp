@@ -13,6 +13,10 @@ const revalidatePath = vi.fn();
 // Note: items.schema is NOT mocked — the real Zod schemas run, so this proves the
 // server actually strips admin-only fields from a USER's submission.
 vi.mock("@/lib/authz", () => ({
+  // Not a read-only demo account. The real denyReadOnly is unit-tested in
+  // src/lib/authz.test.ts; here it only has to exist, because this mock
+  // replaces the whole module.
+  denyReadOnly: () => null,
   requireUser: () => requireUser(),
   requireCapability: (c: string) => requireCapability(c),
 }));
@@ -61,6 +65,18 @@ import { updateItemIdentityAction, createItemAction, deleteItemAction } from "@/
 import { Prisma } from "@prisma/client";
 
 const ADMIN = { id: "a1", role: "ADMIN" as const, name: "Admin", capabilities: roleBaseline("ADMIN") };
+
+// Every mutating action can now also return the read-only demo refusal, which
+// carries none of the success or collision fields. These tests all drive a
+// NON-demo admin (the authz mock's denyReadOnly returns null), so this narrows
+// that branch away — and throws loudly if it is ever actually taken, rather
+// than letting a silent refusal read as a passing assertion.
+function notRefused<T extends object>(res: T) {
+  if ("error" in res && res.error === "Demo account — changes are not saved.") {
+    throw new Error("the action refused this caller as a demo account");
+  }
+  return res as Exclude<T, { readonly error: "Demo account — changes are not saved." }>;
+}
 const USER = { id: "u1", role: "USER" as const, name: "User", capabilities: roleBaseline("USER") };
 
 function fd(entries: Record<string, string>) {
@@ -352,7 +368,7 @@ describe("createItemAction", () => {
       new Prisma.PrismaClientKnownRequestError("dup", { code: "P2002", clientVersion: "7" }),
     );
     getItemBySerial.mockResolvedValue({ id: "existing-9" });
-    const res = await createItemAction(undefined, fd(NEW_ITEM));
+    const res = notRefused(await createItemAction(undefined, fd(NEW_ITEM)));
     expect(res.error).toContain("ABC123");
     expect(res.existingItemId).toBe("existing-9");
   });
@@ -363,7 +379,7 @@ describe("createItemAction", () => {
       new Prisma.PrismaClientKnownRequestError("dup", { code: "P2002", clientVersion: "7" }),
     );
     getItemBySerial.mockResolvedValue(null);
-    const res = await createItemAction(undefined, fd(NEW_ITEM));
+    const res = notRefused(await createItemAction(undefined, fd(NEW_ITEM)));
     expect(res.error).toContain("ABC123");
     expect(res.existingItemId).toBeUndefined();
   });
@@ -372,7 +388,7 @@ describe("createItemAction", () => {
     requireCapability.mockResolvedValue(ADMIN);
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     createItem.mockRejectedValue(new Error("connection reset"));
-    const res = await createItemAction(undefined, fd(NEW_ITEM));
+    const res = notRefused(await createItemAction(undefined, fd(NEW_ITEM)));
     expect(res).toEqual({ error: "Something went wrong creating this item. Please try again." });
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
@@ -388,7 +404,7 @@ describe("createItemAction", () => {
 
   it("rejects a blank make before touching the DB", async () => {
     requireCapability.mockResolvedValue(ADMIN);
-    const res = await createItemAction(undefined, fd({ ...NEW_ITEM, make: "" }));
+    const res = notRefused(await createItemAction(undefined, fd({ ...NEW_ITEM, make: "" })));
     expect(res.error).toMatch(/Make is required/);
     expect(createItem).not.toHaveBeenCalled();
   });
@@ -396,7 +412,7 @@ describe("createItemAction", () => {
   it("returns to the filtered list when the form came from a search", async () => {
     requireCapability.mockResolvedValue(ADMIN);
     createItem.mockResolvedValue({ id: "new-1", serialNumber: "ABC123" });
-    const result = await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "" }));
+    const result = notRefused(await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "" })));
     expect(result.itemId).toBe("new-1");
     expect(result.searchHref).toBe("/items?q=ABC123");
   });
@@ -404,7 +420,7 @@ describe("createItemAction", () => {
   it("carries the unit filter back with it when the new item matches it", async () => {
     requireCapability.mockResolvedValue(ADMIN);
     createItem.mockResolvedValue({ id: "new-1", serialNumber: "ABC123", deviceUIC: "WABC01" });
-    const result = await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "WABC01" }));
+    const result = notRefused(await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "WABC01" })));
     expect(result.itemId).toBe("new-1");
     expect(result.searchHref).toBe("/items?q=ABC123&uic=WABC01");
   });
@@ -413,14 +429,14 @@ describe("createItemAction", () => {
   it("percent-encodes a serial containing URL metacharacters", async () => {
     requireCapability.mockResolvedValue(ADMIN);
     createItem.mockResolvedValue({ id: "new-1", serialNumber: "A&B C#1" });
-    const result = await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1" }));
+    const result = notRefused(await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1" })));
     expect(result.itemId).toBe("new-1");
     expect(result.searchHref).toBe("/items?q=A%26B+C%231");
   });
 
   it("does NOT redirect when the form was opened directly", async () => {
     requireCapability.mockResolvedValue(ADMIN);
-    const result = await createItemAction(undefined, fd(NEW_ITEM));
+    const result = notRefused(await createItemAction(undefined, fd(NEW_ITEM)));
     expect(result.itemId).toBe("new-1");
     expect(result.searchHref).toBeUndefined();
   });
@@ -434,14 +450,14 @@ describe("createItemAction", () => {
       new Prisma.PrismaClientKnownRequestError("dup", { code: "P2002", clientVersion: "7" }),
     );
     getItemBySerial.mockResolvedValue({ id: "existing-9" });
-    const res = await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1" }));
+    const res = notRefused(await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1" })));
     expect(res.error).toContain("ABC123");
   });
 
   it("drops the unit filter from the redirect when the new item's deviceUIC is null", async () => {
     requireCapability.mockResolvedValue(ADMIN);
     createItem.mockResolvedValue({ id: "new-1", serialNumber: "ABC123", deviceUIC: null });
-    const result = await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "WABC01" }));
+    const result = notRefused(await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "WABC01" })));
     expect(result.itemId).toBe("new-1");
     expect(result.searchHref).toBe("/items?q=ABC123");
   });
@@ -449,7 +465,7 @@ describe("createItemAction", () => {
   it("drops the unit filter from the redirect when the new item's deviceUIC differs from it", async () => {
     requireCapability.mockResolvedValue(ADMIN);
     createItem.mockResolvedValue({ id: "new-1", serialNumber: "ABC123", deviceUIC: "WXYZ02" });
-    const result = await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "WABC01" }));
+    const result = notRefused(await createItemAction(undefined, fd({ ...NEW_ITEM, fromSearch: "1", returnUic: "WABC01" })));
     expect(result.itemId).toBe("new-1");
     expect(result.searchHref).toBe("/items?q=ABC123");
   });

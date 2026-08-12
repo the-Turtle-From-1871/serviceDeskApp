@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { requireCapability } from "@/lib/authz";
+import { requireCapability, denyReadOnly } from "@/lib/authz";
 import { ItemError } from "@/modules/items/items.errors";
 import { learnUnits, renameUnit, deleteUnit, resolutionSchema } from "@/modules/items/units.service";
 import { parseUnitBlock } from "@/modules/items/units.parse";
@@ -14,7 +14,9 @@ import { parseUnitBlock } from "@/modules/items/units.parse";
 const idSchema = z.string().min(1, "Missing unit.");
 
 export async function createUnitAction(_prev: unknown, formData: FormData) {
-  await requireCapability("MANAGE_ITEMS");
+  const actor = await requireCapability("MANAGE_ITEMS");
+  const denied = denyReadOnly(actor);
+  if (denied) return denied;
   const parsed = resolutionSchema.safeParse({
     abbreviation: String(formData.get("abbreviation") ?? ""),
     fullName: String(formData.get("fullName") ?? ""),
@@ -33,6 +35,8 @@ export async function createUnitAction(_prev: unknown, formData: FormData) {
 
 export async function renameUnitAction(_prev: unknown, formData: FormData) {
   const admin = await requireCapability("MANAGE_ITEMS");
+  const denied = denyReadOnly(admin);
+  if (denied) return denied;
   const id = idSchema.safeParse(String(formData.get("id") ?? ""));
   if (!id.success) return { error: "Missing unit." };
   const fullName = String(formData.get("fullName") ?? "").trim();
@@ -54,7 +58,9 @@ export async function renameUnitAction(_prev: unknown, formData: FormData) {
 }
 
 export async function deleteUnitAction(formData: FormData) {
-  await requireCapability("MANAGE_ITEMS");
+  const actor = await requireCapability("MANAGE_ITEMS");
+  const denied = denyReadOnly(actor);
+  if (denied) return denied;
   const id = idSchema.safeParse(String(formData.get("id") ?? ""));
   if (!id.success) return { error: "Missing unit." };
 
@@ -70,7 +76,9 @@ export async function deleteUnitAction(formData: FormData) {
 }
 
 export async function bulkLearnUnitsAction(_prev: unknown, formData: FormData) {
-  await requireCapability("MANAGE_ITEMS");
+  const actor = await requireCapability("MANAGE_ITEMS");
+  const denied = denyReadOnly(actor);
+  if (denied) return denied;
   const { units, errors } = parseUnitBlock(String(formData.get("block") ?? ""));
   if (errors.length > 0) return { error: errors.slice(0, 5).join(" ") };
   if (units.length === 0) return { error: "Nothing to add." };

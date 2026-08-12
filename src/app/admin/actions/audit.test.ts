@@ -8,6 +8,10 @@ const recordAudits = vi.fn();
 const revalidatePath = vi.fn();
 
 vi.mock("@/lib/authz", () => ({
+  // Not a read-only demo account. The real denyReadOnly is unit-tested in
+  // src/lib/authz.test.ts; here it only has to exist, because this mock
+  // replaces the whole module.
+  denyReadOnly: () => null,
   requireAdmin: () => requireAdmin(),
   AuthError: class AuthError extends Error {
     constructor(public code: string) {

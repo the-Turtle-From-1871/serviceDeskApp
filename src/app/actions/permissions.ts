@@ -1,7 +1,7 @@
 "use server";
 import { after } from "next/server";
 import { revalidatePath } from "next/cache";
-import { requireAdmin, requireCapability } from "@/lib/authz";
+import { requireAdmin, requireCapability, denyReadOnly } from "@/lib/authz";
 import { defaultBaseUrl } from "@/lib/base-url";
 import {
   createPermissionRequest,
@@ -39,6 +39,8 @@ function messageFor(e: unknown): string | null {
  */
 export async function requestPermissionsAction(_prev: unknown, formData: FormData) {
   const user = await requireCapability("VIEW_INVENTORY");
+  const denied = denyReadOnly(user);
+  if (denied) return denied;
 
   const parsed = permissionRequestSchema.safeParse({
     justification: String(formData.get("justification") ?? ""),
@@ -71,6 +73,8 @@ export async function requestPermissionsAction(_prev: unknown, formData: FormDat
  */
 export async function decidePermissionRequestAction(_prev: unknown, formData: FormData) {
   const admin = await requireAdmin();
+  const denied = denyReadOnly(admin);
+  if (denied) return denied;
 
   const parsed = permissionDecisionSchema.safeParse({
     requestId: String(formData.get("requestId") ?? ""),

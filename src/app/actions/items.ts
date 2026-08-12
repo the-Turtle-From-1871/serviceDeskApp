@@ -1,6 +1,6 @@
 "use server";
 import { revalidatePath } from "next/cache";
-import { requireCapability } from "@/lib/authz";
+import { requireCapability, denyReadOnly } from "@/lib/authz";
 import { updateItemFields } from "@/modules/items/items.service";
 import { itemDetailsSchema, userItemDetailsSchema } from "@/modules/items/items.schema";
 import { learnCategories, normalizeCategoryName } from "@/modules/items/categories.service";
@@ -20,6 +20,8 @@ import type { ItemLoggedFields } from "@/modules/items/item-diff";
 // it. Every change is recorded as an ItemEdit by updateItemFields.
 export async function updateItemDetailsAction(_prev: unknown, formData: FormData) {
   const user = await requireCapability("EDIT_ITEM_HOLDER");
+  const denied = denyReadOnly(user);
+  if (denied) return denied;
   const id = String(formData.get("id") ?? "").trim();
   if (!id) return { error: "Missing item." };
 

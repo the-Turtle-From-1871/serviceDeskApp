@@ -1,6 +1,6 @@
 "use server";
 import { revalidatePath } from "next/cache";
-import { requireCapability, AuthError } from "@/lib/authz";
+import { requireCapability, denyReadOnly, AuthError } from "@/lib/authz";
 import { processReturn } from "@/modules/returns/returns.service";
 import { sendReturnEmail } from "@/modules/returns/send-return-email";
 import { getTransferByReceiptNumber } from "@/modules/transfers/transfers.service";
@@ -20,6 +20,8 @@ export async function processReturnAction(_prev: unknown, formData: FormData): P
     if (e instanceof AuthError) return { error: "You are not authorized to process returns." };
     throw e;
   }
+  const denied = denyReadOnly(admin);
+  if (denied) return denied;
 
   const receiptNumber = String(formData.get("receiptNumber") ?? "");
   const verified = formData.get("verified") === "on";
