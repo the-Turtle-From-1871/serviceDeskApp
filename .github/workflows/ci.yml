@@ -167,8 +167,11 @@ jobs:
           EOF
 
       - name: Run tests
-        # `migrateTestDb()` shells out to `prisma migrate deploy` per DB-backed
-        # file; prisma.config.ts reads DIRECT_URL ?? DATABASE_URL, so both are
-        # set above. Migrations are idempotent, so repeating it is a no-op after
-        # the first.
+        # tests/helpers/global-setup.ts shells out to `prisma migrate deploy`
+        # ONCE per run, against a template database, before cloning it per
+        # worker — not per DB-backed file. prisma.config.ts reads DIRECT_URL ??
+        # DATABASE_URL, so both must be set above AND both are overridden by
+        # global-setup.ts's execSync call for the same reason (see the comment
+        # there) — otherwise the migration lands on the un-cloned
+        # `handreceipt_test` database instead of the template.
         run: npm test

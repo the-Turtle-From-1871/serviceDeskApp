@@ -1,4 +1,3 @@
-import { execSync } from "node:child_process";
 import prisma from "@/lib/prisma";
 
 export async function resetDb() {
@@ -19,13 +18,4 @@ export async function resetDb() {
   await prisma.$executeRawUnsafe(
     `TRUNCATE TABLE "Contact","Transfer","Item","User","Unit","SignatureAsset" RESTART IDENTITY CASCADE;`
   );
-}
-
-export function migrateTestDb() {
-  // Apply migrations to the TEST database. DATABASE_URL is already set to the
-  // test DB by setup-env.ts, so pass it through explicitly to the CLI.
-  execSync("npx prisma migrate deploy", {
-    env: { ...process.env, DATABASE_URL: process.env.DATABASE_URL },
-    stdio: "inherit",
-  });
 }

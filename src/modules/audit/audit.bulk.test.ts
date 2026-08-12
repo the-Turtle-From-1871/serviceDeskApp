@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import prisma from "@/lib/prisma";
 import { recordAudits } from "./audit.service";
-import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
+import { resetDb } from "../../../tests/helpers/db";
 
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==";
 
@@ -20,7 +20,6 @@ async function mkUser() {
 
 describe("recordAudits", () => {
   let userId: string;
-  beforeAll(() => migrateTestDb());
   beforeEach(async () => {
     // DB-backed test on the shared test database, like items.bulk.test.ts —
     // reset first so fixed literal serials (BULKA1…) can't collide with a

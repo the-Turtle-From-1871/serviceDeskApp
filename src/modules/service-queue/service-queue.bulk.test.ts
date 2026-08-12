@@ -1,11 +1,10 @@
-import { beforeAll, beforeEach, describe, it, expect } from "vitest";
+import { beforeEach, describe, it, expect } from "vitest";
 import prisma from "@/lib/prisma";
-import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
+import { resetDb } from "../../../tests/helpers/db";
 import { upsertServiceRequests, completeServiceItems } from "./service-queue.service";
 
 let adminId: string;
 
-beforeAll(() => migrateTestDb());
 beforeEach(async () => {
   await resetDb();
   const admin = await prisma.user.create({

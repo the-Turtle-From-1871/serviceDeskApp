@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import prisma from "@/lib/prisma";
 import { setItemsLoaner, commitImport } from "./items.service";
-import { migrateTestDb, resetDb } from "../../../tests/helpers/db";
+import { resetDb } from "../../../tests/helpers/db";
 
 // Item.createdById is a required relation, so every row here needs an actor —
 // same pattern as items.rename.test.ts / items.service.import.test.ts.
@@ -20,7 +20,6 @@ async function mkItem(serial: string, status: "ACTIVE" | "RETIRED" = "ACTIVE") {
   });
 }
 
-beforeAll(() => migrateTestDb());
 beforeEach(async () => {
   await resetDb();
   const a = await prisma.user.create({ data: { name: "Admin", email: "a@x.co", passwordHash: "x", role: "ADMIN" } });

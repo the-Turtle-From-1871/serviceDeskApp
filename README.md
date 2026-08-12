@@ -71,8 +71,10 @@ npm run db:seed
 npm run dev            # http://localhost:3000
 ```
 
-The test suite uses a separate `handreceipt_test` database on the same server;
-create it once with `CREATE DATABASE handreceipt_test;`.
+The test suite provisions its own databases automatically — `npm test` connects
+to the `postgres` maintenance database and creates what it needs (see
+Testing below). There is nothing to create by hand; the Postgres server just
+needs to be reachable.
 
 ## Environment variables
 
@@ -164,16 +166,34 @@ posture, CI gates) plus the known gaps and accepted risks.
 
 ## Testing
 
-Vitest runs against a **real migrated Postgres** (`handreceipt_test`), truncating
-between tests — services and custody invariants are covered with behavior, not
-mocks. Component tests (`*.test.tsx`, `npm run test:ui`) opt into jsdom per file;
-jsdom has no layout engine, so neither they nor `npm run build` are evidence for
-a CSS or mobile change — verify visual work in a real browser. Playwright covers
-browser/e2e (`tests/e2e`), seeded by `npm run db:seed:e2e`.
+Vitest runs against a **real migrated Postgres**, not mocks — services and
+custody invariants are covered with behavior. `tests/helpers/global-setup.ts`
+provisions the databases itself, once per run: it migrates one template
+(`handreceipt_test_<hash-of-checkout-path>_tmpl`) and clones it into one
+database per worker (`..._1` … `..._N`, where N is `MAX_TEST_WORKERS` —
+`min(8, cores)`, not a bare 8: capped at 8 because that beat 4 workers on an
+8-core dev box (80.73s/79.73s at 8 vs 122.75s/104.85s at 4), capped by the machine's own
+core count because a smaller runner can't afford 8 — a bare 8 oversubscribed a
+4-core CI runner and blew a CPU-bound test's timeout. Override with the
+`VITEST_MAX_WORKERS` env var), then drops all of them at the end. `npm test`
+runs the whole suite in parallel across those workers (166 files / ~2019
+tests): **63.71s in CI** (4-core runner) / **77.53s locally** (8-core dev box).
+Component tests (`*.test.tsx`,
+`npm run test:ui`) opt into jsdom per file and skip database provisioning
+entirely; jsdom has no layout engine, so neither they nor `npm run build` are
+evidence for a CSS or mobile change — verify visual work in a real browser.
+Playwright covers browser/e2e (`tests/e2e`), seeded by `npm run db:seed:e2e`.
 
-Only one agent or developer may run the suite at a time: it truncates a shared
-`handreceipt_test` database, so two concurrent runs corrupt each other and the
-failures look like unrelated flakes.
+**Concurrent `npm test` runs no longer interfere.** This used to say the
+opposite — "only one agent or developer may run the suite at a time" — because
+every checkout shared one `handreceipt_test` database, and two runs TRUNCATing
+it at once corrupted each other in ways that looked like flaky tests in
+unrelated files. That constraint is retired, not just undocumented: the
+template/worker database names above are hashed from the checkout's own
+filesystem path, so two worktrees (or two agent sessions each in their own
+worktree) provision entirely disjoint sets of databases and cannot collide.
+The one case that can still collide is two runs **inside the same worktree**
+at the same time, since both hash to the same names.
 
 ## Deployment
 

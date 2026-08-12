@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import prisma from "@/lib/prisma";
-import { resetDb, migrateTestDb } from "../../../tests/helpers/db";
+import { resetDb } from "../../../tests/helpers/db";
 import { listItems } from "./items.service";
 import { auditState, AUDIT_ORDER } from "@/modules/audit/audit.status";
 
@@ -46,7 +46,6 @@ const SEEDS: Seed[] = [
 ];
 
 beforeAll(async () => {
-  migrateTestDb();
   await resetDb();
   const admin = await prisma.user.create({
     data: { name: "Audit Sort", email: "audit-sort@x.co", passwordHash: "x", role: "ADMIN" },

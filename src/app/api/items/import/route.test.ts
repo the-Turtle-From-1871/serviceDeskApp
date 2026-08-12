@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
 import prisma from "@/lib/prisma";
-import { resetDb, migrateTestDb } from "../../../../../tests/helpers/db";
+import { resetDb } from "../../../../../tests/helpers/db";
 import { IMPORT_SERVICE_ACCOUNT_EMAIL } from "@/modules/items/import-actor";
 
 // `revalidatePath` needs a Next.js request-scoped store that only exists
@@ -64,7 +64,6 @@ function seedServiceAccount() {
 const priorSecret = process.env.MDM_IMPORT_SECRET;
 
 beforeAll(async () => {
-  migrateTestDb();
   process.env.MDM_IMPORT_SECRET = SECRET;
 });
 
