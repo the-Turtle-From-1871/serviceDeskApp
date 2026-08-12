@@ -15,6 +15,7 @@ import { lookupScannedItem, lookupScannedSerial } from "@/app/actions/scan";
 import { QrScanner, SCAN_FORMATS } from "@/components/QrScanner";
 import { beep } from "@/lib/beep";
 import { saveDraftAction } from "@/app/actions/drafts";
+import { PdfPreviewButton } from "@/components/PdfPreviewButton";
 import type { ReceiptDraftPayload } from "@/modules/receipts/drafts.schema";
 
 // `holderName` is the item's current holder, used to warn when a scan brings in
@@ -601,7 +602,11 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, dr
       <div className="card stack-sm">
         <h2 className="page-title">Receipt {receipt} created</h2>
         <div className="row">
-          <a className="btn btn-secondary" href={`/receipts/${receipt}/pdf?preview=1`} target="_blank" rel="noopener noreferrer">Preview PDF</a>
+          <PdfPreviewButton
+            href={`/receipts/${receipt}/pdf?preview=1`}
+            title={receipt}
+            label="Preview PDF"
+          />
           <a className="btn btn-primary" href={`/receipts/${receipt}/pdf`}>Download PDF</a>
           <a className="btn btn-secondary" href={`/receipts/${receipt}`}>View receipt</a>
           <a className="btn btn-ghost" href="/items">Back to items</a>

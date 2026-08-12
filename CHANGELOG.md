@@ -3,6 +3,12 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-08-12
+
+### Fixed
+
+- **Previewing a hand receipt's PDF no longer strands you in the installed app.** On an iPhone home-screen install there is no tab strip and no back button, so opening the PDF left no way back to the receipt short of closing the app. The preview now opens inside the app, over the receipt, with its own Back button and a Download link. In an ordinary browser tab nothing changes — the PDF still opens in a new tab with the browser's own controls.
+
 ## 2026-08-11
 
 ### Changed
