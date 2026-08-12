@@ -46,6 +46,13 @@ export const UNCATEGORIZED = "Uncategorized";
  * list measured the SIGN-IN column until 2026-08-11 and was moved deliberately:
  * "we have not heard from this device" is the question the desk chases.
  *
+ * LOANER-POOL STOCK IS EXCLUDED, matching the dropped-off list (2026-08-11).
+ * The reasoning is weaker here than there — a pool loaner is supposed to be
+ * going out and coming back, so two months of silence about one could be a real
+ * signal rather than the expected quiet of shelf stock — but the desk does not
+ * chase loaners off either list, and one rule across both beats a per-list
+ * nuance. 6 of the 87 listed the day it landed.
+ *
  * BOTH ENDS ARE DELIBERATE. A device seen inside 30 days is not stale. A device
  * unseen for MORE than 90 days is excluded too — that is a different problem
  * (long-term lost kit) needing a different response, and folding it in here
