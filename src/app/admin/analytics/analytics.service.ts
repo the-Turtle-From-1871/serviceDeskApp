@@ -649,13 +649,67 @@ export async function listStaleDevices(
       not.
    ------------------------------------------------------------ */
 
+/**
+ * The newest FLEET CENSUS, as a scalar subquery.
+ *
+ * A census is an import that listed the WHOLE fleet, and `sourceHash IS NOT
+ * NULL` is exactly that: it is set only by the scheduled Drive pull, and left
+ * null by both human-driven paths (see `commitImport`). That distinction is
+ * load-bearing rather than incidental — an admin uploading a one-unit CSV
+ * through /admin/items/import would otherwise define a "census" that omitted
+ * 1,100 devices, and every one of them would be declared missing from it. The
+ * hand paths still STAMP the devices they carry, because that is a true
+ * observation; they simply never set the bar the rest of the fleet is measured
+ * against.
+ *
+ * Returns NULL before the first scheduled import, and that falls out correctly
+ * with no special case: `lastImportedAt < NULL` is NULL, never true, so nothing
+ * is flagged missing until there is a census to be missing from.
+ */
+const LATEST_CENSUS = Prisma.sql`
+  (SELECT max(b."createdAt") FROM "ImportBatch" b WHERE b."sourceHash" IS NOT NULL)`;
+
+/**
+ * When a device dropped off — the FIRST census that did not list it.
+ *
+ * Derived, never stored. A stored `droppedOffAt` would have to be cleared when
+ * the device came back, and a flag that must be un-set is the shape this
+ * schema keeps refusing (see `Item.lastImportedAt`). Deriving it means a device
+ * reappearing in tomorrow's export un-flags itself with no cleanup, and a
+ * device that was never in an import has no date rather than a wrong one.
+ *
+ * NULL when the device has never been imported, or when no census has run since
+ * it was last seen — i.e. exactly when it has not dropped off.
+ */
+const DROPPED_OFF_AT = Prisma.sql`
+  (SELECT min(b."createdAt") FROM "ImportBatch" b
+    WHERE b."sourceHash" IS NOT NULL AND b."createdAt" > i."lastImportedAt")`;
+
 function droppedDeviceWhere(scope: ItemScope): Prisma.Sql {
   return Prisma.sql`
         i."status" = 'ACTIVE'
     AND ${itemScopeSql(scope)}
-    AND i."lastSyncAt" IS NULL
     AND i."deviceName" IS NOT NULL
     AND btrim(i."deviceName") <> ''
+    -- LOANERS ARE OUT, by explicit decision (2026-08-11). Pool stock sits on a
+    -- shelf between loans and is not expected to be checking in, so an absent
+    -- device there is the normal state rather than something to chase — the
+    -- same reasoning that keeps kit on an open receipt off the dormant list.
+    -- isLoaner is a standing decision by the property manager and is
+    -- deliberately NOT importable (see schema.prisma), so nothing an MDM export
+    -- says can flip a device on or off this list behind someone's back.
+    -- (No backticks in here: this is inside a Prisma.sql template literal.)
+    -- 7 of the 164 listed the day this landed.
+    AND i."isLoaner" = false
+    AND (
+      -- MDM has never told us when it last spoke to this device.
+      i."lastSyncAt" IS NULL
+      -- ...or the latest fleet census did not list it at all, which is the
+      -- stronger signal: the device is not merely quiet, Intune has stopped
+      -- reporting it. Comparison against a NULL census is NULL, so this branch
+      -- is simply inert until the first scheduled import has run.
+      OR i."lastImportedAt" < ${LATEST_CENSUS}
+    )
   `;
 }
 
@@ -682,6 +736,7 @@ type DroppedDeviceQueryRow = {
   currentPosition: string | null;
   storageLocation: string | null;
   everInMdm: boolean;
+  droppedOffAt: Date | null;
   lastLogonUserPrincipalName: string | null;
   lastLogonAt: Date | null;
   compliance: string | null;
@@ -718,6 +773,7 @@ export async function listDroppedDevices(
            (i."enrollmentDate" IS NOT NULL
              OR i."lastLogonDate" IS NOT NULL
              OR i."compliance" IS NOT NULL) AS "everInMdm",
+           ${DROPPED_OFF_AT} AS "droppedOffAt",
            i."lastLogonUserPrincipalName",
            i."lastLogonAt",
            i."compliance",
@@ -725,7 +781,12 @@ export async function listDroppedDevices(
     FROM "Item" i
     ${READINESS_JOINS}
     WHERE ${droppedDeviceWhere(scope)}
-    ORDER BY (i."enrollmentDate" IS NOT NULL
+    -- Devices that fell out of a census come FIRST, longest-gone first: those
+    -- carry a date and a specific thing to check. Then devices MDM once knew,
+    -- then the never-enrolled backlog, which is the largest group and the
+    -- least urgent.
+    ORDER BY ${DROPPED_OFF_AT} ASC NULLS LAST,
+             (i."enrollmentDate" IS NOT NULL
                OR i."lastLogonDate" IS NOT NULL
                OR i."compliance" IS NOT NULL) DESC,
              i."lastLogonAt" DESC NULLS LAST,
@@ -745,7 +806,16 @@ export async function listDroppedDevices(
     Holder: r.currentUserEmail ?? "",
     Position: r.currentPosition ?? "",
     "Storage location": r.storageLocation ?? "",
-    "MDM record": r.everInMdm ? "Dropped out" : "Never enrolled",
+    // Three states, most specific first. "Missing from import" is the only one
+    // with a date behind it, and it outranks "Dropped out" because it says
+    // WHICH import stopped listing the device rather than merely that no sync
+    // time was ever recorded.
+    "MDM record": r.droppedOffAt
+      ? "Missing from import"
+      : r.everInMdm
+        ? "Dropped out"
+        : "Never enrolled",
+    "Dropped off": r.droppedOffAt ? isoDay(r.droppedOffAt) : "",
     "Last logon user": r.lastLogonUserPrincipalName ?? "",
     // Blank rather than a dash for a device MDM never knew: the sheet is
     // filtered and sorted, and a dash is a value that sorts.

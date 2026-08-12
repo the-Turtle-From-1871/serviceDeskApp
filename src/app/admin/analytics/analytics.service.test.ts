@@ -45,6 +45,8 @@ function mkItem(data: {
   compliance?: string | null;
   enrollmentDate?: string | null;
   lastLogonDate?: string | null;
+  lastImportedAt?: Date | null;
+  isLoaner?: boolean;
   deviceName?: string;
   serialNumber?: string;
 }) {
@@ -520,6 +522,31 @@ describe("listDroppedDevices", () => {
     expect(rows.map((r) => r.Serial)).toEqual(["ACTIVE"]);
   });
 
+  test("excludes loaner-pool stock", async () => {
+    // Pool stock sits on a shelf between loans, so it is not expected to be
+    // checking in — an absent loaner is the normal state, not something to
+    // chase. Same reasoning as kit on an open receipt being off the dormant
+    // list. 7 of the 164 listed the day this landed.
+    await mkItem({ serialNumber: "LOANER", deviceName: "LAPTOP-1", isLoaner: true });
+    await mkItem({ serialNumber: "NOT-LOANER", deviceName: "LAPTOP-2", isLoaner: false });
+
+    const { rows } = await listDroppedDevices(UNSCOPED);
+    expect(rows.map((r) => r.Serial)).toEqual(["NOT-LOANER"]);
+  });
+
+  test("the count excludes loaners too, so card and file agree", async () => {
+    // The card renders a number and the button fetches the sheet in a separate
+    // round trip; a filter applied to one and not the other makes the number
+    // on screen a lie about the file.
+    await mkItem({ deviceName: "LAPTOP-1", isLoaner: true });
+    await mkItem({ deviceName: "LAPTOP-2", isLoaner: false });
+
+    const count = await countDroppedDevices(UNSCOPED);
+    const { rows } = await listDroppedDevices(UNSCOPED);
+    expect(count).toBe(1);
+    expect(rows).toHaveLength(count);
+  });
+
   test("STILL lists a device out on an open hand receipt — unlike the dormant list", async () => {
     // The deliberate divergence. A receipt explains why nobody has signed in;
     // it does not explain why MDM has no record of the device at all.
@@ -565,5 +592,156 @@ describe("listDroppedDevices", () => {
 
     const { rows } = await listDroppedDevices({ uic: "WAAAAA", unit: null });
     expect(rows.map((r) => r.Serial)).toEqual(["ALPHA"]);
+  });
+});
+
+
+/* ============================================================
+   Missing from the latest fleet census.
+
+   A device absent from an import leaves no trace by definition, so the whole
+   mechanism rests on `Item.lastImportedAt` being stamped for every row an
+   import carried — INCLUDING the ones it changed nothing on — and on only the
+   scheduled Drive pull counting as a census. Both are pinned below, because
+   getting either wrong declares most of the fleet missing.
+   ============================================================ */
+
+/** A census import: the scheduled Drive pull sets a sourceHash, hand uploads
+ *  never do. That is the only thing separating "the whole fleet was listed" from
+ *  "someone uploaded one unit's worth of rows". */
+async function importBatch(at: Date, opts: { census: boolean }) {
+  return prisma.importBatch.create({
+    data: {
+      createdById: adminId,
+      filename: "x.csv",
+      addedCount: 0,
+      updatedCount: 0,
+      skippedCount: 0,
+      skipped: [],
+      createdAt: at,
+      sourceHash: opts.census ? `hash-${at.getTime()}` : null,
+    },
+  });
+}
+
+describe("listDroppedDevices — missing from the latest census", () => {
+  test("flags a device the newest census did not list, and dates it", async () => {
+    await importBatch(daysAgo(10), { census: true });
+    await mkItem({
+      serialNumber: "MISSING",
+      deviceName: "LAPTOP-1",
+      lastSyncAt: daysAgo(20),
+      lastImportedAt: daysAgo(20),
+    });
+
+    const { rows } = await listDroppedDevices(UNSCOPED);
+    expect(rows.map((r) => r.Serial)).toEqual(["MISSING"]);
+    expect(rows[0]["MDM record"]).toBe("Missing from import");
+    // The date is the FIRST census that left it out, not today.
+    expect(rows[0]["Dropped off"]).toBe(daysAgo(10).toISOString().slice(0, 10));
+  });
+
+  test("does NOT flag a device the newest census listed", async () => {
+    await importBatch(daysAgo(10), { census: true });
+    await mkItem({
+      serialNumber: "PRESENT",
+      deviceName: "LAPTOP-1",
+      lastSyncAt: daysAgo(20),
+      lastImportedAt: daysAgo(9),
+    });
+
+    const { rows } = await listDroppedDevices(UNSCOPED);
+    expect(rows).toEqual([]);
+  });
+
+  test("dates it by the FIRST census that missed it, not the most recent", async () => {
+    // Three censuses since the device was last seen. The useful answer is when
+    // it went missing, not when we last confirmed it still was.
+    await importBatch(daysAgo(30), { census: true });
+    await importBatch(daysAgo(20), { census: true });
+    await importBatch(daysAgo(10), { census: true });
+    await mkItem({ serialNumber: "GONE", deviceName: "LAPTOP-1", lastImportedAt: daysAgo(35) });
+
+    const { rows } = await listDroppedDevices(UNSCOPED);
+    expect(rows[0]["Dropped off"]).toBe(daysAgo(30).toISOString().slice(0, 10));
+  });
+
+  test("a HAND upload is not a census — it cannot declare the fleet missing", async () => {
+    // The trap this guards: an admin uploading one unit's CSV would otherwise
+    // set the bar every other device is measured against, and the whole fleet
+    // would be reported as dropped off overnight.
+    await importBatch(daysAgo(1), { census: false });
+    await mkItem({
+      serialNumber: "NOT-IN-THAT-UPLOAD",
+      deviceName: "LAPTOP-1",
+      lastSyncAt: daysAgo(20),
+      lastImportedAt: daysAgo(20),
+    });
+
+    const { rows } = await listDroppedDevices(UNSCOPED);
+    expect(rows).toEqual([]);
+  });
+
+  test("is inert before the first census has ever run", async () => {
+    // Nothing to be missing from. `lastImportedAt < NULL` is NULL, never true,
+    // which is what makes the feature self-arming rather than flagging
+    // everything the day it deploys.
+    await mkItem({
+      serialNumber: "SEEN-ONCE",
+      deviceName: "LAPTOP-1",
+      lastSyncAt: daysAgo(20),
+      lastImportedAt: daysAgo(20),
+    });
+
+    const { rows } = await listDroppedDevices(UNSCOPED);
+    expect(rows).toEqual([]);
+  });
+
+  test("a device never carried by any import is not 'missing', it is never enrolled", async () => {
+    await importBatch(daysAgo(1), { census: true });
+    await mkItem({ serialNumber: "NEVER-IMPORTED", deviceName: "LAPTOP-1", lastImportedAt: null });
+
+    const { rows } = await listDroppedDevices(UNSCOPED);
+    expect(rows[0]["MDM record"]).toBe("Never enrolled");
+    expect(rows[0]["Dropped off"]).toBe("");
+  });
+
+  test("lists the dated ones first, longest gone first", async () => {
+    await importBatch(daysAgo(40), { census: true });
+    await importBatch(daysAgo(5), { census: true });
+    await mkItem({ serialNumber: "GONE-LONGEST", deviceName: "L1", lastImportedAt: daysAgo(45) });
+    await mkItem({ serialNumber: "GONE-RECENTLY", deviceName: "L2", lastImportedAt: daysAgo(20) });
+    await mkItem({ serialNumber: "NEVER", deviceName: "L3", lastImportedAt: null });
+
+    const { rows } = await listDroppedDevices(UNSCOPED);
+    expect(rows.map((r) => r.Serial)).toEqual(["GONE-LONGEST", "GONE-RECENTLY", "NEVER"]);
+  });
+
+  test("a device that reappears in a later census leaves the list on its own", async () => {
+    await importBatch(daysAgo(10), { census: true });
+    const item = await mkItem({
+      serialNumber: "BACK",
+      deviceName: "LAPTOP-1",
+      lastSyncAt: daysAgo(20),
+      lastImportedAt: daysAgo(20),
+    });
+    expect((await listDroppedDevices(UNSCOPED)).rows).toHaveLength(1);
+
+    // The next import carries it again — no flag to clear, because there is no
+    // flag: the state is derived from the stamp.
+    await prisma.item.update({ where: { id: item.id }, data: { lastImportedAt: new Date() } });
+    expect((await listDroppedDevices(UNSCOPED)).rows).toEqual([]);
+  });
+
+  test("the count agrees with the rows once a census is involved", async () => {
+    await importBatch(daysAgo(10), { census: true });
+    await mkItem({ deviceName: "L1", lastSyncAt: daysAgo(20), lastImportedAt: daysAgo(20) });
+    await mkItem({ deviceName: "L2", lastSyncAt: daysAgo(20), lastImportedAt: daysAgo(2) });
+    await mkItem({ deviceName: "L3", lastImportedAt: null });
+
+    const count = await countDroppedDevices(UNSCOPED);
+    const { rows } = await listDroppedDevices(UNSCOPED);
+    expect(count).toBe(2);
+    expect(rows).toHaveLength(count);
   });
 });

@@ -118,6 +118,17 @@ export type StaleDeviceRow = Record<(typeof STALE_DEVICE_COLUMNS)[number], strin
  * there is no date to measure, so without this list it is invisible rather than
  * overdue.
  *
+ * TWO THINGS PUT A DEVICE HERE: no sync time at all, or absence from the newest
+ * FLEET CENSUS import — a device the Intune pull stopped listing. The second is
+ * the stronger signal and the only one with a date attached, and it is what
+ * makes the list self-maintaining: a device that reappears in a later export
+ * leaves on its own.
+ *
+ * LOANER-POOL STOCK IS EXCLUDED, by explicit decision (2026-08-11): a loaner
+ * sits on a shelf between loans and is not expected to be checking in, so its
+ * absence is the normal state rather than something to chase. 7 of the 164
+ * listed the day it landed.
+ *
  * IT REQUIRES A DEVICE NAME, by explicit decision (2026-08-11). A row with no
  * name and no MDM record is a hand-created or scanned stub, not a machine that
  * fell off the network — on the live fleet that excluded 5 rows, including one
@@ -146,6 +157,11 @@ export const DROPPED_DEVICE_COLUMNS = [
   // used to report and no longer does; "Never enrolled" never appeared in an
   // export at all. Derived from whether any MDM telemetry was ever stored.
   "MDM record",
+  // The date the device dropped off: the first fleet census that did not list
+  // it. Blank for a device that has not dropped off — one MDM never knew, or
+  // one no census has run since. Derived, never stored (see
+  // analytics.service.ts) so a device that reappears clears its own date.
+  "Dropped off",
   "Last logon user",
   "Last logon date",
   "Compliance",

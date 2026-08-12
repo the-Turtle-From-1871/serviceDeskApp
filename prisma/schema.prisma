@@ -222,17 +222,30 @@ model Item {
   storageLocation            String?
   /// Pool stock: a device kept to lend out temporarily, over and over.
   ///
-  /// STORED rather than derived, unlike readiness and accountability — and the
-  /// distinction is the reason this column is allowed to exist. Those two were
-  /// dropped because they stored answers the data already knew. NOTHING here can
-  /// infer loaner-ness: no signal separates a laptop kept for lending from an
-  /// identical one issued permanently. It is a standing decision by the property
-  /// manager, so a person is the only possible source.
+  /// STORED rather than derived, unlike readiness and accountability. Those two
+  /// were dropped because they stored answers the data already knew; this one is
+  /// kept because a device can be a loaner without its name saying so, and the
+  /// admin toggle on /items is a real write.
   ///
-  /// DELIBERATELY NOT IMPORTABLE. The CSV importer writes a named column set
-  /// (see import.ts), and this is not in it — which is the entire reason it is a
-  /// new column rather than a reused deviceCategory/homeUnit/storageLocation.
-  /// Any of those would be reverted by the nightly Drive import within a day.
+  /// BUT IT NOW FOLLOWS THE DEVICE NAME — reversed 2026-08-11, hours after this
+  /// column shipped, by explicit decision. The text below this paragraph used to
+  /// read "a person is the only possible source" and "DELIBERATELY NOT
+  /// IMPORTABLE", and both are now false: the property manager already encodes
+  /// loaner status in the name (51 devices are `NGHINB-LOAN-###`), and keeping
+  /// the same fact in Intune and here guarantees the two disagree. Every path
+  /// that writes `deviceName` — import, admin edit, item card, bulk rename,
+  /// create — moves this flag with it via `modules/items/loaner-name.ts`.
+  ///
+  /// WHAT THAT COSTS, stated because it was the original objection and it was
+  /// real: MDM owns `deviceName`, so MDM now indirectly owns this flag for any
+  /// device whose name enters or leaves the convention. A device renamed in
+  /// Intune out of `NGHINB-LOAN-###` loses the flag on the next import with
+  /// nobody here deciding that.
+  ///
+  /// WHAT IS PRESERVED: a name change moves the flag ONLY when one of the two
+  /// names follows the convention. A hand-set flag on a device the convention
+  /// says nothing about survives every unrelated rename and edit — see
+  /// `loanerUpdateForRename`, whose three-way return exists for exactly that.
   isLoaner                   Boolean           @default(false)
   notes                      String?
   // The email of the person actually using the device. Distinct from the
@@ -310,6 +323,28 @@ model Item {
   // near-unique per row can't swallow the secondary sort key. This column still
   // backs the badge itself and the dashboard aggregate.
   lastAuditedAt              DateTime?
+  // When an MDM import last CARRIED this serial — stamped on every row an
+  // import touched, including rows it changed nothing on. "MDM still knows
+  // about this device", as distinct from lastSyncAt's "MDM last spoke to it".
+  //
+  // WHY IT IS STORED WHEN SO LITTLE ELSE HERE IS: this is an OBSERVATION, not a
+  // state. It records that a file arrived containing this serial at a moment in
+  // time, which nothing else in the database remembers — a row absent from a
+  // CSV leaves no trace anywhere by definition. It is not the hand-tickable
+  // flag `isAccountedFor` and `deployableStatus` were (see below); nobody can
+  // set it, and it is written by exactly one code path.
+  //
+  // DROPPED-OFF-NETWORK IS DERIVED FROM IT, NOT STORED. A device is dropped off
+  // when this stamp predates the newest FLEET CENSUS import, and the date it
+  // dropped off is the earliest census after this stamp — see
+  // analytics.service.ts. Storing a `droppedOffAt` instead would need clearing
+  // when the device reappears, and a flag that must be un-set is exactly the
+  // shape this schema keeps refusing.
+  //
+  // NULL means no import has ever carried the serial, which is a different
+  // thing from having dropped off and is deliberately NOT flagged: those
+  // devices are the "Never enrolled" half of the same list.
+  lastImportedAt            DateTime?
 
   serviceQueueItem ServiceQueueItem?
   edits            ItemEdit[]
@@ -336,6 +371,9 @@ model Item {
   // over a mostly-null column on every dashboard load — the same shape as
   // lastLogonAt above, and the same plain B-tree.
   @@index([lastSyncAt])
+  // The dropped-off-network list compares this against the newest census
+  // import, and it is mostly-null today — the same shape as the two above.
+  @@index([lastImportedAt])
   // Trigram GIN for the public, per-keystroke serial search (searchItemsBySerial),
   // which is `ILIKE '%q%'` — a leading wildcard a B-tree can't serve. Needs pg_trgm.
   @@index([serialNumber(ops: raw("gin_trgm_ops"))], type: Gin, map: "Item_serialNumber_trgm_idx")
@@ -536,6 +574,11 @@ model ImportBatch {
   sourceHash   String?
 
   @@index([createdById])
+  // The dropped-off-network derivation asks two questions of this table on
+  // every dashboard load — "when was the newest FLEET CENSUS?" and "which was
+  // the first census after this device was last seen?" — and both filter on a
+  // non-null sourceHash ordered by time.
+  @@index([sourceHash, createdAt])
 }
 
 model ReturnTransaction {

@@ -170,3 +170,165 @@ test("commitImport overwrites an existing item's storageLocation from the CSV an
   expect(edits).toHaveLength(1);
   expect(edits[0].changes).toEqual([{ field: "storageLocation", from: "Bldg 400", to: "Bldg 401" }]);
 });
+
+test("commitImport stamps lastImportedAt on EVERY row the file carried", async () => {
+  // The whole missing-from-census mechanism rests on this stamp, and the
+  // unchanged rows are the half that is easy to miss: on a steady fleet most
+  // rows change nothing, so stamping only the updates would report ~1,000
+  // devices as absent from an import that listed every one of them.
+  await createItem(
+    { make: "Dell", model: "5540", serialNumber: "SAME1", deviceName: "Radio", homeUnit: undefined, notes: undefined },
+    admin.id,
+  );
+  await createItem(
+    { make: "Dell", model: "5540", serialNumber: "CHANGED1", deviceName: "OldName", homeUnit: undefined, notes: undefined },
+    admin.id,
+  );
+
+  const before = new Date();
+  const csv = [
+    "make,model,serialNumber,deviceName",
+    "Dell,5540,SAME1,Radio",       // matches exactly -> unchanged, writes nothing
+    "Dell,5540,CHANGED1,NewName",  // -> updated
+    "HP,X360,BRANDNEW1,Fresh",     // -> created
+  ].join("\n");
+
+  const res = await commitImport(csv, "items.csv", admin);
+  expect(res.error).toBeUndefined();
+  expect(res.unchanged).toBe(1);
+  expect(res.updated).toBe(1);
+  expect(res.added).toBe(1);
+
+  const rows = await prisma.item.findMany({
+    where: { serialNumber: { in: ["SAME1", "CHANGED1", "BRANDNEW1"] } },
+    select: { serialNumber: true, lastImportedAt: true },
+    orderBy: { serialNumber: "asc" },
+  });
+  for (const r of rows) {
+    expect(r.lastImportedAt, `${r.serialNumber} was not stamped`).not.toBeNull();
+    expect(r.lastImportedAt!.getTime()).toBeGreaterThanOrEqual(before.getTime() - 1000);
+  }
+  // ONE instant for the whole import, so "seen in the same import" is an exact
+  // equality rather than a range.
+  const stamps = new Set(rows.map((r) => r.lastImportedAt!.getTime()));
+  expect(stamps.size).toBe(1);
+});
+
+test("an unchanged row's stamp moves without its updatedAt moving", async () => {
+  // The stamp is written in raw SQL precisely so Prisma's @updatedAt does not
+  // fire: bumping updatedAt on a thousand untouched rows every night would
+  // destroy the one signal meaning "something about this device changed".
+  await createItem(
+    { make: "Dell", model: "5540", serialNumber: "STEADY1", deviceName: "Radio", homeUnit: undefined, notes: undefined },
+    admin.id,
+  );
+  const csv = "make,model,serialNumber,deviceName\nDell,5540,STEADY1,Radio\n";
+
+  await commitImport(csv, "first.csv", admin);
+  const after1 = await prisma.item.findUniqueOrThrow({ where: { serialNumber: "STEADY1" } });
+
+  await commitImport(csv, "second.csv", admin);
+  const after2 = await prisma.item.findUniqueOrThrow({ where: { serialNumber: "STEADY1" } });
+
+  expect(after2.lastImportedAt!.getTime()).toBeGreaterThan(after1.lastImportedAt!.getTime());
+  expect(after2.updatedAt.getTime()).toBe(after1.updatedAt.getTime());
+});
+
+test("a real census import does NOT report the devices it just carried as missing", async () => {
+  // The end-to-end version of the boundary, and the one that catches a bug the
+  // hand-built fixtures cannot: `importedAt` is taken before the transaction
+  // opens, so if ImportBatch.createdAt were left to default to now() every
+  // device the census had just listed would be stamped a few milliseconds
+  // EARLIER than the census recording it — and the entire fleet would read as
+  // missing from the import that carried it.
+  const { listDroppedDevices } = await import("@/app/admin/analytics/analytics.service");
+
+  const csv = [
+    "make,model,serialNumber,deviceName",
+    "Dell,5540,CENSUS1,LAPTOP-1",
+    "Dell,5540,CENSUS2,LAPTOP-2",
+  ].join("\n");
+
+  // sourceHash non-null = the scheduled Drive pull, i.e. a fleet census.
+  const res = await commitImport(csv, "drive-import.csv", admin, "hash-abc");
+  expect(res.error).toBeUndefined();
+  expect(res.added).toBe(2);
+
+  const batch = await prisma.importBatch.findFirstOrThrow({ orderBy: { createdAt: "desc" } });
+  const items = await prisma.item.findMany({ select: { lastImportedAt: true } });
+  for (const i of items) {
+    expect(i.lastImportedAt!.getTime()).toBe(batch.createdAt.getTime());
+  }
+
+  // Neither device is missing from the census that just listed it. They still
+  // have no sync time, so they appear for THAT reason — as "Never enrolled",
+  // never as "Missing from import".
+  const { rows } = await listDroppedDevices({ uic: null, unit: null });
+  expect(rows.map((r) => r["MDM record"])).toEqual(["Never enrolled", "Never enrolled"]);
+  expect(rows.every((r) => r["Dropped off"] === "")).toBe(true);
+});
+
+test("the importer moves the loaner flag with the device name", async () => {
+  // The naming convention is the source of loaner status, so a rename in the
+  // MDM export has to carry the flag with it — in both directions.
+  await createItem(
+    { make: "Dell", model: "5540", serialNumber: "BECOMES", deviceName: "NGHINB-PMACN128", homeUnit: undefined, notes: undefined },
+    admin.id,
+  );
+  await createItem(
+    { make: "Dell", model: "5540", serialNumber: "CEASES", deviceName: "NGHINB-LOAN-001", homeUnit: undefined, notes: undefined },
+    admin.id,
+  );
+  await createItem(
+    { make: "Dell", model: "5540", serialNumber: "UNRELATED", deviceName: "NGHINB-PMACN200", homeUnit: undefined, notes: undefined },
+    admin.id,
+  );
+  // A device flagged BY HAND whose name never followed the convention.
+  await prisma.item.update({ where: { serialNumber: "UNRELATED" }, data: { isLoaner: true } });
+  expect((await prisma.item.findUniqueOrThrow({ where: { serialNumber: "CEASES" } })).isLoaner).toBe(true);
+
+  const csv = [
+    "make,model,serialNumber,deviceName",
+    "Dell,5540,BECOMES,NGHINB-LOAN-140",     // into the convention
+    "Dell,5540,CEASES,NGHINB-PMACN300",      // out of it
+    "Dell,5540,UNRELATED,NGHINB-PMACN201",   // renamed, but neither name matches
+  ].join("\n");
+
+  const res = await commitImport(csv, "items.csv", admin);
+  expect(res.error).toBeUndefined();
+  expect(res.updated).toBe(3);
+
+  const byId = async (sn: string) =>
+    (await prisma.item.findUniqueOrThrow({ where: { serialNumber: sn } })).isLoaner;
+  expect(await byId("BECOMES")).toBe(true);
+  expect(await byId("CEASES")).toBe(false);
+  // The load-bearing one: an unrelated rename must not switch off a flag a
+  // person set deliberately.
+  expect(await byId("UNRELATED")).toBe(true);
+});
+
+test("an import that creates a loaner-named device marks it on the way in", async () => {
+  const csv = "make,model,serialNumber,deviceName\nHP,X360,FRESHLOAN,NGHINB-LOAN-200\n";
+  const res = await commitImport(csv, "items.csv", admin);
+  expect(res.added).toBe(1);
+  expect((await prisma.item.findUniqueOrThrow({ where: { serialNumber: "FRESHLOAN" } })).isLoaner).toBe(true);
+});
+
+test("a re-enrolled loaner KEEPS its flag, because the rename is withheld", async () => {
+  // The interaction worth pinning. MDM re-enrols a device as BE-XXXXXXXXXXXX,
+  // which does not match the loaner convention — but planImport withholds that
+  // autogenerated rename, so the stored NGHINB-LOAN-### name survives and so
+  // does the flag. Remove the withhold guard and this strips the flag off every
+  // re-enrolled loaner overnight.
+  await createItem(
+    { make: "Dell", model: "5540", serialNumber: "REENROLLED", deviceName: "NGHINB-LOAN-005", homeUnit: undefined, notes: undefined },
+    admin.id,
+  );
+  const csv = "make,model,serialNumber,deviceName\nDell,5540,REENROLLED,BE-7J5AKRNFLP6B\n";
+  await commitImport(csv, "items.csv", admin);
+
+  const item = await prisma.item.findUniqueOrThrow({ where: { serialNumber: "REENROLLED" } });
+  expect(item.deviceName).toBe("NGHINB-LOAN-005");
+  expect(item.isLoaner).toBe(true);
+  expect(item.mdmProposedName).toBe("BE-7J5AKRNFLP6B");
+});

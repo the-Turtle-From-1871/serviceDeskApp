@@ -18,19 +18,23 @@ import { headerRow, columnWidths, COMMON_WIDTHS } from "./workbook-style";
    time at all, so there is no age to band and nothing to shade. Colouring it
    anyway would invent a severity the data does not carry.
 
-   What it has instead is the `MDM record` column, and that column is the whole
-   reason the sheet is legible. Measured the day it was built: 164 devices, of
-   which **12 had been in MDM and dropped out** and **152 were never enrolled at
-   all**. Only the first group has "dropped off the network" happen to it; the
-   rest were never on it as far as MDM is concerned. Sorting puts the 12 at the
-   top (see `listDroppedDevices`) so they are not buried, and the header note
-   below says the split in words for whoever opens the file cold.
+   What it has instead is the `MDM record` column and its `Dropped off` date,
+   and together they are the whole reason the sheet is legible. Three states:
+   **Missing from import** (the newest fleet census did not list the device —
+   the strongest signal, and the only one with a date), **Dropped out** (MDM
+   knows it but has never reported a sync time) and **Never enrolled** (no MDM
+   record of any kind). Measured the day the list was built, before the census
+   rule existed: 164 devices, 12 dropped out and 152 never enrolled. Sorting
+   puts the dated ones first, longest-gone first (see `listDroppedDevices`), so
+   the actionable handful is never buried under the never-enrolled backlog, and
+   the note below says the split in words for whoever opens the file cold.
    ============================================================ */
 
 /** Widths for the columns this sheet has beyond the shared identity block. */
 const COLUMN_WIDTH: Record<string, number> = {
   ...COMMON_WIDTHS,
-  "MDM record": 16,
+  "MDM record": 20,
+  "Dropped off": 14,
   "Last logon date": 16,
 };
 
@@ -48,8 +52,9 @@ export async function buildDroppedDevicesWorkbook(
     })),
   );
 
+  const missing = rows.filter((r) => r["MDM record"] === "Missing from import").length;
   const droppedOut = rows.filter((r) => r["MDM record"] === "Dropped out").length;
-  const neverEnrolled = rows.length - droppedOut;
+  const neverEnrolled = rows.length - missing - droppedOut;
 
   // Below the data, like the dormant sheet's legend, and for the same reason:
   // above it would push the header off row 1 and break "freeze the top row" and
@@ -60,18 +65,21 @@ export async function buildDroppedDevicesWorkbook(
     [
       {
         value:
-          `Devices with NO MDM sync time at all · ${scopeLabel(scope)}. These cannot appear on the ` +
-          `dormant-device list at any age, because there is no date to measure — this is the only ` +
-          `place they are visible. Devices with no device name are not listed.`,
+          `Devices the MDM export has stopped listing, or has never reported a sync time for · ` +
+          `${scopeLabel(scope)}. Neither can appear on the dormant-device list at any age, because ` +
+          `there is no sync date to measure — this is the only place they are visible. Devices with ` +
+          `no device name, and loaner-pool stock, are not listed.`,
       },
     ],
     [
       {
         value:
-          `${droppedOut.toLocaleString()} dropped out — MDM used to report these and no longer does; ` +
-          `check whether they were unenrolled, wiped or reassigned. ` +
-          `${neverEnrolled.toLocaleString()} never enrolled — MDM has no record of these at all, ` +
-          `so the question is whether they should be enrolled.`,
+          `${missing.toLocaleString()} missing from import — the latest MDM export did not list these ` +
+          `at all, and the Dropped off column says which export first left them out. ` +
+          `${droppedOut.toLocaleString()} dropped out — MDM knows these but has never reported a sync ` +
+          `time for them. ` +
+          `${neverEnrolled.toLocaleString()} never enrolled — MDM has no record of these at all, so the ` +
+          `question is whether they should be enrolled.`,
       },
     ],
     ...(truncated

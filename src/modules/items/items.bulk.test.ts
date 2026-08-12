@@ -8,6 +8,7 @@ import {
   setItemsStatus,
   setItemsCategory,
   setItemStatus,
+  renameItems,
   MAX_BULK_ITEMS,
 } from "./items.service";
 
@@ -215,4 +216,43 @@ test("setItemsCategory dedupes ids, no-ops on empty, and refuses over the cap", 
   await expect(
     setItemsCategory(Array.from({ length: MAX_BULK_ITEMS + 1 }, (_, i) => `id-${i}`), "Laptops", editor()),
   ).rejects.toMatchObject({ code: "TOO_MANY" });
+});
+
+test("renameItems moves the loaner flag with the batch", async () => {
+  // The bulk rename is a deviceName writer like any other, so it has to carry
+  // the flag — in both directions, and leaving hand-set flags alone when the
+  // convention says nothing about either name.
+  const into = await createItem(
+    { make: "Dell", model: "5540", serialNumber: "BULK-IN", deviceName: "NGHINB-PMACN500", homeUnit: undefined, notes: undefined },
+    adminId,
+  );
+  const outOf = await createItem(
+    { make: "Dell", model: "5540", serialNumber: "BULK-OUT", deviceName: "NGHINB-LOAN-600", homeUnit: undefined, notes: undefined },
+    adminId,
+  );
+  expect(outOf.isLoaner).toBe(true);
+
+  // Rename the first INTO the convention.
+  // buildRenameSequence supplies the hyphen, so the prefix carries none.
+  await renameItems([into.id], "NGHINB-LOAN", "700", { id: adminId, name: "Admin" });
+  expect((await prisma.item.findUniqueOrThrow({ where: { id: into.id } })).isLoaner).toBe(true);
+
+  // ...and the second OUT of it.
+  await renameItems([outOf.id], "NGHINB-PMACN", "800", { id: adminId, name: "Admin" });
+  const after = await prisma.item.findUniqueOrThrow({ where: { id: outOf.id } });
+  expect(after.deviceName).toBe("NGHINB-PMACN-800");
+  expect(after.isLoaner).toBe(false);
+});
+
+test("renameItems leaves a hand-set loaner flag alone", async () => {
+  const item = await createItem(
+    { make: "Dell", model: "5540", serialNumber: "BULK-HANDSET", deviceName: "NGHINB-SWITCH-10", homeUnit: undefined, notes: undefined },
+    adminId,
+  );
+  await prisma.item.update({ where: { id: item.id }, data: { isLoaner: true } });
+
+  await renameItems([item.id], "NGHINB-SWITCH", "20", { id: adminId, name: "Admin" });
+  // Neither name follows the convention, so the COALESCE leaves the flag as the
+  // person set it.
+  expect((await prisma.item.findUniqueOrThrow({ where: { id: item.id } })).isLoaner).toBe(true);
 });
