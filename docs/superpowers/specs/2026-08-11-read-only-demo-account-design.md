@@ -14,6 +14,7 @@ Concretely it must:
 2. Have every write refused, with a message rather than a crash.
 3. Sign in without confirming its email address.
 4. Be unable to change its own password — through **any** door.
+5. Be unable to import items.
 
 ## Why this needs a new concept
 
@@ -95,12 +96,39 @@ const denied = denyReadOnly(user);
 if (denied) return denied;
 ```
 
-Scope: ~50 mutating actions of the 64 in `src/app/actions/*` and
-`src/app/admin/actions/*` (24 non-test files). Read-only actions
-(`search.ts`, `receipts.parse.ts`) are excluded.
+**The rule is blanket: if an action writes to the database, it gets the guard.**
+Not a curated list of "dangerous" ones — creating users, editing items,
+recording audits, processing returns, filing receipts, managing the queue,
+categories, units, contacts, signatures, the access PIN, receipt timers,
+committing an import. Scope: ~50 mutating actions of the 64 in
+`src/app/actions/*` and `src/app/admin/actions/*` (24 non-test files).
+
+The **only** exclusions are actions that genuinely write nothing —
+`search.ts`, `receipts.parse.ts`, `analyzeImportAction`,
+`previewItemRenameAction`. Each is named on an explicit allowlist in the
+coverage test (§4), so exempting an action is a deliberate, reviewable edit
+rather than an omission.
 
 `changePasswordAction` and `saveSignatureAction` (`src/app/actions/account.ts`)
 are inside this set — that is requirement 4's authenticated door.
+
+#### CSV import
+
+There are three import front doors and one implementation (CLAUDE.md), but only
+**two are session-reachable**, both in `src/app/admin/actions/items.ts`:
+
+- `analyzeImportAction` (`:430`) — **left allowed.** `analyzeImport`
+  (`items.service.ts:1265`) is a pure read: `parseItemsCsv` →
+  `loadExistingBySerial` → `planImport`, writing nothing. The demo can upload a
+  CSV and see the real preview counts, which shows the feature properly rather
+  than dead-ending at step one.
+- `commitImportAction` (`:447`) — **blocked** by `denyReadOnly`, like every other
+  mutating action. `commitImport` (`:1292`) writes items, `ItemEdit` rows,
+  categories and an `ImportBatch`. It already returns a `useActionState`-shaped
+  result, so the refusal renders inline in the form.
+
+`POST /api/items/import` and `GET|POST /api/cron/import-drive` authenticate on a
+**secret**, not a session, so the demo account cannot reach them. No change.
 
 **Known gap, deliberate:** a few actions return `void` and are bare
 `<form action={fn}>` — e.g. `toggleUserActiveAction` and `setUserRoleAction`
@@ -144,11 +172,17 @@ never minted cannot be redeemed.
   one layout edit. Covers the silent `void` actions from §2, and is the visible
   tell that the fail-open env var is actually set.
 - **Guard-coverage test.** Walks `src/app/actions/*.ts` and
-  `src/app/admin/actions/*.ts` and fails if an exported mutating `*Action` does
-  not call `denyReadOnly`. This is the mechanical enforcement that the
-  per-call-site approach otherwise lacks — a future action cannot quietly forget
-  it. Read-only actions sit on an explicit allowlist in the test, so exempting
-  one is a deliberate, reviewable edit.
+  `src/app/admin/actions/*.ts` and fails if an exported `*Action` calls neither
+  `denyReadOnly` nor appears on the read-only allowlist. This is the mechanical
+  enforcement that the per-call-site approach otherwise lacks — a future action
+  cannot quietly forget the guard.
+
+  **Honest limit:** per `ci-gates`, `Tests (vitest)` is **advisory** — only
+  Semgrep and `next build` block a merge. So this test *reports* a forgotten
+  guard, it does not *prevent* one landing. Accepted for now, because the guard
+  protects a single known demo account rather than a general permission. If a
+  hard gate is wanted later, the same check can be expressed as a Semgrep rule,
+  which **is** a required check.
 
 ## Testing
 
@@ -158,6 +192,7 @@ never minted cannot be redeemed.
 | `authz.test.ts` | `SessionUser.isReadOnly` resolves from DB email; `denyReadOnly` returns the refusal only for demo accounts |
 | `auth.reset.test.ts` | no `PasswordResetToken` is minted for a demo email, and the action still returns generic success |
 | guard-coverage test | every mutating action calls `denyReadOnly` |
+| `items.import.readonly.test.ts` | `commitImportAction` writes no `Item`/`ImportBatch` for a demo caller, while `analyzeImportAction` still returns its counts |
 
 Per `parallel-agents-share-one-test-db`, if another session holds the test DB,
 push and let CI run the full suite.
