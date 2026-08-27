@@ -42,6 +42,7 @@ export function pickupItems(t: PickupReceipt): PickupItem[] {
   );
 }
 
+// NOTE: deliberately carries NO link - see send-receipt-email.ts for why.
 function body(a: PickupEmailArgs): string {
   const list = a.items.map((i) => `  - ${i.make} ${i.model} (SN ${i.serialNumber})`).join("\n");
   return [
@@ -52,8 +53,7 @@ function body(a: PickupEmailArgs): string {
     ``,
     `Please coordinate with the DCSIM Service Desk to collect your equipment.`,
     ``,
-    `Reference hand receipt ${a.receiptNumber}:`,
-    a.receiptUrl,
+    `Reference hand receipt ${a.receiptNumber}.`,
   ].join("\n");
 }
 

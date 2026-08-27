@@ -3,6 +3,29 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-08-27
+
+### Changed
+
+- **More than 10 of the same make and model now split across rows instead of being refused.** Scanning an 11th identical device used to stop with "Too many of one item — 10 per make and model max", forcing a second receipt. The items are now spread evenly over as many rows as they need: 11 become 6+5, 12 become 6+6, 21 become 7+7+7. The 10-per-row cap still holds (all the serials for a row print into one DA 2062 description cell, and past ~10 the row stops being legible) — it just splits rather than refusing. The 18-row limit for one receipt is unchanged and is now the only ceiling.
+- **Hand-receipt emails no longer carry a link to the receipt.** The signed PDF is attached, and the link pointed at a host recipients cannot reach. Password-reset and email-verification links are unaffected — those links are the whole point of those messages.
+- **The DA 2062 signature column no longer prints as a solid black bar.** The unused part of the column is ruled through with an outlined box and a diagonal instead of being flooded with toner. It carries the same meaning — that space cannot be added to after signing — at a fraction of the ink.
+
+### Removed
+
+- **The test suite.** 170 Vitest/Playwright files, their configs, and the `npm test` scripts, plus the `Tests (vitest)` CI job. Nothing now verifies behaviour mechanically; `Semgrep SAST` and `Build (next build)` remain and neither runs application logic.
+- **`docs/SECURITY.md`**, the inventory of security controls and accepted risks.
+
+### Security
+
+- **The Turnstile bot challenge on sign-in, registration and password reset is disabled.** It could not complete on the deployment network and was refusing valid sign-ins. Rate limiting (5 failed sign-ins per account per 15 minutes, 60 per network), the app-wide velocity detector, and bcrypt are unchanged. The code is intact and re-enables by uncommenting two keys — do that before the app is reachable from the public internet again.
+
+### Notes
+
+- `npm run dev` now runs against the **Supabase** database; `npm run dev:local` uses the local Docker Postgres. Vercel was retired on 2026-08-21, so Supabase holds the only copy of the data and a local dev server writes to it directly. `npm run db:migrate` and `npm run db:reset` still target Docker deliberately.
+- Outbound email was restored on a new Google OAuth client after the previous one was deleted; delivery to army.mil, including a PDF attachment and CC'd recipients, is confirmed.
+- Record copies of every custody email go to `dcsimservicedesk@gmail.com` and `ng.hi.hiarng.mbx.dcsim-hand-receipt@army.mil`. These are **defaults in code** (`DEFAULT_RECEIPT_CC_EMAILS`), not configuration — they apply with no env var set. `RECEIPT_CC_EMAILS` overrides them, and setting it to an empty string disables the copies entirely.
+
 ## 2026-08-12
 
 ### Fixed

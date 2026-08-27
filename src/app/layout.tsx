@@ -55,8 +55,14 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // suppressHydrationWarning on <html>: browser extensions inject attributes
+  // before React hydrates (observed: __gcrremoteframetoken from a remote-access
+  // extension), which React reports as a mismatch it "won't patch up". Nothing
+  // in this app writes those attributes. It suppresses attribute mismatches on
+  // THAT ELEMENT ONLY - one level deep, not a subtree switch - so a real
+  // mismatch anywhere inside is still reported.
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
+    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`} suppressHydrationWarning>
       <body>
         <div className="app-shell">{children}</div>
         <SiteFooter />

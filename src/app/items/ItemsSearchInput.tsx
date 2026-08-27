@@ -85,9 +85,11 @@ export function ItemsSearchInput({
     return () => clearTimeout(timer);
   }, [query, q, router]);
 
+  // suppressHydrationWarning below: a browser extension tags form controls with
+  // __gcruniqueid before React hydrates — see src/app/layout.tsx.
   return (
-    <form className="row" style={{ gap: 8 }} onSubmit={(e) => e.preventDefault()}>
-      <input
+    <form suppressHydrationWarning className="row" style={{ gap: 8 }} onSubmit={(e) => e.preventDefault()}>
+      <input suppressHydrationWarning
         className="input"
         name="q"
         aria-label="Search items"

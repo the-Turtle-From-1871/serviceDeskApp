@@ -69,11 +69,13 @@ export function HomeSearch() {
   return (
     <div className="stack">
       <div className="row search-row">
-        <select className="select" aria-label="Search by" value={mode} onChange={(e) => setMode(e.target.value === "receipt" ? "receipt" : "serial")}>
+        {/* suppressHydrationWarning: see src/app/layout.tsx — an extension
+            tags form controls with __gcruniqueid before hydration. */}
+        <select suppressHydrationWarning className="select" aria-label="Search by" value={mode} onChange={(e) => setMode(e.target.value === "receipt" ? "receipt" : "serial")}>
           <option value="serial">Serial number</option>
           <option value="receipt">Hand receipt number</option>
         </select>
-        <input className="input" aria-label="Search" placeholder="Start typing…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <input suppressHydrationWarning className="input" aria-label="Search" placeholder="Start typing…" value={query} onChange={(e) => setQuery(e.target.value)} />
       </div>
 
       {/* Deliberately OUTSIDE the aria-live region below: a progress bar that

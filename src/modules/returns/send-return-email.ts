@@ -18,6 +18,7 @@ function itemLines(items: EmailItem[]): string {
   return items.length ? items.map((i) => `  - ${i.make} ${i.model} (SN ${i.serialNumber})`).join("\n") : "  (none)";
 }
 
+// NOTE: neither body carries a link - see send-receipt-email.ts for why.
 // Partial return → "UPDATED": what was returned and what is still out.
 function updatedBody(a: ReturnEmailArgs): string {
   return [
@@ -29,8 +30,7 @@ function updatedBody(a: ReturnEmailArgs): string {
     `Not returned:`,
     itemLines(a.remaining),
     ``,
-    `View or download the signed hand receipt here:`,
-    a.receiptUrl,
+    `The signed hand receipt is attached to this message as a PDF.`,
   ].join("\n");
 }
 
@@ -41,8 +41,7 @@ function closedBody(a: ReturnEmailArgs): string {
     ``,
     itemLines(a.allItems),
     ``,
-    `View or download the signed hand receipt here:`,
-    a.receiptUrl,
+    `The signed hand receipt is attached to this message as a PDF.`,
   ].join("\n");
 }
 

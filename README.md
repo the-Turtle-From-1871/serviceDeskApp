@@ -40,7 +40,7 @@ receipt PDF.
 - **Zod** validation · **pdf-lib** (PDFs) · **qrcode** · **csv-parse** (imports) · **barcode-detector** (in-browser QR scanning)
 - **Gmail API** (OAuth2 refresh token, `gmail.send`) as the transactional-email sender, with **Resend** as the configured alternative — both are plain `fetch` calls, there is no SMTP client (`nodemailer` was removed on 2026-08-04)
 - **Tailwind CSS v4** + **shadcn/ui** (new UI only — the original `globals.css` design system still backs existing pages; see the styling section of `CLAUDE.md`) · **Recharts** · **lucide-react**
-- **Vitest** (real-DB integration tests) · **Playwright** · **ESLint 9**
+- **ESLint 9** — there is no test suite (see Testing)
 - Hosted on **Vercel** + **Supabase**
 
 Full rationale and diagrams: [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md).
@@ -68,13 +68,18 @@ npm run db:migrate
 npm run db:seed
 
 # 5. Run
-npm run dev            # http://localhost:3000
+npm run dev:local      # http://localhost:3000, against the Docker DB above
 ```
 
-The test suite provisions its own databases automatically — `npm test` connects
-to the `postgres` maintenance database and creates what it needs (see
-Testing below). There is nothing to create by hand; the Postgres server just
-needs to be reachable.
+`npm run dev` (no `:local`) runs against the **Supabase** database instead — that
+is the normal way to work now that Vercel is retired, and it is the only copy of
+the real data. It needs `.env.supabase` (gitignored, one per clone) holding the
+Session-pooler connection string from Supabase Dashboard → Project Settings →
+Database. Steps 2–4 above still matter: `.env` keeps pointing the Prisma CLI at
+the Docker database, which is what stops `npm run db:reset` from wiping Supabase.
+
+There is no test suite, so nothing else needs provisioning — the Docker database
+above is used by `npm run dev:local` and the Prisma CLI only.
 
 ## Environment variables
 
@@ -105,15 +110,14 @@ inline.
 
 | Script            | Description                                  |
 |-------------------|----------------------------------------------|
-| `npm run dev`     | Dev server (Turbopack), after staging the wasm assets |
+| `npm run dev`     | Dev server (Turbopack) against the **Supabase** database — the only copy of the data. Connection string in the gitignored `.env.supabase` (`scripts/dev-supabase.mjs`), applied only to the spawned `next dev`. **Real data, no undo.** |
+| `npm run dev:local` | Dev server against the local Docker Postgres (port 5435). |
 | `npm run build`   | `copy-wasm && prisma generate && next build`  |
 | `npm start`       | Production server                             |
-| `npm test`        | Vitest suite (needs the test DB up)           |
-| `npm run test:ui` | The jsdom component tests only (`*.test.tsx`). jsdom has **no layout engine** — this is not evidence for a CSS or mobile change. |
 | `npm run db:migrate` | `prisma migrate dev` (local)               |
 | `npm run db:deploy`  | `prisma migrate deploy` (prod)             |
 | `npm run db:seed`    | Seed the admin account                     |
-| `npm run db:seed:e2e` | Seed the fixtures the Playwright suite expects |
+| `npm run db:seed:e2e` | **Dead.** Seeded fixtures for the deleted Playwright suite; the script and `prisma/seed-e2e.ts` remain but nothing consumes them. |
 | `npm run db:seed:analytics` | **Dev only.** Populate categories, UICs, readiness *signals* (service flags, on-hand marks, MDM last-logon) and demo closed receipts so the analytics dashboard renders locally. Overwrites those fields, so it **refuses any non-local `DATABASE_URL`** — a `NODE_ENV` check alone would not have stopped it, since `tsx` leaves that unset. The refusal is overridable with `ALLOW_NONLOCAL_DEMO_SEED=1`; that override exists for a deliberate staging run and should never be set in a shell that can reach production. |
 | `npm run db:reset`   | Reset the local dev DB                     |
 | `npm run lint`    | ESLint                                        |
@@ -159,41 +163,24 @@ JWT (no DB session table). Authorization is enforced in `requireUser` /
 `requireAdmin`, which re-read `role`/`isActive` from the DB each request, so
 deactivations and role changes take effect immediately. See
 [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) for the full model and **why we
-use Auth.js rather than Supabase Auth**, and
-[`docs/SECURITY.md`](./docs/SECURITY.md) for the complete inventory of security
-controls (authn/authz, the public PIN gate, reset hardening, crypto seal, RLS
-posture, CI gates) plus the known gaps and accepted risks.
+use Auth.js rather than Supabase Auth**, .
+`docs/SECURITY.md` — the inventory of security controls and accepted risks —
+was **deleted on 2026-08-27** and is recoverable from git history.
 
 ## Testing
 
-Vitest runs against a **real migrated Postgres**, not mocks — services and
-custody invariants are covered with behavior. `tests/helpers/global-setup.ts`
-provisions the databases itself, once per run: it migrates one template
-(`handreceipt_test_<hash-of-checkout-path>_tmpl`) and clones it into one
-database per worker (`..._1` … `..._N`, where N is `MAX_TEST_WORKERS` —
-`min(8, cores)`, not a bare 8: capped at 8 because that beat 4 workers on an
-8-core dev box (80.73s/79.73s at 8 vs 122.75s/104.85s at 4), capped by the machine's own
-core count because a smaller runner can't afford 8 — a bare 8 oversubscribed a
-4-core CI runner and blew a CPU-bound test's timeout. Override with the
-`VITEST_MAX_WORKERS` env var), then drops all of them at the end. `npm test`
-runs the whole suite in parallel across those workers (166 files / ~2019
-tests): **63.71s in CI** (4-core runner) / **77.53s locally** (8-core dev box).
-Component tests (`*.test.tsx`,
-`npm run test:ui`) opt into jsdom per file and skip database provisioning
-entirely; jsdom has no layout engine, so neither they nor `npm run build` are
-evidence for a CSS or mobile change — verify visual work in a real browser.
-Playwright covers browser/e2e (`tests/e2e`), seeded by `npm run db:seed:e2e`.
+**There is no test suite.** The Vitest + Playwright suite — 170 files, roughly
+2,000 tests, plus `vitest.config.ts`, `playwright.config.ts`, `tests/` and the
+`npm test` scripts — was deleted on 2026-08-27 at the owner's request, and the
+`Tests (vitest)` CI job was removed with it.
 
-**Concurrent `npm test` runs no longer interfere.** This used to say the
-opposite — "only one agent or developer may run the suite at a time" — because
-every checkout shared one `handreceipt_test` database, and two runs TRUNCATing
-it at once corrupted each other in ways that looked like flaky tests in
-unrelated files. That constraint is retired, not just undocumented: the
-template/worker database names above are hashed from the checkout's own
-filesystem path, so two worktrees (or two agent sessions each in their own
-worktree) provision entirely disjoint sets of databases and cannot collide.
-The one case that can still collide is two runs **inside the same worktree**
-at the same time, since both hash to the same names.
+Nothing now checks behaviour mechanically. `npm run lint` and `npm run build`
+are the only automated feedback, and neither executes application logic: a build
+proves the app compiles, not that a receipt is filed correctly. Verify changes by
+running the app — and note `npm run dev` writes to the **live** Supabase data,
+so use `npm run dev:local` against the Docker database for anything destructive.
+
+All of it is recoverable from git history if that decision is revisited.
 
 ## Deployment
 

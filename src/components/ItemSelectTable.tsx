@@ -11,7 +11,7 @@ import { ReadinessControls } from "@/components/ReadinessControls";
 import { BulkActionsMenu } from "@/components/BulkActionsMenu";
 import { DeleteItemButton } from "@/components/DeleteItemButton";
 import { toggleItemStatusAction } from "@/app/admin/actions/items";
-import { MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW } from "@/modules/transfers/receipt-lines";
+import { MAX_RECEIPT_ROWS } from "@/modules/transfers/receipt-lines";
 // From the PURE schema module, never items.service.ts — that imports Prisma,
 // which must not reach the browser bundle.
 import { MAX_BULK_ITEMS } from "@/modules/items/items.schema";
@@ -179,17 +179,9 @@ export function ItemSelectTable({
     [selected],
   );
   const tooMany = groupCount > MAX_RECEIPT_ROWS;
-  const maxGroupSize = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const it of selected.values()) {
-      const key = `${it.make} ${it.model}`;
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-    let max = 0;
-    for (const n of counts.values()) if (n > max) max = n;
-    return max;
-  }, [selected]);
-  const tooManyPerRow = maxGroupSize > MAX_ITEMS_PER_ROW;
+  // No per-model cap here any more: groupItemsIntoLines SPLITS an oversized
+  // model across rows (11 -> 6+5), so a big selection of one model is fine.
+  // Only the item-TYPE count is still bounded, by the form's 18 rows.
 
   // Selection mode is DERIVED, not its own state: the phone shows checkboxes
   // and treats taps as toggles exactly when something is selected. A separate
@@ -519,7 +511,7 @@ export function ItemSelectTable({
   };
 
   const selectedKeys = () => [...selected.keys()].join(",");
-  const create = () => { if (selected.size && !tooMany && !tooManyPerRow) router.push(`/receipts/new?items=${selectedKeys()}`); };
+  const create = () => { if (selected.size && !tooMany) router.push(`/receipts/new?items=${selectedKeys()}`); };
   // In an INSTALLED app a new window collapses into the standalone one, which
   // has no tab strip and no back button — so the sheet would take the app over
   // with no way back. Show it in the overlay there, and leave a browser tab
@@ -830,8 +822,6 @@ export function ItemSelectTable({
             <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
               {tooMany
                 ? <span role="alert" className="alert-error">Too many item types ({groupCount}). Max {MAX_RECEIPT_ROWS} per receipt — split into two.</span>
-                : tooManyPerRow
-                ? <span role="alert" className="alert-error">Too many of one item ({maxGroupSize}). Max {MAX_ITEMS_PER_ROW} per row — split into two.</span>
                 : <button className="btn btn-primary" onClick={create}>Create receipt from {selected.size} selected</button>}
               {/* The only way out of selection mode on a phone. `selecting` is
                   derived from selected.size, and on the card layout every tap
