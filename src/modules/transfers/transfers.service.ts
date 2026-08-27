@@ -2,7 +2,7 @@ import type { Transfer, TransferLine, TransferItem } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { TransferError } from "./transfers.errors";
 import type { PartyInput, LineQtyInput } from "./transfers.schema";
-import { groupItemsIntoLines, buildItemSummary, MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW } from "./receipt-lines";
+import { groupItemsIntoLines, buildItemSummary, MAX_RECEIPT_ROWS } from "./receipt-lines";
 import { buildHandoffManifest } from "./seal";
 import { generateCryptographicSeal } from "@/lib/crypto";
 
@@ -37,10 +37,20 @@ export async function createTransfer(input: CreateInput): Promise<Transfer> {
       return { itemId: i.id, make: i.make, model: i.model, serialNumber: i.serialNumber };
     }));
     if (grouped.length > MAX_RECEIPT_ROWS) throw new TransferError("TOO_MANY_LINES");
-    if (grouped.some((g) => g.serials.length > MAX_ITEMS_PER_ROW)) throw new TransferError("TOO_MANY_PER_ROW");
-
+    // No per-row cap: groupItemsIntoLines now SPLITS an oversized group across
+    // rows instead of producing one that would have to be refused.
     // Match submitted qtyAuth/qtyIssued to each server group by make+model.
     const qtyByKey = new Map(lineQtys.map((l) => [qtyKey(l), l]));
+
+    // How many ROWS each make+model occupies. Since groupItemsIntoLines began
+    // splitting oversized groups, make+model is no longer unique across rows —
+    // and the client still sends ONE qty entry per make+model. Applying that
+    // entry to every split row would print the model's FULL quantity on each:
+    // 12 laptops split 6+6 would read 12 and 12, claiming 24 items on a signed
+    // custody document. A model spanning several rows therefore takes each
+    // row's own serial count, which sums back to the true total.
+    const rowsPerKey = new Map<string, number>();
+    for (const g of grouped) rowsPerKey.set(qtyKey(g), (rowsPerKey.get(qtyKey(g)) ?? 0) + 1);
 
     const rows = await tx.$queryRaw<{ n: bigint }[]>`SELECT nextval('receipt_number_seq') AS n`;
     const receiptNumber = `HR-${String(rows[0].n).padStart(6, "0")}`;
@@ -88,7 +98,7 @@ export async function createTransfer(input: CreateInput): Promise<Transfer> {
         status: "OPEN",
         lines: {
           create: grouped.map((g) => {
-            const q = qtyByKey.get(qtyKey(g));
+            const q = (rowsPerKey.get(qtyKey(g)) ?? 1) > 1 ? undefined : qtyByKey.get(qtyKey(g));
             return {
               lineNo: g.lineNo,
               make: g.make,

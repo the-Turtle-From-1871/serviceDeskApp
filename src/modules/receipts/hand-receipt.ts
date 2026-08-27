@@ -169,14 +169,27 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
       page1.drawText(fallback, { x: cx + 4, y: sigBottom, size: 9, font: helv, rotate: degrees(90) });
       blockTop = sigBottom + helv.widthOfTextAtSize(fallback, 9);
     }
-    // Guard bars: black out the empty column below and above the signature block.
-    const gx = cx - 11;
-    if (sigBottom - 4 - tableBottomY > 1) {
-      page1.drawRectangle({ x: gx, y: tableBottomY, width: colWidth, height: sigBottom - 4 - tableBottomY, color: black });
-    }
-    if (lastRowBottom - (blockTop + 2) > 1) {
-      page1.drawRectangle({ x: gx, y: blockTop + 2, width: colWidth, height: lastRowBottom - (blockTop + 2), color: black });
-    }
+    // Guard bars: mark the unused part of the column so nothing can be added to
+    // it after signing. Drawn as an OUTLINED box with a diagonal strike rather
+    // than a solid fill — same tamper-evident meaning (it is the paper-form
+    // convention of ruling through blank space), a fraction of the toner. A
+    // filled bar on a tall column emptied a cartridge over a print run, which is
+    // why this changed; do not 'restore' the solid fill.
+    const voidBar = (y: number, h: number) => {
+      if (h <= 1) return;
+      const gx = cx - 11;
+      page1.drawRectangle({ x: gx, y, width: colWidth, height: h, borderColor: black, borderWidth: 0.75 });
+      // One diagonal corner-to-corner. Inset so it meets the border cleanly
+      // rather than overshooting it at the corners.
+      page1.drawLine({
+        start: { x: gx + 1.5, y: y + 1.5 },
+        end: { x: gx + colWidth - 1.5, y: y + h - 1.5 },
+        thickness: 0.75,
+        color: black,
+      });
+    };
+    voidBar(tableBottomY, sigBottom - 4 - tableBottomY);
+    voidBar(blockTop + 2, lastRowBottom - (blockTop + 2));
   };
   // Column A = recipient/issuance; columns B, C, … = each return transaction.
   const signedColumns = [

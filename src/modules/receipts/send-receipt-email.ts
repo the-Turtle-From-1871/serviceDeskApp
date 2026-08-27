@@ -17,14 +17,17 @@ function itemLines(items: EmailItem[]): string {
   return items.length ? items.map((i) => `  - ${i.make} ${i.model} (SN ${i.serialNumber})`).join("\n") : "  (none)";
 }
 
+// NOTE: deliberately carries NO link. APP_URL is the local dev server, so a URL
+// here resolves to the RECIPIENT's own machine and is dead for everyone but the
+// host. The attached PDF is the deliverable. Restore a link only once APP_URL
+// points at a host recipients can actually reach.
 function body(a: Args): string {
   return [
     `New hand receipt ${a.receiptNumber} has been created.`,
     ``,
     itemLines(a.items),
     ``,
-    `View or download the signed hand receipt here:`,
-    a.receiptUrl,
+    `The signed hand receipt is attached to this message as a PDF.`,
   ].join("\n");
 }
 

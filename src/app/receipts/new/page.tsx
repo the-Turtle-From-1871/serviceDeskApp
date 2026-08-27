@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/authz";
 import { getItem } from "@/modules/items/items.service";
 import { getLastReceiver } from "@/modules/transfers/transfers.service";
-import { groupItemsIntoLines, MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW } from "@/modules/transfers/receipt-lines";
+import { groupItemsIntoLines, MAX_RECEIPT_ROWS } from "@/modules/transfers/receipt-lines";
 import { listSignatures } from "@/modules/signatures/signatures.service";
 import { SiteHeader } from "@/components/SiteHeader";
 import { ReceiptBuilderForm } from "./ReceiptBuilderForm";
@@ -144,7 +144,6 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
 
   const lines = groupItemsIntoLines(loaded.map((i) => ({ itemId: i.id, make: i.make, model: i.model, serialNumber: i.serialNumber })));
   const tooMany = lines.length > MAX_RECEIPT_ROWS;
-  const tooManyPerRow = lines.some((l) => l.serials.length > MAX_ITEMS_PER_ROW);
 
   // Named signatures are an ADMIN capability, so gate on the ROLE — not on
   // "a non-admin happens to own no rows". A demoted admin keeps their Signature
@@ -176,11 +175,6 @@ export default async function NewReceiptPage({ searchParams }: { searchParams: P
           <>
             <h1 className="page-title">New hand receipt</h1>
             <div className="card empty">This selection has {lines.length} item types — the form holds {MAX_RECEIPT_ROWS}. Split it into two receipts.</div>
-          </>
-        ) : tooManyPerRow ? (
-          <>
-            <h1 className="page-title">New hand receipt</h1>
-            <div className="card empty">One item type has more than {MAX_ITEMS_PER_ROW} items on a single row. Split that item across two receipts.</div>
           </>
         ) : (
           <ReceiptBuilderForm

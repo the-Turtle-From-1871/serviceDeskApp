@@ -9,7 +9,7 @@ import type { ContactOption } from "@/modules/contacts/contact-match";
 import { SERVICE_TYPE_OPTIONS } from "@/modules/service-queue/service-form";
 
 type Prefill = { isDcsim?: boolean; name?: string; rank?: string; unit?: string; contact?: string; email?: string };
-import { groupItemsIntoLines, MAX_RECEIPT_ROWS, MAX_ITEMS_PER_ROW, type LineItem } from "@/modules/transfers/receipt-lines";
+import { groupItemsIntoLines, MAX_RECEIPT_ROWS, type LineItem } from "@/modules/transfers/receipt-lines";
 import { parseScans, describeScan } from "@/modules/items/scan-code";
 import { lookupScannedItem, lookupScannedSerial } from "@/app/actions/scan";
 import { QrScanner, SCAN_FORMATS } from "@/components/QrScanner";
@@ -466,9 +466,8 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, dr
       // createTransfer remains the authority.
       const nextLines = groupItemsIntoLines(next);
       if (nextLines.length > MAX_RECEIPT_ROWS) return say("err", `This receipt is full — ${MAX_RECEIPT_ROWS} item types max`);
-      if (nextLines.some((l) => l.serials.length > MAX_ITEMS_PER_ROW)) {
-        return say("err", `Too many of one item — ${MAX_ITEMS_PER_ROW} per make and model max`);
-      }
+      // No per-model cap: groupItemsIntoLines splits an oversized model across
+      // rows, so the only ceiling left is MAX_RECEIPT_ROWS above.
 
       itemsRef.current = next; // eager, so a scan landing before re-render sees it
       setItems(next);
