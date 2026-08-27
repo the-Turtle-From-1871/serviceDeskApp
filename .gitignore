@@ -69,3 +69,6 @@ backups/
 # CLAUDE.md project rules ARE shared with the team; the rest of .claude/ is local.
 !.claude/rules/
 !.claude/rules/**
+
+# scheduled-task output (scripts/mail-import-task.mjs)
+/logs/

@@ -23,7 +23,19 @@ import fs from "node:fs";
 import dotenv from "dotenv";
 
 const ENV_FILE = ".env.local";
-const SCOPE = "https://www.googleapis.com/auth/gmail.send";
+// Both scopes in ONE grant. A refresh token carries the scopes it was minted
+// with, so re-consenting for gmail.readonly alone would produce a token that
+// can read but no longer send.
+const SCOPES = [
+  "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/gmail.readonly",
+  // modify: lets the importer LABEL a processed message in Gmail itself, so a
+  // CSV is never imported twice. Broader than it looks - it is read/write over
+  // the whole mailbox (everything except permanent delete) held by a token in
+  // a plaintext .env.local. Granted deliberately; do not widen further.
+  "https://www.googleapis.com/auth/gmail.modify",
+];
+const SCOPE = SCOPES.join(" ");
 
 const die = (m) => { console.error(`\n[mint-gmail-token] ${m}\n`); process.exit(1); };
 
@@ -92,7 +104,9 @@ const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
 const tok = await tokenRes.json();
 if (!tokenRes.ok) die(`token exchange failed (HTTP ${tokenRes.status}): ${tok.error} ${tok.error_description || ""}`);
 if (!tok.refresh_token) die("Google returned no refresh_token. That happens on a silent re-auth; this script sends prompt=consent, so re-check the client is a Desktop app type.");
-if (!String(tok.scope || "").includes(SCOPE)) die(`granted scope is missing ${SCOPE} (got: ${tok.scope})`);
+const granted = String(tok.scope || "").split(" ").filter(Boolean);
+const missing = SCOPES.filter((sc) => !granted.includes(sc));
+if (missing.length) die(`granted scopes are missing ${missing.join(", ")} (got: ${tok.scope})`);
 
 let s = fs.readFileSync(ENV_FILE, "utf8");
 const nl = s.includes("\r\n") ? "\r\n" : "\n";

@@ -5,6 +5,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## 2026-08-27
 
+### Added
+
+- **The MDM export can now be imported straight from an email.** Send the CSV as an attachment to the service-desk mailbox with the configured subject, and a scheduled sweep imports it — a fourth way in alongside the admin page, the machine-driven API and the Drive pull, all of which still share one importer. Only the NEWEST matching email is imported; older ones are marked handled without being read, so a stale export can never overwrite a newer one on a later run.
+- Messages are labelled in Gmail once handled (`MDM-Imported`), which is what makes repeat runs safe. A message from an unrecognised sender is labelled `MDM-Import-Rejected` instead — not retried, but left visible rather than filed away as though it had been imported.
+
 ### Changed
 
 - **More than 10 of the same make and model now split across rows instead of being refused.** Scanning an 11th identical device used to stop with "Too many of one item — 10 per make and model max", forcing a second receipt. The items are now spread evenly over as many rows as they need: 11 become 6+5, 12 become 6+6, 21 become 7+7+7. The 10-per-row cap still holds (all the serials for a row print into one DA 2062 description cell, and past ~10 the row stops being legible) — it just splits rather than refusing. The 18-row limit for one receipt is unchanged and is now the only ceiling.
