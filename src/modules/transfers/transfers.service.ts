@@ -14,6 +14,7 @@ type CreateInput = {
   sender: PartyInput;
   receiver: PartyInput;
   receiverSignature: string;
+  notes?: string;
   createdByUserId?: string;
   dueAt?: Date | null;
 };
@@ -21,7 +22,7 @@ type CreateInput = {
 const qtyKey = (l: { make: string; model: string }) => `${l.make} ${l.model}`;
 
 export async function createTransfer(input: CreateInput): Promise<Transfer> {
-  const { itemIds, lines: lineQtys, sender, receiver, receiverSignature, createdByUserId, dueAt } = input;
+  const { itemIds, lines: lineQtys, sender, receiver, receiverSignature, createdByUserId, dueAt, notes } = input;
   return prisma.$transaction(async (tx) => {
     const items = await tx.item.findMany({ where: { id: { in: itemIds } } });
     if (items.length !== new Set(itemIds).size) throw new TransferError("ITEM_NOT_FOUND");
@@ -69,6 +70,7 @@ export async function createTransfer(input: CreateInput): Promise<Transfer> {
         unit: receiver.unit ?? null, contact: receiver.contact ?? null, email: receiver.email ?? null,
       },
       receiverSignature,
+      notes: notes ?? null,
       items: grouped.flatMap((g) => g.itemIds.map((id, i) => ({ serialNumber: g.serials[i], make: g.make, model: g.model }))),
     });
     const cryptoSignature = generateCryptographicSeal(manifest);
@@ -95,6 +97,7 @@ export async function createTransfer(input: CreateInput): Promise<Transfer> {
         sealedAt,
         cryptoSignature,
         dueAt: dueAt ?? null,
+        notes: notes ?? null,
         status: "OPEN",
         lines: {
           create: grouped.map((g) => {

@@ -526,6 +526,7 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, dr
   // Optional return timer, in days from when the receipt is filed. Blank = no
   // timer. Posted as `returnDays`, parsed by receiptSchema.
   const [returnDays, setReturnDays] = useState(draftValues?.returnDays ?? "");
+  const [notes, setNotes] = useState(draftValues?.notes ?? "");
 
   const [senderIsDcsim, setSenderIsDcsim] = useState(draftValues?.sender.isDcsim ?? senderPrefill?.isDcsim ?? false);
   const [receiverIsDcsim, setReceiverIsDcsim] = useState(draftValues?.receiver.isDcsim ?? false);
@@ -780,6 +781,25 @@ export function ReceiptBuilderForm({ initialItems, senderPrefill, signatures, dr
           />
         </div>
         <span className="subtle" style={{ fontSize: 12 }}>Leave blank for no return timer.</span>
+      </fieldset>
+      <fieldset className="card stack-sm">
+        <legend className="card__title">Notes (optional)</legend>
+        {/* For what the receipt cannot itemise: unserialised things handed over
+            with the equipment. Those have no Item rows, so they can never be
+            receipt lines — this is where they get recorded. */}
+        <textarea
+          className="input"
+          name="notes"
+          rows={3}
+          maxLength={2000}
+          placeholder="e.g. 14 chargers, 20 mice"
+          aria-label="Notes"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+        />
+        <span className="subtle" style={{ fontSize: 12 }}>
+          Printed on the receipt and covered by its seal — it cannot be edited once filed.
+        </span>
       </fieldset>
       <fieldset className="card stack-sm">
         <legend className="card__title">Recipient signature{receiverIsDcsim ? " (DCSIM)" : ""}</legend>

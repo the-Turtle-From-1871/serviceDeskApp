@@ -449,6 +449,18 @@ model Transfer {
 
   receiverSignature String
 
+  // Free text about the handover itself — typically the unserialised things
+  // that came with it ("14 chargers, 20 mice"), which have no Item rows and
+  // so cannot appear as receipt lines.
+  //
+  // SEALED, and therefore IMMUTABLE once filed: it is included in the signed
+  // manifest whenever it is non-empty, so altering it later reports TAMPERED.
+  // That conditional inclusion is what keeps every receipt sealed BEFORE this
+  // column existed verifying correctly — their manifests carry no notes key,
+  // and adding one unconditionally would have re-signed nothing and broken
+  // every existing signature at once.
+  notes         String?
+
   // Ed25519 signature (base64) over the canonical handoff manifest, produced at
   // creation. Null when unsealed: pre-existing rows, or best-effort failures when
   // SIGNING_PRIVATE_KEY is absent/invalid. Verified via verifyReceiptSealAction.

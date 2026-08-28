@@ -60,6 +60,7 @@ export const receiptDraftSchema = z.object({
   sender: draftPartySchema.default(EMPTY_DRAFT_PARTY),
   receiver: draftPartySchema.default(EMPTY_DRAFT_PARTY),
   returnDays: text(NUMERIC_MAX),
+  notes: text(2000),
   service: z.array(draftServiceSchema).max(MAX_RECEIPT_ROWS * MAX_ITEMS_PER_ROW).default([]),
 });
 

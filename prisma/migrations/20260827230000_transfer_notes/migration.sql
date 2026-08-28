@@ -1,0 +1,14 @@
+-- Free text about the handover itself, typically the unserialised things that
+-- came with it ("14 chargers, 20 mice"), which have no Item rows and so cannot
+-- appear as receipt lines.
+--
+-- Nullable with no default and no backfill: every existing receipt keeps NULL,
+-- which is what lets their cryptographic seals keep verifying. The manifest
+-- includes `notes` only when it is non-empty, so a NULL row rebuilds the exact
+-- manifest it was signed with.
+--
+-- HAND-WRITTEN, deliberately. `prisma migrate diff` against the local dev
+-- database also proposed dropping PushSubscription, WatchedItem and four
+-- User.notify* columns -- unrelated drift from a branch that is not merged.
+-- Applying its output would have destroyed those tables.
+ALTER TABLE "Transfer" ADD COLUMN "notes" TEXT;

@@ -69,6 +69,7 @@ export async function renderReceiptPdf(receiptNumber: string): Promise<Uint8Arra
     // the token's length costs nothing legibility-wise.
     receiptUrl: await receiptLinkUrl(t.receiptNumber),
     receiverSignature: t.receiverSignature,
+    notes: t.notes ?? null,
     lines: t.lines.map((ln) => {
       const serials = ln.items.map((it) => it.serialNumber);
       return {
