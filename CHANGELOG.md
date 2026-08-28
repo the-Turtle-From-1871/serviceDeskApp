@@ -3,6 +3,19 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-08-28
+
+### Fixed
+
+- **The nightly maintenance sweep is running again.** It had been silently dead since 2026-08-21: the GitHub Action that triggered it posts to `www.dcsim.us`, which still resolves but returns 503 now that the deployment is gone, so it failed every night for a week without anything in the app showing a problem. That sweep is not only a purge — it also sends the **overdue receipt and overdue service alert emails**, so those stopped going out at the same time.
+
+### Removed
+
+- The `Nightly purge (cron)` GitHub Action. A hosted runner cannot reach the app any more — it runs locally — so the trigger moved onto the same machine as a Windows Scheduled Task.
+
+### Notes
+
+- Two scheduled tasks now exist on the host machine: **DCSIM nightly purge** (daily 08:30) and **DCSIM MDM mail import** (hourly). Both read `CRON_SECRET` from `.env.local` at run time rather than holding it in the task definition, and both append one line per run to `logs/`. Neither runs while the machine is off or the dev server is down; both log that as `SKIP` rather than a failure.
 ## 2026-08-27
 
 ### Added
