@@ -32,6 +32,7 @@ export function draftPayloadFromForm(formData: FormData) {
     sender: raw.sender,
     receiver: raw.receiver,
     returnDays: raw.returnDays,
+    notes: raw.notes ?? "",
     service,
   };
 }

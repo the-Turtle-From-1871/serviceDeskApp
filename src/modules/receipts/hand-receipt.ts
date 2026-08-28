@@ -18,6 +18,8 @@ export type ReceiptData = {
   createdAt: Date;
   receiptUrl: string;
   receiverSignature: string; // "" or data:image/png;base64,…
+  /** Free text about the handover — unserialised extras that cannot be lines. */
+  notes?: string | null;
   lines: { lineNo: number; make: string; model: string; unitOfIssue: string; serials: string[]; qtyAuth: number; qtyIssued: number; qtyColumns?: number[] }[];
   sender: ReceiptParty;
   receiver: ReceiptParty;
@@ -277,6 +279,31 @@ export async function buildHandReceiptPdf(t: ReceiptData): Promise<Uint8Array> {
     y -= 15;
     page.drawText(`SER: ${ln.serials.join(", ")}`, { x: 76, y, size: 9, font: helv, color: muted });
     y -= 18;
+  }
+  // Notes sit on THIS page, not the DA 2062 form above: that form is a fixed
+  // government layout with no free-text box, and drawing into it would overlap
+  // printed fields. Wrapped by hand because pdf-lib's drawText does not wrap —
+  // an unwrapped 2000-character note would run straight off the page edge.
+  if (t.notes) {
+    y -= 6;
+    page.drawText("Notes", { x: 56, y, size: 11, font: bold, color: muted });
+    y -= 16;
+    const maxWidth = 500;
+    // Respect the operator's own line breaks first, then wrap each paragraph.
+    for (const paragraph of t.notes.split(/\r?\n/)) {
+      let line = "";
+      for (const word of paragraph.split(/\s+/).filter(Boolean)) {
+        const next = line ? `${line} ${word}` : word;
+        if (helv.widthOfTextAtSize(next, 10) > maxWidth) {
+          page.drawText(line, { x: 66, y, size: 10, font: helv, color: ink });
+          y -= 14;
+          line = word;
+        } else line = next;
+      }
+      page.drawText(line, { x: 66, y, size: 10, font: helv, color: ink });
+      y -= 14;
+    }
+    y -= 8;
   }
   const meta: [string, string][] = [["Date", dateStr], ["Status", t.status]];
   for (const [k, v] of meta) {

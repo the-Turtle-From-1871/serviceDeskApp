@@ -64,6 +64,17 @@ export const receiptSchema = z
     lines: z.array(lineQtySchema).min(1).max(MAX_RECEIPT_ROWS, "Too many item types for one receipt"),
     sender: partySchema,
     receiver: partySchema,
+    // Free text about the handover — typically the unserialised things that came
+    // with it ("14 chargers, 20 mice"), which have no Item rows and so cannot be
+    // receipt lines. Blank collapses to undefined (-> NULL), which matters: the
+    // seal omits the key entirely when there is no note, and an empty string is
+    // not the same as absent.
+    notes: z
+      .string()
+      .trim()
+      .max(2000, "Notes are too long")
+      .transform((v) => v || undefined)
+      .optional(),
     receiverSignature: z
       .string()
       .startsWith(SIGNATURE_PREFIX, "Recipient signature is required")

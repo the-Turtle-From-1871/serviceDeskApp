@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **A hand receipt can carry notes.** A free-text field on the receipt builder, for what the receipt cannot itemise — typically unserialised things handed over with the equipment ("14 chargers, 20 mice"), which have no inventory records and so can never be receipt lines. It prints on the receipt page and on the PDF's custody-record page.
+- Notes are **covered by the receipt's cryptographic seal**, so altering one after filing reports the receipt as tampered. The trade is that a note **cannot be edited once the receipt is filed** — a mistake means a corrected receipt, the same way a signature does. Receipts filed before this change are unaffected and still verify.
 - **The MDM export can now be imported straight from an email.** Send the CSV as an attachment to the service-desk mailbox with the configured subject, and a scheduled sweep imports it — a fourth way in alongside the admin page, the machine-driven API and the Drive pull, all of which still share one importer. Only the NEWEST matching email is imported; older ones are marked handled without being read, so a stale export can never overwrite a newer one on a later run.
 - Messages are labelled in Gmail once handled (`MDM-Imported`), which is what makes repeat runs safe. A message from an unrecognised sender is labelled `MDM-Import-Rejected` instead — not retried, but left visible rather than filed away as though it had been imported.
 

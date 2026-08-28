@@ -8,6 +8,8 @@ export type ManifestInput = {
   sender: { isDcsim: boolean; name: string; rank: string | null; unit: string | null; contact: string | null; email: string | null };
   receiver: { isDcsim: boolean; name: string; rank: string | null; unit: string | null; contact: string | null; email: string | null };
   receiverSignature: string;
+  /** Omitted from the manifest entirely when absent — see buildHandoffManifest. */
+  notes?: string | null;
   items: { serialNumber: string; make: string; model: string }[];
 };
 
@@ -23,6 +25,15 @@ export function buildHandoffManifest(input: ManifestInput) {
     sender: { ...input.sender },
     receiver: { ...input.receiver },
     receiverSignature: input.receiverSignature,
+    // CONDITIONAL, and that is load-bearing rather than tidiness. Every receipt
+    // sealed before the notes column existed was signed over a manifest with no
+    // `notes` key at all. Adding the key unconditionally — even as null — changes
+    // the canonical JSON of those receipts, so every one of them would verify as
+    // TAMPERED the moment this shipped. Spreading it only when non-empty means an
+    // unnoted receipt rebuilds byte-identically to what it was signed with, while
+    // a noted one is genuinely covered: altering the note later reports TAMPERED,
+    // which is the whole point of putting custody-relevant text inside the seal.
+    ...(input.notes ? { notes: input.notes } : {}),
     // Code-unit (not locale) comparison: the sorted order is baked into the
     // signature at sign time and re-derived (possibly much later, on a
     // different Node/ICU build) at verify time. localeCompare's collation can
@@ -58,6 +69,7 @@ export function manifestFromTransfer(t: ReceiptWithLines) {
       email: t.receiverEmail ?? null,
     },
     receiverSignature: t.receiverSignature,
+    notes: t.notes ?? null,
     items: t.lines.flatMap((ln) => ln.items.map((it) => ({ serialNumber: it.serialNumber, make: ln.make, model: ln.model }))),
   });
 }

@@ -77,6 +77,14 @@ export default async function ReceiptPage({ params }: { params: Promise<{ receip
               })}
             </ul>
           </div>
+          {t.notes && (
+            <div>
+              <strong>Notes:</strong>
+              {/* whiteSpace keeps the operator's line breaks. React renders this as
+                  TEXT, never markup. */}
+              <p style={{ whiteSpace: "pre-wrap", margin: "4px 0 0" }}>{t.notes}</p>
+            </div>
+          )}
           <div><strong>From:</strong> {formatParty({ isDcsim: t.senderIsDcsim, name: t.senderName, rank: t.senderRank, unit: t.senderUnit })}</div>
           <div><strong>To:</strong> {formatParty({ isDcsim: t.receiverIsDcsim, name: t.receiverName, rank: t.receiverRank, unit: t.receiverUnit })}</div>
           <div><strong>Date:</strong> {formatDateTimeHST(t.createdAt)}</div>
