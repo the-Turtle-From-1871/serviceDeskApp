@@ -14,6 +14,7 @@ export function ItemsSearchInput({
   sortKeys,
   uic,
   needsRename,
+  stale,
   loaner,
   showUnnamed,
 }: {
@@ -23,6 +24,7 @@ export function ItemsSearchInput({
   sortKeys: SortKey[];
   uic: string | null;
   needsRename: boolean;
+  stale: boolean;
   loaner: boolean;
   /** The URL flag, not whether the hide is in effect. A search lifts the hide
    *  server-side, but typing must not rewrite the URL to claim the user asked
@@ -44,12 +46,14 @@ export function ItemsSearchInput({
   const sortRef = useRef(sortKeys);
   const uicRef = useRef(uic);
   const needsRenameRef = useRef(needsRename);
+  const staleRef = useRef(stale);
   const loanerRef = useRef(loaner);
   const showUnnamedRef = useRef(showUnnamed);
   useEffect(() => {
     sortRef.current = sortKeys;
     uicRef.current = uic;
     needsRenameRef.current = needsRename;
+    staleRef.current = stale;
     loanerRef.current = loaner;
     showUnnamedRef.current = showUnnamed;
   });
@@ -72,6 +76,7 @@ export function ItemsSearchInput({
       }
       if (uicRef.current) params.set("uic", uicRef.current);
       if (needsRenameRef.current) params.set("needsRename", "1");
+      if (staleRef.current) params.set("stale", "1");
       if (loanerRef.current) params.set("loaner", "1");
       if (showUnnamedRef.current) params.set("showUnnamed", "1");
       // Changing the query resets to page 1 (omitted = page 1): a narrower

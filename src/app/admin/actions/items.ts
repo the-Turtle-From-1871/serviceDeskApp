@@ -13,6 +13,7 @@ import {
   previewRename,
   renameItems,
   setItemsLoaner,
+  listStaleItemsForSelection,
   type RenameCollision,
 } from "@/modules/items/items.service";
 import { ItemError } from "@/modules/items/items.errors";
@@ -27,6 +28,12 @@ import { Prisma } from "@prisma/client";
 import { learnCategories, normalizeCategoryName } from "@/modules/items/categories.service";
 import { z } from "zod";
 import type { SkippedRow } from "@/modules/items/import";
+import {
+  previewStaleNotifications,
+  sendStaleNotifications,
+  type NotifyPreview,
+  type NotifyResult,
+} from "@/modules/items/stale-notify.service";
 
 export async function createItemAction(_prev: unknown, formData: FormData) {
   const admin = await requireCapability("MANAGE_ITEMS");
@@ -480,5 +487,112 @@ export async function commitImportAction(
   } catch (e) {
     console.error("[commitImportAction] unexpected error:", e);
     return { error: "Something went wrong importing the file. Please try again." };
+  }
+}
+
+
+/** Shared shape for both notification actions — the ids of the selected
+ *  devices. Deliberately NOT a list of addresses: who gets mailed is resolved
+ *  server-side from each item's last-logon user, so a crafted POST cannot
+ *  choose the recipients. */
+const notifySchema = z.object({
+  itemIds: z
+    .array(z.string().min(1))
+    .min(1, "Select at least one device.")
+    .max(MAX_BULK_ITEMS, `Too many items selected. The limit is ${MAX_BULK_ITEMS} per action.`),
+});
+
+type NotifyActionResult<T> = { error: string } | ({ ok: true } & T);
+
+/**
+ * What a send WOULD do. Reads only — no mail leaves.
+ *
+ * This exists because the selected count is not the sent count: unreachable
+ * devices drop out and one person can hold many devices, so 242 selected can
+ * mean 113 emailed. Sending that without showing it first would be asking
+ * someone to approve a number they have not seen.
+ */
+export async function previewStaleNotificationsAction(
+  formData: FormData,
+): Promise<NotifyActionResult<NotifyPreview>> {
+  const actor = await requireCapability("MANAGE_ITEMS");
+  const denied = denyReadOnly(actor);
+  if (denied) return denied;
+
+  const parsed = notifySchema.safeParse({
+    itemIds: String(formData.get("itemIds") ?? "").split(",").filter(Boolean),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+
+  try {
+    return { ok: true, ...(await previewStaleNotifications(parsed.data.itemIds)) };
+  } catch (e) {
+    if (e instanceof ItemError && e.code === "TOO_MANY") {
+      return { error: `Too many items selected. The limit is ${MAX_BULK_ITEMS} per action.` };
+    }
+    console.error("[previewStaleNotificationsAction] unexpected error:", e);
+    return { error: "Could not work out who would be notified. Please try again." };
+  }
+}
+
+/**
+ * Send them. NOT reversible — this is the line past which real mail has left
+ * the building, which is why the preview above is a separate action rather
+ * than a confirm dialog over the same one.
+ *
+ * Revalidates nothing: notifying somebody changes no row this app renders.
+ */
+export async function sendStaleNotificationsAction(
+  formData: FormData,
+): Promise<NotifyActionResult<NotifyResult>> {
+  const actor = await requireCapability("MANAGE_ITEMS");
+  const denied = denyReadOnly(actor);
+  if (denied) return denied;
+
+  const parsed = notifySchema.safeParse({
+    itemIds: String(formData.get("itemIds") ?? "").split(",").filter(Boolean),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+
+  try {
+    const result = await sendStaleNotifications(parsed.data.itemIds);
+    // Who was told about what is worth a server-side trace: nothing in the
+    // database records that this ran, and the desk's summary email is the only
+    // other copy. Counts only — no addresses in the app log.
+    console.info(
+      `[stale-notify] ${actor.email} notified ${result.sent} people about ${result.deviceCount} devices` +
+        ` (${result.failed.length} failed, ${result.skipped.length} unreachable, ${result.retiredSkipped} retired)`,
+    );
+    return { ok: true, ...result };
+  } catch (e) {
+    if (e instanceof ItemError && e.code === "TOO_MANY") {
+      return { error: `Too many items selected. The limit is ${MAX_BULK_ITEMS} per action.` };
+    }
+    console.error("[sendStaleNotificationsAction] unexpected error:", e);
+    return { error: "Something went wrong sending those notifications. Please try again." };
+  }
+}
+
+
+/**
+ * Every dormant device, for the "Select all" button on the /items filter.
+ *
+ * Gated on VIEW_INVENTORY rather than MANAGE_ITEMS: this only returns rows the
+ * caller can already see on /items with `?stale=1`, so gating it higher would
+ * refuse a read they can perform by scrolling. The ACTIONS that follow are what
+ * carry the real capability check.
+ */
+export async function selectAllStaleItemsAction(): Promise<
+  { error: string } | { ok: true; items: { id: string; make: string; model: string; serialNumber: string; status: "ACTIVE" | "RETIRED" }[] }
+> {
+  await requireCapability("VIEW_INVENTORY");
+  try {
+    return { ok: true, items: await listStaleItemsForSelection() };
+  } catch (e) {
+    if (e instanceof ItemError && e.code === "TOO_MANY") {
+      return { error: `More than ${MAX_BULK_ITEMS} devices match. Narrow the list first — selecting a truncated set would act on fewer devices than it appears to.` };
+    }
+    console.error("[selectAllStaleItemsAction] unexpected error:", e);
+    return { error: "Could not load the dormant devices. Please try again." };
   }
 }

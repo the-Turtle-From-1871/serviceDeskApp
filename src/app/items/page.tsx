@@ -28,6 +28,8 @@ export default async function ItemsListPage({
     needsRename?: string | string[];
     /** `?loaner=1` — the loaner-pool worklist. Any other value is "off". */
     loaner?: string | string[];
+    /** `?stale=1` — the dormant-device worklist. Any other value is "off". */
+    stale?: string | string[];
     /** `?showUnnamed=1` — lift the default hide on unnamed / `BE-…` devices.
      *  The INVERSE of the two above: absent means the filter is ON. */
     showUnnamed?: string | string[];
@@ -75,6 +77,8 @@ export default async function ItemsListPage({
       // Exactly "1" is on, matching needsRename. A permissive check would make
       // `?loaner=0` mean the opposite of what it says.
       loaner: firstParam(sp.loaner) === "1",
+      // Exactly "1" is on, matching the two above.
+      stale: firstParam(sp.stale) === "1",
       // The view default lives here, not in the service: listItems defaults the
       // hide OFF so no other caller silently loses rows, and lifts it itself
       // when a search is running.
@@ -137,6 +141,7 @@ export default async function ItemsListPage({
             uic={result.uic}
             needsRename={result.needsRename}
             loaner={result.loaner}
+            stale={result.stale}
             showUnnamed={showUnnamed}
           />
           {/* Gated on the CAPABILITY, not `isAdmin`: a USER granted MANAGE_ITEMS
@@ -185,6 +190,7 @@ export default async function ItemsListPage({
             uics={uics}
             needsRename={result.needsRename}
             loaner={result.loaner}
+            stale={result.stale}
             showUnnamed={showUnnamed}
             unnamedHidden={result.hideUnnamed}
             categories={categoryNames.map((name) => ({ name }))}

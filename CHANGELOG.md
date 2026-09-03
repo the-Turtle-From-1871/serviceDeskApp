@@ -3,6 +3,14 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-09-03
+
+### Added
+
+- **Devices that have not checked in for 30+ days can be filtered, selected in bulk, and their last user emailed.** A new filter on the items list shows only dormant devices, a **Select all dormant** button selects every one of them at once (they span several pages, so the existing per-page checkbox could not), and **More actions → Notify last-logon users** emails the person who last signed in to each.
+- **The notification is one email per person, not per device.** Someone holding 23 dormant devices gets a single message listing all 23. The email asks them to reconnect the devices to the network so they can report in, and needs no reply.
+- **Sending is a two-step confirmation.** Choosing the action first shows what it would do — how many people, how many devices, and how many selected devices have nobody recorded to notify — and sends nothing until that is confirmed. The selected count is deliberately not the sent count: a quarter of a typical dormant selection has no last-logon user, and one person can hold many devices.
+- Individual notifications are **not** copied to the record mailboxes — one run would put over a hundred messages in each. The service desk gets a single summary afterwards with the counts and any addresses that failed.
 ## 2026-08-28
 
 ### Fixed
