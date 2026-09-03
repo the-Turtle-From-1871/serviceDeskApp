@@ -5,6 +5,7 @@ import { ChevronDown } from "lucide-react";
 import { recordAuditsAction } from "@/app/admin/actions/audit";
 import { flagItemsForServiceAction, completeServiceItemsAction } from "@/app/admin/actions/queue";
 import { previewItemRenameAction, renameItemsAction, setItemsLoanerAction } from "@/app/admin/actions/items";
+import { previewStaleNotificationsAction, sendStaleNotificationsAction } from "@/app/admin/actions/items";
 // PURE — no DOM, no Prisma — which is the only reason a Client Component may
 // import it. The server rebuilds the names it writes from the same function, so
 // the two cannot disagree about the SHAPE of a name. They can still disagree
@@ -160,6 +161,17 @@ export function BulkActionsMenu({
   // the button that was not pressed. Same reasoning as the three above.
   const [markPending, startMark] = useTransition();
   const [unmarkPending, startUnmark] = useTransition();
+
+  // The dormant-device notification is the only action here whose effect
+  // leaves the building, so it is the only one that is TWO steps. `notifyPreview`
+  // holds what a send would do; it is non-null exactly while a confirmation is
+  // pending, so it doubles as the "armed" flag.
+  const [notifyPreview, setNotifyPreview] = useState<null | {
+    people: number; devices: number; unreachable: number; retired: number;
+  }>(null);
+  const [notifyMsg, setNotifyMsg] = useState<Msg>(null);
+  const [previewPending, startPreview] = useTransition();
+  const [sendPending, startSend] = useTransition();
 
   const none = itemIds.length === 0;
   const ids = itemIds.join(",");
@@ -577,6 +589,83 @@ export function BulkActionsMenu({
               </button>
               {loanerMsg && (
                 <span role={loanerMsg.ok ? "status" : "alert"} className={loanerMsg.ok ? "subtle" : "alert-error"}>{loanerMsg.text}</span>
+              )}
+
+              {/* TWO STEPS, deliberately unlike every other control here. The
+                  others write rows this app owns and can correct; this one
+                  sends mail that cannot be recalled. And the count an operator
+                  selected is NOT the count that gets sent — unreachable devices
+                  drop out and one person can hold many devices, so 243 selected
+                  can mean 113 emails. Asking for confirmation of a number they
+                  have not been shown would be asking them to approve nothing. */}
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={previewPending || sendPending || none}
+                onClick={() =>
+                  startPreview(async () => {
+                    setNotifyMsg(null);
+                    setNotifyPreview(null);
+                    const fd = new FormData();
+                    fd.set("itemIds", ids);
+                    const res = await previewStaleNotificationsAction(fd);
+                    if ("error" in res) { setNotifyMsg({ ok: false, text: res.error }); return; }
+                    if (res.recipients.length === 0) {
+                      setNotifyMsg({ ok: false, text: "Nobody to notify — none of the selected devices has a last-logon user." });
+                      return;
+                    }
+                    setNotifyPreview({
+                      people: res.recipients.length,
+                      devices: res.deviceCount,
+                      unreachable: res.skipped.length,
+                      retired: res.retiredSkipped,
+                    });
+                  })
+                }
+              >
+                {previewPending ? "Checking…" : "Notify last-logon users"}
+              </button>
+              {notifyPreview && (
+                <div className="stack-sm">
+                  {/* Every number that is not the selection count is stated. A
+                      quarter of a dormant selection typically has nobody to
+                      notify, and silently dropping it would misreport what the
+                      button just did. */}
+                  <span role="status">
+                    {notifyPreview.people} {notifyPreview.people === 1 ? "person" : "people"} would be emailed about{" "}
+                    {notifyPreview.devices} device{notifyPreview.devices === 1 ? "" : "s"}.
+                    {notifyPreview.unreachable > 0 && ` ${notifyPreview.unreachable} selected device${notifyPreview.unreachable === 1 ? " has" : "s have"} no last-logon user and cannot be notified.`}
+                    {notifyPreview.retired > 0 && ` ${notifyPreview.retired} retired device${notifyPreview.retired === 1 ? "" : "s"} skipped.`}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={sendPending}
+                    onClick={() =>
+                      startSend(async () => {
+                        const fd = new FormData();
+                        fd.set("itemIds", ids);
+                        const res = await sendStaleNotificationsAction(fd);
+                        setNotifyPreview(null);
+                        if ("error" in res) { setNotifyMsg({ ok: false, text: res.error }); return; }
+                        setNotifyMsg({
+                          ok: res.failed.length === 0,
+                          text:
+                            `Notified ${res.sent} about ${res.deviceCount} device${res.deviceCount === 1 ? "" : "s"}.` +
+                            (res.failed.length ? ` ${res.failed.length} failed to send.` : ""),
+                        });
+                      })
+                    }
+                  >
+                    {sendPending ? "Sending…" : `Send ${notifyPreview.people} email${notifyPreview.people === 1 ? "" : "s"}`}
+                  </button>
+                  <button type="button" className="btn btn-secondary" disabled={sendPending} onClick={() => setNotifyPreview(null)}>
+                    Cancel
+                  </button>
+                </div>
+              )}
+              {notifyMsg && (
+                <span role={notifyMsg.ok ? "status" : "alert"} className={notifyMsg.ok ? "subtle" : "alert-error"}>{notifyMsg.text}</span>
               )}
             </div>
           )}

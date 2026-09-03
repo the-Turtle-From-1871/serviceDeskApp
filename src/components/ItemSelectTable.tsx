@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useItemSelection } from "./ItemSelection";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -12,6 +12,8 @@ import { BulkActionsMenu } from "@/components/BulkActionsMenu";
 import { DeleteItemButton } from "@/components/DeleteItemButton";
 import { toggleItemStatusAction } from "@/app/admin/actions/items";
 import { MAX_RECEIPT_ROWS } from "@/modules/transfers/receipt-lines";
+import { STALE_SYNC_DAYS } from "@/modules/items/stale-window";
+import { selectAllStaleItemsAction } from "@/app/admin/actions/items";
 // From the PURE schema module, never items.service.ts — that imports Prisma,
 // which must not reach the browser bundle.
 import { MAX_BULK_ITEMS } from "@/modules/items/items.schema";
@@ -78,6 +80,7 @@ export function ItemSelectTable({
   uic,
   uics,
   needsRename,
+  stale,
   loaner,
   showUnnamed,
   unnamedHidden,
@@ -98,6 +101,10 @@ export function ItemSelectTable({
   uic: string | null;
   uics: string[];
   needsRename: boolean;
+  /** Only devices MDM has not heard from in STALE_SYNC_DAYS. One-way, like
+   *  needsRename: false means "no filter", never "only devices that are
+   *  current". */
+  stale: boolean;
   /** The loaner-pool worklist filter, `?loaner=1`. Same one-way shape as
    *  needsRename: false means "no filter", never "only devices that are not
    *  loaners". */
@@ -534,6 +541,7 @@ export function ItemSelectTable({
     page?: number;
     uic?: string | null;
     needsRename?: boolean;
+    stale?: boolean;
     loaner?: boolean;
     showUnnamed?: boolean;
   }) => {
@@ -553,6 +561,8 @@ export function ItemSelectTable({
     // exactly "1" by the page, so there is one spelling of "on".
     const nextNeedsRename = over.needsRename !== undefined ? over.needsRename : needsRename;
     if (nextNeedsRename) params.set("needsRename", "1");
+    const nextStale = over.stale !== undefined ? over.stale : stale;
+    if (nextStale) params.set("stale", "1");
 
     // Same silent-drop trap as ItemsSearchInput: navigate rebuilds this URL for
     // every sort, filter and page change, so a filter missing here vanishes
@@ -596,6 +606,21 @@ export function ItemSelectTable({
   };
   const setUic = (next: string | null) => navigate({ uic: next, page: 1 });
   const setNeedsRename = (next: boolean) => navigate({ needsRename: next, page: 1 });
+  const setStale = (next: boolean) => navigate({ stale: next, page: 1 });
+
+  // Selecting every dormant device needs the SERVER: the selection is
+  // client-side and the page is 50 rows, so ~240 matches span five pages and
+  // the existing header checkbox only ever covers the page you can see.
+  const [selectAllMsg, setSelectAllMsg] = useState<string | null>(null);
+  const [selectAllPending, startSelectAll] = useTransition();
+  const selectAllStale = () =>
+    startSelectAll(async () => {
+      setSelectAllMsg(null);
+      const res = await selectAllStaleItemsAction();
+      if ("error" in res) { setSelectAllMsg(res.error); return; }
+      addMany(res.items);
+      setSelectAllMsg(`Selected ${res.items.length} dormant device${res.items.length === 1 ? "" : "s"}.`);
+    });
   const setLoaner = (next: boolean) => navigate({ loaner: next, page: 1 });
   const setShowUnnamed = (next: boolean) => navigate({ showUnnamed: next, page: 1 });
 
@@ -611,7 +636,7 @@ export function ItemSelectTable({
         <SortFilterMenu
           idPrefix="items"
           columns={SORTABLE_COLUMNS}
-          summary={sortFilterSummary(sort, dir, uic, needsRename, loaner, !unnamedHidden)}
+          summary={sortFilterSummary(sort, dir, uic, needsRename, loaner, stale, !unnamedHidden)}
           sort={sort}
           dir={dir}
           secondary={secondarySort?.key ?? null}
@@ -630,6 +655,7 @@ export function ItemSelectTable({
           toggles={[
             { label: "Needs rename in Intune", checked: needsRename, onChange: setNeedsRename },
             { label: "Loaners only", checked: loaner, onChange: setLoaner },
+            { label: `Not checked in for ${STALE_SYNC_DAYS}+ days`, checked: stale, onChange: setStale },
             // Reads as the POSITIVE act because the hide is the default: a
             // "Hide unnamed devices" box that started checked would describe the
             // resting state of every page load, and the one-way shape the other
@@ -651,6 +677,19 @@ export function ItemSelectTable({
           onDir={setPrimaryDir}
           onSecondary={setSecondary}
         />
+        {/* Only while the dormant filter is ON. Offering it against an
+            unfiltered list would silently select ~240 rows the operator
+            cannot see, which is the opposite of what a selection is for. */}
+        {stale && (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={selectAllPending}
+            onClick={selectAllStale}
+          >
+            {selectAllPending ? "Selecting…" : "Select all dormant"}
+          </button>
+        )}
         {isAdmin && (
           <button
             type="button"
@@ -693,6 +732,9 @@ export function ItemSelectTable({
           </div>
         </details>
       </div>
+      {/* Under the toolbar, not inside it: the toolbar is a flex row of
+          controls and a sentence wrapping inside it re-flows the buttons. */}
+      {selectAllMsg && <p className="subtle" role="status">{selectAllMsg}</p>}
 
       {/* Rendered below the toolbar, so the controls that produced an empty
           result stay on screen and the filter can be undone. */}
