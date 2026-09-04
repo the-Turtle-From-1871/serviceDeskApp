@@ -43,13 +43,22 @@ import type { SortKey } from "@/modules/items/items.service";
 export type { ItemRow };
 
 const HIDDEN_KEY = "items:hiddenCols";
-// Category is hidden by default: the table already carries a lot of columns,
-// and category is opt-in for people who work by device class. It stays
-// filterable and sortable while hidden. Home unit is hidden by default for
-// the same reason — the UIC column already carries the same fact in six
-// characters. (Only applies to new visitors — an existing stored preference
-// wins over this default.)
-const DEFAULT_HIDDEN: ColumnKey[] = ["deviceCategory", "homeUnit"];
+// Hidden by default so a first-time visitor's table isn't 13 columns wide:
+// Device Name, Model, Serial and Last sync are what's left visible. Every
+// hidden one stays filterable/sortable (or, for Home unit, filterable via its
+// own header select) while off — this only changes what a NEW visitor sees
+// first. An existing stored preference always wins over this default.
+const DEFAULT_HIDDEN: ColumnKey[] = [
+  "deviceCategory",
+  "homeUnit",
+  "holder",
+  "make",
+  "deviceUIC",
+  "loaner",
+  "auditState",
+  "status",
+  "readiness",
+];
 const hiddenStore = makeStore(HIDDEN_KEY, parseHiddenCols);
 
 // Which header cells cycleSort applies to — the same set SortFilterMenu's
@@ -945,7 +954,7 @@ export function ItemSelectTable({
                   </th>
                 );
               })}
-              <th style={{ textAlign: "right" }}>Actions</th>
+              <th className="row-actions" style={{ textAlign: "right" }}><span className="row-actions__label">Actions</span></th>
             </tr>
           </thead>
           <tbody>

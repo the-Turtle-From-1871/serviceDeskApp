@@ -2469,27 +2469,65 @@ input[type="file"].input {
    leave a phone with no way to Edit, Retire or Delete at all (the context menu
    refuses below 720px by design).
 
-   REVEALED ON KEYBOARD FOCUS. A context menu is mouse-only, so hiding these
-   outright would take Edit/Retire/Delete away from anyone not using a mouse —
-   the row buttons were what made the menu safe to add in the first place.
+   THE WHOLE COLUMN COLLAPSES, not just its contents. Hiding only the buttons
+   left an `Actions` header over a column of empty cells, still taking its
+   width — which is exactly what this was asked to remove. The header's label
+   is clipped rather than removed, so the column keeps an accessible name.
 
-   `opacity: 0`, NOT `visibility: hidden`. This was written with `visibility`
-   first, and measured: it removes the element from the TAB ORDER as well as
-   the accessibility tree, so Tab never reached the buttons and the keyboard
-   fallback did not exist — the exact regression the reveal is here to prevent.
-   `opacity: 0` leaves them focusable and announced; `pointer-events: none` is
-   what stops a mouse clicking an invisible Delete button.
+   REVEALED ON KEYBOARD FOCUS, because a context menu is mouse-only: hiding
+   these outright would take Edit/Retire/Delete away from anyone not using a
+   mouse, and the row buttons are what made the menu safe to add.
 
-   `:has(:focus-visible)` and not `:focus-within`: focus-within also matches a
-   MOUSE click landing on a button, which would flicker the column into view
-   for the very users it is hidden from. focus-visible is the browser's own
-   answer to "did this focus come from the keyboard". */
+   `opacity: 0`, NOT `visibility: hidden`. Written with `visibility` first and
+   measured: it drops the element out of the TAB ORDER as well as the
+   accessibility tree, so Tab never reached the buttons and the keyboard
+   fallback did not exist. `opacity` leaves them focusable and announced;
+   `pointer-events: none` is what stops a mouse clicking an invisible Delete.
+
+   `:focus-within`, chosen for simplicity over `:has(… :focus-visible)`. An
+   earlier version of this comment claimed the `:has()` form was measured
+   failing to invalidate in Chromium — that was WRONG and is retracted here
+   rather than left standing. The reveal did work; the test read the computed
+   opacity immediately after Tab and caught it mid-transition, because `.btn`
+   carries `transition: … opacity 0.15s`. Anything measuring this must let the
+   transition settle first.
+
+   Dropping `:focus-visible` costs nothing HERE, and only here: it existed to
+   stop a mouse click revealing the column, and the contents already carry
+   `pointer-events: none`, so a mouse cannot put focus in this cell at all.
+   Keyboard focus is the only way in. Do not copy this shortcut to a cell whose
+   contents are clickable.
+
+   */
 @media (min-width: 720px) {
+  .table--cards th.row-actions,
+  .table--cards td.row-actions {
+    width: 0;
+    max-width: 0;
+    padding-left: 0;
+    padding-right: 0;
+    overflow: hidden;
+  }
   .table--cards td.row-actions .actions > *:not(dialog) {
     opacity: 0;
     pointer-events: none;
   }
-  .table--cards tbody tr:has(.row-actions :focus-visible) td.row-actions .actions > *:not(dialog) {
+  .row-actions__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .table--cards td.row-actions:focus-within {
+    width: auto;
+    max-width: none;
+    overflow: visible;
+    padding-left: var(--space-2, 8px);
+    padding-right: var(--space-2, 8px);
+  }
+  .table--cards td.row-actions:focus-within .actions > *:not(dialog) {
     opacity: 1;
     pointer-events: auto;
   }
