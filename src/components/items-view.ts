@@ -25,25 +25,27 @@ import type { SortField } from "@/modules/items/sort-keys";
  *  subquery in the raw ORDER BY, its own parity coverage and a nulls decision.
  *  Sortability is the SORTABLE_COLUMNS list below; visibility is this one.
  *
- *  `lastSyncDateTime` is the second such column, for a different reason:
- *  it HAS a real column, but it holds the MDM export's raw text
- *  ("8/9/2026 6:02:11 AM"), so `ORDER BY` on it sorts lexically — 10/1/2025
- *  ahead of 7/25/2026. A sort that confidently returns the wrong order is
- *  worse than no sort.
+ *  `lastSyncDateTime` is SORTABLE as of 2026-09-03, but not by itself: it
+ *  holds the MDM export's raw text ("8/9/2026 6:02:11 AM"), and `ORDER BY` on
+ *  that sorts lexically — 10/1/2025 ahead of 7/25/2026. `SORT_COLUMN` in
+ *  sort-keys.ts points this key at a DIFFERENT physical column, the parsed
+ *  twin `Item.lastSyncAt` (added 2026-08-11 for the dormant-device window),
+ *  while the cell keeps rendering the verbatim string. So it is a SortField,
+ *  not one of the extras below — it is named here only because a reader
+ *  looking for "why is Last sync's sort weird" should find the answer beside
+ *  the columns that stayed unsortable.
  *
- *  The parsed twin that would fix it now EXISTS — `Item.lastSyncAt`, added
- *  2026-08-11 for the dormant-device window — so this is no longer a blocked
- *  sort, just an unwired one: making it sortable means adding a `SortField`,
- *  a `SORT_COLUMN` entry and the matching raw-path handling, and rendering the
- *  cell would still show the verbatim text. Nobody has asked for it. What has
- *  NOT changed is the rule: order by the twin, never by this text.
- *
- *  `loaner` is the THIRD displayable-but-unsortable column, for a third
+ *  `loaner` is the SECOND displayable-but-unsortable column, for a second
  *  reason: it is a two-value flag, and a two-value sort is a filter wearing
  *  the wrong control. Ordering 1,200 rows by a boolean groups every loaner
  *  at one end of the page and answers "which ones", not "in what order" —
- *  the `?loaner=1` worklist filter is that question's real answer. */
-export type ColumnKey = SortField | "holder" | "lastSyncDateTime" | "loaner";
+ *  the `?loaner=1` worklist filter is that question's real answer.
+ *
+ *  `homeUnit` is the THIRD, added 2026-09-03: a real column, but with no
+ *  index (see the Units rule in `.claude/rules/backend-constraints.md`), and
+ *  nobody has asked to sort by it — the UIC column already orders the same
+ *  fact. Add it to SORT_COLUMN in sort-keys.ts if that changes. */
+export type ColumnKey = SortField | "holder" | "loaner" | "homeUnit";
 
 /* Readiness labels have ONE definition, in modules/items/readiness.ts, next to
    the function that derives them. Re-exported here so the table imports its
@@ -70,10 +72,11 @@ export type ItemRow = {
    *  whole page in one query — never per row. See
    *  modules/transfers/holders.query.ts. */
   holderName: string | null;
-  /** The owning unit, shown in the phone card's More panel. Free text and often
-   *  long ("HHC, 1-506 IN, 1BCT"), which is why the panel sizes it to fit — see
-   *  `.card-more__fit` in globals.css. There is no Home unit COLUMN: the desktop
-   *  table shows the UIC instead, which is the same fact in six characters. */
+  /** The owning unit. Free text and often long ("HHC, 1-506 IN, 1BCT"), which
+   *  is why the phone card's More panel sizes it to fit — see
+   *  `.card-more__fit` in globals.css. Also a desktop column (added
+   *  2026-09-03), hidden by default alongside Category since the UIC column
+   *  already carries the same fact in six characters. */
   homeUnit: string | null;
   /** Where the device physically sits when nobody holds it. Free text. */
   storageLocation: string | null;
@@ -125,6 +128,7 @@ export const ITEM_COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: "serialNumber", label: "Serial" },
   { key: "holder", label: "Holder" },
   { key: "deviceUIC", label: "UIC" },
+  { key: "homeUnit", label: "Home unit" },
   { key: "deviceCategory", label: "Category" },
   { key: "readiness", label: "Readiness" },
   { key: "status", label: "Status" },
@@ -137,7 +141,7 @@ export const ITEM_COLUMNS: { key: ColumnKey; label: string }[] = [
  *  why each one is here. Named rather than inlined into the filter below so
  *  adding another is one edit in one place, and so the reason lives with the
  *  list rather than in a `!==` chain. */
-const UNSORTABLE_COLUMNS = new Set<string>(["holder", "lastSyncDateTime", "loaner"]);
+const UNSORTABLE_COLUMNS = new Set<string>(["holder", "loaner", "homeUnit"]);
 
 /** The Sort control's options — every column EXCEPT the unsortable ones.
  *
@@ -208,9 +212,10 @@ export function sortFilterSummary(
 const SORT_FIELDS = new Set<string>(SORTABLE_COLUMNS.map((c) => c.key));
 // Visibility and sortability are separate CONCEPTS on purpose: hiding a column
 // must never imply you cannot sort by it. They also now differ in MEMBERSHIP —
-// COLUMN_KEYS has 12 keys (including "holder" and "loaner"), SORT_FIELDS has 9
-// — because `holder` and `loaner` are displayable but not server-sortable (see
-// SORTABLE_COLUMNS above).
+// COLUMN_KEYS has 13 keys, SORT_FIELDS has 10 — because "holder", "loaner" and
+// "homeUnit" are displayable but not server-sortable (see SORTABLE_COLUMNS
+// above). "lastSyncDateTime" IS in SORT_FIELDS, ordering by a different
+// physical column than the one it displays — see the ColumnKey doc comment.
 const COLUMN_KEYS = new Set<string>(ITEM_COLUMNS.map((c) => c.key));
 
 /** Client-side ordering of rows already in hand. The /items table does NOT use

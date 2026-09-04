@@ -10,6 +10,7 @@ import { MarkReadyButton } from "@/components/MarkReadyButton";
 import { ReadinessControls } from "@/components/ReadinessControls";
 import { BulkActionsMenu } from "@/components/BulkActionsMenu";
 import { DeleteItemButton } from "@/components/DeleteItemButton";
+import { ItemRowContextMenu, useItemRowContextMenu } from "@/components/ItemRowContextMenu";
 import { toggleItemStatusAction } from "@/app/admin/actions/items";
 import { MAX_RECEIPT_ROWS } from "@/modules/transfers/receipt-lines";
 import { STALE_SYNC_DAYS } from "@/modules/items/stale-window";
@@ -44,10 +45,18 @@ export type { ItemRow };
 const HIDDEN_KEY = "items:hiddenCols";
 // Category is hidden by default: the table already carries a lot of columns,
 // and category is opt-in for people who work by device class. It stays
-// filterable and sortable while hidden. (Only applies to new visitors — an
-// existing stored preference wins over this default.)
-const DEFAULT_HIDDEN: ColumnKey[] = ["deviceCategory"];
+// filterable and sortable while hidden. Home unit is hidden by default for
+// the same reason — the UIC column already carries the same fact in six
+// characters. (Only applies to new visitors — an existing stored preference
+// wins over this default.)
+const DEFAULT_HIDDEN: ColumnKey[] = ["deviceCategory", "homeUnit"];
 const hiddenStore = makeStore(HIDDEN_KEY, parseHiddenCols);
+
+// Which header cells cycleSort applies to — the same set SortFilterMenu's
+// "Sort by" field offers, so a header a column click cannot resolve is never
+// clickable in the first place. `holder` and `loaner` stay plain text; Home
+// unit gets its own filter <select> instead (see the header render below).
+const SORTABLE_KEYS = new Set<string>(SORTABLE_COLUMNS.map((c) => c.key));
 
 /** Above this many selected items, "Clear selection" confirms first. The
  *  selection is persisted, so clearing can throw away a sweep collected over
@@ -79,6 +88,8 @@ export function ItemSelectTable({
   sortKeys,
   uic,
   uics,
+  homeUnitFilter,
+  homeUnits,
   needsRename,
   stale,
   loaner,
@@ -100,6 +111,17 @@ export function ItemSelectTable({
   sortKeys: SortKey[];
   uic: string | null;
   uics: string[];
+  /** The Home unit column header's own filter, `?homeUnit=` — a SEPARATE
+   *  control from `uic`/`uics` above: it lives in the header cell itself
+   *  (rendered as a `<select>` in place of the column label), not the Sort &
+   *  filter menu, because homeUnit stays unsortable (see SORTABLE_KEYS) and a
+   *  closed `<select>` already shows its own picked value with no summary
+   *  chip needed. Named with the `Filter` suffix so it can never be confused
+   *  with the per-row `homeUnit` local `renderRow` computes for display. */
+  homeUnitFilter: string | null;
+  /** Distinct `homeUnit` values present in the catalogue (listItemHomeUnits),
+   *  for the dropdown's options — same shape as `uics`. */
+  homeUnits: string[];
   needsRename: boolean;
   /** Only devices MDM has not heard from in STALE_SYNC_DAYS. One-way, like
    *  needsRename: false means "no filter", never "only devices that are
@@ -152,6 +174,9 @@ export function ItemSelectTable({
   // receipt-group validation below needs each selected item's make/model, and
   // an item selected on page 1 is no longer in `items` once you page forward.
   const { selected, startedAt, atCap, toggle, addMany, removeMany, clear } = useItemSelection();
+  // Right-click a row for its actions. ADDITIVE — the row buttons stay, which
+  // is what keeps the same actions reachable without a mouse.
+  const { target: ctxTarget, close: closeCtx, onContextMenu } = useItemRowContextMenu();
   const selectedIds = useMemo(() => new Set(selected.keys()), [selected]);
 
   const allState = useMemo(() => selectAllState(items, selectedIds), [items, selectedIds]);
@@ -169,7 +194,17 @@ export function ItemSelectTable({
   // URL-driven (server-side), so they are NOT stored here.
   const [hidden, setHidden] = usePersistedPref(hiddenStore, DEFAULT_HIDDEN);
   const isHidden = (key: ColumnKey) => hidden.includes(key);
-  const visibleCols = ITEM_COLUMNS.filter((c) => !isHidden(c.key));
+  // An ACTIVE Home unit filter forces the column into view regardless of the
+  // stored preference — that filter's only control is this header's own
+  // <select>, with no chip anywhere else on the page. Hiding the column while
+  // it narrows the list would strand the user on a silently partial result
+  // with no way back but editing the URL, which is exactly the confident-
+  // wrong-answer shape this app avoids everywhere else (see the hidden-count
+  // and search-lifts-the-hide rules). The stored preference is left alone —
+  // clearing the filter reverts to it with nothing to re-toggle.
+  const visibleCols = ITEM_COLUMNS.filter(
+    (c) => !isHidden(c.key) || (c.key === "homeUnit" && !!homeUnitFilter),
+  );
 
   const toggleCol = (key: ColumnKey) => {
     const next = new Set(hidden);
@@ -234,6 +269,15 @@ export function ItemSelectTable({
     <tr
       key={it.id}
       {...gestures.pointerHandlers(it.id)}
+      // Desktop only, and never over a control the row already owns — see
+      // useItemRowContextMenu. Below 720px this <tr> is a swipe card and the
+      // native menu is left alone.
+      onContextMenu={(e) =>
+        onContextMenu(e, {
+          id: it.id, make: it.make, model: it.model, serialNumber: it.serialNumber,
+          holderName: it.holderName ?? null, status: it.status,
+        })
+      }
       style={{
         // Read by the mobile card rules in globals.css. This is the RESTING
         // position only — a live drag is written straight to the node by
@@ -268,6 +312,7 @@ export function ItemSelectTable({
       {!isHidden("serialNumber") && <td className="mono cell-desktop" data-label="Serial">{it.serialNumber}</td>}
       {!isHidden("holder") && <td className="cell-desktop" data-label="Holder">{it.holderName ?? <span className="subtle">—</span>}</td>}
       {!isHidden("deviceUIC") && <td className="mono cell-desktop" data-label="UIC">{it.deviceUIC ?? <span className="subtle">—</span>}</td>}
+      {!isHidden("homeUnit") && <td className="cell-desktop" data-label="Home unit">{homeUnit ?? <span className="subtle">—</span>}</td>}
       {!isHidden("deviceCategory") && <td className="cell-desktop" data-label="Category">{it.deviceCategory ?? <span className="subtle">—</span>}</td>}
       {/* Derived server-side (readiness.query.ts), so no client-side narrowing
           of an untrusted stored value is needed — the row already carries a
@@ -540,6 +585,7 @@ export function ItemSelectTable({
     keys?: SortKey[];
     page?: number;
     uic?: string | null;
+    homeUnitFilter?: string | null;
     needsRename?: boolean;
     stale?: boolean;
     loaner?: boolean;
@@ -556,6 +602,11 @@ export function ItemSelectTable({
 
     const nextUic = over.uic !== undefined ? over.uic : uic;
     if (nextUic) params.set("uic", nextUic);
+
+    // Same silent-drop trap as every other filter here: omitted, this vanishes
+    // the moment someone pages, sorts, or picks a different filter.
+    const nextHomeUnit = over.homeUnitFilter !== undefined ? over.homeUnitFilter : homeUnitFilter;
+    if (nextHomeUnit) params.set("homeUnit", nextHomeUnit);
 
     // Written only when ON, so an unfiltered URL stays clean — and read back as
     // exactly "1" by the page, so there is one spelling of "on".
@@ -604,7 +655,21 @@ export function ItemSelectTable({
     const [first, ...rest] = sortKeys;
     navigate({ keys: [{ ...first, dir: next }, ...rest], page: 1 });
   };
+  /** Clicking a sortable column header, desktop only — a THIRD control over the
+   *  same `sort`/`dir` state the menu's Sort by/Direction fields write, cycling
+   *  descending -> ascending -> the default (newest) order on repeated clicks
+   *  of the SAME column. A click on a different column always starts it at
+   *  descending, matching the menu's own default when a fresh key is chosen
+   *  (see `setPrimary`). Any secondary key is dropped on the third click, same
+   *  as picking "Default (newest)" in the menu — "back to normal" means no
+   *  sort at all, not "keep whatever Then-by was set". */
+  const cycleSort = (key: string) => {
+    if (sort !== key) return navigate({ keys: [{ key, dir: "desc" }], page: 1 });
+    if (dir === "desc") return navigate({ keys: [{ key, dir: "asc" }], page: 1 });
+    navigate({ keys: [], page: 1 });
+  };
   const setUic = (next: string | null) => navigate({ uic: next, page: 1 });
+  const setHomeUnit = (next: string | null) => navigate({ homeUnitFilter: next, page: 1 });
   const setNeedsRename = (next: boolean) => navigate({ needsRename: next, page: 1 });
   const setStale = (next: boolean) => navigate({ stale: next, page: 1 });
 
@@ -735,6 +800,10 @@ export function ItemSelectTable({
       {/* Under the toolbar, not inside it: the toolbar is a flex row of
           controls and a sentence wrapping inside it re-flows the buttons. */}
       {selectAllMsg && <p className="subtle" role="status">{selectAllMsg}</p>}
+      {/* ONE menu for the whole table — see ItemRowContextMenu. Rendered outside
+          the table so a popover in the top layer is never a descendant of a
+          <tr> that may be mid-transform on the card layout. */}
+      <ItemRowContextMenu target={ctxTarget} onClose={closeCtx} isAdmin={isAdmin} />
 
       {/* Rendered below the toolbar, so the controls that produced an empty
           result stay on screen and the filter can be undone. */}
@@ -806,9 +875,60 @@ export function ItemSelectTable({
                   title={selectableCount === 0 ? "No selectable items" : undefined}
                 />
               </th>
-              {visibleCols.map((c) => (
-                <th key={c.key} style={c.key === "auditState" ? { textAlign: "center" } : undefined}>{c.label}{sort === c.key ? (dir === "asc" ? " ▲" : " ▼") : ""}</th>
-              ))}
+              {visibleCols.map((c) => {
+                // Home unit gets a FILTER, not a sort — it stays out of
+                // SORTABLE_KEYS (see the ColumnKey doc comment in
+                // items-view.ts), so this branch replaces the plain label
+                // with a native <select> listing every distinct home unit
+                // present in the catalogue. A closed <select> already shows
+                // its own picked value, so unlike the Sort & filter menu's
+                // trigger this needs no separate "is a filter active" chip.
+                if (c.key === "homeUnit") {
+                  return (
+                    <th key={c.key}>
+                      <select
+                        className="th-filter-select"
+                        aria-label="Filter by home unit"
+                        value={homeUnitFilter ?? ""}
+                        onChange={(e) => setHomeUnit(e.target.value || null)}
+                      >
+                        <option value="">{c.label}</option>
+                        {homeUnits.map((u) => (
+                          <option key={u} value={u}>{u}</option>
+                        ))}
+                      </select>
+                    </th>
+                  );
+                }
+                const sortable = SORTABLE_KEYS.has(c.key);
+                return (
+                  <th
+                    key={c.key}
+                    style={c.key === "auditState" ? { textAlign: "center" } : undefined}
+                    className={sortable ? "col-sortable" : undefined}
+                    // aria-sort belongs on the header CELL, not a click handler,
+                    // so a screen reader announces the column's sort state the
+                    // same way it would for a native sortable table.
+                    aria-sort={sort === c.key ? (dir === "asc" ? "ascending" : "descending") : sortable ? "none" : undefined}
+                    onClick={sortable ? () => cycleSort(c.key) : undefined}
+                    // Keyboard/screen-reader parity with the click: a header
+                    // that only responds to a mouse would leave this control
+                    // out of reach for anyone tabbing through the table.
+                    tabIndex={sortable ? 0 : undefined}
+                    onKeyDown={
+                      sortable
+                        ? (e) => {
+                            if (e.key !== "Enter" && e.key !== " ") return;
+                            e.preventDefault();
+                            cycleSort(c.key);
+                          }
+                        : undefined
+                    }
+                  >
+                    {c.label}{sort === c.key ? (dir === "asc" ? " ▲" : " ▼") : ""}
+                  </th>
+                );
+              })}
               <th style={{ textAlign: "right" }}>Actions</th>
             </tr>
           </thead>

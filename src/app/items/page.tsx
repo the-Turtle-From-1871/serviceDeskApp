@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/authz";
-import { listItems, listItemUics } from "@/modules/items/items.service";
+import { listItems, listItemUics, listItemHomeUnits } from "@/modules/items/items.service";
 import { listCategoryNames } from "@/modules/items/categories.service";
 import { listSignatureNames } from "@/modules/signatures/signatures.service";
 import { readinessForItems } from "@/modules/items/readiness.query";
@@ -24,6 +24,9 @@ export default async function ItemsListPage({
     dir?: string | string[];
     page?: string | string[];
     uic?: string | string[];
+    /** `?homeUnit=<value>` — the Home unit column header's own filter
+     *  dropdown. A separate control from `uic`. */
+    homeUnit?: string | string[];
     /** `?needsRename=1` — the rename worklist. Any other value is "off". */
     needsRename?: string | string[];
     /** `?loaner=1` — the loaner-pool worklist. Any other value is "off". */
@@ -64,13 +67,14 @@ export default async function ItemsListPage({
   // admin's saved signature NAMES for the bulk-audit control. Both are small
   // curated lists fetched ONCE per render, never per row. A standard USER never
   // sees those controls, so they never pay for either query.
-  const [result, uics, categoryNames, signatures] = await Promise.all([
+  const [result, uics, homeUnits, categoryNames, signatures] = await Promise.all([
     listItems({
       search: q,
       sort: firstParam(sp.sort) ?? null,
       dir: firstParam(sp.dir) ?? null,
       page: pageParam ? Number.parseInt(pageParam, 10) : 1,
       uic: firstParam(sp.uic) ?? null,
+      homeUnit: firstParam(sp.homeUnit) ?? null,
       // Exactly "1" is on. A permissive check (any non-empty value) would make
       // `?needsRename=0` mean the opposite of what it says.
       needsRename: firstParam(sp.needsRename) === "1",
@@ -85,6 +89,7 @@ export default async function ItemsListPage({
       hideUnnamed: !showUnnamed,
     }),
     listItemUics(),
+    listItemHomeUnits(),
     isAdmin ? listCategoryNames() : Promise.resolve<string[]>([]),
     // Names only — no signature image blob reaches the browser.
     // recordAuditsAction re-reads the image server-side scoped to the acting
@@ -139,6 +144,7 @@ export default async function ItemsListPage({
             q={q ?? ""}
             sortKeys={result.sortKeys}
             uic={result.uic}
+            homeUnit={result.homeUnit}
             needsRename={result.needsRename}
             loaner={result.loaner}
             stale={result.stale}
@@ -188,6 +194,8 @@ export default async function ItemsListPage({
             sortKeys={result.sortKeys}
             uic={result.uic}
             uics={uics}
+            homeUnitFilter={result.homeUnit}
+            homeUnits={homeUnits}
             needsRename={result.needsRename}
             loaner={result.loaner}
             stale={result.stale}
