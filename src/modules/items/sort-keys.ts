@@ -31,6 +31,13 @@ const SORT_COLUMN_MAP = Object.freeze({
   status: "status",
   deviceUIC: "deviceUIC",
   deviceCategory: "deviceCategory",
+  // The KEY is the column the /items table renders ("Last sync", the MDM
+  // export's raw text); the VALUE is a DIFFERENT physical column — the parsed
+  // twin `Item.lastSyncAt` (added 2026-08-11 for the dormant-device window).
+  // Ordering by the raw text sorts lexically ("10/1/2025" ahead of
+  // "7/25/2026"), so this key deliberately points columnForKey somewhere else
+  // entirely; the cell itself still renders the verbatim string untouched.
+  lastSyncDateTime: "lastSyncAt",
 } as const);
 
 /** Widened for lookup by an arbitrary string (always via `columnForKey`), while

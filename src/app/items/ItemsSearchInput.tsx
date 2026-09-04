@@ -13,6 +13,7 @@ export function ItemsSearchInput({
   q,
   sortKeys,
   uic,
+  homeUnit,
   needsRename,
   stale,
   loaner,
@@ -23,6 +24,10 @@ export function ItemsSearchInput({
    *  a lone `sort`/`dir` silently collapsed a two-key sort down to one. */
   sortKeys: SortKey[];
   uic: string | null;
+  /** The Home unit column header's own filter, `?homeUnit=`. A separate
+   *  control from `uic`, but the same silent-drop trap applies: omitted here,
+   *  it vanishes the moment someone types a search. */
+  homeUnit: string | null;
   needsRename: boolean;
   stale: boolean;
   loaner: boolean;
@@ -45,6 +50,7 @@ export function ItemsSearchInput({
   // is still pending.
   const sortRef = useRef(sortKeys);
   const uicRef = useRef(uic);
+  const homeUnitRef = useRef(homeUnit);
   const needsRenameRef = useRef(needsRename);
   const staleRef = useRef(stale);
   const loanerRef = useRef(loaner);
@@ -52,6 +58,7 @@ export function ItemsSearchInput({
   useEffect(() => {
     sortRef.current = sortKeys;
     uicRef.current = uic;
+    homeUnitRef.current = homeUnit;
     needsRenameRef.current = needsRename;
     staleRef.current = stale;
     loanerRef.current = loaner;
@@ -75,6 +82,7 @@ export function ItemsSearchInput({
         params.set("dir", sortRef.current.map((k) => k.dir).join(","));
       }
       if (uicRef.current) params.set("uic", uicRef.current);
+      if (homeUnitRef.current) params.set("homeUnit", homeUnitRef.current);
       if (needsRenameRef.current) params.set("needsRename", "1");
       if (staleRef.current) params.set("stale", "1");
       if (loanerRef.current) params.set("loaner", "1");

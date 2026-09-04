@@ -834,6 +834,76 @@ input[type="file"].input {
   background: rgb(25 28 24 / 0.4);
 }
 
+/* The /items ROW CONTEXT MENU. Deliberately NOT added to the three id lists
+   above, even though the convention says a new popover joins them: it is a
+   different shape and would have to undo most of what it inherited.
+
+   Those three are dropdowns ANCHORED to a trigger button, and a bottom sheet
+   on a phone. This one has no trigger — it opens wherever the pointer was —
+   so it is positioned from inline top/left coordinates, and it never becomes a
+   sheet because it is desktop-only by construction (useItemRowContextMenu
+   refuses below 720px, matching the breakpoint that restacks the table).
+
+   What it DOES share is the rule that matters: no class on the popover, no
+   `display` here, everything visible one level in. A closed popover carrying a
+   layout class renders anyway and swallows clicks meant for the table.
+
+   Its panel is likewise its own class rather than .popup-menu__panel: that
+   one's desktop treatment (border, radius, padding) lives inside an
+   `@supports (anchor-name: …)` gate, and a browser without anchor positioning
+   would give this menu the phone sheet's border-top-only styling in a floating
+   box at the cursor. This menu needs no anchor support, so it must not inherit
+   a rule gated on it. */
+#item-row-context-menu {
+  /* Undo the UA popover box, same as the group above. `inset: auto` is the
+     load-bearing half: the UA sets `inset: 0; margin: auto`, which centres an
+     unstyled popover in the viewport and would fight the inline coordinates. */
+  margin: 0;
+  inset: auto;
+  border: none;
+  padding: 0;
+  background: transparent;
+  overflow: visible;
+}
+/* Not modal — dimming the page behind a context menu would be. */
+#item-row-context-menu::backdrop {
+  background: transparent;
+}
+.context-menu__panel {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 12rem;
+  max-height: min(70vh, 420px);
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--ledger-radius-sm);
+  background: var(--surface);
+  box-shadow: 0 6px 18px rgb(25 28 24 / 0.12);
+}
+/* Menu items read as a list, so they are left-aligned and full width — a
+   centred label in a 12rem column reads as a row of buttons, not a menu. The
+   Retire control is a <form>, so its button needs the width rather than the
+   form element. */
+.context-menu__panel > a,
+.context-menu__panel > button,
+.context-menu__panel > form > button {
+  justify-content: flex-start;
+  text-align: left;
+  width: 100%;
+}
+/* The device it applies to. Without it a menu opened over a dense table gives
+   no confirmation of WHICH row is about to be acted on. */
+.context-menu__heading {
+  padding: 2px 8px 6px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .popup-menu__panel {
   max-height: 80svh;
   overflow-y: auto;
@@ -1176,6 +1246,42 @@ input[type="file"].input {
   padding: 11px 14px;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
+}
+/* Click-to-sort headers on ItemSelectTable, desktop only — `.table thead` is
+   `display: none` below 720px (see the 720px breakpoint below), so this needs
+   no viewport check of its own. `user-select: none` stops a fast double-click
+   selecting the label text instead of cycling the sort twice. */
+.table thead th.col-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+.table thead th.col-sortable:hover {
+  color: var(--text);
+}
+/* The Home unit header renders a FILTER dropdown in place of a plain label
+   (see ItemSelectTable.tsx) — a native <select> that has to read as a header
+   cell, not a form field, and must not grow the header row's height. Border
+   and background are stripped and every text property inherited explicitly
+   (the `font` shorthand does not cover text-transform/letter-spacing/color),
+   so it takes on `.table thead th`'s own uppercase/muted styling until a
+   value is picked. `appearance` is deliberately left at its UA default so the
+   OS-native dropdown indicator still says "this opens something" without
+   drawing a second chevron by hand. */
+.th-filter-select {
+  width: 100%;
+  max-width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+.th-filter-select:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 .table tbody td {
   padding: 12px 14px;

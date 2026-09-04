@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { deleteItemAction } from "@/app/admin/actions/items";
 
 /**
@@ -13,7 +13,7 @@ import { deleteItemAction } from "@/app/admin/actions/items";
  * gives us Escape-to-close for free.
  */
 export function DeleteItemButton({
-  id, make, model, serialNumber, holderName, onOpen,
+  id, make, model, serialNumber, holderName, onOpen, className, autoOpen, onClosed,
 }: {
   id: string;
   make: string;
@@ -30,16 +30,42 @@ export function DeleteItemButton({
    *  swipe drawer this button was tapped in, so no ancestor is mid-transform
    *  while a modal is in the top layer. */
   onOpen?: () => void;
+  /** Overrides the trigger's classes so the same confirmation flow can render
+   *  as a row button OR as a context-menu item. The DIALOG is unaffected —
+   *  what it warns about does not change with where it was opened from. */
+  className?: string;
+  /** Open on mount and render NO trigger of its own.
+   *
+   *  For a caller that already has its own control — the /items row context
+   *  menu, whose menu item is the trigger. It exists because a <dialog> must
+   *  not be rendered INSIDE that popover: a closed popover is `display: none`,
+   *  which hides its entire subtree, so a modal opened from within one is
+   *  promoted to the top layer and then rendered at 0x0 by an ancestor that is
+   *  no longer displayed. Measured in a browser; the DOM reports it as open and
+   *  `:modal`, and nothing is on screen. */
+  autoOpen?: boolean;
+  /** Fired whenever the dialog closes — any route, including Escape. Lets a
+   *  caller using `autoOpen` unmount this again. */
+  onClosed?: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
+  // Effect, not a render-time call: showModal() must run against a mounted
+  // node, and only once.
+  useEffect(() => {
+    if (autoOpen && !ref.current?.open) ref.current?.showModal();
+  }, [autoOpen]);
+
   return (
     <>
-      <button type="button" className="btn btn-danger btn-sm" onClick={() => { onOpen?.(); ref.current?.showModal(); }}>
-        Delete
-      </button>
+      {/* Omitted entirely under `autoOpen` — that caller IS the trigger. */}
+      {!autoOpen && (
+        <button type="button" className={className ?? "btn btn-danger btn-sm"} onClick={() => { onOpen?.(); ref.current?.showModal(); }}>
+          Delete
+        </button>
+      )}
       {/* No className on the <dialog> itself. The UA stylesheet hides a closed
           dialog with `dialog:not([open]) { display: none; }`, which is a
           low-specificity type-selector rule — any AUTHOR class selector
@@ -62,7 +88,7 @@ export function DeleteItemButton({
           attempt must not still be showing the next time this dialog opens. */}
       <dialog
         ref={ref}
-        onClose={() => setError(null)}
+        onClose={() => { setError(null); onClosed?.(); }}
         style={{ padding: 0, border: "none", background: "transparent", maxWidth: "32rem" }}
       >
         <div className="card stack">
