@@ -3,6 +3,14 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-09-04
+
+### Changed
+
+- **The `/items` table is now clean — row actions moved to right-click.** The View / Edit / Retire / Delete buttons no longer sit at the end of every desktop row; right-click a row for the same actions. **Left-clicking anywhere on a row opens the item**, so the common case takes one click instead of a trip to the far right of the table.
+- Selecting text in the table still works — a click that ends a selection does not navigate, so serial numbers can still be copied out.
+- **Keyboard users are unaffected.** Tabbing into a row still reveals the buttons and reaches every action; they are hidden from the eye and the mouse, not from the keyboard or a screen reader. A context menu is mouse-only, so this mattered.
+- **The phone is unchanged.** Swiping a card open still shows the same four buttons — that drawer is the only way to reach those actions on a touch device, where there is no right-click.
 ## 2026-09-03
 
 ### Added

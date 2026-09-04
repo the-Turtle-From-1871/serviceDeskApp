@@ -10,7 +10,7 @@ import { MarkReadyButton } from "@/components/MarkReadyButton";
 import { ReadinessControls } from "@/components/ReadinessControls";
 import { BulkActionsMenu } from "@/components/BulkActionsMenu";
 import { DeleteItemButton } from "@/components/DeleteItemButton";
-import { ItemRowContextMenu, useItemRowContextMenu } from "@/components/ItemRowContextMenu";
+import { ItemRowContextMenu, useItemRowContextMenu, isDesktopWidth } from "@/components/ItemRowContextMenu";
 import { toggleItemStatusAction } from "@/app/admin/actions/items";
 import { MAX_RECEIPT_ROWS } from "@/modules/transfers/receipt-lines";
 import { STALE_SYNC_DAYS } from "@/modules/items/stale-window";
@@ -272,6 +272,22 @@ export function ItemSelectTable({
       // Desktop only, and never over a control the row already owns — see
       // useItemRowContextMenu. Below 720px this <tr> is a swipe card and the
       // native menu is left alone.
+      // Left-click anywhere on a DESKTOP row opens the item. Deliberately a
+      // handler and NOT a stretched link like the phone card: a link over the
+      // whole row would make the table unselectable, and copying a serial out
+      // of the property book is a real workflow. The cost is that middle-click
+      // cannot open a row in a new tab — the device-name link still can, and
+      // faking it by intercepting auxclick would take away the browser's own
+      // behaviour to hand back a worse copy of it.
+      onClick={(e) => {
+        if (!isDesktopWidth()) return;
+        // A click that ends a text selection is not a navigation request.
+        if ((window.getSelection()?.toString() ?? "").trim() !== "") return;
+        // Anything the row already owns keeps its own behaviour.
+        if ((e.target as HTMLElement).closest("a, button, input, select, textarea, dialog, summary, details")) return;
+        if (selecting) return; // in selection mode a click toggles, it does not navigate
+        router.push(`/i/${it.id}`);
+      }}
       onContextMenu={(e) =>
         onContextMenu(e, {
           id: it.id, make: it.make, model: it.model, serialNumber: it.serialNumber,

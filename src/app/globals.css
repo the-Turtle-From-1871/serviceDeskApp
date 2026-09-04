@@ -2460,3 +2460,42 @@ input[type="file"].input {
   color: var(--text-muted);
 }
 
+
+
+/* Row actions are HIDDEN on the desktop table — right-click is the way in.
+
+   DESKTOP ONLY, and the scoping is the whole point: `td.row-actions` is also
+   the PHONE swipe drawer, so hiding it unscoped would empty the drawer and
+   leave a phone with no way to Edit, Retire or Delete at all (the context menu
+   refuses below 720px by design).
+
+   REVEALED ON KEYBOARD FOCUS. A context menu is mouse-only, so hiding these
+   outright would take Edit/Retire/Delete away from anyone not using a mouse —
+   the row buttons were what made the menu safe to add in the first place.
+
+   `opacity: 0`, NOT `visibility: hidden`. This was written with `visibility`
+   first, and measured: it removes the element from the TAB ORDER as well as
+   the accessibility tree, so Tab never reached the buttons and the keyboard
+   fallback did not exist — the exact regression the reveal is here to prevent.
+   `opacity: 0` leaves them focusable and announced; `pointer-events: none` is
+   what stops a mouse clicking an invisible Delete button.
+
+   `:has(:focus-visible)` and not `:focus-within`: focus-within also matches a
+   MOUSE click landing on a button, which would flicker the column into view
+   for the very users it is hidden from. focus-visible is the browser's own
+   answer to "did this focus come from the keyboard". */
+@media (min-width: 720px) {
+  .table--cards td.row-actions .actions > *:not(dialog) {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .table--cards tbody tr:has(.row-actions :focus-visible) td.row-actions .actions > *:not(dialog) {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  /* The row is clickable, so say so. Not `pointer` on the whole row — the
+     cursor must stay `text` over selectable cell content. */
+  .table--cards tbody tr:hover td:not(.row-actions) {
+    cursor: pointer;
+  }
+}
