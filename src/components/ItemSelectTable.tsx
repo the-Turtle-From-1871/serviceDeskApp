@@ -1,4 +1,6 @@
 "use client";
+import type { DeviceClass } from "@prisma/client";
+import { DEVICE_CLASS_LABEL, DEVICE_CLASS_ORDER, isDeviceClass } from "@/modules/items/device-class";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useItemSelection } from "./ItemSelection";
 import Link from "next/link";
@@ -54,7 +56,7 @@ const DEFAULT_HIDDEN: ColumnKey[] = [
   "holder",
   "make",
   "deviceUIC",
-  "loaner",
+  "deviceClass",
   "auditState",
   "status",
   "readiness",
@@ -63,7 +65,7 @@ const hiddenStore = makeStore(HIDDEN_KEY, parseHiddenCols);
 
 // Which header cells cycleSort applies to — the same set SortFilterMenu's
 // "Sort by" field offers, so a header a column click cannot resolve is never
-// clickable in the first place. `holder` and `loaner` stay plain text; Home
+// clickable in the first place. `holder` and `deviceClass` stay plain text; Home
 // unit gets its own filter <select> instead (see the header render below).
 const SORTABLE_KEYS = new Set<string>(SORTABLE_COLUMNS.map((c) => c.key));
 
@@ -101,7 +103,7 @@ export function ItemSelectTable({
   homeUnits,
   needsRename,
   stale,
-  loaner,
+  deviceClass,
   showUnnamed,
   unnamedHidden,
   categories = [],
@@ -136,10 +138,11 @@ export function ItemSelectTable({
    *  needsRename: false means "no filter", never "only devices that are
    *  current". */
   stale: boolean;
-  /** The loaner-pool worklist filter, `?loaner=1`. Same one-way shape as
-   *  needsRename: false means "no filter", never "only devices that are not
-   *  loaners". */
-  loaner: boolean;
+  /** The device-class filter, `?class=`. A SELECT rather than a one-way
+   *  toggle like the two above: the three classes are exhaustive, so "show
+   *  me the EUDs" is a real request rather than the complement of a
+   *  worklist. null means no filter. */
+  deviceClass: DeviceClass | null;
   /** What the URL ASKED for (`?showUnnamed=1`) — drives the checkbox and every
    *  link this component builds. */
   showUnnamed: boolean;
@@ -346,7 +349,11 @@ export function ItemSelectTable({
           the Audit column IS the accountability signal now. */}
       {!isHidden("readiness") && <td className="cell-desktop" data-label="Readiness">{READINESS_LABEL[it.readiness]}</td>}
       {!isHidden("status") && <td className="cell-desktop" data-label="Status"><StatusBadge status={it.status} /></td>}
-      {!isHidden("loaner") && <td className="cell-desktop" data-label="Loaner">{it.isLoaner ? <span className="badge badge-loaner">Loaner</span> : <span className="subtle">—</span>}</td>}
+      {/* EUD renders as a dash, not a badge: it is ~97% of the fleet, so a
+          badge on nearly every row would be a column of noise. The dash is
+          still rendered here (unlike the card below, which omits it entirely)
+          because a desktop table column reads as broken when cells are blank. */}
+      {!isHidden("deviceClass") && <td className="cell-desktop" data-label="Class">{it.deviceClass !== "EUD" ? <span className={`badge badge-${it.deviceClass.toLowerCase()}`}>{DEVICE_CLASS_LABEL[it.deviceClass]}</span> : <span className="subtle">—</span>}</td>}
       {!isHidden("auditState") && <td className="cell-desktop" data-label="Audit" style={{ textAlign: "center" }}><AuditLight state={it.auditState} /></td>}
       {/* `orDash`, not the `??` the columns above use. This is an MDM column,
           so an absent value arrives as null from some exports, "" from others
@@ -389,9 +396,13 @@ export function ItemSelectTable({
         {/* Rendered only when true — the More panel is at seven fields and
             `.claude/rules/ui-styling.md` measures an eighth as reaching into
             its second row, so the badge goes beside the name instead. An
-            em-dash on every non-loaner card would be noise on a surface with
-            no room to spare. */}
-        {it.isLoaner && <span className="badge badge-loaner">Loaner</span>}
+            em-dash on every ordinary EUD card would be noise on a surface with
+            no room to spare — and EUD is ~97% of the fleet. */}
+        {it.deviceClass !== "EUD" && (
+          <span className={`badge badge-${it.deviceClass.toLowerCase()}`}>
+            {DEVICE_CLASS_LABEL[it.deviceClass]}
+          </span>
+        )}
         <span className="cell-primary__sub">{it.make} {it.model}</span>
       </td>
       <td className="cell-meta" data-label="">
@@ -613,7 +624,7 @@ export function ItemSelectTable({
     homeUnitFilter?: string | null;
     needsRename?: boolean;
     stale?: boolean;
-    loaner?: boolean;
+    deviceClass?: DeviceClass | null;
     showUnnamed?: boolean;
   }) => {
     const params = new URLSearchParams();
@@ -643,8 +654,8 @@ export function ItemSelectTable({
     // Same silent-drop trap as ItemsSearchInput: navigate rebuilds this URL for
     // every sort, filter and page change, so a filter missing here vanishes
     // the moment someone pages or re-sorts.
-    const nextLoaner = over.loaner !== undefined ? over.loaner : loaner;
-    if (nextLoaner) params.set("loaner", "1");
+    const nextClass = over.deviceClass !== undefined ? over.deviceClass : deviceClass;
+    if (nextClass) params.set("class", nextClass);
 
     // Written only when ON like the two above — but here ON is the NON-default
     // state (unnamed and `BE-…` devices are hidden unless asked for), so an
@@ -711,7 +722,7 @@ export function ItemSelectTable({
       addMany(res.items);
       setSelectAllMsg(`Selected ${res.items.length} dormant device${res.items.length === 1 ? "" : "s"}.`);
     });
-  const setLoaner = (next: boolean) => navigate({ loaner: next, page: 1 });
+  const setDeviceClass = (next: DeviceClass | null) => navigate({ deviceClass: next, page: 1 });
   const setShowUnnamed = (next: boolean) => navigate({ showUnnamed: next, page: 1 });
 
   return (
@@ -726,25 +737,40 @@ export function ItemSelectTable({
         <SortFilterMenu
           idPrefix="items"
           columns={SORTABLE_COLUMNS}
-          summary={sortFilterSummary(sort, dir, uic, needsRename, loaner, stale, !unnamedHidden)}
+          summary={sortFilterSummary(sort, dir, uic, needsRename, deviceClass, stale, !unnamedHidden)}
           sort={sort}
           dir={dir}
           secondary={secondarySort?.key ?? null}
-          filter={
-            uics.length > 0
-              ? {
+          filters={[
+            // Unit is omitted entirely when the page has no units — a lone
+            // "All units" option is a control that cannot change anything.
+            ...(uics.length > 0
+              ? [{
                   label: "Unit",
                   // The page passes "" for "no filter"; the select's neutral
                   // option carries the same "" so they round-trip.
                   value: uic?.trim() ? uic : "",
                   options: [{ value: "", label: "All units" }, ...uics.map((u) => ({ value: u, label: u }))],
-                  onChange: (v) => setUic(v || null),
-                }
-              : undefined
-          }
+                  onChange: (v: string) => setUic(v || null),
+                }]
+              : []),
+            // Class is a SELECT, not a checkbox beside "Needs rename": the
+            // three values are exhaustive and mutually exclusive, so each is a
+            // real thing to ask for. The old "Loaners only" checkbox could not
+            // express "show me the standalones" without becoming a second box
+            // that silently conflicted with the first.
+            {
+              label: "Class",
+              value: deviceClass ?? "",
+              options: [
+                { value: "", label: "All classes" },
+                ...DEVICE_CLASS_ORDER.map((c) => ({ value: c, label: DEVICE_CLASS_LABEL[c] })),
+              ],
+              onChange: (v: string) => setDeviceClass(isDeviceClass(v) ? v : null),
+            },
+          ]}
           toggles={[
             { label: "Needs rename in Intune", checked: needsRename, onChange: setNeedsRename },
-            { label: "Loaners only", checked: loaner, onChange: setLoaner },
             { label: `Not checked in for ${STALE_SYNC_DAYS}+ days`, checked: stale, onChange: setStale },
             // Reads as the POSITIVE act because the hide is the default: a
             // "Hide unnamed devices" box that started checked would describe the
@@ -840,12 +866,19 @@ export function ItemSelectTable({
               search nobody ran, and gives no hint that a filter is hiding the
               other 1,200 devices. */}
           <div>
-            No items match {[uic ? "this unit" : null, needsRename ? "the rename filter" : null, loaner ? "the loaner filter" : null]
+            No items match{" "}
+            {[
+              uic ? "this unit" : null,
+              needsRename ? "the rename filter" : null,
+              // Named by its own label rather than "the class filter": which
+              // class is the whole content of the message here.
+              deviceClass ? `the ${DEVICE_CLASS_LABEL[deviceClass]} class` : null,
+            ]
               .filter(Boolean)
               .join(" and ")}
-            {(uic || needsRename || loaner) && q.trim() ? " and " : ""}
+            {(uic || needsRename || deviceClass) && q.trim() ? " and " : ""}
             {q.trim() ? "your search" : ""}
-            {!uic && !needsRename && !loaner && !q.trim() ? "the current view" : ""}.
+            {!uic && !needsRename && !deviceClass && !q.trim() ? "the current view" : ""}.
             {/* The unnamed hide is ON by default, so it is the ONE filter that
                 can empty this list without anybody having touched a control —
                 filter to a unit whose devices are all unnamed and the sentence

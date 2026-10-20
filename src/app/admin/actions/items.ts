@@ -12,7 +12,7 @@ import {
   markItemsReady,
   previewRename,
   renameItems,
-  setItemsLoaner,
+  setItemsDeviceClass,
   listStaleItemsForSelection,
   type RenameCollision,
 } from "@/modules/items/items.service";
@@ -25,6 +25,8 @@ import {
   MAX_BULK_ITEMS,
 } from "@/modules/items/items.schema";
 import { Prisma } from "@prisma/client";
+import type { DeviceClass } from "@prisma/client";
+import { DEVICE_CLASS_ORDER, DEVICE_CLASS_LABEL } from "@/modules/items/device-class";
 import { learnCategories, normalizeCategoryName } from "@/modules/items/categories.service";
 import { z } from "zod";
 import type { SkippedRow } from "@/modules/items/import";
@@ -266,53 +268,62 @@ export async function markItemsReadyAction(formData: FormData) {
   }
 }
 
-const setLoanerSchema = z.object({
+const setDeviceClassSchema = z.object({
   itemIds: z.array(z.string().min(1)).min(1, "Select at least one item."),
-  isLoaner: z.boolean(),
+  // z.enum over the enum's own value list, so a crafted POST naming a class
+  // that does not exist is refused here rather than failing as a Postgres
+  // enum cast deeper in. DEVICE_CLASS_ORDER is the single list; restating the
+  // three strings here would be a second answer to "what classes exist".
+  deviceClass: z.enum(DEVICE_CLASS_ORDER as unknown as [DeviceClass, ...DeviceClass[]]),
 });
 
 /* Annotated, not inferred: a "use server" module may only export async
    functions, so the union stays a local type — which is what lets the client
    narrow with `"error" in res` and get a number rather than number | undefined. */
-type LoanerResult =
+type DeviceClassResult =
   | { error: string }
-  | { ok: true; updated: number; skipped: number; isLoaner: boolean };
+  | { ok: true; updated: number; skipped: number; deviceClass: DeviceClass; label: string };
 
 /**
- * Mark the selected items as loaner-pool stock, or take them out of it.
+ * Set the device class on the selected items — EUD, Loaner or Standalone.
  *
  * MANAGE_ITEMS, not ADMINISTER: this is item vocabulary, the same capability
  * the rename and category controls use. The batch is client-supplied ids, so
  * this guard is the entire boundary — the sheet hiding the buttons is
  * presentation, not security.
  *
- * Revalidates /items only. Not /admin/analytics: nothing on the dashboard reads
- * this flag yet, and that entry must be added when the loaner bucket ships.
- * Not the 500 individual /i/<id> paths either — setReadinessAction sets that
+ * REVALIDATES /admin/analytics TOO, which the loaner version did not. Its
+ * comment claimed "nothing on the dashboard reads this flag yet" and that was
+ * already untrue: both the dormant and dropped-off queries exclude pool stock,
+ * so marking a device changed two cards and neither refreshed. The class now
+ * decides even more there — STANDALONE is excluded from both lists — so the
+ * stale page would have been wrong more often, not less.
+ *
+ * Still not the 500 individual /i/<id> paths — setReadinessAction sets that
  * precedent, and the item page picks the badge up on its next render.
  */
-export async function setItemsLoanerAction(formData: FormData): Promise<LoanerResult> {
+export async function setItemsDeviceClassAction(formData: FormData): Promise<DeviceClassResult> {
   const actor = await requireCapability("MANAGE_ITEMS");
   const denied = denyReadOnly(actor);
   if (denied) return denied;
 
-  const parsed = setLoanerSchema.safeParse({
+  const parsed = setDeviceClassSchema.safeParse({
     itemIds: String(formData.get("itemIds") ?? "").split(",").filter(Boolean),
-    // Exactly "1" is on. Anything else is off, so a malformed value cannot
-    // accidentally mark a batch.
-    isLoaner: String(formData.get("isLoaner") ?? "") === "1",
+    deviceClass: String(formData.get("deviceClass") ?? ""),
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
 
   try {
-    const { updated, skipped } = await setItemsLoaner(parsed.data.itemIds, parsed.data.isLoaner);
+    const { deviceClass } = parsed.data;
+    const { updated, skipped } = await setItemsDeviceClass(parsed.data.itemIds, deviceClass);
     revalidatePath("/items");
-    return { ok: true, updated, skipped, isLoaner: parsed.data.isLoaner };
+    revalidatePath("/admin/analytics");
+    return { ok: true, updated, skipped, deviceClass, label: DEVICE_CLASS_LABEL[deviceClass] };
   } catch (e) {
     if (e instanceof ItemError && e.code === "TOO_MANY") {
       return { error: `Too many items selected. The limit is ${MAX_BULK_ITEMS} per action.` };
     }
-    console.error("[setItemsLoanerAction] unexpected error:", e);
+    console.error("[setItemsDeviceClassAction] unexpected error:", e);
     return { error: "Something went wrong updating those items. Please try again." };
   }
 }

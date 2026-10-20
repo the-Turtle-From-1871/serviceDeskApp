@@ -168,6 +168,23 @@ model PasswordResetToken {
   @@index([userId])
 }
 
+/// What KIND of device this is, for the property book.
+///
+/// Exactly one value per device, which is why this replaced the `isLoaner`
+/// boolean rather than sitting beside it: a second independent flag would have
+/// made `EUD` mean "neither flag set" — a default nothing actually records,
+/// and two columns to keep in step. One column, one answer.
+enum DeviceClass {
+  /// End User Device. THE DEFAULT, and what ~97% of the fleet is.
+  EUD
+  /// Pool stock: kept to lend out temporarily, over and over.
+  LOANER
+  /// Not on the network by design. The distinction that earns this its own
+  /// value: a standalone device CANNOT check in with MDM, so its silence is
+  /// its defining property rather than a fault — see the analytics exclusions.
+  STANDALONE
+}
+
 enum ItemStatus {
   ACTIVE
   RETIRED
@@ -220,33 +237,26 @@ model Item {
   // public per-keystroke search. Revisit if the fleet grows an order of
   // magnitude.
   storageLocation            String?
-  /// Pool stock: a device kept to lend out temporarily, over and over.
+  /// What kind of device this is. Replaced the `isLoaner` boolean on
+  /// 2026-10-19; every device now carries exactly one class and the default is
+  /// EUD, so "ordinary device" is a value that is actually stored rather than
+  /// the absence of a flag.
   ///
-  /// STORED rather than derived, unlike readiness and accountability. Those two
-  /// were dropped because they stored answers the data already knew; this one is
-  /// kept because a device can be a loaner without its name saying so, and the
-  /// admin toggle on /items is a real write.
+  /// LOANER FOLLOWS THE DEVICE NAME; STANDALONE DOES NOT. That asymmetry is
+  /// deliberate. The loaner convention is encoded in Intune's device names, so
+  /// every path that writes `deviceName` moves the class with it via
+  /// `modules/items/device-class.ts` — the rule inherited from `isLoaner`, and
+  /// its cost is unchanged: MDM owns `deviceName`, so MDM indirectly owns a
+  /// device's loaner status. STANDALONE has no naming convention and is set by
+  /// hand only, so no import can move it.
   ///
-  /// BUT IT NOW FOLLOWS THE DEVICE NAME — reversed 2026-08-11, hours after this
-  /// column shipped, by explicit decision. The text below this paragraph used to
-  /// read "a person is the only possible source" and "DELIBERATELY NOT
-  /// IMPORTABLE", and both are now false: the property manager already encodes
-  /// loaner status in the name (51 devices are `NGHINB-LOAN-###`), and keeping
-  /// the same fact in Intune and here guarantees the two disagree. Every path
-  /// that writes `deviceName` — import, admin edit, item card, bulk rename,
-  /// create — moves this flag with it via `modules/items/loaner-name.ts`.
-  ///
-  /// WHAT THAT COSTS, stated because it was the original objection and it was
-  /// real: MDM owns `deviceName`, so MDM now indirectly owns this flag for any
-  /// device whose name enters or leaves the convention. A device renamed in
-  /// Intune out of `NGHINB-LOAN-###` loses the flag on the next import with
-  /// nobody here deciding that.
-  ///
-  /// WHAT IS PRESERVED: a name change moves the flag ONLY when one of the two
-  /// names follows the convention. A hand-set flag on a device the convention
-  /// says nothing about survives every unrelated rename and edit — see
-  /// `loanerUpdateForRename`, whose three-way return exists for exactly that.
-  isLoaner                   Boolean           @default(false)
+  /// WHAT IS PRESERVED, and it matters more now than it did with a boolean: a
+  /// rename moves the class ONLY between EUD and LOANER, and only when one of
+  /// the two names follows the convention. A hand-set STANDALONE survives every
+  /// rename, including one out of the loaner convention — see
+  /// `deviceClassForRename`, which reads the current class for exactly that
+  /// reason and no other.
+  deviceClass                DeviceClass       @default(EUD)
   notes                      String?
   // The email of the person actually using the device. Distinct from the
   // hand-receipt holder (derived from the latest OPEN Transfer), which stays the
@@ -359,7 +369,7 @@ model Item {
   @@index([deviceUIC])
   // Low-cardinality equality filter feeding a paginated list, same as
   // deviceCategory/deviceUIC above.
-  @@index([isLoaner])
+  @@index([deviceClass])
   // Audit-status sort on /items: a bare ORDER BY lastAuditedAt, no nulls override.
   @@index([lastAuditedAt])
   // Readiness derivation reads these two on every dashboard aggregate and on

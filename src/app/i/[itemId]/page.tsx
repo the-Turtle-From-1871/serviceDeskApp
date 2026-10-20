@@ -1,3 +1,4 @@
+import { DEVICE_CLASS_LABEL } from "@/modules/items/device-class";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getItemWithCreator, listItemFieldSuggestions } from "@/modules/items/items.service";
@@ -96,7 +97,11 @@ export default async function PublicItemPage({ params }: { params: Promise<{ ite
             <p className="subtle">Serial {item.serialNumber}{item.homeUnit ? ` · ${item.homeUnit}` : ""}</p>
           </div>
           <span className="spacer" />
-          {item.isLoaner && <span className="badge badge-loaner">Loaner</span>}
+          {item.deviceClass !== "EUD" && (
+            <span className={`badge badge-${item.deviceClass.toLowerCase()}`}>
+              {DEVICE_CLASS_LABEL[item.deviceClass]}
+            </span>
+          )}
           <StatusBadge status={item.status} />
         </div>
 

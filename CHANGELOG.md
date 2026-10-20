@@ -3,6 +3,26 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-10-19
+
+### Added
+
+- **Devices now carry a CLASS: EUD, Loaner or Standalone.** Every device is an **EUD** (end user device) unless it is marked otherwise — that is the default and about 97% of the fleet. **Standalone** is new, and means a device that is not on the network by design.
+- Set it from the `/items` selection bar: pick a class and press **Set class**. The Sort & filter menu has a matching **Class** dropdown, and the table's **Class** column shows it.
+- **Standalone devices are excluded from both dormant-device lists** — "not checked in for 30+ days" and "dropped off the network". A standalone device cannot check in with MDM, so listing it as missing would report it as faulty for doing exactly what it is configured to do.
+
+### Changed
+
+- **The loaner mark became the Loaner class.** Everything it did still works: the 40 devices marked as loaners are now classed `Loaner`, they are still excluded from both dormant lists, and the class still follows the `NGHINB-LOAN-###` naming convention through an import. What changed is that a device now has one class rather than a flag that is either set or not, so "ordinary device" is something the property book actually records.
+- The `/items` **Loaner** column is now **Class**, and the **Loaners only** checkbox is now a **Class** dropdown — a checkbox could not express "show me the standalones".
+- The URL filter `?loaner=1` is now `?class=LOANER` (or `EUD` / `STANDALONE`). An old bookmarked `?loaner=1` link no longer filters.
+- Setting a class now refreshes the analytics dashboard. The loaner version did not, and its own comment claimed nothing on the dashboard read the flag — which was untrue when it was written: both dormant lists have always excluded pool stock.
+
+### Notes
+
+- **Migration `20261019120000_device_class`** adds the `DeviceClass` enum and `Item.deviceClass`, backfills `LOANER` from `isLoaner`, and drops `isLoaner`. It verifies the backfill row-for-row before the drop and rolls the whole file back on a mismatch. **Apply it to Supabase before running this code** — `npm run db:migrate` targets local Docker on purpose.
+- **Standalone is hand-set only.** No import can write it or clear it, deliberately: the loaner convention is encoded in Intune device names, and no such convention exists for standalone devices, so deriving one would be inventing a fact rather than reading one.
+- **Known data issue, not addressed by this change:** the loaner naming convention in the code is `NGHINB-LOAN-###`, but 43 live devices are named `NGHINB-PLOAN###` and carry no loaner marking. They migrate as `EUD`. Widening the pattern would reclassify all 43 and remove them from the dropped-off list, which is a property-book decision rather than a refactor.
 ## 2026-09-04
 
 ### Changed
