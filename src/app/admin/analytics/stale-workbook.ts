@@ -129,7 +129,7 @@ export async function buildStaleDevicesWorkbook(
         value:
           `Devices MDM has not checked in with for ${STALE_MIN_DAYS}–${STALE_MAX_DAYS} days · ${scopeLabel(scope)}. ` +
           `This is the last MDM sync, not the last user sign-in. Devices unseen for over ${STALE_MAX_DAYS} days, ` +
-          `devices with no sync time recorded, loaner-pool stock, and devices out on an open hand ` +
+          `devices with no sync time recorded, loaner-pool stock, standalone devices, and devices out on an open hand ` +
           `receipt are not listed.`,
       },
     ],

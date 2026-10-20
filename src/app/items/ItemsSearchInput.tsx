@@ -1,4 +1,5 @@
 "use client";
+import type { DeviceClass } from "@prisma/client";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { SortKey } from "@/components/ItemSelectTable";
@@ -16,7 +17,7 @@ export function ItemsSearchInput({
   homeUnit,
   needsRename,
   stale,
-  loaner,
+  deviceClass,
   showUnnamed,
 }: {
   q: string;
@@ -30,7 +31,7 @@ export function ItemsSearchInput({
   homeUnit: string | null;
   needsRename: boolean;
   stale: boolean;
-  loaner: boolean;
+  deviceClass: DeviceClass | null;
   /** The URL flag, not whether the hide is in effect. A search lifts the hide
    *  server-side, but typing must not rewrite the URL to claim the user asked
    *  for that — clearing the box has to land back on the filtered view. */
@@ -53,7 +54,7 @@ export function ItemsSearchInput({
   const homeUnitRef = useRef(homeUnit);
   const needsRenameRef = useRef(needsRename);
   const staleRef = useRef(stale);
-  const loanerRef = useRef(loaner);
+  const deviceClassRef = useRef(deviceClass);
   const showUnnamedRef = useRef(showUnnamed);
   useEffect(() => {
     sortRef.current = sortKeys;
@@ -61,7 +62,7 @@ export function ItemsSearchInput({
     homeUnitRef.current = homeUnit;
     needsRenameRef.current = needsRename;
     staleRef.current = stale;
-    loanerRef.current = loaner;
+    deviceClassRef.current = deviceClass;
     showUnnamedRef.current = showUnnamed;
   });
 
@@ -85,7 +86,7 @@ export function ItemsSearchInput({
       if (homeUnitRef.current) params.set("homeUnit", homeUnitRef.current);
       if (needsRenameRef.current) params.set("needsRename", "1");
       if (staleRef.current) params.set("stale", "1");
-      if (loanerRef.current) params.set("loaner", "1");
+      if (deviceClassRef.current) params.set("class", deviceClassRef.current);
       if (showUnnamedRef.current) params.set("showUnnamed", "1");
       // Changing the query resets to page 1 (omitted = page 1): a narrower
       // result set could otherwise strand the user on a now-empty page.

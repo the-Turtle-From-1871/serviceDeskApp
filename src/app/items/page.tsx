@@ -1,3 +1,4 @@
+import { isDeviceClass } from "@/modules/items/device-class";
 import Link from "next/link";
 import { requireUser } from "@/lib/authz";
 import { listItems, listItemUics, listItemHomeUnits } from "@/modules/items/items.service";
@@ -29,8 +30,11 @@ export default async function ItemsListPage({
     homeUnit?: string | string[];
     /** `?needsRename=1` — the rename worklist. Any other value is "off". */
     needsRename?: string | string[];
-    /** `?loaner=1` — the loaner-pool worklist. Any other value is "off". */
-    loaner?: string | string[];
+    /** `?class=EUD|LOANER|STANDALONE` — the device-class filter. Unlike the
+     *  worklist flags around it this is a SELECT, not a checkbox: the three
+     *  values are exhaustive, so "not a loaner" is a real answer rather than
+     *  the absence of a filter. Anything else is treated as no filter. */
+    class?: string | string[];
     /** `?stale=1` — the dormant-device worklist. Any other value is "off". */
     stale?: string | string[];
     /** `?showUnnamed=1` — lift the default hide on unnamed / `BE-…` devices.
@@ -78,9 +82,13 @@ export default async function ItemsListPage({
       // Exactly "1" is on. A permissive check (any non-empty value) would make
       // `?needsRename=0` mean the opposite of what it says.
       needsRename: firstParam(sp.needsRename) === "1",
-      // Exactly "1" is on, matching needsRename. A permissive check would make
-      // `?loaner=0` mean the opposite of what it says.
-      loaner: firstParam(sp.loaner) === "1",
+      // Validated against the enum rather than cast: an unrecognised `?class=`
+      // becomes "no filter" instead of reaching Postgres as a failing enum
+      // cast. isDeviceClass is the single list of valid values.
+      deviceClass: (() => {
+        const v = firstParam(sp.class);
+        return isDeviceClass(v) ? v : null;
+      })(),
       // Exactly "1" is on, matching the two above.
       stale: firstParam(sp.stale) === "1",
       // The view default lives here, not in the service: listItems defaults the
@@ -146,7 +154,7 @@ export default async function ItemsListPage({
             uic={result.uic}
             homeUnit={result.homeUnit}
             needsRename={result.needsRename}
-            loaner={result.loaner}
+            deviceClass={result.deviceClass}
             stale={result.stale}
             showUnnamed={showUnnamed}
           />
@@ -175,7 +183,7 @@ export default async function ItemsListPage({
               deviceCategory: it.deviceCategory,
               homeUnit: it.homeUnit,
               storageLocation: it.storageLocation,
-              isLoaner: it.isLoaner,
+              deviceClass: it.deviceClass,
               // Raw MDM text, passed straight through — see ItemRow.
               lastLogonUserPrincipalName: it.lastLogonUserPrincipalName,
               lastLogonDate: it.lastLogonDate,
@@ -197,7 +205,7 @@ export default async function ItemsListPage({
             homeUnitFilter={result.homeUnit}
             homeUnits={homeUnits}
             needsRename={result.needsRename}
-            loaner={result.loaner}
+            deviceClass={result.deviceClass}
             stale={result.stale}
             showUnnamed={showUnnamed}
             unnamedHidden={result.hideUnnamed}

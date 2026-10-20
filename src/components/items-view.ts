@@ -1,3 +1,5 @@
+import type { DeviceClass } from "@prisma/client";
+import { DEVICE_CLASS_LABEL } from "@/modules/items/device-class";
 import { sortRows, parseSortPref as parseSortPrefGeneric, parseHiddenCols as parseHiddenColsGeneric, type SortDir, type SortPref as GenericSortPref } from "@/components/column-view";
 import type { AuditState } from "@/modules/audit/audit.status";
 import { READINESS_LABEL, type ReadinessState } from "@/modules/items/readiness";
@@ -35,17 +37,17 @@ import type { SortField } from "@/modules/items/sort-keys";
  *  looking for "why is Last sync's sort weird" should find the answer beside
  *  the columns that stayed unsortable.
  *
- *  `loaner` is the SECOND displayable-but-unsortable column, for a second
- *  reason: it is a two-value flag, and a two-value sort is a filter wearing
- *  the wrong control. Ordering 1,200 rows by a boolean groups every loaner
- *  at one end of the page and answers "which ones", not "in what order" —
- *  the `?loaner=1` worklist filter is that question's real answer.
+ *  `deviceClass` is the SECOND displayable-but-unsortable column, for a
+ *  second reason: it has three values, and a three-value sort is a filter
+ *  wearing the wrong control. Ordering 1,200 rows by it groups ~97% of the
+ *  fleet under EUD and answers "which ones", not "in what order" — the
+ *  `?class=` filter is that question's real answer.
  *
  *  `homeUnit` is the THIRD, added 2026-09-03: a real column, but with no
  *  index (see the Units rule in `.claude/rules/backend-constraints.md`), and
  *  nobody has asked to sort by it — the UIC column already orders the same
  *  fact. Add it to SORT_COLUMN in sort-keys.ts if that changes. */
-export type ColumnKey = SortField | "holder" | "loaner" | "homeUnit";
+export type ColumnKey = SortField | "holder" | "deviceClass" | "homeUnit";
 
 /* Readiness labels have ONE definition, in modules/items/readiness.ts, next to
    the function that derives them. Re-exported here so the table imports its
@@ -80,9 +82,9 @@ export type ItemRow = {
   homeUnit: string | null;
   /** Where the device physically sits when nobody holds it. Free text. */
   storageLocation: string | null;
-  /** Pool stock — a device kept to lend out temporarily. Stored, not derived;
-   *  see the note on the column in schema.prisma. */
-  isLoaner: boolean;
+  /** EUD, Loaner or Standalone. Exactly one per device; see the note on the
+   *  column in schema.prisma for why this replaced an `isLoaner` boolean. */
+  deviceClass: DeviceClass;
   /* MDM telemetry, shown in the phone card's More panel. All four are stored
      VERBATIM as text by the importer (`lastLogonDate` is a raw string like
      "7/25/2026 1:40:21 AM", never a Date) — so they are rendered as-is, exactly
@@ -132,7 +134,7 @@ export const ITEM_COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: "deviceCategory", label: "Category" },
   { key: "readiness", label: "Readiness" },
   { key: "status", label: "Status" },
-  { key: "loaner", label: "Loaner" },
+  { key: "deviceClass", label: "Class" },
   { key: "auditState", label: "Audit" },
   { key: "lastSyncDateTime", label: "Last sync" },
 ];
@@ -141,7 +143,7 @@ export const ITEM_COLUMNS: { key: ColumnKey; label: string }[] = [
  *  why each one is here. Named rather than inlined into the filter below so
  *  adding another is one edit in one place, and so the reason lives with the
  *  list rather than in a `!==` chain. */
-const UNSORTABLE_COLUMNS = new Set<string>(["holder", "loaner", "homeUnit"]);
+const UNSORTABLE_COLUMNS = new Set<string>(["holder", "deviceClass", "homeUnit"]);
 
 /** The Sort control's options — every column EXCEPT the unsortable ones.
  *
@@ -176,7 +178,7 @@ export function sortFilterSummary(
   dir: SortDir,
   uic: string | null,
   needsRename = false,
-  loaner = false,  stale = false,  showingUnnamed = false,
+  deviceClass: DeviceClass | null = null,  stale = false,  showingUnnamed = false,
 ): string {
   const label = sort ? SORT_LABEL.get(sort) : undefined;
   const sortPart = label ? `${label} ${dir === "asc" ? "▲" : "▼"}` : "Newest";
@@ -189,12 +191,11 @@ export function sortFilterSummary(
   // same reason the sort is: a list silently showing 3 of 1,204 devices is a
   // confident wrong answer about the property book.
   if (needsRename) parts.push("Rename");
-  // Same reasoning as Rename, one abbreviation later: a trigger that already
-  // carries a sort, a unit AND the rename worklist has no room to spell out
-  // "Loaners only", and this filter needs to be just as visible with the menu
-  // shut — a list silently showing 40 loaners out of 1,204 devices is the same
-  // confident wrong answer.
-  if (loaner) parts.push("Loaner");
+  // Same reasoning as Rename: a class filter needs to be just as visible with
+  // the menu shut — a list silently showing 40 loaners out of 1,254 devices is
+  // the same confident wrong answer. The label is the class's own name rather
+  // than a fixed word, since there are now three of them.
+  if (deviceClass) parts.push(DEVICE_CLASS_LABEL[deviceClass]);
   // Same reasoning again: this one narrows 1,200 devices to ~240, and an
   // operator who has forgotten it is on would read a partial fleet as the
   // whole one. "Dormant" rather than "Stale" — the word the analytics card

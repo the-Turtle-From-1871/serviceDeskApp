@@ -4,7 +4,9 @@ import { useRouter } from "next/navigation";
 import { ChevronDown } from "lucide-react";
 import { recordAuditsAction } from "@/app/admin/actions/audit";
 import { flagItemsForServiceAction, completeServiceItemsAction } from "@/app/admin/actions/queue";
-import { previewItemRenameAction, renameItemsAction, setItemsLoanerAction } from "@/app/admin/actions/items";
+import { previewItemRenameAction, renameItemsAction, setItemsDeviceClassAction } from "@/app/admin/actions/items";
+import { DEVICE_CLASS_LABEL, DEVICE_CLASS_ORDER } from "@/modules/items/device-class";
+import type { DeviceClass } from "@prisma/client";
 import { previewStaleNotificationsAction, sendStaleNotificationsAction } from "@/app/admin/actions/items";
 // PURE — no DOM, no Prisma — which is the only reason a Client Component may
 // import it. The server rebuilds the names it writes from the same function, so
@@ -58,7 +60,7 @@ function outcome(verb: string, updated: number, skipped: number): string {
 
 /**
  * The /items selection bar's overflow sheet: four bulk actions — audit, the
- * service queue, rename and the loaner mark — that need inputs or dedicated
+ * service queue, rename and the device class — that need inputs or dedicated
  * buttons of their own and cannot fit inline. The bar is sticky and overlays
  * the table, so every line of height hides another row of what you are
  * selecting from — stacked inline, these four covered a phone viewport
@@ -79,7 +81,7 @@ function outcome(verb: string, updated: number, skipped: number): string {
  * Either way this is PRESENTATION, never a boundary: `recordAuditsAction` calls
  * `requireAdmin()` (= `requireCapability("ADMINISTER")`), both queue actions
  * call `requireCapability("MANAGE_QUEUE")`, and both rename actions and
- * `setItemsLoanerAction` call `requireCapability("MANAGE_ITEMS")`, re-read from
+ * `setItemsDeviceClassAction` call `requireCapability("MANAGE_ITEMS")`, re-read from
  * the DB per request. The batch is client-supplied ids, so that server guard
  * is the whole of it — the `isAdmin` wrapper above is a VISIBILITY gap, not a
  * security one, and nothing is over-exposed by it.
@@ -89,10 +91,9 @@ function outcome(verb: string, updated: number, skipped: number): string {
  * NAMES only (`listSignatureNames`) and never any ink. For the rename, only a
  * prefix and a start number are posted: the server rebuilds the name list
  * itself, so this control can never be turned into "write any string to any
- * item". For the loaner mark, only one flag rides along — `isLoaner`, read
- * server-side as exactly `"1"` = true and anything else = false — so this
- * control can only ever set or clear a single boolean, never an arbitrary
- * write.
+ * item". For the device class, only the class NAME rides along, and the action
+ * parses it with `z.enum` over the DeviceClass values — so this control can
+ * only ever set one of three known classes, never an arbitrary write.
  *
  * POPOVER RULES — all inherited from SortFilterMenu and all load-bearing:
  *  - The element carrying `popover` has NO className. An author `display` beats
@@ -119,7 +120,7 @@ export function BulkActionsMenu({
   signatures: { id: string; name: string }[];
   canAudit: boolean;
   canQueue: boolean;
-  /** MANAGE_ITEMS — the bulk rename and the loaner mark. */
+  /** MANAGE_ITEMS — the bulk rename and the device class. */
   canManageItems: boolean;
 }) {
   const menuId = "items-bulkactions";
@@ -156,11 +157,16 @@ export function BulkActionsMenu({
   // ends of one job and are never used together, and this bar is sticky over
   // the table, where every line of height hides another row of what you are
   // selecting from.
-  const [loanerMsg, setLoanerMsg] = useState<Msg>(null);
-  // Two transitions, not one — a slow write must not point the busy state at
-  // the button that was not pressed. Same reasoning as the three above.
-  const [markPending, startMark] = useTransition();
-  const [unmarkPending, startUnmark] = useTransition();
+  const [classMsg, setClassMsg] = useState<Msg>(null);
+  // ONE transition, where the loaner pair needed two. Those were two buttons
+  // that could each be pressed, so a slow write had to point the busy state at
+  // whichever one it was, and only that one. This is a single button whose
+  // target comes from a select, so only one thing can ever be in flight.
+  const [classPending, startClass] = useTransition();
+  // Which class the button applies. STANDALONE is the default selection
+  // because it is the one this control is the ONLY way to set: LOANER and EUD
+  // also arrive from the Intune naming convention, standalone never does.
+  const [classTarget, setClassTarget] = useState<DeviceClass>("STANDALONE");
 
   // The dormant-device notification is the only action here whose effect
   // leaves the building, so it is the only one that is TWO steps. `notifyPreview`
@@ -564,31 +570,51 @@ export function BulkActionsMenu({
               {renameMsg && (
                 <span role={renameMsg.ok ? "status" : "alert"} className={renameMsg.ok ? "subtle" : "alert-error"}>{renameMsg.text}</span>
               )}
-              {/* No confirm: the audit control confirms because it writes
+              {/* A SELECT PLUS ONE BUTTON, where this was two buttons ("Mark as
+                  loaner" / "Remove loaner mark"). Two buttons expressed a
+                  boolean; three classes would have needed three, and three
+                  mutually exclusive buttons in a sticky bar read as three
+                  independent actions rather than one choice. The select also
+                  makes the exclusivity visible: you pick what the device IS,
+                  rather than setting and clearing flags.
+
+                  No confirm: the audit control confirms because it writes
                   accountability records that cannot be undone. This writes one
-                  reversible boolean, and its inverse is the next button. */}
+                  reversible column, and every other value is one pick away. */}
+              <label className="sr-only" htmlFor="bulk-device-class">
+                Device class
+              </label>
+              <select
+                id="bulk-device-class"
+                className="select"
+                value={classTarget}
+                disabled={classPending || none}
+                onChange={(e) => setClassTarget(e.target.value as DeviceClass)}
+              >
+                {DEVICE_CLASS_ORDER.map((c) => (
+                  <option key={c} value={c}>
+                    {DEVICE_CLASS_LABEL[c]}
+                  </option>
+                ))}
+              </select>
               <button
                 type="button"
                 className="btn btn-secondary"
-                disabled={markPending || unmarkPending || none}
+                disabled={classPending || none}
                 onClick={() =>
-                  run(startMark, setLoanerMsg, { isLoaner: "1" }, setItemsLoanerAction, "Marked as loaner")
+                  run(
+                    startClass,
+                    setClassMsg,
+                    { deviceClass: classTarget },
+                    setItemsDeviceClassAction,
+                    `Set to ${DEVICE_CLASS_LABEL[classTarget]}:`,
+                  )
                 }
               >
-                {markPending ? "Marking…" : "Mark as loaner"}
+                {classPending ? "Setting…" : "Set class"}
               </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                disabled={markPending || unmarkPending || none}
-                onClick={() =>
-                  run(startUnmark, setLoanerMsg, { isLoaner: "0" }, setItemsLoanerAction, "Removed the loaner mark from")
-                }
-              >
-                {unmarkPending ? "Removing…" : "Remove loaner mark"}
-              </button>
-              {loanerMsg && (
-                <span role={loanerMsg.ok ? "status" : "alert"} className={loanerMsg.ok ? "subtle" : "alert-error"}>{loanerMsg.text}</span>
+              {classMsg && (
+                <span role={classMsg.ok ? "status" : "alert"} className={classMsg.ok ? "subtle" : "alert-error"}>{classMsg.text}</span>
               )}
 
               {/* TWO STEPS, deliberately unlike every other control here. The

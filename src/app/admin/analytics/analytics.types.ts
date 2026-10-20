@@ -47,7 +47,11 @@ export const UNCATEGORIZED = "Uncategorized";
  * "we have not heard from this device" is the question the desk chases.
  *
  * LOANER-POOL STOCK IS EXCLUDED, matching the dropped-off list (2026-08-11).
- * The reasoning is weaker here than there — a pool loaner is supposed to be
+ * STANDALONE devices are excluded too (2026-10-19), and there the case is not a
+ * judgement call: a standalone device is off the network by design and can
+ * never sync, so it would sit on a list measuring sync age forever.
+ *
+ * The loaner reasoning is weaker here than there — a pool loaner is supposed to be
  * going out and coming back, so two months of silence about one could be a real
  * signal rather than the expected quiet of shelf stock — but the desk does not
  * chase loaners off either list, and one rule across both beats a per-list
@@ -131,7 +135,8 @@ export type StaleDeviceRow = Record<(typeof STALE_DEVICE_COLUMNS)[number], strin
  * makes the list self-maintaining: a device that reappears in a later export
  * leaves on its own.
  *
- * LOANER-POOL STOCK IS EXCLUDED, by explicit decision (2026-08-11): a loaner
+ * LOANER-POOL STOCK AND STANDALONE DEVICES ARE EXCLUDED (2026-08-11 /
+ * 2026-10-19, the latter because a standalone can never sync at all): a loaner
  * sits on a shelf between loans and is not expected to be checking in, so its
  * absence is the normal state rather than something to chase. 7 of the 164
  * listed the day it landed.

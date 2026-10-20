@@ -161,7 +161,7 @@ export function SortFilterMenu({
   sort,
   dir,
   secondary,
-  filter,
+  filters,
   toggles,
   onPrimary,
   onDir,
@@ -180,7 +180,13 @@ export function SortFilterMenu({
   /** The tie-breaker key, or null. OMIT `onSecondary` to hide "Then by"
    *  entirely — a page whose sort takes one key must not offer a second. */
   secondary?: string | null;
-  filter?: MenuFilter;
+  /** Zero or more vocabulary filters, each a <select>. Plural since
+   *  2026-10-19: /items now carries two (Unit, and device Class) and a
+   *  single-filter prop would have forced the second into the `toggles`
+   *  list, where a checkbox would have had to mean "Loaners only" again —
+   *  the one-way shape the class deliberately moved away from. The queue
+   *  passes one; an empty or omitted list renders nothing. */
+  filters?: readonly MenuFilter[];
   /** Zero or more optional ONE-WAY filters, each rendered as a checkbox rather
    *  than a select. A select needs a vocabulary; each of these is a worklist
    *  narrowing ("only the rows that need attention"), where unchecked means "no
@@ -226,17 +232,19 @@ export function SortFilterMenu({
           {/* Only offered when there is something to filter BY — /items passes
               no filter at all when the page has no units, and a lone "All units"
               option is a control that cannot change anything. */}
-          {filter && filter.options.length > 1 && (
-            <Field label={filter.label}>
-              <select
-                className="select"
-                value={filter.value}
-                onChange={(e) => filter.onChange(e.target.value)}
-              >
-                {filter.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            </Field>
-          )}
+          {(filters ?? [])
+            .filter((f) => f.options.length > 1)
+            .map((f) => (
+              <Field key={f.label} label={f.label}>
+                <select
+                  className="select"
+                  value={f.value}
+                  onChange={(e) => f.onChange(e.target.value)}
+                >
+                  {f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </Field>
+            ))}
 
           {/* A checkbox each, not a Field+select: the label belongs BESIDE the
               box, and the 44px tap floor has to come from the row rather than

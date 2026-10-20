@@ -89,12 +89,12 @@ export function ServiceQueueTable({ rows }: { rows: QueueRowVM[] }) {
           summary={queueSortFilterSummary(sort.field, sort.dir, typeFilter)}
           sort={sort.field}
           dir={sort.dir}
-          filter={{
+          filters={[{
             label: "Service type",
             value: typeFilter,
             options: QUEUE_TYPE_FILTERS,
             onChange: (v) => setTypeFilter(v as QueueTypeFilter),
-          }}
+          }]}
           onPrimary={(key) => setSort({ ...sort, field: key as QueueSortField | null })}
           onDir={(dir) => setSort({ ...sort, dir })}
         />

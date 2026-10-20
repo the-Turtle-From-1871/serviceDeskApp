@@ -1406,11 +1406,20 @@ input[type="file"].input {
   background: var(--primary-soft);
   border-color: #c7d2fe;
 }
-/* Loaner is informational, not a status alarm — the pool-stock flag, never
-   IN_REPAIR/DEPLOYED/etc. It shares the admin badge's blue treatment rather
-   than inventing a sixth colour: every other slot in this palette
-   (green/amber/slate/red) already means something else on this table. */
-.badge-loaner {
+/* Device class. Both are informational, not status alarms — they say what KIND
+   of device this is, never IN_REPAIR/DEPLOYED/etc. They share the admin badge's
+   blue treatment rather than inventing new colours: every other slot in this
+   palette (green/amber/slate/red) already means something else on this table,
+   and these two are not degrees of the same thing for a colour ramp to express.
+
+   There is deliberately NO `.badge-eud`. EUD is the default and ~97% of the
+   fleet, so a badge on nearly every row would carry no information and would
+   crowd out the status badge beside it — the two exceptions are what is worth
+   marking. Both surfaces that render a class check `!== "EUD"` for that reason;
+   adding the rule here would quietly make a styled badge available to a future
+   caller who skips the check. */
+.badge-loaner,
+.badge-standalone {
   color: var(--primary);
   background: var(--primary-soft);
   border-color: #c7d2fe;

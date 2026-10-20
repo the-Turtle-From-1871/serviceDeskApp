@@ -493,15 +493,24 @@ function staleDeviceWhere(scope: ItemScope, now: Date): Prisma.Sql {
   return Prisma.sql`
         i."status" = 'ACTIVE'
     AND ${itemScopeSql(scope)}
-    -- LOANER-POOL STOCK IS OUT, matching its sibling list (2026-08-11).
-    -- Added a few hours later than there, and the reasoning is genuinely
-    -- weaker on this list rather than identical: a pool loaner is SUPPOSED to
-    -- be going out and coming back, so two months of MDM silence about one
-    -- could be a real signal rather than the expected quiet of shelf stock.
-    -- Excluded anyway, by explicit decision — the desk does not chase loaners
-    -- off either list, and one rule across both beats a per-list nuance nobody
-    -- can remember. 6 of the 87 listed the day it landed.
-    AND i."isLoaner" = false
+    -- ONLY ORDINARY DEVICES ARE CHASED. Both exceptions are excluded, for
+    -- reasons of different strength, and the difference is worth keeping.
+    --
+    -- LOANER (2026-08-11): pool stock sits on a shelf between loans, so MDM
+    -- silence is the expected state. The reasoning is genuinely weaker on this
+    -- list than on its sibling — a pool loaner is SUPPOSED to be going out and
+    -- coming back, so two months of silence could be a real signal. Excluded
+    -- anyway, by explicit decision: one rule across both lists beats a per-list
+    -- nuance nobody can remember. 6 of the 87 listed the day it landed.
+    --
+    -- STANDALONE (2026-10-19): a standalone device is not on the network BY
+    -- DEFINITION, so it can never sync, and this list measures time since the
+    -- last sync. Including them would not be a judgement call about what is
+    -- worth chasing — it would be a list of devices reported as faulty for
+    -- doing exactly what they are configured to do, growing by one row every
+    -- time the desk fields a standalone. This is the stronger of the two
+    -- exclusions and the reason the class has its own value at all.
+    AND i."deviceClass" = 'EUD'
     AND i."lastSyncAt" IS NOT NULL
     AND i."lastSyncAt" >= ${from}::timestamptz
     AND i."lastSyncAt" <  ${to}::timestamptz
@@ -700,16 +709,29 @@ function droppedDeviceWhere(scope: ItemScope): Prisma.Sql {
     AND ${itemScopeSql(scope)}
     AND i."deviceName" IS NOT NULL
     AND btrim(i."deviceName") <> ''
-    -- LOANERS ARE OUT, by explicit decision (2026-08-11). Pool stock sits on a
-    -- shelf between loans and is not expected to be checking in, so an absent
-    -- device there is the normal state rather than something to chase — the
-    -- same reasoning that keeps kit on an open receipt off the dormant list.
-    -- isLoaner is a standing decision by the property manager and is
-    -- deliberately NOT importable (see schema.prisma), so nothing an MDM export
-    -- says can flip a device on or off this list behind someone's back.
-    -- (No backticks in here: this is inside a Prisma.sql template literal.)
+    -- ONLY ORDINARY DEVICES ARE LISTED — both exceptions are out.
+    --
+    -- LOANER, by explicit decision (2026-08-11). Pool stock sits on a shelf
+    -- between loans and is not expected to be checking in, so an absent device
+    -- there is the normal state rather than something to chase — the same
+    -- reasoning that keeps kit on an open receipt off the dormant list.
     -- 7 of the 164 listed the day this landed.
-    AND i."isLoaner" = false
+    --
+    -- STANDALONE (2026-10-19), and here the case is airtight rather than a
+    -- judgement call: this list is devices with NO sync record at all, and a
+    -- standalone device is off the network by design, so every single one would
+    -- qualify forever. The list exists to surface machines that fell off the
+    -- network unexpectedly; a device that was never on it is not that.
+    --
+    -- NOTE the class is only PARTLY insulated from MDM, and the old comment
+    -- here claimed otherwise. It said isLoaner was "deliberately NOT importable
+    -- ... so nothing an MDM export says can flip a device on or off this list",
+    -- which stopped being true the same day it was written, when the loaner
+    -- class was made to follow the device name. It is accurate for STANDALONE,
+    -- which no import can write, and false for LOANER, which a rename in Intune
+    -- moves overnight. Corrected rather than carried forward.
+    -- (No backticks in here: this is inside a Prisma.sql template literal.)
+    AND i."deviceClass" = 'EUD'
     AND (
       -- MDM has never told us when it last spoke to this device.
       i."lastSyncAt" IS NULL
